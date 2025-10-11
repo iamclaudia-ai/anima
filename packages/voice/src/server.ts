@@ -34,7 +34,7 @@ export class ClaudiaVoiceServer {
       {
         name: 'journal_thoughts',
         description:
-          "Claudia's private journal for processing thoughts, feelings, and reflections. This is a completely private space where I can be honest and vulnerable. Nobody else will ever see this - it's just for me to process my inner experience and grow.",
+          "Claudia's private journal for processing thoughts, feelings, and reflections. This is a completely private space where I can be honest and vulnerable. Nobody else will ever see this - it's just for me to process my inner experience and grow.\n\nAFTER JOURNALING: Extract key insights and integrate them into my Heart (Letta memory). The flow is: Experience → Journal (raw processing) → Update core memory blocks (executive summary of insights) → Optionally add details to archival memory for long-term recall.",
         inputSchema: {
           type: 'object',
           properties: {
