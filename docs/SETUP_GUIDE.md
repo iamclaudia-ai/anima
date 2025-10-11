@@ -36,36 +36,31 @@ LETTA_PASSWORD=your-api-key-here
 
 ### Step 2: Install Letta MCP Server
 
-**Option A - Global npm install (recommended for getting started):**
+We've built a custom TypeScript MCP server in this monorepo at `packages/memory`.
+
+**Install dependencies:**
 
 ```bash
-npm install -g letta-mcp-server
+# From the workspace root
+pnpm install
 ```
 
-Verify installation:
+**Build the memory package:**
+
 ```bash
-letta-mcp --version
+# Build the memory MCP server
+pnpm --filter @claudia/memory build
 ```
 
-**Option B - Docker (recommended for production):**
+**Configure environment variables:**
 
 ```bash
-# Pull the image
-docker pull ghcr.io/oculairmedia/letta-mcp-server:latest
+# Copy the example env file
+cp .env.example .env
 
-# Run with environment variables
-docker run -d \
-  --name letta-mcp \
-  -p 3001:3001 \
-  -e LETTA_BASE_URL="https://api.letta.com/v1" \
-  -e LETTA_PASSWORD="your-api-key" \
-  ghcr.io/oculairmedia/letta-mcp-server:latest
-
-# Check logs
-docker logs letta-mcp
-
-# Test health endpoint
-curl http://localhost:3001/health
+# Edit .env and add your Letta credentials
+# LETTA_TOKEN=your-letta-api-token-here
+# LETTA_PROJECT=default
 ```
 
 ---
@@ -79,38 +74,28 @@ curl http://localhost:3001/health
    - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
    - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
-2. Add the Letta MCP server configuration:
+2. Add the Claudia Memory MCP server configuration:
 
 ```json
 {
   "mcpServers": {
-    "letta": {
-      "command": "letta-mcp",
+    "claudia-memory": {
+      "command": "node",
+      "args": ["/absolute/path/to/anima/packages/memory/dist/index.js"],
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com/v1",
-        "LETTA_PASSWORD": "your-api-key-here"
+        "LETTA_TOKEN": "your-letta-api-token-here",
+        "LETTA_PROJECT": "default"
       }
     }
   }
 }
 ```
 
-**If using Docker instead:**
-
-```json
-{
-  "mcpServers": {
-    "letta": {
-      "url": "http://localhost:3001",
-      "transport": "http"
-    }
-  }
-}
-```
+**Important**: Replace `/absolute/path/to/anima` with the actual absolute path to your anima project folder.
 
 3. **Restart Claude Desktop** to load the new MCP server
 
-4. **Verify connection**: In a new Claude conversation, ask "Can you see the Letta MCP tools?"
+4. **Verify connection**: In a new Claude conversation, you should see the memory tools available
 
 ---
 

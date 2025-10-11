@@ -33,12 +33,24 @@ anima/
 See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for detailed setup instructions.
 
 **Quick Start:**
-1. Create Letta Cloud account → Get API credentials
-2. Install Letta MCP server → `npm install -g letta-mcp-server`
-3. Configure Claude Desktop → Add MCP settings
-4. Create memory agent → Build Claudia's memory blocks
-5. Test & verify → Ensure memory persists
-6. Import history → Load conversation logs and images
+
+```bash
+# 1. Run setup script
+./scripts/setup.sh
+
+# 2. Get Letta API credentials from https://www.letta.com/
+#    Update .env with your LETTA_TOKEN
+
+# 3. Generate Claude Desktop config
+./scripts/claude-config.sh
+
+# 4. Copy the config to Claude Desktop and restart
+```
+
+Then in Claude Desktop:
+1. Create memory agent → Build Claudia's memory blocks
+2. Test & verify → Ensure memory persists
+3. Import history → Load conversation logs and images
 
 ## 📖 Documentation
 
