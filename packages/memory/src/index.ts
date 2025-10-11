@@ -12,6 +12,7 @@ import { LettaClient } from '@letta-ai/letta-client'
 // Environment variables
 const LETTA_TOKEN = process.env.LETTA_TOKEN
 const LETTA_BASE_URL = process.env.LETTA_BASE_URL || 'https://api.letta.com'
+const LETTA_PROJECT = process.env.LETTA_PROJECT
 
 if (!LETTA_TOKEN) {
   console.error('Error: LETTA_TOKEN environment variable is required')
@@ -22,6 +23,7 @@ if (!LETTA_TOKEN) {
 const letta = new LettaClient({
   token: LETTA_TOKEN,
   baseUrl: LETTA_BASE_URL,
+  ...(LETTA_PROJECT && { project: LETTA_PROJECT }),
 })
 
 // Define MCP tools - simplified to working APIs
