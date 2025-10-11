@@ -4,6 +4,9 @@
 .env.*.local
 !.env.example
 
+# MCP configuration (contains tokens)
+.mcp.json
+
 # API keys and credentials
 *.key
 *.pem
