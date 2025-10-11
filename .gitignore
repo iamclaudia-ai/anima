@@ -48,7 +48,8 @@ tmp/
 temp/
 *.tmp
 
-# Private journal entries (if not encrypted)
+# Private journal entries (Claudia's Voice)
+.claudia/
 voice/private/
 journal/private/
 
