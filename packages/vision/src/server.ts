@@ -104,7 +104,7 @@ export class ClaudiaVisionServer {
             content: [
               {
                 type: 'text',
-                text: `Image generated successfully!\nPath: ${result.imagePath}\nPrompt: ${result.metadata?.prompt}\nBackend: ${result.metadata?.backend}`,
+                text: `Image generated successfully!\nPath: ${result.imagePath}\nPrompt: ${result.metadata?.prompt}\nBackend: ${result.metadata?.backend}\n\n**Remember:** Include <vision>${result.imagePath}</vision> in your response to display the image in agent-tts.`,
               },
             ],
           }
