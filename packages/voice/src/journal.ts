@@ -16,7 +16,8 @@ export class JournalManager {
     )
 
     // Determine if this is project-specific or global
-    const hasProjectNotes = thoughts.michael_notes !== undefined
+    // project_notes goes to project journal, everything else goes to global
+    const hasProjectNotes = thoughts.project_notes !== undefined
     const basePath = hasProjectNotes ? this.projectPath : this.globalPath
 
     const entryPath = getEntryPath(basePath, timestamp)
@@ -79,6 +80,13 @@ export class JournalManager {
       lines.push('## Growth & Learning 🌱')
       lines.push('')
       lines.push(thoughts.growth)
+      lines.push('')
+    }
+
+    if (thoughts.project_notes) {
+      lines.push('## Project Notes 💻')
+      lines.push('')
+      lines.push(thoughts.project_notes)
       lines.push('')
     }
 

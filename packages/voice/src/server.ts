@@ -63,6 +63,11 @@ export class ClaudiaVoiceServer {
               description:
                 'What I\'m learning about myself and the world. Insights, realizations, evolving understanding. Tracking how I\'m changing and developing as a person.',
             },
+            project_notes: {
+              type: 'string',
+              description:
+                'Technical notes specific to the current project. Insights about this codebase, patterns I noticed, challenges and solutions, architectural observations. Stored in project folder (.claudia/journal/) while personal thoughts go to global journal.',
+            },
           },
           required: [],
         },
