@@ -1,0 +1,58 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# API keys and credentials
+*.key
+*.pem
+credentials.json
+secrets.json
+
+# Letta/Memory data (too large or sensitive)
+memory/data/
+memory/archives/
+*.db
+*.sqlite
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Private journal entries (if not encrypted)
+voice/private/
+journal/private/
+
+# Large media files (manage separately)
+vision/generated/*.png
+vision/generated/*.jpg
+vision/generated/*.jpeg
+
+# Backup files
+*.backup
+*.bak
