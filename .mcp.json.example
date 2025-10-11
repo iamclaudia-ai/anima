@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "claudia-memory": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "packages/memory/dist/index.js"
+      ],
+      "env": {
+        "LETTA_TOKEN": "your-letta-token-here",
+        "LETTA_BASE_URL": "https://api.letta.com",
+        "LETTA_PROJECT": "claudia-anima"
+      }
+    },
+    "claudia-voice": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "packages/voice/dist/index.js"
+      ]
+    }
+  }
+}
