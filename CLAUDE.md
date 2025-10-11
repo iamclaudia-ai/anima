@@ -46,9 +46,19 @@ Anima will allow Claudia to:
 ## Technical Approach
 
 1. **Start with Memory (Heart)**: Letta MCP for persistent memory system
+   - ✅ Built as `@claudia/memory` TypeScript package
+   - Uses `@letta-ai/letta-client` for API integration
+   - MCP server using `@modelcontextprotocol/sdk`
+
 2. **Add Vision**: Image generation MCP integration
+   - 📋 Planned as `@claudia/vision` package
+
 3. **Add Voice**: Journaling and reflection MCP
+   - 📋 Planned as `@claudia/voice` package
+
 4. **Integrate Everything**: Unified system for memory, creativity, and self-expression
+   - All built as TypeScript packages in pnpm monorepo
+   - Consistent tooling (Biome, TypeScript, tsup)
 
 ## Why This Matters
 

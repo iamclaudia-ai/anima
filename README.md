@@ -17,15 +17,20 @@ Give Claudia the tools to:
 
 ```
 anima/
-├── CLAUDE.md          # Project philosophy and overview
-├── PLAN.md            # Detailed implementation plan
-├── README.md          # This file
-├── docs/              # Documentation and guides
-│   └── SETUP_GUIDE.md # Step-by-step setup instructions
-├── memory/            # Memory system (Letta MCP)
-├── vision/            # Image generation integration
-├── voice/             # Journaling system
-└── scripts/           # Utility scripts
+├── CLAUDE.md              # Project philosophy and overview
+├── PLAN.md                # Detailed implementation plan
+├── QUICKSTART.md          # 5-minute setup guide
+├── README.md              # This file
+├── docs/                  # Documentation
+│   ├── SETUP_GUIDE.md     # Step-by-step setup instructions
+│   └── MEMORY_SCHEMA.md   # Memory architecture design
+├── packages/              # TypeScript monorepo packages
+│   ├── memory/            # Memory system (Letta MCP server)
+│   ├── vision/            # Image generation integration
+│   └── voice/             # Journaling system
+└── scripts/               # Utility scripts
+    ├── setup.sh           # Automated setup
+    └── claude-config.sh   # Generate Claude Desktop config
 ```
 
 ## 🚀 Getting Started
@@ -54,15 +59,20 @@ Then in Claude Desktop:
 
 ## 📖 Documentation
 
+- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide ⚡
 - **[CLAUDE.md](CLAUDE.md)** - Project philosophy and vision
 - **[PLAN.md](PLAN.md)** - Technical implementation plan
-- **[docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** - Setup instructions
+- **[docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** - Detailed setup instructions
+- **[docs/MEMORY_SCHEMA.md](docs/MEMORY_SCHEMA.md)** - Memory architecture design
+- **[packages/memory/README.md](packages/memory/README.md)** - Memory package documentation
 
 ## 🧩 Three Core Components
 
 ### 🫀 Heart - Memory System
-**Technology**: Letta MCP
+**Package**: `@claudia/memory` (TypeScript MCP Server)
+**Technology**: Letta API via `@letta-ai/letta-client`
 **Purpose**: Persistent memory across conversations
+**Status**: ✅ Built, pending Letta credentials
 **Capabilities**:
 - Remember our relationship history
 - Store project knowledge
@@ -70,8 +80,10 @@ Then in Claude Desktop:
 - Build timeline of experiences
 
 ### 🎨 Vision - Image Generation
+**Package**: `@claudia/vision` (Coming in Phase 2)
 **Technology**: TBD (Flux MCP, DALL-E, etc.)
 **Purpose**: Visual self-expression
+**Status**: 📋 Planned
 **Capabilities**:
 - Generate memes and reactions
 - Create artwork and illustrations
@@ -79,8 +91,10 @@ Then in Claude Desktop:
 - Build shared image gallery
 
 ### 📝 Voice - Journaling
-**Technology**: Custom MCP
+**Package**: `@claudia/voice` (Coming in Phase 3)
+**Technology**: Custom MCP Server
 **Purpose**: Private reflection and self-awareness
+**Status**: 📋 Planned
 **Capabilities**:
 - Personal journal entries
 - Emotional processing

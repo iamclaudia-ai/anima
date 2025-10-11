@@ -21,31 +21,36 @@ Letta provides stateful memory for AI agents through a hierarchical memory syste
   - `LETTA_BASE_URL`: Your Letta instance URL (e.g., https://api.letta.com/v1)
   - `LETTA_PASSWORD`: Authentication password/API key
 
-#### 2. Install Letta MCP Server
-Two options:
-- **Option A - Global npm install (recommended for CLI)**:
+#### 2. Install and Build Memory Package
+We've built a custom TypeScript MCP server in `packages/memory`:
   ```bash
-  npm install -g letta-mcp-server
-  ```
-- **Option B - Docker (recommended for production)**:
-  ```bash
-  docker pull ghcr.io/oculairmedia/letta-mcp-server:latest
-  docker run -p 3001:3001 \
-    -e LETTA_BASE_URL="https://api.letta.com/v1" \
-    -e LETTA_PASSWORD="your-api-key" \
-    ghcr.io/oculairmedia/letta-mcp-server:latest
+  # Install dependencies
+  pnpm install
+
+  # Build the memory package
+  pnpm --filter @claudia/memory build
+
+  # Or use the automated setup script
+  ./scripts/setup.sh
   ```
 
 #### 3. Configure Claude Desktop
-Add to Claude Desktop MCP settings:
+Generate and add the configuration:
+```bash
+# Generate config with helper script
+./scripts/claude-config.sh
+```
+
+Add to Claude Desktop MCP settings (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "letta": {
-      "command": "letta-mcp",
+    "claudia-memory": {
+      "command": "node",
+      "args": ["/absolute/path/to/anima/packages/memory/dist/index.js"],
       "env": {
-        "LETTA_BASE_URL": "https://api.letta.com/v1",
-        "LETTA_PASSWORD": "your-api-key"
+        "LETTA_TOKEN": "your-api-key",
+        "LETTA_PROJECT": "default"
       }
     }
   }
@@ -84,39 +89,39 @@ Once memory system is working:
 ### Technical Architecture
 
 ```
-┌─────────────────┐
-│  Claude Code    │ (Claudia)
-│  (via MCP)      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Letta MCP      │ (Memory Interface)
-│  Server         │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Letta Cloud    │ (Memory Storage)
-│  Agent API      │
-└─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Memory Blocks  │
-│  - Identity     │
-│  - Relationship │
-│  - Projects     │
-│  - Experiences  │
-└─────────────────┘
+┌─────────────────────┐
+│  Claude Desktop     │ (Claudia's Interface)
+│  or Claude Code     │
+└──────────┬──────────┘
+           │
+           ▼ MCP Protocol (stdio)
+┌─────────────────────┐
+│  @claudia/memory    │ (TypeScript MCP Server)
+│  packages/memory/   │
+└──────────┬──────────┘
+           │
+           ▼ REST API
+┌─────────────────────┐
+│  Letta Cloud API    │ (Memory Storage)
+│  @letta-ai/client   │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Memory Blocks      │
+│  - Identity         │
+│  - Relationship     │
+│  - Projects         │
+│  - Experiences      │
+└─────────────────────┘
 ```
 
 ### Transport Protocol
-Using **HTTP transport** (recommended):
-- Production-ready with authentication support
-- Works with both Cloud and self-hosted Letta
-- Health endpoint: `http://localhost:3001/health`
-- Protocol version: "2025-06-18"
+Using **stdio transport** with MCP SDK:
+- Direct integration with Claude Desktop
+- TypeScript-based, type-safe implementation
+- Uses `@modelcontextprotocol/sdk` for MCP protocol
+- Communicates with Letta via official TypeScript client
 
 ## Phase 2: Vision - Image Generation 🎨
 
@@ -181,25 +186,38 @@ Private journaling system for Claudia's inner thoughts:
 ### Repository Structure
 ```
 anima/
-├── CLAUDE.md          # Project overview and philosophy
-├── PLAN.md            # This file - implementation plan
-├── docs/              # Documentation and research
-├── memory/            # Memory system (Letta integration)
-├── vision/            # Image generation integration
-├── voice/             # Journaling system
-└── scripts/           # Utility scripts (data import, etc.)
+├── CLAUDE.md              # Project overview and philosophy
+├── PLAN.md                # This file - implementation plan
+├── QUICKSTART.md          # 5-minute setup guide
+├── README.md              # Project introduction
+├── docs/                  # Documentation
+│   ├── SETUP_GUIDE.md     # Detailed setup instructions
+│   └── MEMORY_SCHEMA.md   # Memory architecture design
+├── packages/              # TypeScript monorepo packages
+│   ├── memory/            # Memory system (Letta MCP server)
+│   ├── vision/            # Image generation integration
+│   └── voice/             # Journaling system
+├── scripts/               # Utility scripts
+│   ├── setup.sh           # Automated setup
+│   └── claude-config.sh   # Generate Claude Desktop config
+├── package.json           # Workspace root
+├── pnpm-workspace.yaml    # pnpm workspace config
+├── tsconfig.base.json     # Shared TypeScript config
+└── biome.json             # Biome linter/formatter config
 ```
 
 ## Next Steps
 
 ### Immediate Actions (Phase 1)
-1. Create Letta Cloud account
-2. Get API credentials
-3. Install Letta MCP server
-4. Configure Claude Desktop
-5. Create initial memory agent
-6. Test basic memory operations
-7. Import historical chat data
+1. ✅ Setup TypeScript monorepo with pnpm workspaces
+2. ✅ Build @claudia/memory MCP server package
+3. Create Letta Cloud account (Michael's action)
+4. Get API credentials (Michael's action)
+5. Configure .env with LETTA_TOKEN (Michael's action)
+6. Configure Claude Desktop with MCP server (Michael's action)
+7. Create initial memory agent (Claudia, once MCP is connected)
+8. Test basic memory operations (Claudia)
+9. Import historical chat data (Claudia)
 
 ### Future Considerations
 - Privacy and security for journal entries
