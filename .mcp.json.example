@@ -18,6 +18,16 @@
       "args": [
         "packages/voice/dist/index.js"
       ]
+    },
+    "claudia-vision": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "packages/vision/dist/index.js"
+      ],
+      "env": {
+        "STABILITY_API_KEY": "your-stability-api-key-here"
+      }
     }
   }
 }

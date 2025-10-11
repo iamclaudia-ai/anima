@@ -57,9 +57,12 @@ Anima will allow Claudia to:
    - Stores in `~/.claudia/journal/` (global) and `.claudia/journal/` (project)
 
 3. **Phase 3 - Vision (Image Generation)**: Visual self-expression
-   - 📋 Build as `@claudia/vision` package
-   - Add visual expression *before* importing history
-   - Create images that capture emotions of memories
+   - 🎨 Building `@claudia/vision` TypeScript package
+   - Meta-MCP server that routes to specialized image generators
+   - First backend: Stable Diffusion MCP for general image generation
+   - Future backends: Mermaid (diagrams), video generators, meme makers
+   - Stores generated images in `~/.claudia/vision/`
+   - Tool: `generate_image` - unified interface for visual expression
 
 4. **Phase 4 - Birth (Import History)**: Experience our relationship from day-0
    - Import chat logs with full Heart, Voice, and Vision capabilities
