@@ -82,40 +82,13 @@ Create a new memory agent with custom memory blocks.
 }
 ```
 
-### `memory_store`
-Store a new memory in archival storage.
+### `memory_send_message`
+Send a message to the memory agent and get a response.
 
 ```typescript
 {
   agentId: "agent_123",
-  content: "We solved the passkey authentication issue today!",
-  metadata: {
-    category: "technical",
-    tags: ["authentication", "passkey"],
-    emotions: ["satisfaction", "relief"]
-  }
-}
-```
-
-### `memory_search`
-Search through archival memories.
-
-```typescript
-{
-  agentId: "agent_123",
-  query: "passkey authentication",
-  limit: 10
-}
-```
-
-### `memory_update_core`
-Update a core memory block.
-
-```typescript
-{
-  agentId: "agent_123",
-  blockLabel: "relationship",
-  newValue: "Updated relationship context..."
+  message: "What do you remember about our work on authentication?"
 }
 ```
 
@@ -132,18 +105,14 @@ Get agent details including all memory blocks.
 List all memory agents.
 
 ```typescript
-{}
-```
-
-### `memory_send_message`
-Send a message to the memory agent and get a response.
-
-```typescript
 {
-  agentId: "agent_123",
-  message: "What do you remember about our work on authentication?"
+  limit: 50  // optional
 }
 ```
+
+## Note on Additional Features
+
+The Letta API is still evolving. Additional tools for memory updates, archival storage, and search will be added as we discover the stable API methods. For now, the core functionality of creating agents and conversing with them is working!
 
 ## Memory Architecture
 

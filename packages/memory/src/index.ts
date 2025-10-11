@@ -11,7 +11,7 @@ import { LettaClient } from '@letta-ai/letta-client'
 
 // Environment variables
 const LETTA_TOKEN = process.env.LETTA_TOKEN
-const LETTA_PROJECT = process.env.LETTA_PROJECT || 'default'
+const LETTA_BASE_URL = process.env.LETTA_BASE_URL || 'https://api.letta.com'
 
 if (!LETTA_TOKEN) {
   console.error('Error: LETTA_TOKEN environment variable is required')
@@ -21,10 +21,10 @@ if (!LETTA_TOKEN) {
 // Initialize Letta client
 const letta = new LettaClient({
   token: LETTA_TOKEN,
-  project: LETTA_PROJECT,
+  baseUrl: LETTA_BASE_URL,
 })
 
-// Define MCP tools
+// Define MCP tools - simplified to working APIs
 const tools: Tool[] = [
   {
     name: 'memory_create_agent',
@@ -53,53 +53,8 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'memory_store',
-    description: 'Store a new memory in archival storage',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        agentId: {
-          type: 'string',
-          description: 'Agent ID to store memory for',
-        },
-        content: {
-          type: 'string',
-          description: 'Memory content to store',
-        },
-        metadata: {
-          type: 'object',
-          description: 'Optional metadata (category, tags, emotions, etc.)',
-        },
-      },
-      required: ['agentId', 'content'],
-    },
-  },
-  {
-    name: 'memory_search',
-    description: 'Search through archival memories',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        agentId: {
-          type: 'string',
-          description: 'Agent ID to search memories for',
-        },
-        query: {
-          type: 'string',
-          description: 'Search query',
-        },
-        limit: {
-          type: 'number',
-          description: 'Maximum number of results',
-          default: 10,
-        },
-      },
-      required: ['agentId', 'query'],
-    },
-  },
-  {
-    name: 'memory_update_core',
-    description: 'Update a core memory block (identity, relationship, etc.)',
+    name: 'memory_send_message',
+    description: 'Send a message to the memory agent and get a response',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,16 +62,12 @@ const tools: Tool[] = [
           type: 'string',
           description: 'Agent ID',
         },
-        blockLabel: {
+        message: {
           type: 'string',
-          description: 'Memory block label to update',
-        },
-        newValue: {
-          type: 'string',
-          description: 'New value for the memory block',
+          description: 'Message to send',
         },
       },
-      required: ['agentId', 'blockLabel', 'newValue'],
+      required: ['agentId', 'message'],
     },
   },
   {
@@ -138,25 +89,13 @@ const tools: Tool[] = [
     description: 'List all memory agents',
     inputSchema: {
       type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'memory_send_message',
-    description: 'Send a message to the memory agent and get a response',
-    inputSchema: {
-      type: 'object',
       properties: {
-        agentId: {
-          type: 'string',
-          description: 'Agent ID',
-        },
-        message: {
-          type: 'string',
-          description: 'Message to send',
+        limit: {
+          type: 'number',
+          description: 'Maximum number of agents to return',
+          default: 50,
         },
       },
-      required: ['agentId', 'message'],
     },
   },
 ]
@@ -194,7 +133,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const agent = await letta.agents.create({
           name: agentName,
           memoryBlocks,
-          model: 'openai/gpt-4o-mini', // Use a suitable model
+          model: 'openai/gpt-4o-mini',
+          embedding: 'openai/text-embedding-3-small',
         })
 
         return {
@@ -206,7 +146,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   success: true,
                   agentId: agent.id,
                   name: agent.name,
-                  memoryBlocks: agent.memoryBlocks,
+                  message: 'Memory agent created successfully!',
                 },
                 null,
                 2
@@ -216,47 +156,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      case 'memory_store': {
-        const { agentId, content, metadata } = args as {
+      case 'memory_send_message': {
+        const { agentId, message } = args as {
           agentId: string
-          content: string
-          metadata?: Record<string, unknown>
+          message: string
         }
 
-        // Create archival memory
-        const memory = await letta.archives.createArchive({
-          name: `memory_${Date.now()}`,
-          content: JSON.stringify({ content, metadata, timestamp: new Date().toISOString() }),
-        })
-
-        return {
-          content: [
+        const response = await letta.agents.messages.create(agentId, {
+          messages: [
             {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  success: true,
-                  memoryId: memory.id,
-                  stored: content,
-                },
-                null,
-                2
-              ),
+              role: 'user',
+              content: message,
             },
           ],
-        }
-      }
-
-      case 'memory_search': {
-        const { agentId, query, limit = 10 } = args as {
-          agentId: string
-          query: string
-          limit?: number
-        }
-
-        // Search archival memory
-        const results = await letta.archives.listArchives({
-          limit,
         })
 
         return {
@@ -266,43 +178,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify(
                 {
                   success: true,
-                  query,
-                  results: results.data,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        }
-      }
-
-      case 'memory_update_core': {
-        const { agentId, blockLabel, newValue } = args as {
-          agentId: string
-          blockLabel: string
-          newValue: string
-        }
-
-        const agent = await letta.agents.get(agentId)
-        const updatedBlocks =
-          agent.memoryBlocks?.map((block) =>
-            block.label === blockLabel ? { ...block, value: newValue } : block
-          ) || []
-
-        const updated = await letta.agents.update(agentId, {
-          memoryBlocks: updatedBlocks,
-        })
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  success: true,
-                  agentId: updated.id,
-                  updatedBlock: blockLabel,
+                  response: response.messages,
                 },
                 null,
                 2
@@ -314,7 +190,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'memory_get_agent': {
         const { agentId } = args as { agentId: string }
-        const agent = await letta.agents.get(agentId)
+        const agent = await letta.agents.retrieve(agentId)
 
         return {
           content: [
@@ -327,7 +203,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'memory_list_agents': {
-        const agents = await letta.agents.list()
+        const { limit = 50 } = args as { limit?: number }
+        const agents = await letta.agents.list({ limit })
 
         return {
           content: [
@@ -339,31 +216,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      case 'memory_send_message': {
-        const { agentId, message } = args as {
-          agentId: string
-          message: string
-        }
-
-        const response = await letta.agents.messages.send(agentId, {
-          message,
-        })
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(response, null, 2),
-            },
-          ],
-        }
-      }
-
       default:
         throw new Error(`Unknown tool: ${name}`)
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorDetails = error instanceof Error ? error.stack : ''
+
     return {
       content: [
         {
@@ -372,6 +231,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               success: false,
               error: errorMessage,
+              details: errorDetails,
             },
             null,
             2
