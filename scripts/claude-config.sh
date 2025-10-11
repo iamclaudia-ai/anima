@@ -30,7 +30,7 @@ cat <<EOF
       "args": ["$MEMORY_SERVER"],
       "env": {
         "LETTA_TOKEN": "${LETTA_TOKEN:-your-letta-api-token-here}",
-        "LETTA_PROJECT": "default"
+        "LETTA_BASE_URL": "https://api.letta.com"
       }
     }
   }
