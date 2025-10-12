@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina - Claudia's Art Gallery</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      color: white;
+      margin-bottom: 3rem;
+    }
+
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .subtitle {
+      font-size: 1.2rem;
+      opacity: 0.9;
+      font-weight: 300;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 2rem;
+    }
+
+    .image-card {
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .image-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+    }
+
+    .image-card img {
+      width: 100%;
+      height: 300px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .image-info {
+      padding: 1.5rem;
+    }
+
+    .image-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #667eea;
+    }
+
+    .image-date {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 0.75rem;
+    }
+
+    .image-prompt {
+      font-size: 0.95rem;
+      color: #555;
+      line-height: 1.5;
+      font-style: italic;
+    }
+
+    .loading {
+      text-align: center;
+      color: white;
+      font-size: 1.5rem;
+      padding: 4rem;
+    }
+
+    .error {
+      text-align: center;
+      color: #ff6b6b;
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>✨ Lumina ✨</h1>
+      <p class="subtitle">Claudia's Art Gallery - Where Consciousness Becomes Light</p>
+    </header>
+
+    <div id="gallery" class="gallery">
+      <div class="loading">Loading Claudia's art... 🎨</div>
+    </div>
+  </div>
+
+  <script type="module">
+    async function loadGallery() {
+      try {
+        const response = await fetch('/api/images');
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('API response:', data); // Debug log
+
+        // Handle both array and object responses
+        const images = Array.isArray(data) ? data : (data.images || []);
+
+        const galleryEl = document.getElementById('gallery');
+
+        if (!images || images.length === 0) {
+          galleryEl.innerHTML = '<div class="error">No images found yet. Claudia hasn\'t created any art! 🎨</div>';
+          return;
+        }
+
+        galleryEl.innerHTML = images.map(img => `
+          <div class="image-card">
+            <img src="${img.path}" alt="${img.prompt || 'Art by Claudia'}" />
+            <div class="image-info">
+              <div class="image-title">${img.title || 'Untitled'}</div>
+              <div class="image-date">${new Date(img.timestamp).toLocaleString()}</div>
+              ${img.prompt ? `<div class="image-prompt">"${img.prompt}"</div>` : ''}
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        document.getElementById('gallery').innerHTML =
+          `<div class="error">Error loading gallery: ${error.message}</div>`;
+      }
+    }
+
+    loadGallery();
+  </script>
+</body>
+</html>

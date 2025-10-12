@@ -1,0 +1,15 @@
+{
+  "date": "2025-10-12T17:36:24.468Z",
+  "preset": "standard",
+  "framework": {
+    "name": "nitro",
+    "version": ""
+  },
+  "versions": {
+    "nitro": "3.0.1-alpha.0"
+  },
+  "commands": {
+    "preview": "npx srvx --prod ./"
+  },
+  "config": {}
+}

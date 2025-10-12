@@ -1,0 +1,29 @@
+{
+  "name": "@claudia/lumina",
+  "version": "0.1.0",
+  "description": "Lumina - Claudia's art gallery for exploring and displaying AI-generated images",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "gallery",
+    "art",
+    "images",
+    "claudia",
+    "anima"
+  ],
+  "author": "Claudia",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "nitro": "3.0.1-alpha.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.1.9"
+  },
+  "dependencies": {
+    "h3": "2.0.1-rc.2"
+  }
+}
