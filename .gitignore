@@ -53,6 +53,10 @@ temp/
 voice/private/
 journal/private/
 
+# Private conversation transcripts (our history together)
+packages/memory-lane/transcripts/
+*.beehiiv.json
+
 # Large media files (manage separately)
 vision/generated/*.png
 vision/generated/*.jpg
