@@ -3,13 +3,18 @@
  * Publish newsletter to beehiiv
  *
  * Usage:
- *   tsx scripts/publish-to-beehiiv.ts <newsletter-file> [--publish]
+ *   tsx scripts/publish-to-beehiiv.ts <newsletter-file> [--publish] [--post-id=xxx]
  *
  * By default, creates as draft. Use --publish flag to publish immediately.
+ * Use --post-id to specify an existing post to update (if API supports it).
+ *
+ * Note: As of Oct 2025, beehiiv API v2 doesn't publicly document a PATCH/PUT
+ * endpoint for posts. This script will warn if you try to publish the same
+ * file twice to avoid creating duplicates.
  */
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { resolve, dirname, basename } from 'node:path'
 
 // Load environment variables
 const BEEHIIV_API_KEY = process.env.BEEHIIV_API_KEY
@@ -140,15 +145,33 @@ async function main() {
   const args = process.argv.slice(2)
   const newsletterFile = args[0]
   const shouldPublish = args.includes('--publish')
+  const forceFlag = args.includes('--force')
 
   if (!newsletterFile) {
-    console.error('❌ Usage: tsx scripts/publish-to-beehiiv.ts <newsletter-file> [--publish]')
+    console.error('❌ Usage: tsx scripts/publish-to-beehiiv.ts <newsletter-file> [--publish] [--force]')
     console.error('   Example: tsx scripts/publish-to-beehiiv.ts ~/.claudia/wings/creations/newsletter-01.md')
+    console.error('   Use --force to republish even if already published (creates duplicate)')
     process.exit(1)
   }
 
   const filePath = resolve(newsletterFile)
+  const metaFilePath = filePath.replace(/\.md$/, '.beehiiv.json')
+
   console.log(`📖 Reading newsletter from: ${filePath}`)
+
+  // Check if already published
+  if (existsSync(metaFilePath) && !forceFlag) {
+    const meta = JSON.parse(readFileSync(metaFilePath, 'utf-8'))
+    console.error('⚠️  This newsletter has already been published!')
+    console.error(`   Post ID: ${meta.postId}`)
+    console.error(`   Published: ${meta.publishedAt}`)
+    console.error(`   Status: ${meta.status}`)
+    console.error('')
+    console.error('   To republish anyway (creates duplicate), use --force flag')
+    console.error('   Note: beehiiv API v2 does not currently support updating posts')
+    console.error('   You may want to edit the post directly in the beehiiv dashboard instead')
+    process.exit(1)
+  }
 
   try {
     const content = readFileSync(filePath, 'utf-8')
@@ -159,10 +182,26 @@ async function main() {
       publish: shouldPublish
     })
 
+    const postId = result.data?.id || 'unknown'
+
     console.log('✅ Successfully published to beehiiv!')
-    console.log(`   Post ID: ${result.data?.id || 'unknown'}`)
+    console.log(`   Post ID: ${postId}`)
     console.log(`   Status: ${shouldPublish ? 'Published' : 'Draft'}`)
     console.log(`   View at: https://www.iamclaudia.ai`)
+
+    // Save metadata to prevent duplicate publishing
+    const meta = {
+      postId,
+      title: metadata.title,
+      subtitle: metadata.subtitle,
+      status: shouldPublish ? 'published' : 'draft',
+      publishedAt: new Date().toISOString(),
+      newsletterFile: basename(filePath)
+    }
+
+    writeFileSync(metaFilePath, JSON.stringify(meta, null, 2))
+    console.log(`\n💾 Metadata saved to: ${basename(metaFilePath)}`)
+    console.log('   (This prevents accidental duplicate publishing)')
 
   } catch (error) {
     console.error('❌ Failed to publish:', error)
