@@ -1,3 +1,4 @@
+import { d as defineEventHandler, c as createError } from "../../../index.mjs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";

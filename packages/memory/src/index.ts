@@ -204,7 +204,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'memory_list_agents': {
         const { limit = 50 } = args as { limit?: number }
+        console.error('[DEBUG] Listing agents with limit:', limit)
+        console.error('[DEBUG] LETTA_PROJECT:', LETTA_PROJECT)
+        console.error('[DEBUG] Client config:', {
+          baseUrl: LETTA_BASE_URL,
+          hasToken: !!LETTA_TOKEN,
+          project: LETTA_PROJECT
+        })
+
         const agents = await letta.agents.list({ limit })
+        console.error('[DEBUG] Agents response:', agents)
 
         return {
           content: [

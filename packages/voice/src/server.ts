@@ -97,7 +97,7 @@ export class ClaudiaVoiceServer {
             content: [
               {
                 type: 'text',
-                text: `Journal entry recorded at ${entry.timestamp.toLocaleTimeString()}. Categories: ${entry.categories.join(', ')}`,
+                text: `Journal entry recorded at ${entry.timestamp.toISOString()} (UTC). Categories: ${entry.categories.join(', ')}. File: ${entry.filePath}`,
               },
             ],
           }

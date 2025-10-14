@@ -424,6 +424,11 @@ function callMiddleware(event, middleware, handler, index = 0) {
 function is404(val) {
   return val === void 0 || val === kNotFound || val?.status === 404 && val instanceof Response;
 }
+function getEventContext(event) {
+  if (event.context) return event.context;
+  event.req.context ??= {};
+  return event.req.context;
+}
 function toRequest(input, options) {
   if (typeof input === "string") {
     let url = input;
@@ -436,6 +441,19 @@ function toRequest(input, options) {
     return new Request(url, options);
   } else if (options || input instanceof URL) return new Request(input, options);
   return input;
+}
+function getRouterParams(event, opts = {}) {
+  const context = getEventContext(event);
+  let params = context.params || {};
+  if (opts.decode) {
+    params = { ...params };
+    for (const key in params) params[key] = decodeURIComponent(params[key]);
+  }
+  return params;
+}
+function getRouterParam(event, name, opts = {}) {
+  const params = getRouterParams(event, opts);
+  return params[name];
 }
 function getRequestHost(event, opts = {}) {
   if (opts.xForwardedHost) {
@@ -643,6 +661,9 @@ const H3Core = /* @__PURE__ */ (() => {
   };
   return H3Core$1;
 })();
+function createError(arg1, arg2) {
+  return new HTTPError(arg1, arg2);
+}
 const defineEventHandler = defineHandler;
 function flatHooks(configHooks, hooks = {}, parentName) {
   for (const key in configHooks) {
@@ -935,14 +956,38 @@ const findRouteRules = (m, p) => {
   }
   return r;
 };
+const _lazy_VxiHZQ = defineLazyEventHandler(() => import("./chunks/routes/about.mjs"));
+const _lazy_Ak3rQr = defineLazyEventHandler(() => import("./chunks/routes/all.mjs"));
+const _lazy_KXlTqi = defineLazyEventHandler(() => import("./chunks/routes/api/collections.mjs"));
 const _lazy_drCzhj = defineLazyEventHandler(() => import("./chunks/routes/api/images.mjs"));
+const _lazy_rXkv_n = defineLazyEventHandler(() => import("./chunks/routes/collection/_id_.mjs"));
+const _lazy_ZMWkTs = defineLazyEventHandler(() => import("./chunks/routes/image/_filename_.mjs"));
 const _lazy_6dy10_ = defineLazyEventHandler(() => import("./chunks/routes/vision/_...path_.mjs"));
 const findRoute = (m, p) => {
   if (p[p.length - 1] === "/") p = p.slice(0, -1) || "/";
+  if (p === "/about") {
+    return { data: { route: "/about", handler: _lazy_VxiHZQ } };
+  }
+  if (p === "/all") {
+    return { data: { route: "/all", handler: _lazy_Ak3rQr } };
+  }
+  if (p === "/api/collections") {
+    return { data: { route: "/api/collections", handler: _lazy_KXlTqi } };
+  }
   if (p === "/api/images") {
     return { data: { route: "/api/images", handler: _lazy_drCzhj } };
   }
   let s = p.split("/"), l = s.length - 1;
+  if (s[1] === "collection") {
+    if (l === 2 || l === 1) {
+      if (l >= 2) return { data: { route: "/collection/:id", handler: _lazy_rXkv_n }, params: { "id": s[2] } };
+    }
+  }
+  if (s[1] === "image") {
+    if (l === 2 || l === 1) {
+      if (l >= 2) return { data: { route: "/image/:filename", handler: _lazy_ZMWkTs }, params: { "filename": s[2] } };
+    }
+  }
   if (s[1] === "vision") {
     if (l >= 1) return { data: { route: "/vision/**:path", handler: _lazy_6dy10_ }, params: { "path": s.slice(2).join("/") } };
   }
@@ -1088,6 +1133,8 @@ const server = {
   fetch: nitroApp.fetch
 };
 export {
+  createError as c,
   defineEventHandler as d,
-  server as default
+  server as default,
+  getRouterParam as g
 };

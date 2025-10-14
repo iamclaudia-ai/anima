@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 
 // Paths
 const scriptPath = path.resolve(process.cwd(), path.dirname(process.argv[1]));
