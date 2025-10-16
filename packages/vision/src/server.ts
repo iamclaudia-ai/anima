@@ -5,15 +5,15 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js'
-import { StabilityAIBackend } from './stability'
+import { HttpBackend } from './http-backend'
 import type { ImageGenerationRequest } from './types'
 
 export class ClaudiaVisionServer {
   private server: Server
-  private stabilityBackend: StabilityAIBackend
+  private httpBackend: HttpBackend
 
-  constructor(stabilityApiKey: string, visionDir: string) {
-    this.stabilityBackend = new StabilityAIBackend(stabilityApiKey, visionDir)
+  constructor() {
+    this.httpBackend = new HttpBackend()
     this.server = new Server(
       {
         name: 'claudia-vision',
@@ -86,7 +86,7 @@ export class ClaudiaVisionServer {
         }
 
         try {
-          const result = await this.stabilityBackend.generateImage(imageRequest)
+          const result = await this.httpBackend.generateImage(imageRequest)
 
           if (!result.success) {
             return {

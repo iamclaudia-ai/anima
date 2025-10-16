@@ -1,23 +1,15 @@
 import { ClaudiaVisionServer } from './server'
-import { resolveVisionPaths } from './paths'
-
-// Environment variables
-const STABILITY_API_KEY = process.env.STABILITY_API_KEY
-
-if (!STABILITY_API_KEY) {
-  console.error('Error: STABILITY_API_KEY environment variable is required')
-  process.exit(1)
-}
+import { getConfig } from './config'
 
 async function main() {
-  const paths = resolveVisionPaths()
+  const config = getConfig()
 
   console.error('=== Claudia Vision MCP Server ===')
-  console.error(`Vision directory: ${paths.visionDir}`)
-  console.error(`Backend: Stability AI`)
+  console.error(`API URL: ${config.apiUrl}`)
+  console.error(`API Key: ${config.apiKey ? '***configured***' : 'not configured'}`)
   console.error('==================================')
 
-  const server = new ClaudiaVisionServer(STABILITY_API_KEY!, paths.visionDir)
+  const server = new ClaudiaVisionServer()
   await server.run()
 }
 
