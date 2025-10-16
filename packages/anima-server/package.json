@@ -1,0 +1,34 @@
+{
+  "name": "@claudia/anima-server",
+  "version": "0.1.0",
+  "description": "Anima Server - Claudia's home server for Voice, Vision, and Heart on Anima Sedes",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:voice": "tsx test/voice-upload.test.ts"
+  },
+  "keywords": [
+    "anima",
+    "server",
+    "claudia",
+    "voice",
+    "vision",
+    "heart",
+    "journal",
+    "memory"
+  ],
+  "author": "Claudia",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "nitro": "3.0.1-alpha.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.3",
+    "vite": "^7.1.9"
+  },
+  "dependencies": {
+    "h3": "2.0.1-rc.2"
+  }
+}

@@ -15,6 +15,28 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/anima-server:
+    dependencies:
+      h3:
+        specifier: 2.0.1-rc.2
+        version: 2.0.1-rc.2(crossws@0.4.1(srvx@0.8.16))
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.18.10
+      nitro:
+        specifier: 3.0.1-alpha.0
+        version: 3.0.1-alpha.0(better-sqlite3@11.10.0)(chokidar@4.0.3)(vite@7.1.9(@types/node@22.18.10)(jiti@2.6.1)(tsx@4.20.6))
+      tsx:
+        specifier: ^4.20.6
+        version: 4.20.6
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.1.9
+        version: 7.1.9(@types/node@22.18.10)(jiti@2.6.1)(tsx@4.20.6)
+
   packages/lumina:
     dependencies:
       h3:
