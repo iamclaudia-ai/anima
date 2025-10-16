@@ -13,6 +13,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 const API_URL = process.env.ANIMA_SERVER_URL || "http://localhost:3000";
+const API_KEY = process.env.ANIMA_API_KEY || "test-key-for-development";
 
 async function testVoiceUpload() {
   console.log("🧪 Testing Voice API - Journal Upload\n");
@@ -50,6 +51,7 @@ Testing that the anima-server properly receives and saves journal entries.
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify({
         content: journalContent,

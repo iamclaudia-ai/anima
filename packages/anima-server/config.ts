@@ -20,6 +20,7 @@ export interface AnimaConfig {
   voice: VoiceConfig;
   vision: VisionConfig;
   heart: HeartConfig;
+  apiKey?: string;
 }
 
 /**
@@ -53,6 +54,7 @@ export function loadConfig(): AnimaConfig {
     heart: {
       memoryPath: resolvePath(process.env.HEART_MEMORY_PATH || "~/memory"),
     },
+    apiKey: process.env.ANIMA_API_KEY,
   };
 }
 

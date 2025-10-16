@@ -1,15 +1,15 @@
 import { ClaudiaVoiceServer } from './server'
-import { resolveJournalPaths } from './paths'
+import { getConfig } from './config'
 
 async function main() {
-  const paths = resolveJournalPaths()
+  const config = getConfig()
 
   console.error('=== Claudia Voice MCP Server ===')
-  console.error(`Global journal: ${paths.global}`)
-  console.error(`Project journal: ${paths.project}`)
+  console.error(`API URL: ${config.apiUrl}`)
+  console.error(`API Key: ${config.apiKey ? '***configured***' : 'not configured'}`)
   console.error('================================')
 
-  const server = new ClaudiaVoiceServer(paths.global, paths.project)
+  const server = new ClaudiaVoiceServer()
   await server.run()
 }
 

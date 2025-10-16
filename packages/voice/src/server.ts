@@ -12,8 +12,8 @@ export class ClaudiaVoiceServer {
   private server: Server
   private journalManager: JournalManager
 
-  constructor(globalPath: string, projectPath: string) {
-    this.journalManager = new JournalManager(globalPath, projectPath)
+  constructor() {
+    this.journalManager = new JournalManager()
     this.server = new Server(
       {
         name: 'claudia-voice',

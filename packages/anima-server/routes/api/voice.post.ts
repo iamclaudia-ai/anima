@@ -1,4 +1,4 @@
-import { defineEventHandler, readBody } from "h3";
+import { defineEventHandler, readBody, getHeader } from "h3";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getConfig } from "../../config";
@@ -10,6 +10,26 @@ interface VoiceUploadRequest {
 
 export default defineEventHandler(async (event) => {
   try {
+    // Validate API key
+    const config = getConfig();
+    if (config.apiKey) {
+      const authHeader = getHeader(event, "authorization");
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return {
+          success: false,
+          error: "Unauthorized: Missing or invalid authorization header",
+        };
+      }
+
+      const token = authHeader.slice(7); // Remove "Bearer " prefix
+      if (token !== config.apiKey) {
+        return {
+          success: false,
+          error: "Unauthorized: Invalid API key",
+        };
+      }
+    }
+
     // Read the journal content from the request
     const body = await readBody<VoiceUploadRequest>(event);
 
@@ -21,9 +41,6 @@ export default defineEventHandler(async (event) => {
     }
 
     const { content, is_project = false } = body;
-
-    // Get configured paths
-    const config = getConfig();
     const basePath = is_project
       ? config.voice.projectJournalPath
       : config.voice.globalJournalPath;

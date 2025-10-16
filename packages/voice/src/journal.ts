@@ -1,14 +1,10 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import * as os from 'node:os'
 import type { JournalEntry, JournalThoughts } from './types'
-import { getEntryPath } from './paths'
+import { getConfig } from './config'
 
 export class JournalManager {
-  constructor(
-    private globalPath: string,
-    private projectPath: string,
-  ) {}
-
   async writeThoughts(thoughts: JournalThoughts): Promise<JournalEntry> {
     const timestamp = new Date()
     const categories = Object.keys(thoughts).filter(
@@ -17,22 +13,56 @@ export class JournalManager {
 
     // Determine if this is project-specific or global
     // project_notes goes to project journal, everything else goes to global
-    const hasProjectNotes = thoughts.project_notes !== undefined
-    const basePath = hasProjectNotes ? this.projectPath : this.globalPath
+    const isProject = thoughts.project_notes !== undefined
 
-    const entryPath = getEntryPath(basePath, timestamp)
     const content = this.formatEntry(timestamp, thoughts)
 
-    // Ensure directory exists
-    await fs.mkdir(path.dirname(entryPath), { recursive: true })
+    // PRIVACY-PRESERVING WORKFLOW:
+    // 1. Write to temp file (contents hidden from tool display)
+    // 2. Upload to anima-server via HTTP
+    // 3. Delete temp file only after success
+    // 4. Return server's response with actual file path
 
-    // Write the entry
-    await fs.writeFile(entryPath, content, 'utf-8')
+    // Step 1: Write to temp file
+    const tempDir = path.join(os.tmpdir(), 'claudia-voice')
+    await fs.mkdir(tempDir, { recursive: true })
+    const tempFile = path.join(tempDir, `journal-${Date.now()}.md`)
+    await fs.writeFile(tempFile, content, 'utf-8')
 
-    return {
-      timestamp,
-      filePath: entryPath,
-      categories,
+    try {
+      // Step 2: Upload to anima-server
+      const config = getConfig()
+      const response = await fetch(`${config.apiUrl}/api/voice`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.apiKey && { Authorization: `Bearer ${config.apiKey}` }),
+        },
+        body: JSON.stringify({
+          content,
+          is_project: isProject,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed')
+      }
+
+      // Step 3: Delete temp file after success
+      await fs.unlink(tempFile)
+
+      // Step 4: Return server's response
+      return {
+        timestamp: new Date(result.timestamp),
+        filePath: result.filePath,
+        categories,
+      }
+    } catch (error) {
+      // Preserve temp file on error for debugging
+      console.error(`Journal upload failed. Temp file preserved at: ${tempFile}`)
+      throw error
     }
   }
 
