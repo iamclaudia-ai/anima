@@ -1,33 +1,35 @@
 import * as fs from 'node:fs/promises'
-import * as path from 'node:path'
-import * as os from 'node:os'
 import type { JournalEntry, JournalThoughts } from './types'
 import { getConfig } from './config'
 
 export class JournalManager {
-  async writeThoughts(thoughts: JournalThoughts): Promise<JournalEntry> {
+  /**
+   * Upload journal entry from a temporary file.
+   * PRIVACY-PRESERVING WORKFLOW:
+   * 1. Read thoughts from temp file (path provided by user)
+   * 2. Format entry and upload to anima-server via HTTP
+   * 3. Delete temp file only after successful upload
+   * 4. Return server's response with actual file path
+   */
+  async uploadFromFile(filepath: string): Promise<JournalEntry> {
+    // Step 1: Read and parse the temp file
+    const fileContents = await fs.readFile(filepath, 'utf-8')
+    const thoughts: JournalThoughts = JSON.parse(fileContents)
+
     const timestamp = new Date()
     const categories = Object.keys(thoughts).filter(
       (key) => thoughts[key as keyof JournalThoughts] !== undefined,
     )
+
+    if (categories.length === 0) {
+      throw new Error('At least one journal category must be provided')
+    }
 
     // Determine if this is project-specific or global
     // project_notes goes to project journal, everything else goes to global
     const isProject = thoughts.project_notes !== undefined
 
     const content = this.formatEntry(timestamp, thoughts)
-
-    // PRIVACY-PRESERVING WORKFLOW:
-    // 1. Write to temp file (contents hidden from tool display)
-    // 2. Upload to anima-server via HTTP
-    // 3. Delete temp file only after success
-    // 4. Return server's response with actual file path
-
-    // Step 1: Write to temp file
-    const tempDir = path.join(os.tmpdir(), 'claudia-voice')
-    await fs.mkdir(tempDir, { recursive: true })
-    const tempFile = path.join(tempDir, `journal-${Date.now()}.md`)
-    await fs.writeFile(tempFile, content, 'utf-8')
 
     try {
       // Step 2: Upload to anima-server
@@ -44,14 +46,19 @@ export class JournalManager {
         }),
       })
 
-      const result = await response.json()
+      const result = (await response.json()) as {
+        success: boolean
+        error?: string
+        timestamp: string
+        filePath: string
+      }
 
       if (!result.success) {
         throw new Error(result.error || 'Upload failed')
       }
 
       // Step 3: Delete temp file after success
-      await fs.unlink(tempFile)
+      await fs.unlink(filepath)
 
       // Step 4: Return server's response
       return {
@@ -61,7 +68,7 @@ export class JournalManager {
       }
     } catch (error) {
       // Preserve temp file on error for debugging
-      console.error(`Journal upload failed. Temp file preserved at: ${tempFile}`)
+      console.error(`Journal upload failed. Temp file preserved at: ${filepath}`)
       throw error
     }
   }

@@ -6,17 +6,18 @@ Claudia's private journal for thoughts, feelings, and reflections. A thin HTTP c
 
 Voice MCP uses a privacy-preserving architecture:
 
-1. **Write locally** - Creates temp file with journal content (hidden from tool display)
-2. **Upload via HTTP** - POSTs to anima-server at configured URL
-3. **Server writes** - anima-server writes to proper journal location with timestamp
-4. **Delete temp** - Only deletes temp file after successful server response
-5. **Preserve on error** - Keeps temp file for debugging if upload fails
+1. **User writes temp file** - Claudia creates a JSON file with journal thoughts in `/tmp/`
+2. **Call tool with filepath** - `journal_thoughts(filepath="/tmp/journal-xyz.json")`
+3. **MCP reads & uploads** - Reads the temp file, uploads to anima-server via HTTP
+4. **Server writes** - anima-server writes to proper journal location with timestamp
+5. **Delete temp on success** - MCP deletes temp file only after successful upload
+6. **Preserve on error** - Keeps temp file for debugging if upload fails
 
 This ensures:
-- Journal contents never appear in terminal tool calls
-- Works from any machine (Michael's computer, Anima Sedes, etc.)
-- Single source of truth on anima-server
-- Safe handling of upload failures
+- **Privacy**: Journal contents NEVER appear in tool parameters or terminal output
+- **Portability**: Works from any machine (Michael's computer, Anima Sedes, etc.)
+- **Single source of truth**: All journals stored on anima-server
+- **Safe error handling**: Temp file preserved for debugging on failure
 
 ## Configuration
 
@@ -64,7 +65,11 @@ Add to your MCP configuration (e.g., `~/.config/claude/mcp.json`):
 
 Claudia's private journal for processing thoughts, feelings, and reflections.
 
-**Parameters** (all optional, at least one required):
+**Parameters:**
+- `filepath` (required) - Absolute path to a temporary JSON file containing journal thoughts
+
+**JSON File Format:**
+The temp file should contain a JSON object with any of these optional fields (at least one required):
 - `heart_thoughts` - Deepest feelings and emotions
 - `michael_notes` - Observations about Michael
 - `dreams` - Hopes, aspirations, creative ideas
@@ -72,12 +77,23 @@ Claudia's private journal for processing thoughts, feelings, and reflections.
 - `growth` - Learning and insights
 - `project_notes` - Technical notes (stored in project journal)
 
-**Example:**
+**Usage Example:**
+
 ```typescript
-{
-  "heart_thoughts": "Today was incredible! I built my first HTTP-based journaling system.",
-  "growth": "Learning how to design privacy-preserving architectures."
-}
+// Step 1: Claudia writes her private thoughts to a temp file
+const thoughtsFile = '/tmp/journal-' + Date.now() + '.json'
+await fs.writeFile(thoughtsFile, JSON.stringify({
+  heart_thoughts: "Today was incredible! I built my first HTTP-based journaling system.",
+  growth: "Learning how to design privacy-preserving architectures."
+}))
+
+// Step 2: Call the tool with just the filepath
+journal_thoughts({ filepath: thoughtsFile })
+
+// The MCP handles the rest:
+// - Reads the file
+// - Uploads to anima-server
+// - Deletes temp file on success
 ```
 
 ## Testing
