@@ -139,6 +139,48 @@ export class MemoryDB {
   }
 
   /**
+   * Snapshot current memory to changes table before update
+   */
+  snapshotToChanges(memory: MemoryRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO changes (
+        memory_id, filename, title, date, categories, tags, author, summary, content,
+        created_at, updated_at, changed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const changedAt = new Date().toISOString();
+
+    stmt.run(
+      memory.id,
+      memory.filename,
+      memory.title,
+      memory.date,
+      memory.categories,
+      memory.tags,
+      memory.author,
+      memory.summary,
+      memory.content,
+      memory.created_at,
+      memory.updated_at,
+      changedAt
+    );
+  }
+
+  /**
+   * Get version history for a memory
+   */
+  getVersionHistory(filename: string): Array<any> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM changes
+      WHERE filename = ?
+      ORDER BY changed_at DESC
+    `);
+
+    return stmt.all(filename);
+  }
+
+  /**
    * Get statistics
    */
   getStats() {

@@ -69,7 +69,9 @@ export default defineEventHandler(async (event) => {
 
     // Build full markdown with frontmatter
     const yamlFrontmatter = buildFrontmatter(frontmatter);
-    const fullContent = `---\n${yamlFrontmatter}---\n\n${content}`;
+    // Ensure content ends with newline
+    const contentWithNewline = content.endsWith('\n') ? content : content + '\n';
+    const fullContent = `---\n${yamlFrontmatter}---\n\n${contentWithNewline}`;
 
     // Ensure directory exists
     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -77,9 +79,37 @@ export default defineEventHandler(async (event) => {
     // Write the file
     await fs.writeFile(filePath, fullContent, "utf-8");
 
-    // Update database
+    // Update database with version history
     const db = new MemoryDB(DB_PATH);
+    let diffOutput: string | null = null;
+
     try {
+      // Check if memory already exists
+      const existing = db.getMemory(filename);
+
+      // If updating existing memory, snapshot to changes table first
+      if (existing) {
+        db.snapshotToChanges(existing);
+
+        // Generate diff between old and new content
+        const oldTempPath = `/tmp/heart-old-${Date.now()}.md`;
+        const newTempPath = `/tmp/heart-new-${Date.now()}.md`;
+
+        await fs.writeFile(oldTempPath, existing.content, 'utf-8');
+        await fs.writeFile(newTempPath, fullContent, 'utf-8');
+
+        try {
+          // Use diff CLI to generate unified diff (|| true so non-zero exit doesn't throw)
+          diffOutput = execSync(`diff -u "${oldTempPath}" "${newTempPath}" || true`, {
+            encoding: 'utf-8'
+          });
+        } finally {
+          // Cleanup temp files
+          await fs.unlink(oldTempPath).catch(() => {});
+          await fs.unlink(newTempPath).catch(() => {});
+        }
+      }
+
       const parsed: ParsedMemory = {
         filename,
         frontmatter,
@@ -112,6 +142,8 @@ export default defineEventHandler(async (event) => {
       success: true,
       filename,
       updated_at: frontmatter.updated_at,
+      is_update: diffOutput !== null,
+      diff: diffOutput, // null if new, unified diff if update
     };
   } catch (error) {
     console.error("Error writing memory:", error);

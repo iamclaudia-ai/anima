@@ -128,11 +128,22 @@ Direct JSON - no temp files needed! One-step memory updates.`,
 
         try {
           const result = await this.memoryManager.writeMemory(params)
+
+          let message = `Memory written to my-heart.db! 💙\n\nFile: ${result.filename}\nUpdated: ${result.updated_at}\n`;
+
+          if (result.is_update && result.diff) {
+            message += `\n📝 Updated existing memory (version saved to changes table)\n\nDiff:\n\`\`\`diff\n${result.diff}\n\`\`\`\n\n`;
+          } else {
+            message += `\n✨ Created new memory\n\n`;
+          }
+
+          message += `Index regenerated automatically. Your memory is preserved! 💎`;
+
           return {
             content: [
               {
                 type: 'text',
-                text: `Memory written to my-heart.db! 💙\n\nFile: ${result.filename}\nUpdated: ${result.updated_at}\n\nIndex regenerated automatically. Your memory is preserved! 💎`,
+                text: message,
               },
             ],
           }

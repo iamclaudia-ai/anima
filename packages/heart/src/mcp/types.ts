@@ -14,5 +14,7 @@ export interface WriteMemoryResult {
   success: boolean
   filename: string
   updated_at: string
+  is_update: boolean // true if updating existing, false if new
+  diff: string | null // unified diff if update, null if new
   error?: string
 }
