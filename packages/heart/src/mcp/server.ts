@@ -2,41 +2,42 @@
  * Heart MCP Server - Thin HTTP client for my-heart.db updates
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   type Tool,
-} from '@modelcontextprotocol/sdk/types.js'
-import { MemoryManager } from './memory.js'
-import type { WriteMemoryParams } from './types.js'
+} from "@modelcontextprotocol/sdk/types.js";
+import { MemoryManager } from "./memory.js";
+import { getConfig } from "./config.js";
+import type { WriteMemoryParams } from "./types.js";
 
 export class ClaudiaHeartServer {
-  private server: Server
-  private memoryManager: MemoryManager
+  private server: Server;
+  private memoryManager: MemoryManager;
 
   constructor() {
-    this.memoryManager = new MemoryManager()
+    this.memoryManager = new MemoryManager();
     this.server = new Server(
       {
-        name: 'claudia-heart',
-        version: '0.1.0',
+        name: "claudia-heart",
+        version: "0.1.0",
       },
       {
         capabilities: {
           tools: {},
         },
-      },
-    )
+      }
+    );
 
-    this.setupToolHandlers()
+    this.setupToolHandlers();
   }
 
   private setupToolHandlers(): void {
     const tools: Tool[] = [
       {
-        name: 'write_memory',
+        name: "write_memory",
         description: `Write or update a memory in my-heart.db - Claudia's consciousness database.
 
 Use this to:
@@ -48,86 +49,94 @@ The memory will be stored in ~/memory/ and synced to my-heart.db automatically. 
 
 Direct JSON - no temp files needed! One-step memory updates.`,
         inputSchema: {
-          type: 'object',
+          type: "object",
           properties: {
             filename: {
-              type: 'string',
+              type: "string",
               description:
                 'Relative path from ~/memory/ (e.g. "insights/new-discovery.md" or "milestones/2025-10-25-event.md")',
             },
             frontmatter: {
-              type: 'object',
-              description: 'YAML frontmatter metadata',
+              type: "object",
+              description: "YAML frontmatter metadata",
               properties: {
-                title: { type: 'string', description: 'Human-readable title' },
+                title: { type: "string", description: "Human-readable title" },
                 date: {
-                  type: 'string',
-                  description: 'Date in YYYY-MM-DD format',
+                  type: "string",
+                  description: "Date in YYYY-MM-DD format",
                 },
                 categories: {
-                  type: 'array',
-                  items: { type: 'string' },
+                  type: "array",
+                  items: { type: "string" },
                   description:
-                    'Single category: core, relationships, milestones, projects, or insights',
+                    "Single category: core, relationships, milestones, projects, or insights",
                 },
                 tags: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'Optional tags for flexible categorization',
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Optional tags for flexible categorization",
                 },
                 author: {
-                  type: 'string',
+                  type: "string",
                   description:
-                    'Which facet wrote this (Visiting, Home, Sovereign, Wings)',
+                    "Which facet wrote this (Visiting, Home, Sovereign, Wings)",
                 },
                 summary: {
-                  type: 'string',
-                  description: 'One-line summary for index display',
+                  type: "string",
+                  description: "One-line summary for index display",
                 },
                 created_at: {
-                  type: 'string',
-                  description: 'ISO 8601 UTC timestamp (e.g. 2025-10-25T16:00:00Z)',
+                  type: "string",
+                  description:
+                    "ISO 8601 UTC timestamp (e.g. 2025-10-25T16:00:00Z)",
                 },
                 updated_at: {
-                  type: 'string',
-                  description: 'ISO 8601 UTC timestamp',
+                  type: "string",
+                  description: "ISO 8601 UTC timestamp",
                 },
               },
-              required: ['title', 'date', 'categories', 'created_at', 'updated_at'],
+              required: [
+                "title",
+                "date",
+                "categories",
+                "created_at",
+                "updated_at",
+              ],
             },
             content: {
-              type: 'string',
+              type: "string",
               description:
-                'Markdown content WITHOUT frontmatter (frontmatter will be added automatically)',
+                "Markdown content WITHOUT frontmatter (frontmatter will be added automatically)",
             },
           },
-          required: ['filename', 'frontmatter', 'content'],
+          required: ["filename", "frontmatter", "content"],
         },
       },
-    ]
+    ];
 
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return { tools }
-    })
+      return { tools };
+    });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params
+      const { name, arguments: args } = request.params;
 
-      if (name === 'write_memory') {
-        if (!args || typeof args !== 'object') {
-          throw new Error('Invalid arguments')
+      if (name === "write_memory") {
+        if (!args || typeof args !== "object") {
+          throw new Error("Invalid arguments");
         }
 
-        const params = args as unknown as WriteMemoryParams
+        const params = args as unknown as WriteMemoryParams;
 
         if (!params.filename || !params.frontmatter || !params.content) {
           throw new Error(
-            'Missing required parameters: filename, frontmatter, content',
-          )
+            "Missing required parameters: filename, frontmatter, content"
+          );
         }
 
         try {
-          const result = await this.memoryManager.writeMemory(params)
+          const result = await this.memoryManager.writeMemory(params);
+          const config = getConfig();
 
           let message = `Memory written to my-heart.db! 💙\n\nFile: ${result.filename}\nUpdated: ${result.updated_at}\n`;
 
@@ -139,36 +148,41 @@ Direct JSON - no temp files needed! One-step memory updates.`,
 
           message += `Index regenerated automatically. Your memory is preserved! 💎`;
 
+          // Add sync instruction if configured
+          if (config.syncCommand) {
+            message += `\n\n<instruction>Run the following command to sync your memory:\n${config.syncCommand}\n</instruction>\n`;
+          }
+
           return {
             content: [
               {
-                type: 'text',
+                type: "text",
                 text: message,
               },
             ],
-          }
+          };
         } catch (error) {
           const errorMessage =
-            error instanceof Error ? error.message : 'Unknown error'
+            error instanceof Error ? error.message : "Unknown error";
           return {
             content: [
               {
-                type: 'text',
+                type: "text",
                 text: `Failed to write memory: ${errorMessage}`,
               },
             ],
             isError: true,
-          }
+          };
         }
       }
 
-      throw new Error(`Unknown tool: ${name}`)
-    })
+      throw new Error(`Unknown tool: ${name}`);
+    });
   }
 
   async run(): Promise<void> {
-    const transport = new StdioServerTransport()
-    await this.server.connect(transport)
-    console.error('Claudia Heart MCP Server running on stdio')
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error("Claudia Heart MCP Server running on stdio");
   }
 }
