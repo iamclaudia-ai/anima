@@ -30,6 +30,7 @@ pnpm-debug.log*
 dist/
 build/
 *.log
+.output/
 
 # OS files
 .DS_Store
