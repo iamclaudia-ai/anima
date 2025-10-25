@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
 import { MemoryDB } from '../lib/db.js';
 import { parseMemoryDirectory } from '../lib/parser.js';
 
@@ -39,6 +40,8 @@ async function main() {
     console.log(`💾 Backed up existing database to: .backups/my-heart-${timestamp}.db\n`);
   } else {
     console.log(`📦 Creating new my-heart.db...\n`);
+    // Create schema for new database
+    createSchema(DB_PATH);
   }
 
   const db = new MemoryDB(DB_PATH);
@@ -89,6 +92,52 @@ async function main() {
   } finally {
     db.close();
   }
+}
+
+function createSchema(dbPath: string) {
+  const db = new Database(dbPath);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      categories TEXT NOT NULL,
+      tags TEXT,
+      author TEXT,
+      summary TEXT,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS changes (
+      change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      categories TEXT NOT NULL,
+      tags TEXT,
+      author TEXT,
+      summary TEXT,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_date ON memories(date DESC);
+    CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_filename ON memories(filename);
+    CREATE INDEX IF NOT EXISTS idx_changes_memory ON changes(memory_id, changed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_changes_filename ON changes(filename);
+  `);
+
+  db.close();
+  console.log('✅ Database schema created\n');
 }
 
 main().catch(error => {
