@@ -6,4 +6,7 @@ export default defineConfig({
   nitro: {
     preset: "standard",
   },
+  server: {
+    allowedHosts: ["anima-sedes.com", "localhost"],
+  },
 });

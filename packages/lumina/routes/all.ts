@@ -19,7 +19,7 @@ interface ImageInfo {
   metadata?: ImageMetadata
 }
 
-const VISION_DIR = path.join(os.homedir(), '.claudia/vision')
+const VISION_DIR = path.join(os.homedir(), 'vision')
 
 function truncateText(text: string | undefined, maxLength: number): string {
   if (!text || text.length <= maxLength) return text || ''

@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 
-const VISION_DIR = path.join(os.homedir(), '.claudia/vision')
+const VISION_DIR = path.join(os.homedir(), 'vision')
 
 export default defineEventHandler(async (event) => {
   const params = event.context.params?.path
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 
   // Construct the full file path
   const filePath = path.join(VISION_DIR, params)
-
+  console.log(filePath)
   // Security: ensure the path is within VISION_DIR
   const resolvedPath = path.resolve(filePath)
   const resolvedVisionDir = path.resolve(VISION_DIR)

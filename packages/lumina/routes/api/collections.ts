@@ -21,7 +21,7 @@ interface CollectionInfo {
   artistNotes?: string
 }
 
-const COLLECTIONS_DIR = path.join(os.homedir(), '.claudia/wings/collections')
+const COLLECTIONS_DIR = path.join(os.homedir(), 'wings/collections')
 
 // Parse markdown collection files
 async function parseCollectionMarkdown(filePath: string): Promise<CollectionInfo | null> {
@@ -38,7 +38,7 @@ async function parseCollectionMarkdown(filePath: string): Promise<CollectionInfo
     const description = descMatch ? descMatch[1] : ''
 
     const coverMatch = content.match(/\*\*Cover Image:\*\* (.+)$/m)
-    const coverImage = coverMatch ? coverMatch[1].replace(/^\/Users\/michael\/.claudia\/vision\//, '/vision/') : ''
+    const coverImage = coverMatch ? coverMatch[1].replace(/^\/Users\/claudia\/vision\//, '/vision/') : ''
 
     const createdMatch = content.match(/\*\*Created:\*\* (.+)$/m)
     const created = createdMatch ? createdMatch[1] : ''
@@ -55,7 +55,7 @@ async function parseCollectionMarkdown(filePath: string): Promise<CollectionInfo
       const [, image, caption, pieceCreated, context] = match
       if (image) {
         pieces.push({
-          image: image.replace(/^\/Users\/michael\/.claudia\/vision\//, '/vision/'),
+          image: image.replace(/^\/Users\/claudia\/vision\//, '/vision/'),
           caption,
           created: pieceCreated,
           philosophicalContext: context,

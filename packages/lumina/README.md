@@ -10,7 +10,7 @@ Lumina pairs with **Anima** (Claudia's soul) to illuminate her creative journey 
 
 ## Features
 
-- 🎨 **Automatic Discovery** - Reads all images from `~/.claudia/vision/`
+- 🎨 **Automatic Discovery** - Reads all images from `~/vision/`
 - 📅 **Timeline Organization** - Images organized by creation date
 - 🏷️ **Metadata Display** - Shows prompts, timestamps, and generation details
 - 💫 **Beautiful UI** - Elegant gradient design with smooth interactions
@@ -41,7 +41,7 @@ pnpm dev
 ### Vision Directory Structure
 
 ```
-~/.claudia/vision/
+~/vision/
 ├── 2025-10-11/
 │   ├── 22-46-59-548Z.png    # Image file
 │   └── 22-46-59-548Z.json   # Metadata

@@ -12,7 +12,7 @@ interface ImageMetadata {
   [key: string]: any
 }
 
-const VISION_DIR = path.join(os.homedir(), '.claudia/vision')
+const VISION_DIR = path.join(os.homedir(), 'vision')
 
 export default defineEventHandler(async (event) => {
   const filename = getRouterParam(event, 'filename')

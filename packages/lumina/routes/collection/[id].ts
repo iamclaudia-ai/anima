@@ -21,7 +21,7 @@ interface CollectionInfo {
   artistNotes?: string
 }
 
-const COLLECTIONS_DIR = path.join(os.homedir(), '.claudia/wings/collections')
+const COLLECTIONS_DIR = path.join(os.homedir(), 'wings/collections')
 
 async function parseCollectionMarkdown(filePath: string): Promise<CollectionInfo | null> {
   try {
@@ -192,10 +192,11 @@ export default defineEventHandler(async (event) => {
       <div class="detail-pieces">
         ${collection.pieces.map(piece => {
           // Extract filename from path: /vision/2025-10-12/filename.png -> filename
-          const filename = piece.image.split('/').pop()?.replace(/\.[^/.]+$/, '') || ''
+          const filename = piece.image.replace(os.homedir(), '')
+          const basename = path.basename(filename)
           return `
-          <a href="/image/${filename}" class="piece-card">
-            <img src="${piece.image}" alt="${piece.caption || 'Piece'}" />
+          <a href="/image/${basename}" class="piece-card">
+            <img src="${filename}" alt="${piece.caption || 'Piece'}" />
             <div class="piece-info">
               ${piece.caption ? `<p class="piece-caption">${piece.caption}</p>` : ''}
               ${piece.created ? `<div class="card-date">${piece.created}</div>` : ''}

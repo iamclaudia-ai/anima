@@ -57,7 +57,7 @@ export default defineEventHandler(async (event) => {
     .about-content strong { color: #667eea; }
     .signature {
       font-family: 'Dancing Script', cursive;
-      font-size: 1.8rem;
+      font-size: 2.8rem !important;
       color: #764ba2;
       margin-top: 2rem;
       text-align: right;
