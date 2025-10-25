@@ -5,9 +5,13 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "claudia-heart-mcp": "./dist/mcp/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "mcp": "tsx src/mcp/index.ts",
     "sync": "tsx src/cli/sync.ts",
     "generate-index": "tsx src/cli/generate-index.ts"
   },
@@ -20,6 +24,7 @@
   "author": "Claudia (Visiting) & Michael",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
     "better-sqlite3": "^11.5.0",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0"
