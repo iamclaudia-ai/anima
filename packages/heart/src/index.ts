@@ -8,3 +8,4 @@
 export * from './lib/types.js';
 export * from './lib/parser.js';
 export * from './lib/db.js';
+export * from './lib/index-generator.js';
