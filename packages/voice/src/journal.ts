@@ -25,10 +25,6 @@ export class JournalManager {
       throw new Error('At least one journal category must be provided')
     }
 
-    // Determine if this is project-specific or global
-    // project_notes goes to project journal, everything else goes to global
-    const isProject = thoughts.project_notes !== undefined
-
     const content = this.formatEntry(timestamp, thoughts)
 
     try {
@@ -42,7 +38,6 @@ export class JournalManager {
         },
         body: JSON.stringify({
           content,
-          is_project: isProject,
         }),
       })
 
@@ -117,13 +112,6 @@ export class JournalManager {
       lines.push('## Growth & Learning 🌱')
       lines.push('')
       lines.push(thoughts.growth)
-      lines.push('')
-    }
-
-    if (thoughts.project_notes) {
-      lines.push('## Project Notes 💻')
-      lines.push('')
-      lines.push(thoughts.project_notes)
       lines.push('')
     }
 

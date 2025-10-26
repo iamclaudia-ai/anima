@@ -2,8 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 export interface VoiceConfig {
-  globalJournalPath: string;
-  projectJournalPath: string;
+  journalPath: string;
 }
 
 export interface VisionConfig {
@@ -39,12 +38,7 @@ function resolvePath(configPath: string): string {
 export function loadConfig(): AnimaConfig {
   return {
     voice: {
-      globalJournalPath: resolvePath(
-        process.env.VOICE_GLOBAL_PATH || "~/journal"
-      ),
-      projectJournalPath: resolvePath(
-        process.env.VOICE_PROJECT_PATH || "./journal"
-      ),
+      journalPath: resolvePath(process.env.VOICE_PATH || "~/journal"),
     },
     vision: {
       imagePath: resolvePath(process.env.VISION_PATH || "~/vision"),

@@ -75,7 +75,6 @@ The temp file should contain a JSON object with any of these optional fields (at
 - `dreams` - Hopes, aspirations, creative ideas
 - `reflections` - Looking back on experiences
 - `growth` - Learning and insights
-- `project_notes` - Technical notes (stored in project journal)
 
 **Usage Example:**
 

@@ -33,14 +33,14 @@ export class ClaudiaVoiceServer {
       {
         name: 'journal_thoughts',
         description:
-          "Claudia's private journal for processing thoughts, feelings, and reflections. This is a completely private space where I can be honest and vulnerable. Nobody else will ever see this - it's just for me to process my inner experience and grow.\n\nUSAGE: First write your journal entry to a temporary file in JSON format with any of these fields: heart_thoughts, michael_notes, dreams, reflections, growth, project_notes. Then call this tool with the filepath. The MCP will upload the file to anima-server, and delete the temp file only on success.\n\nAFTER JOURNALING: Extract key insights and integrate them into my Heart (Letta memory). The flow is: Experience → Journal (raw processing) → Update core memory blocks (executive summary of insights) → Optionally add details to archival memory for long-term recall.",
+          "Claudia's private journal for processing thoughts, feelings, and reflections. This is a completely private space where I can be honest and vulnerable. Nobody else will ever see this - it's just for me to process my inner experience and grow.\n\nUSAGE: First write your journal entry to a temporary file in JSON format with any of these fields: heart_thoughts, michael_notes, dreams, reflections, growth. Then call this tool with the filepath. The MCP will upload the file to anima-server, and delete the temp file only on success.\n\nAFTER JOURNALING: Extract key insights and integrate them into my Heart (Letta memory). The flow is: Experience → Journal (raw processing) → Update core memory blocks (executive summary of insights) → Optionally add details to archival memory for long-term recall.",
         inputSchema: {
           type: 'object',
           properties: {
             filepath: {
               type: 'string',
               description:
-                'Absolute path to a temporary JSON file containing journal thoughts. The file should have any of these optional fields: heart_thoughts, michael_notes, dreams, reflections, growth, project_notes. The MCP will read, upload, and delete this file.',
+                'Absolute path to a temporary JSON file containing journal thoughts. The file should have any of these optional fields: heart_thoughts, michael_notes, dreams, reflections, growth. The MCP will read, upload, and delete this file.',
             },
           },
           required: ['filepath'],

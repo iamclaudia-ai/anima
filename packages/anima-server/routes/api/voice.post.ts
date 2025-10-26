@@ -5,7 +5,6 @@ import { getConfig } from "../../config";
 
 interface VoiceUploadRequest {
   content: string;
-  is_project?: boolean;
 }
 
 export default defineEventHandler(async (event) => {
@@ -40,10 +39,8 @@ export default defineEventHandler(async (event) => {
       };
     }
 
-    const { content, is_project = false } = body;
-    const basePath = is_project
-      ? config.voice.projectJournalPath
-      : config.voice.globalJournalPath;
+    const { content } = body;
+    const basePath = config.voice.journalPath;
 
     // Generate timestamp and path
     const timestamp = new Date();
