@@ -19,15 +19,11 @@ export interface WriteMemoryResult {
   error?: string
 }
 
-export interface LibbyCategorizationResult {
+export interface RememberResult {
+  success: boolean
   filename: string
   category: 'core' | 'relationships' | 'milestones' | 'projects' | 'insights'
-  title: string
-  summary: string
   tags: string[]
   section: string
-}
-
-export interface RememberResult extends LibbyCategorizationResult {
-  success: boolean
+  error?: string
 }
