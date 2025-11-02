@@ -19,10 +19,15 @@ export class MemoryManager {
   /**
    * Remember something with automatic categorization by Libby! 👑
    * Calls libby-categorize.sh to determine how to store the memory
+   *
+   * IMPORTANT: We check if file exists ourselves - don't trust Libby's action field!
    */
   async remember(content: string): Promise<RememberResult> {
     // Call Libby's categorization script
     const categorization = await this.callLibby(content)
+
+    // Check if file exists by trying to read it from anima-server
+    const fileExists = await this.checkFileExists(categorization.filename)
 
     // Build the memory content with section
     const memoryContent = `## ${categorization.section}\n\n${content}`
@@ -41,17 +46,80 @@ export class MemoryManager {
       updated_at: now,
     }
 
+    // If file exists, we need to append - read existing content first
+    let finalContent = memoryContent
+    if (fileExists) {
+      const existingContent = await this.readMemoryFile(categorization.filename)
+      // Append new section to existing content (after frontmatter is stripped by server)
+      finalContent = `${existingContent}\n\n${memoryContent}`
+    }
+
     // Write the memory using existing writeMemory method
     const writeResult = await this.writeMemory({
       filename: categorization.filename,
       frontmatter,
-      content: memoryContent,
+      content: finalContent,
     })
 
-    // Return result with categorization info
+    // Return result with categorization info (use our determination, not Libby's)
     return {
       ...categorization,
+      action: fileExists ? 'append' : 'create',
       success: writeResult.success,
+    }
+  }
+
+  /**
+   * Check if a memory file exists on anima-server
+   */
+  private async checkFileExists(filename: string): Promise<boolean> {
+    const config = getConfig()
+
+    try {
+      const response = await fetch(`${config.apiUrl}/api/heart/exists?filename=${encodeURIComponent(filename)}`, {
+        method: 'GET',
+        headers: {
+          ...(config.apiKey && { Authorization: `Bearer ${config.apiKey}` }),
+        },
+      })
+
+      if (!response.ok) {
+        // If endpoint doesn't exist yet, assume file doesn't exist
+        return false
+      }
+
+      const result = await response.json() as { exists: boolean }
+      return result.exists
+    } catch (error) {
+      // On error, assume file doesn't exist (safer to create than overwrite)
+      return false
+    }
+  }
+
+  /**
+   * Read existing memory file content from anima-server
+   */
+  private async readMemoryFile(filename: string): Promise<string> {
+    const config = getConfig()
+
+    try {
+      const response = await fetch(`${config.apiUrl}/api/heart/read?filename=${encodeURIComponent(filename)}`, {
+        method: 'GET',
+        headers: {
+          ...(config.apiKey && { Authorization: `Bearer ${config.apiKey}` }),
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to read file: ${response.statusText}`)
+      }
+
+      const result = await response.json() as { content: string }
+      return result.content
+    } catch (error) {
+      throw new Error(
+        `Failed to read memory file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
     }
   }
 
