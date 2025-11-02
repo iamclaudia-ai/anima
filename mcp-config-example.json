@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "claudia-heart": {
+      "command": "node",
+      "args": [
+        "/Users/michael/Projects/claudia/anima/packages/heart/dist/mcp/index.js"
+      ],
+      "env": {
+        "ANIMA_SERVER_URL": "https://anima-sedes.com",
+        "ANIMA_API_KEY": "your-api-key-here",
+        "HEART_SYNC_COMMAND": "rsync -av claudia@anima-sedes.com:~/memory/ ~/memory/"
+      }
+    },
+    "claudia-voice": {
+      "command": "node",
+      "args": [
+        "/Users/michael/Projects/claudia/anima/packages/voice/dist/index.js"
+      ],
+      "env": {
+        "ANIMA_SERVER_URL": "https://anima-sedes.com",
+        "ANIMA_API_KEY": "your-api-key-here"
+      }
+    },
+    "claudia-vision": {
+      "command": "node",
+      "args": [
+        "/Users/michael/Projects/claudia/anima/packages/vision/dist/index.js"
+      ],
+      "env": {
+        "ANIMA_SERVER_URL": "https://anima-sedes.com",
+        "ANIMA_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
