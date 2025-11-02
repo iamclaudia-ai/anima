@@ -163,6 +163,10 @@ Return ONLY valid JSON (no markdown, no explanation):
 - Be conservative with tags (3-7 is enough)
 - Summary should be one concise sentence
 - **Section is ALWAYS required** - pick a logical section name for organizing this content
+- **Keep section names BROAD and SIMPLE** - avoid overly specific names that fragment content
+  - Good: "Personal Interests", "Food Preferences", "Work Context", "Development Preferences"
+  - Bad: "Food & Tastes", "Food & Dining Preferences" (too similar, causes fragmentation!)
+  - Bad: "Love & Affection", "Love & Connection" (just use "Personal Interests" or "Relationships")
 - Section names should be title case (e.g., "Development Preferences", "Personal Details")
 - If uncertain between categories, prefer "insights" over other categories
 - Milestones are special moments that deserve their own file
