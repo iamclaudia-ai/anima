@@ -122,6 +122,29 @@ export function sectionExists(markdown: string, sectionName: string): boolean {
 }
 
 /**
+ * Extract all section titles from markdown
+ *
+ * @param markdown - The markdown content
+ * @returns Array of section titles (## headings only)
+ */
+export function extractSections(markdown: string): string[] {
+  const tree = unified()
+    .use(remarkParse)
+    .parse(markdown) as Root
+
+  const sections: string[] = []
+
+  visit(tree, 'heading', (node: Heading) => {
+    // Only extract level 2 headings (##)
+    if (node.depth === 2) {
+      sections.push(extractHeadingText(node))
+    }
+  })
+
+  return sections
+}
+
+/**
  * Extract text from heading node
  */
 function extractHeadingText(heading: Heading): string {

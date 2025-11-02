@@ -7,7 +7,7 @@ import { getConfig } from "../../../config";
 import { MemoryDB, generateIndexMarkdown } from "@claudia/heart";
 import type { MemoryFrontmatter, ParsedMemory } from "@claudia/heart";
 import { execSync } from "node:child_process";
-import { insertIntoSection, sectionExists } from "../../../utils/markdown-section";
+import { insertIntoSection, sectionExists, extractSections } from "../../../utils/markdown-section";
 
 const execFileAsync = promisify(execFile);
 
@@ -58,13 +58,19 @@ export default defineEventHandler(async (event) => {
 
     const { content } = body;
 
-    // Call Libby to categorize
-    const categorization = await callLibby(content);
-
     // Build paths
     const HOME = process.env.HOME || "/Users/claudia";
     const MEMORY_ROOT = path.join(HOME, "memory");
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
+
+    // Get existing sections from database
+    const tempDb = new MemoryDB(DB_PATH);
+    const existingSections = tempDb.getAllSections();
+    tempDb.close();
+
+    // Call Libby to categorize (with existing sections context)
+    const categorization = await callLibby(content, existingSections);
+
     const filePath = path.join(MEMORY_ROOT, categorization.filename);
 
     // Check if target file exists
@@ -165,6 +171,12 @@ export default defineEventHandler(async (event) => {
 
       db.upsertMemory(parsed);
 
+      // Extract and store sections from the file
+      const sections = extractSections(finalContentWithoutFrontmatter);
+      for (const sectionTitle of sections) {
+        db.upsertSection(relativeFilename, sectionTitle, categorization.summary);
+      }
+
       // Regenerate index.md
       const indexMarkdown = await generateIndexMarkdown(MEMORY_ROOT, DB_PATH);
       const indexPath = path.join(MEMORY_ROOT, "index.md");
@@ -203,14 +215,19 @@ export default defineEventHandler(async (event) => {
  * Call Libby's categorization script
  */
 async function callLibby(
-  content: string
+  content: string,
+  existingSections: Array<{ file_path: string; section_title: string; summary: string | null }>
 ): Promise<LibbyCategorizationResult> {
   // In Nuxt, we need to use process.cwd() to get to the project root
   const projectRoot = process.cwd();
   const scriptPath = path.join(projectRoot, "libby/libby-categorize.sh");
 
+  // Format existing sections for Libby
+  const sectionsContext = formatSectionsForLibby(existingSections);
+
   try {
-    const { stdout } = await execFileAsync(scriptPath, [content]);
+    // Pass both content and sections context to Libby
+    const { stdout } = await execFileAsync(scriptPath, [content, sectionsContext]);
     const result = JSON.parse(stdout.trim()) as LibbyCategorizationResult;
     return result;
   } catch (error) {
@@ -218,6 +235,45 @@ async function callLibby(
       `Libby categorization failed: ${error instanceof Error ? error.message : "Unknown error"}`
     );
   }
+}
+
+/**
+ * Format sections for Libby's prompt
+ */
+function formatSectionsForLibby(
+  sections: Array<{ file_path: string; section_title: string; summary: string | null }>
+): string {
+  if (sections.length === 0) {
+    return "No existing sections yet.";
+  }
+
+  // Group by file
+  const byFile = new Map<string, Array<{ section_title: string; summary: string | null }>>();
+
+  for (const section of sections) {
+    if (!byFile.has(section.file_path)) {
+      byFile.set(section.file_path, []);
+    }
+    byFile.get(section.file_path)!.push({
+      section_title: section.section_title,
+      summary: section.summary
+    });
+  }
+
+  // Format as readable list
+  const lines: string[] = ["Existing sections:"];
+  for (const [filePath, fileSections] of byFile.entries()) {
+    lines.push(`- ${filePath}:`);
+    for (const { section_title, summary } of fileSections) {
+      if (summary) {
+        lines.push(`  * ${section_title} (${summary})`);
+      } else {
+        lines.push(`  * ${section_title}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
 }
 
 /**

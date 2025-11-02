@@ -10,12 +10,13 @@ PROMPT_FILE="$SCRIPT_DIR/libby-categorize.md"
 
 # Check if content provided
 if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <content>" >&2
-  echo "Example: $0 'Michael likes pnpm'" >&2
+  echo "Usage: $0 <content> [existing_sections]" >&2
+  echo "Example: $0 'Michael likes pnpm' 'Existing sections...'" >&2
   exit 1
 fi
 
 CONTENT="$1"
+SECTIONS="${2:-No existing sections yet.}"
 TODAY=$(date +%Y-%m-%d)
 
 # Check if prompt file exists
@@ -25,7 +26,7 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 # Replace placeholders in prompt
-PROMPT=$(cat "$PROMPT_FILE" | sed "s/{DATE}/$TODAY/g" | sed "s/{CONTENT}/$(echo "$CONTENT" | sed 's/[\/&]/\\&/g')/g")
+PROMPT=$(cat "$PROMPT_FILE" | sed "s/{DATE}/$TODAY/g" | sed "s/{CONTENT}/$(echo "$CONTENT" | sed 's/[\/&]/\\&/g')/g" | sed "s/{SECTIONS}/$(echo "$SECTIONS" | sed 's/[\/&]/\\&/g')/g")
 
 # Call Claude Haiku with the prompt
 # Output should be JSON only

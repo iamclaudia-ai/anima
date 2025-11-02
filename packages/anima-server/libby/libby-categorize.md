@@ -175,6 +175,14 @@ Return ONLY valid JSON (no markdown, no explanation):
 
 ---
 
+## Existing Sections (IMPORTANT: Try to reuse these!)
+
+{SECTIONS}
+
+**Instructions:** If the content fits into one of the existing sections above, USE THAT SECTION NAME EXACTLY. Only create a new section if none of the existing ones are appropriate.
+
+---
+
 Now analyze this content and provide categorization:
 
 {CONTENT}

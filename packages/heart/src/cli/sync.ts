@@ -129,9 +129,20 @@ function createSchema(dbPath: string) {
       FOREIGN KEY (memory_id) REFERENCES memories(id)
     );
 
+    CREATE TABLE IF NOT EXISTS sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_path TEXT NOT NULL,
+      section_title TEXT NOT NULL,
+      summary TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(file_path, section_title)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_date ON memories(date DESC);
     CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_filename ON memories(filename);
+    CREATE INDEX IF NOT EXISTS idx_sections_file ON sections(file_path);
     CREATE INDEX IF NOT EXISTS idx_changes_memory ON changes(memory_id, changed_at DESC);
     CREATE INDEX IF NOT EXISTS idx_changes_filename ON changes(filename);
   `);

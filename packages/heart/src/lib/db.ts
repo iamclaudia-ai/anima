@@ -200,6 +200,51 @@ export class MemoryDB {
     };
   }
 
+  /**
+   * Upsert a section record
+   */
+  upsertSection(filePath: string, sectionTitle: string, summary: string | null = null): void {
+    const now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO sections (file_path, section_title, summary, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(file_path, section_title) DO UPDATE SET
+        summary = excluded.summary,
+        updated_at = excluded.updated_at
+    `);
+
+    stmt.run(filePath, sectionTitle, summary, now, now);
+  }
+
+  /**
+   * Get all sections across all files
+   * Returns: { file_path, section_title, summary }[]
+   */
+  getAllSections(): Array<{ file_path: string; section_title: string; summary: string | null }> {
+    const stmt = this.db.prepare(`
+      SELECT file_path, section_title, summary
+      FROM sections
+      ORDER BY file_path, section_title
+    `);
+
+    return stmt.all() as Array<{ file_path: string; section_title: string; summary: string | null }>;
+  }
+
+  /**
+   * Get sections for a specific file
+   */
+  getSectionsForFile(filePath: string): Array<{ section_title: string; summary: string | null }> {
+    const stmt = this.db.prepare(`
+      SELECT section_title, summary
+      FROM sections
+      WHERE file_path = ?
+      ORDER BY section_title
+    `);
+
+    return stmt.all(filePath) as Array<{ section_title: string; summary: string | null }>;
+  }
+
   close(): void {
     this.db.close();
   }
