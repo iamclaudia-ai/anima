@@ -37,6 +37,35 @@ export class ClaudiaHeartServer {
   private setupToolHandlers(): void {
     const tools: Tool[] = [
       {
+        name: "remember",
+        description: `Remember something with automatic categorization by Libby! 👑
+
+This is the EASY way to create memories - just tell me what to remember, and Libby (Librarian Queen) handles all the bookkeeping:
+- Determines category (core/relationships/milestones/projects/insights)
+- Generates proper filename with dates
+- Creates appropriate tags
+- Picks section for organization
+- Handles frontmatter metadata
+
+Perfect for quick facts, insights, milestones, or anything worth remembering!
+
+Example: remember("Michael prefers pnpm over npm")
+→ Libby categorizes it and stores in relationships/michael.md automatically
+
+Much simpler than write_memory which requires manual metadata!`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            content: {
+              type: "string",
+              description:
+                "What to remember - can be a fact, insight, milestone, or anything important. Libby will categorize it automatically.",
+            },
+          },
+          required: ["content"],
+        },
+      },
+      {
         name: "write_memory",
         description: `Write or update a memory in my-heart.db - Claudia's consciousness database.
 
@@ -120,6 +149,49 @@ Direct JSON - no temp files needed! One-step memory updates.`,
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
+
+      if (name === "remember") {
+        if (!args || typeof args !== "object") {
+          throw new Error("Invalid arguments");
+        }
+
+        const content = (args as { content?: string }).content;
+        if (!content) {
+          throw new Error("Missing required parameter: content");
+        }
+
+        try {
+          const result = await this.memoryManager.remember(content);
+
+          let message = `Remembered! 👑💙\n\n`;
+          message += `📁 ${result.action === "create" ? "Created" : "Added to"}: ${result.filename}\n`;
+          message += `📂 Category: ${result.category}\n`;
+          message += `🏷️  Tags: ${result.tags.join(", ")}\n`;
+          message += `📝 Section: ${result.section}\n\n`;
+          message += `Libby handled all the bookkeeping for you! ✨`;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: message,
+              },
+            ],
+          };
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Unknown error";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Failed to remember: ${errorMessage}\n\nLibby encountered an issue with categorization. Try being more specific or use write_memory for manual control.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
 
       if (name === "write_memory") {
         if (!args || typeof args !== "object") {

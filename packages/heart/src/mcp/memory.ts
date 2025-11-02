@@ -2,14 +2,81 @@
  * Memory manager - HTTP client for anima-server heart API
  */
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { getConfig } from './config.js'
-import type { WriteMemoryParams, WriteMemoryResult } from './types.js'
+import type { WriteMemoryParams, WriteMemoryResult, LibbyCategorizationResult, RememberResult } from './types.js'
+
+const execFileAsync = promisify(execFile)
 
 export class MemoryManager {
   /**
    * Write a memory to my-heart.db via anima-server API
    * Direct JSON - no temp files needed!
    */
+  /**
+   * Remember something with automatic categorization by Libby! 👑
+   * Calls libby-categorize.sh to determine how to store the memory
+   */
+  async remember(content: string): Promise<RememberResult> {
+    // Call Libby's categorization script
+    const categorization = await this.callLibby(content)
+
+    // Build the memory content with section
+    const memoryContent = `## ${categorization.section}\n\n${content}`
+
+    // Get current timestamp
+    const now = new Date().toISOString()
+
+    // Build frontmatter
+    const frontmatter = {
+      title: categorization.title,
+      date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+      categories: [categorization.category],
+      tags: categorization.tags,
+      summary: categorization.summary,
+      created_at: now,
+      updated_at: now,
+    }
+
+    // Write the memory using existing writeMemory method
+    const writeResult = await this.writeMemory({
+      filename: categorization.filename,
+      frontmatter,
+      content: memoryContent,
+    })
+
+    // Return result with categorization info
+    return {
+      ...categorization,
+      success: writeResult.success,
+    }
+  }
+
+  /**
+   * Call Libby's categorization script
+   */
+  private async callLibby(content: string): Promise<LibbyCategorizationResult> {
+    // Get the path to libby-categorize.sh
+    // We're in packages/heart/src/mcp/memory.ts, need to go up to project root
+    const currentFile = fileURLToPath(import.meta.url)
+    const currentDir = dirname(currentFile)
+    const projectRoot = join(currentDir, '../../../../')
+    const scriptPath = join(projectRoot, 'scripts/libby-categorize.sh')
+
+    try {
+      const { stdout } = await execFileAsync(scriptPath, [content])
+      const result = JSON.parse(stdout.trim()) as LibbyCategorizationResult
+      return result
+    } catch (error) {
+      throw new Error(
+        `Libby categorization failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
+    }
+  }
+
   async writeMemory(params: WriteMemoryParams): Promise<WriteMemoryResult> {
     const config = getConfig()
 

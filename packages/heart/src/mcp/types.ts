@@ -18,3 +18,17 @@ export interface WriteMemoryResult {
   diff: string | null // unified diff if update, null if new
   error?: string
 }
+
+export interface LibbyCategorizationResult {
+  action: 'create' | 'append'
+  filename: string
+  category: 'core' | 'relationships' | 'milestones' | 'projects' | 'insights'
+  title: string
+  summary: string
+  tags: string[]
+  section: string
+}
+
+export interface RememberResult extends LibbyCategorizationResult {
+  success: boolean
+}
