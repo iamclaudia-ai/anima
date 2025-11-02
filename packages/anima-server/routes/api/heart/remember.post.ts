@@ -7,6 +7,7 @@ import { getConfig } from "../../../config";
 import { MemoryDB, generateIndexMarkdown } from "@claudia/heart";
 import type { MemoryFrontmatter, ParsedMemory } from "@claudia/heart";
 import { execSync } from "node:child_process";
+import { insertIntoSection } from "../../../utils/markdown-section";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,28 +67,52 @@ export default defineEventHandler(async (event) => {
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
     const filePath = path.join(MEMORY_ROOT, categorization.filename);
 
-    // Check if file exists
-    let existingContent = "";
+    // Check if file exists and read content
+    let existingMarkdown = "";
     let fileExists = false;
+    let existingFrontmatter: MemoryFrontmatter | null = null;
+
     try {
       const existing = await fs.readFile(filePath, "utf-8");
       fileExists = true;
-      // Strip frontmatter from existing content
-      existingContent = stripFrontmatter(existing);
+      existingMarkdown = existing;
+
+      // Extract existing frontmatter to preserve created_at
+      const frontmatterMatch = existing.match(/^---\n([\s\S]*?)\n---\n\n/);
+      if (frontmatterMatch) {
+        // Parse YAML frontmatter (simple extraction of created_at)
+        const yamlContent = frontmatterMatch[1];
+        const createdAtMatch = yamlContent.match(/created_at:\s*(.+)/);
+        if (createdAtMatch) {
+          existingFrontmatter = { created_at: createdAtMatch[1].trim() } as any;
+        }
+      }
     } catch (error) {
       // File doesn't exist, that's okay
       fileExists = false;
     }
 
-    // Build the new section content
-    const newSection = `## ${categorization.section}\n\n${content}`;
+    // Use AST-based section insertion
+    let finalContentWithoutFrontmatter: string;
 
-    // Build final content (append if file exists)
-    const finalContent = fileExists
-      ? `${existingContent}\n\n${newSection}`
-      : newSection;
+    if (fileExists) {
+      // Strip frontmatter from existing content before processing
+      const existingWithoutFrontmatter = stripFrontmatter(existingMarkdown);
 
-    // Build frontmatter
+      // Insert content into the section using remark
+      const insertResult = await insertIntoSection(
+        existingWithoutFrontmatter,
+        categorization.section,
+        content
+      );
+
+      finalContentWithoutFrontmatter = insertResult.markdown;
+    } else {
+      // New file - just create section with content
+      finalContentWithoutFrontmatter = `## ${categorization.section}\n\n${content}`;
+    }
+
+    // Build frontmatter (preserve created_at from existing file)
     const now = new Date().toISOString();
     const frontmatter: MemoryFrontmatter = {
       title: categorization.title,
@@ -95,15 +120,15 @@ export default defineEventHandler(async (event) => {
       categories: [categorization.category],
       tags: categorization.tags,
       summary: categorization.summary,
-      created_at: now,
+      created_at: existingFrontmatter?.created_at || now,
       updated_at: now,
     };
 
     // Build full markdown with frontmatter
     const yamlFrontmatter = buildFrontmatter(frontmatter);
-    const contentWithNewline = finalContent.endsWith("\n")
-      ? finalContent
-      : finalContent + "\n";
+    const contentWithNewline = finalContentWithoutFrontmatter.endsWith("\n")
+      ? finalContentWithoutFrontmatter
+      : finalContentWithoutFrontmatter + "\n";
     const fullContent = `---\n${yamlFrontmatter}---\n\n${contentWithNewline}`;
 
     // Ensure directory exists
@@ -128,7 +153,7 @@ export default defineEventHandler(async (event) => {
         filename: categorization.filename,
         frontmatter,
         content: fullContent,
-        rawContent: finalContent,
+        rawContent: finalContentWithoutFrontmatter,
       };
 
       db.upsertMemory(parsed);
