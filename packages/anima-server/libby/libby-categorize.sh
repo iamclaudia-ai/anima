@@ -25,8 +25,13 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-# Replace placeholders in prompt
-PROMPT=$(cat "$PROMPT_FILE" | sed "s/{DATE}/$TODAY/g" | sed "s/{CONTENT}/$(echo "$CONTENT" | sed 's/[\/&]/\\&/g')/g" | sed "s/{SECTIONS}/$(echo "$SECTIONS" | sed 's/[\/&]/\\&/g')/g")
+# Read prompt template
+PROMPT=$(cat "$PROMPT_FILE")
+
+# Replace placeholders (using bash parameter expansion to handle newlines)
+PROMPT="${PROMPT//\{DATE\}/$TODAY}"
+PROMPT="${PROMPT//\{CONTENT\}/$CONTENT}"
+PROMPT="${PROMPT//\{SECTIONS\}/$SECTIONS}"
 
 # Call Claude Haiku with the prompt
 # Output should be JSON only
