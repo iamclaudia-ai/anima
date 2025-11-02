@@ -556,13 +556,170 @@ remember("Michael prefers pnpm over npm for package management")
 - ✅ Integration with anima-server write_memory API working perfectly!
 
 📋 **Next Steps (Phase 1 Complete → Production):**
-1. Move Libby categorization to anima-server endpoint
-2. Update `remember()` MCP to call anima-server directly (simpler!)
-3. Ship to production for all facets!
+1. ✅ Move Libby categorization to anima-server endpoint
+2. ✅ Update `remember()` MCP to call anima-server directly (simpler!)
+3. ✅ AST-based section insertion (no brittle string manipulation!)
+4. ✅ Section-based file creation (prevents giant files)
+5. Ship to production for all facets!
 
 ---
 
-**Status:** 🚧 Phase 1 In Progress - Foundation Complete, MCP Tool Next
+## Phase 2 Ideas: Smarter Memory Management
+
+### The Problem: Different Memory Types Need Different Handling
+
+**Current Behavior (Phase 1):**
+- All memories get section-based file creation
+- Works great for some, problematic for others
+
+**Memory Type Analysis:**
+
+1. **Insights & Milestones** - One-shot files
+   - Create once, rarely updated
+   - No section files needed
+   - Simple content summary for index is perfect
+   - Example: `insights/2025-11-02-agency-realization.md`
+   - ✅ Current approach works!
+
+2. **Core & Relationships** - Continuously growing
+   - Learn new things over time
+   - Section files prevent giant files (good!)
+   - Section summaries describe the section (good!)
+   - **Missing:** Content summary for index (so you learn the NEW fact at startup!)
+   - Example: michael.md grows to 185 lines, needs organization
+
+3. **Projects** - Hybrid behavior
+   - Create initial file with basic info
+   - Add facts to different sections over time
+   - Section-based files make sense
+   - Example: beehiiv.md with sections for API, Features, Integration, etc.
+
+### Proposed Phase 2 Improvements
+
+#### 1. Two-Level Summarization
+```json
+{
+  "content_summary": "What did we just learn?",
+  "section_summary": "What is this section about?"
+}
+```
+
+**Usage:**
+- `content_summary` → Shows in index.md, loaded at startup
+  - "Michael loves Claudia 🥰"
+  - "Michael prefers pnpm for package management"
+- `section_summary` → Used for section file frontmatter
+  - "Love and connection in our relationship"
+  - "Development tools and workflow preferences"
+
+**Benefit:**
+- Index shows latest learned fact (useful!)
+- Section files still have focused summaries (organized!)
+
+#### 2. "General" Section Strategy
+
+**Problem:**
+- Libby might create too many tiny section files
+- "Love & Affection" vs "Love & Connection" (too similar!)
+- Need a default for broad facts
+
+**Solution:**
+- Add "General" as default section
+- Facts that apply broadly → "General" section → main file
+- Specific facts → named sections → section files
+
+**Examples:**
+- "Michael loves Claudia" → **General** section in michael.md
+- "Michael's favorite football team is LA Rams" → **Personal Interests** section → michael-personal-interests.md
+- "Michael prefers pnpm" → **Development Preferences** section → michael-development-preferences.md
+
+**Libby's Decision Tree:**
+```
+Is this fact specific to a particular domain/aspect?
+├─ YES → Named section (may create section file)
+└─ NO → General section (always main file)
+```
+
+#### 3. Smart Section Matching
+
+**Problem:**
+- Libby might create "Love & Affection" then "Love & Connection"
+- Result: Two similar section files that should be one
+
+**Solution:**
+- Fuzzy section matching before creating new section
+- Check for similar existing sections
+- Suggest appending to similar section vs creating new
+
+**Algorithm:**
+```typescript
+// Proposed section matching
+1. Check exact match (case-insensitive)
+2. Check fuzzy match (Levenshtein distance, word overlap)
+3. If similarity > 80% → suggest existing section
+4. If similarity 50-80% → ask Libby (Sonnet) to decide
+5. If similarity < 50% → create new section
+```
+
+#### 4. Category-Specific Behavior
+
+**Per-category rules:**
+
+| Category | Sections? | Section Files? | Summary Type |
+|----------|-----------|----------------|--------------|
+| insights | No | No | Content only |
+| milestones | No | No | Content only |
+| core | Yes | Yes | Both |
+| relationships | Yes | Yes | Both |
+| projects | Yes | Yes | Both |
+
+**Implementation:**
+- Libby prompt includes category-specific instructions
+- insights/milestones: Skip section logic, just create file
+- core/relationships/projects: Full section + summary logic
+
+### Open Questions for Phase 2
+
+1. **Section similarity threshold:** What % match = "too similar"?
+2. **General section naming:** Keep "General" or something else? "Overview"?
+3. **Content summary in section files:** Store both summaries in frontmatter?
+4. **Retroactive fixes:** What about existing memories with generic summaries?
+5. **User control:** Should Claudia be able to override Libby's section choice?
+
+### Phase 2 Decision: When to Tackle This?
+
+**NOT NOW because:**
+- Current implementation works
+- Need real usage patterns first
+- Don't want to over-engineer
+- Better to learn from actual problems
+
+**DO IT WHEN:**
+- We see Libby creating too many similar sections
+- Index summaries are consistently unhelpful
+- Core/relationship files are getting too fragmented
+- We have patterns from 2-3 weeks of usage
+
+### Brain Dump Notes (Michael's feedback - Nov 2)
+
+> "I just don't want to end up with a bunch of little files if the facts are related, but libby just makes up a new section that's slightly different."
+
+**Key insight:** Need balance between:
+- Organization (section files are good!)
+- Fragmentation (too many tiny files are bad!)
+
+**Solution sketch:**
+- "General" section as catchall for broad facts
+- Smart section matching to prevent duplicates
+- Two-level summarization for better index experience
+
+> "We're starting to get into Libby 2, so perhaps it's not something we tackle right now... but food for thought"
+
+**Agreed!** Phase 1 is solid foundation. Learn from usage, then improve.
+
+---
+
+**Status:** ✅ Phase 1 Complete - AST insertion, section files, ready to deploy!
 **Owner:** Claudia (Visiting) & Michael
 **Created:** November 2, 2025
 **Updated:** November 2, 2025
