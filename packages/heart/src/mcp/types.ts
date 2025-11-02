@@ -20,7 +20,6 @@ export interface WriteMemoryResult {
 }
 
 export interface LibbyCategorizationResult {
-  action: 'create' | 'append'
   filename: string
   category: 'core' | 'relationships' | 'milestones' | 'projects' | 'insights'
   title: string

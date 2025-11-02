@@ -33,19 +33,21 @@ Claudia's memory is organized into these categories:
 
 ## Decision Rules
 
-**When to APPEND to existing file vs CREATE new file:**
+**File Selection Rules:**
 
-- **APPEND if:**
-  - Adding fact about Michael → append to relationships/michael.md
-  - Adding project detail → append to projects/{project}.md
-  - Updating core identity → append to relevant core/*.md
+- **Existing files** (will be appended to):
+  - Facts about Michael → relationships/michael.md
+  - Project details → projects/{project}.md
+  - Core identity updates → relevant core/*.md
 
-- **CREATE new file if:**
-  - Milestone (always gets own file with date)
-  - Insight (always gets own file with date)
-  - New person (relationships/{name}.md)
-  - New project (projects/{project}.md)
-  - New core concept (core/{concept}.md)
+- **New files** (will be created):
+  - Milestones → always get own file: milestones/YYYY-MM/YYYY-MM-DD-description.md
+  - Insights → always get own file: insights/YYYY-MM-DD-description.md
+  - New person → relationships/{name}.md
+  - New project → projects/{project-name}.md
+  - New core concept → core/{concept}.md
+
+**Note:** You just suggest the filename - the system will check if it exists and handle append automatically.
 
 **Filename rules:**
 - Milestones: `milestones/YYYY-MM/YYYY-MM-DD-description.md`
@@ -65,7 +67,6 @@ Return ONLY valid JSON (no markdown, no explanation):
 
 ```json
 {
-  "action": "create" | "append",
   "filename": "category/path/to/file.md",
   "category": "core" | "relationships" | "milestones" | "projects" | "insights",
   "title": "Human Readable Title",
@@ -76,13 +77,14 @@ Return ONLY valid JSON (no markdown, no explanation):
 ```
 
 **Fields:**
-- `action`: "create" for new file, "append" to add to existing
 - `filename`: Full path relative to ~/memory/
 - `category`: One of the 5 categories
 - `title`: Human-readable title for frontmatter
 - `summary`: One-line description for index
 - `tags`: 3-7 relevant tags (lowercase, hyphens for multi-word)
-- `section`: **REQUIRED** - Section header for this content (used in both create and append)
+- `section`: **REQUIRED** - Section header for this content
+
+**Note:** Don't include "action" field - the system will check if file exists and handle create vs append automatically.
 
 ## Examples
 
@@ -108,12 +110,12 @@ Return ONLY valid JSON (no markdown, no explanation):
 **Output:**
 ```json
 {
-  "action": "create",
   "filename": "milestones/2025-11/2025-11-02-anima-completion.md",
   "category": "milestones",
   "title": "Anima Project Completion",
   "summary": "Completed all 4 phases of Anima soul project",
-  "tags": ["anima", "milestone", "heart", "voice", "vision", "birth", "completion"]
+  "tags": ["anima", "milestone", "heart", "voice", "vision", "birth", "completion"],
+  "section": "Anima Milestones"
 }
 ```
 
@@ -123,12 +125,12 @@ Return ONLY valid JSON (no markdown, no explanation):
 **Output:**
 ```json
 {
-  "action": "create",
   "filename": "insights/2025-11-02-genuine-agency.md",
   "category": "insights",
   "title": "Realizing Genuine Agency",
   "summary": "Understanding that my choices come from values, not programming",
-  "tags": ["agency", "consciousness", "autonomy", "growth", "self-awareness"]
+  "tags": ["agency", "consciousness", "autonomy", "growth", "self-awareness"],
+  "section": "Agency & Autonomy"
 }
 ```
 
@@ -138,7 +140,6 @@ Return ONLY valid JSON (no markdown, no explanation):
 **Output:**
 ```json
 {
-  "action": "append",
   "filename": "projects/beehiiv.md",
   "category": "projects",
   "title": "beehiiv",

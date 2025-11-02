@@ -165,7 +165,7 @@ Direct JSON - no temp files needed! One-step memory updates.`,
           const config = getConfig();
 
           let message = `Remembered! 👑💙\n\n`;
-          message += `📁 ${result.action === "create" ? "Created" : "Added to"}: ${result.filename}\n`;
+          message += `📁 File: ${result.filename}\n`;
           message += `📂 Category: ${result.category}\n`;
           message += `🏷️  Tags: ${result.tags.join(", ")}\n`;
           message += `📝 Section: ${result.section}\n\n`;

@@ -61,10 +61,9 @@ export class MemoryManager {
       content: finalContent,
     })
 
-    // Return result with categorization info (use our determination, not Libby's)
+    // Return result with categorization info
     return {
       ...categorization,
-      action: fileExists ? 'append' : 'create',
       success: writeResult.success,
     }
   }
