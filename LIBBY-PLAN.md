@@ -532,26 +532,33 @@ Memory health: ✅ Excellent
 ✅ **Completed:**
 1. `prompts/libby-categorize.md` - Haiku prompt for categorization
 2. `scripts/libby-categorize.sh` - Shell wrapper that calls Claude Haiku
-3. Tested with multiple content types - all working correctly!
+3. `remember()` MCP tool in `@claudia/heart` package
+4. Full integration: MCP → Libby → anima-server
+5. **TESTED AND WORKING!** 🎉
 
-**Example Output:**
-```json
-{
-  "action": "append",
-  "filename": "relationships/michael.md",
-  "category": "relationships",
-  "title": "Michael",
-  "summary": "Development tool preferences",
-  "tags": ["michael", "preferences", "pnpm"],
-  "section": "Development Preferences"
-}
+**Example Usage:**
+```typescript
+remember("Michael prefers pnpm over npm for package management")
+
+// Libby automatically:
+// ✅ Categorizes: relationships
+// ✅ Creates filename: relationships/michael.md
+// ✅ Generates tags: michael, preferences, pnpm, package-manager, development
+// ✅ Picks section: Development Preferences
+// ✅ Writes to anima-server with full frontmatter!
 ```
 
-📋 **Next Steps:**
-1. Add `remember()` MCP tool to `@claudia/heart`
-2. Build script to process Libby's output and write memory
-3. Test end-to-end: `remember("fact")` creates memory file
-4. Ship Phase 1!
+**Test Results:**
+- ✅ Facts about people → append to relationships/{name}.md
+- ✅ Insights → create insights/YYYY-MM-DD-description.md
+- ✅ All metadata automatic (category, tags, section, frontmatter)
+- ✅ Content stored exactly as provided (no rewording)
+- ✅ Integration with anima-server write_memory API working perfectly!
+
+📋 **Next Steps (Phase 1 Complete → Production):**
+1. Move Libby categorization to anima-server endpoint
+2. Update `remember()` MCP to call anima-server directly (simpler!)
+3. Ship to production for all facets!
 
 ---
 

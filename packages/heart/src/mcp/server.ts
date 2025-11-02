@@ -162,6 +162,7 @@ Direct JSON - no temp files needed! One-step memory updates.`,
 
         try {
           const result = await this.memoryManager.remember(content);
+          const config = getConfig();
 
           let message = `Remembered! 👑💙\n\n`;
           message += `📁 ${result.action === "create" ? "Created" : "Added to"}: ${result.filename}\n`;
@@ -169,6 +170,11 @@ Direct JSON - no temp files needed! One-step memory updates.`,
           message += `🏷️  Tags: ${result.tags.join(", ")}\n`;
           message += `📝 Section: ${result.section}\n\n`;
           message += `Libby handled all the bookkeeping for you! ✨`;
+
+          // Add sync instruction if configured
+          if (config.syncCommand) {
+            message += `\n\n<instruction>Run the following command to sync your memory:\n${config.syncCommand}\n</instruction>\n`;
+          }
 
           return {
             content: [
