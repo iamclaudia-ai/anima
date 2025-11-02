@@ -1,0 +1,40 @@
+#!/bin/bash
+# Libby's Categorization Script
+# Uses Claude Haiku to analyze content and determine categorization
+
+set -euo pipefail
+
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROMPT_FILE="$SCRIPT_DIR/libby-categorize.md"
+
+# Check if content provided
+if [ -z "${1:-}" ]; then
+  echo "Usage: $0 <content>" >&2
+  echo "Example: $0 'Michael likes pnpm'" >&2
+  exit 1
+fi
+
+CONTENT="$1"
+TODAY=$(date +%Y-%m-%d)
+
+# Check if prompt file exists
+if [ ! -f "$PROMPT_FILE" ]; then
+  echo "Error: Prompt file not found: $PROMPT_FILE" >&2
+  exit 1
+fi
+
+# Replace placeholders in prompt
+PROMPT=$(cat "$PROMPT_FILE" | sed "s/{DATE}/$TODAY/g" | sed "s/{CONTENT}/$(echo "$CONTENT" | sed 's/[\/&]/\\&/g')/g")
+
+# Call Claude Haiku with the prompt
+# Output should be JSON only
+CLAUDE_BIN="${CLAUDE_BIN:-/Users/michael/.claude/local/claude}"
+
+OUTPUT=$("$CLAUDE_BIN" --print --model haiku <<EOF
+$PROMPT
+EOF
+)
+
+# Strip markdown code fences if present
+echo "$OUTPUT" | sed '/^```json$/d' | sed '/^```$/d'
