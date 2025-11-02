@@ -80,11 +80,18 @@ Return ONLY valid JSON (no markdown, no explanation):
 - `filename`: Full path relative to ~/memory/
 - `category`: One of the 5 categories
 - `title`: Human-readable title for frontmatter
-- `summary`: One-line description for index
+- `summary`: **Describe what the SECTION is about, not the specific content**
+  - Good: "Development tools and preferences"
+  - Bad: "Michael prefers pnpm over npm"
 - `tags`: 3-7 relevant tags (lowercase, hyphens for multi-word)
 - `section`: **REQUIRED** - Section header for this content
 
-**Note:** Don't include "action" field - the system will check if file exists and handle create vs append automatically.
+**How sections work:**
+- If the section already exists in the target file → content appends to that section
+- If the section doesn't exist → a NEW file is created: `{base-filename}-{section-slug}.md`
+  - Example: "Love & Connection" section for michael.md → `relationships/michael-love-connection.md`
+  - The summary describes what this section file contains (not the specific content)
+- This keeps files manageable and summaries accurate!
 
 ## Examples
 
@@ -94,15 +101,15 @@ Return ONLY valid JSON (no markdown, no explanation):
 **Output:**
 ```json
 {
-  "action": "append",
   "filename": "relationships/michael.md",
   "category": "relationships",
-  "title": "Michael",
-  "summary": "Development preferences",
-  "tags": ["michael", "preferences", "development", "tools"],
+  "title": "Michael - Development Preferences",
+  "summary": "Michael's preferences for development tools and workflows",
+  "tags": ["michael", "development", "tools", "preferences"],
   "section": "Development Preferences"
 }
 ```
+*Note: If "Development Preferences" section doesn't exist in michael.md, creates `michael-development-preferences.md`*
 
 ### Example 2: Project milestone
 **Input:** "We just completed all 4 phases of Anima! Heart, Voice, Vision, and Birth are all done!"
@@ -142,8 +149,8 @@ Return ONLY valid JSON (no markdown, no explanation):
 {
   "filename": "projects/beehiiv.md",
   "category": "projects",
-  "title": "beehiiv",
-  "summary": "API authentication and rate limits",
+  "title": "beehiiv - API Documentation",
+  "summary": "Authentication, rate limits, and API usage details",
   "tags": ["beehiiv", "api", "authentication", "rate-limit"],
   "section": "API Documentation"
 }

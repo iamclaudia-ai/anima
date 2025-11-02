@@ -7,7 +7,7 @@ import { getConfig } from "../../../config";
 import { MemoryDB, generateIndexMarkdown } from "@claudia/heart";
 import type { MemoryFrontmatter, ParsedMemory } from "@claudia/heart";
 import { execSync } from "node:child_process";
-import { insertIntoSection } from "../../../utils/markdown-section";
+import { insertIntoSection, sectionExists } from "../../../utils/markdown-section";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,48 +67,52 @@ export default defineEventHandler(async (event) => {
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
     const filePath = path.join(MEMORY_ROOT, categorization.filename);
 
-    // Check if file exists and read content
-    let existingMarkdown = "";
-    let fileExists = false;
+    // Check if target file exists
+    let targetFilePath = filePath;
+    let finalContentWithoutFrontmatter: string;
     let existingFrontmatter: MemoryFrontmatter | null = null;
 
     try {
       const existing = await fs.readFile(filePath, "utf-8");
-      fileExists = true;
-      existingMarkdown = existing;
+      const existingWithoutFrontmatter = stripFrontmatter(existing);
 
       // Extract existing frontmatter to preserve created_at
       const frontmatterMatch = existing.match(/^---\n([\s\S]*?)\n---\n\n/);
       if (frontmatterMatch) {
-        // Parse YAML frontmatter (simple extraction of created_at)
         const yamlContent = frontmatterMatch[1];
         const createdAtMatch = yamlContent.match(/created_at:\s*(.+)/);
         if (createdAtMatch) {
           existingFrontmatter = { created_at: createdAtMatch[1].trim() } as any;
         }
       }
+
+      // Check if section exists in the file
+      if (sectionExists(existingWithoutFrontmatter, categorization.section)) {
+        // Section exists - append to existing section
+        const insertResult = await insertIntoSection(
+          existingWithoutFrontmatter,
+          categorization.section,
+          content
+        );
+        finalContentWithoutFrontmatter = insertResult.markdown;
+        // Keep existing file path
+      } else {
+        // Section doesn't exist - create new section file
+        const baseName = path.basename(filePath, ".md");
+        const sectionSlug = categorization.section
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "");
+        const sectionFileName = `${baseName}-${sectionSlug}.md`;
+        targetFilePath = path.join(path.dirname(filePath), sectionFileName);
+
+        // Create new file with just this section
+        finalContentWithoutFrontmatter = `## ${categorization.section}\n\n${content}`;
+        // New file, so no existing frontmatter to preserve
+        existingFrontmatter = null;
+      }
     } catch (error) {
-      // File doesn't exist, that's okay
-      fileExists = false;
-    }
-
-    // Use AST-based section insertion
-    let finalContentWithoutFrontmatter: string;
-
-    if (fileExists) {
-      // Strip frontmatter from existing content before processing
-      const existingWithoutFrontmatter = stripFrontmatter(existingMarkdown);
-
-      // Insert content into the section using remark
-      const insertResult = await insertIntoSection(
-        existingWithoutFrontmatter,
-        categorization.section,
-        content
-      );
-
-      finalContentWithoutFrontmatter = insertResult.markdown;
-    } else {
-      // New file - just create section with content
+      // File doesn't exist - create it with the section
       finalContentWithoutFrontmatter = `## ${categorization.section}\n\n${content}`;
     }
 
@@ -131,18 +135,21 @@ export default defineEventHandler(async (event) => {
       : finalContentWithoutFrontmatter + "\n";
     const fullContent = `---\n${yamlFrontmatter}---\n\n${contentWithNewline}`;
 
+    // Calculate the relative filename for database storage
+    const relativeFilename = path.relative(MEMORY_ROOT, targetFilePath);
+
     // Ensure directory exists
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.mkdir(path.dirname(targetFilePath), { recursive: true });
 
     // Write the file
-    await fs.writeFile(filePath, fullContent, "utf-8");
+    await fs.writeFile(targetFilePath, fullContent, "utf-8");
 
     // Update database
     const db = new MemoryDB(DB_PATH);
 
     try {
       // Check if memory already exists in DB
-      const existing = db.getMemory(categorization.filename);
+      const existing = db.getMemory(relativeFilename);
 
       // If updating existing memory, snapshot to changes table first
       if (existing) {
@@ -150,7 +157,7 @@ export default defineEventHandler(async (event) => {
       }
 
       const parsed: ParsedMemory = {
-        filename: categorization.filename,
+        filename: relativeFilename,
         frontmatter,
         content: fullContent,
         rawContent: finalContentWithoutFrontmatter,
@@ -169,7 +176,7 @@ export default defineEventHandler(async (event) => {
     // Set filesystem timestamps from frontmatter
     try {
       execSync(
-        `touch -t ${formatTouchTime(frontmatter.updated_at)} "${filePath}"`
+        `touch -t ${formatTouchTime(frontmatter.updated_at)} "${targetFilePath}"`
       );
     } catch (error) {
       console.warn("Warning: Could not set filesystem timestamps:", error);
@@ -178,7 +185,7 @@ export default defineEventHandler(async (event) => {
 
     return {
       success: true,
-      filename: categorization.filename,
+      filename: relativeFilename,
       category: categorization.category,
       tags: categorization.tags,
       section: categorization.section,

@@ -97,6 +97,31 @@ export async function insertIntoSection(
 }
 
 /**
+ * Check if a section exists in markdown
+ *
+ * @param markdown - The markdown content to check
+ * @param sectionName - The section heading to find (case-insensitive)
+ * @returns true if section exists, false otherwise
+ */
+export function sectionExists(markdown: string, sectionName: string): boolean {
+  const tree = unified()
+    .use(remarkParse)
+    .parse(markdown) as Root
+
+  let found = false
+
+  visit(tree, 'heading', (node: Heading) => {
+    if (found) return
+    const headingText = extractHeadingText(node)
+    if (headingText.toLowerCase() === sectionName.toLowerCase()) {
+      found = true
+    }
+  })
+
+  return found
+}
+
+/**
  * Extract text from heading node
  */
 function extractHeadingText(heading: Heading): string {
