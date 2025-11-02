@@ -29,8 +29,8 @@ PROMPT=$(cat "$PROMPT_FILE" | sed "s/{DATE}/$TODAY/g" | sed "s/{CONTENT}/$(echo 
 
 # Call Claude Haiku with the prompt
 # Output should be JSON only
-# Default to user's home directory for Claude binary
-CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.claude/local/claude}"
+# Find claude in PATH, or use CLAUDE_BIN env var if set
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
 
 OUTPUT=$("$CLAUDE_BIN" --print --model haiku <<EOF
 $PROMPT
