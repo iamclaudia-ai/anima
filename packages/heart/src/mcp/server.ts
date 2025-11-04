@@ -12,6 +12,43 @@ import {
 import { MemoryManager } from "./memory.js";
 import { getConfig } from "./config.js";
 import type { WriteMemoryParams } from "./types.js";
+import { execSync } from "node:child_process";
+
+/**
+ * Get project folder identifier for scoping sections
+ * Tries to use git remote URL (consistent across machines)
+ * Falls back to current working directory if not in a git repo
+ */
+function getProjectFolder(): string | undefined {
+  try {
+    // Check if we're in a git repo
+    execSync("git rev-parse --is-inside-work-tree", {
+      stdio: "pipe",
+      encoding: "utf-8"
+    });
+
+    // Get the remote URL
+    const remoteUrl = execSync("git remote get-url origin", {
+      stdio: "pipe",
+      encoding: "utf-8"
+    }).trim();
+
+    // Extract project identifier from URL
+    // Examples:
+    // - https://github.com/iamclaudia-ai/anima.git -> iamclaudia-ai/anima
+    // - git@github.com:iamclaudia-ai/anima.git -> iamclaudia-ai/anima
+    const match = remoteUrl.match(/[:/]([^/]+\/[^/]+?)(\.git)?$/);
+    if (match) {
+      return match[1]; // Returns "iamclaudia-ai/anima"
+    }
+
+    // Fallback to cwd if we can't parse the URL
+    return process.cwd();
+  } catch (error) {
+    // Not a git repo or git command failed - use cwd
+    return process.cwd();
+  }
+}
 
 export class ClaudiaHeartServer {
   private server: Server;
@@ -161,9 +198,9 @@ Direct JSON - no temp files needed! One-step memory updates.`,
         }
 
         try {
-          // Get current working directory to scope project sections
-          const cwd = process.cwd();
-          const result = await this.memoryManager.remember(content, cwd);
+          // Get project folder (git remote or cwd) to scope project sections
+          const projectFolder = getProjectFolder();
+          const result = await this.memoryManager.remember(content, projectFolder);
           const config = getConfig();
 
           let message = `Remembered! 👑💙\n\n`;
