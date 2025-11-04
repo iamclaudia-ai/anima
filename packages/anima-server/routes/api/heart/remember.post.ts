@@ -68,6 +68,11 @@ export default defineEventHandler(async (event) => {
     const MEMORY_ROOT = path.join(HOME, "memory");
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
 
+    // Prepare request log
+    const requestLog = JSON.stringify({ content, cwd });
+    let responseLog = "";
+    let gitCommit: string | null = null;
+
     // Get existing sections from database (filtered by cwd for projects)
     const tempDb = new MemoryDB(DB_PATH);
     const existingSections = tempDb.getAllSections(cwd);
@@ -75,6 +80,7 @@ export default defineEventHandler(async (event) => {
 
     // Call Libby to categorize (with existing sections context)
     const categorization = await callLibby(content, existingSections);
+    responseLog = JSON.stringify(categorization);
 
     const filePath = path.join(MEMORY_ROOT, categorization.filename);
 
@@ -159,14 +165,6 @@ export default defineEventHandler(async (event) => {
     const db = new MemoryDB(DB_PATH);
 
     try {
-      // Check if memory already exists in DB
-      const existing = db.getMemory(relativeFilename);
-
-      // If updating existing memory, snapshot to changes table first
-      if (existing) {
-        db.snapshotToChanges(existing);
-      }
-
       const parsed: ParsedMemory = {
         filename: relativeFilename,
         frontmatter,
@@ -190,6 +188,41 @@ export default defineEventHandler(async (event) => {
       const indexMarkdown = await generateIndexMarkdown(MEMORY_ROOT, DB_PATH);
       const indexPath = path.join(MEMORY_ROOT, "index.md");
       await fs.writeFile(indexPath, indexMarkdown, "utf-8");
+
+      // Git commit and push
+      try {
+        // Add files
+        execSync(`git -C "${MEMORY_ROOT}" add "${relativeFilename}" index.md`, {
+          encoding: "utf-8",
+        });
+
+        // Commit with Libby's summary as message
+        const commitMessage = categorization.summary || "Update memory";
+        execSync(
+          `git -C "${MEMORY_ROOT}" commit -m "${commitMessage.replace(/"/g, '\\"')}"`,
+          { encoding: "utf-8" }
+        );
+
+        // Get commit hash
+        gitCommit = execSync(`git -C "${MEMORY_ROOT}" rev-parse HEAD`, {
+          encoding: "utf-8",
+        }).trim();
+
+        // Push to remote
+        execSync(`git -C "${MEMORY_ROOT}" push`, { encoding: "utf-8" });
+      } catch (gitError) {
+        // Log the git error but don't fail the request
+        const errorMessage = gitError instanceof Error ? gitError.message : "Unknown git error";
+        db.logRequest(requestLog, responseLog, false, errorMessage, null);
+        db.close();
+        return {
+          success: false,
+          error: `Memory saved but git operation failed: ${errorMessage}`,
+        };
+      }
+
+      // Log successful request
+      db.logRequest(requestLog, responseLog, true, null, gitCommit);
     } finally {
       db.close();
     }
@@ -213,9 +246,23 @@ export default defineEventHandler(async (event) => {
     };
   } catch (error) {
     console.error("Error remembering:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+    // Log failed request
+    try {
+      const HOME = process.env.HOME || "/Users/claudia";
+      const MEMORY_ROOT = path.join(HOME, "memory");
+      const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
+      const db = new MemoryDB(DB_PATH);
+      db.logRequest(requestLog, responseLog, false, errorMessage, null);
+      db.close();
+    } catch (logError) {
+      console.error("Failed to log error:", logError);
+    }
+
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: errorMessage,
     };
   }
 });

@@ -259,6 +259,20 @@ export class MemoryDB {
     return stmt.all(filePath) as Array<{ section_title: string; summary: string | null }>;
   }
 
+  /**
+   * Log a remember request and response for debugging
+   */
+  logRequest(request: string, response: string, success: boolean, error: string | null = null, gitCommit: string | null = null): void {
+    const timestamp = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO request_log (timestamp, request, response, success, error, git_commit)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(timestamp, request, response, success ? 1 : 0, error, gitCommit);
+  }
+
   close(): void {
     this.db.close();
   }

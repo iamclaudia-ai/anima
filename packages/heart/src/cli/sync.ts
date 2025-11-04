@@ -140,6 +140,16 @@ function createSchema(dbPath: string) {
       UNIQUE(file_path, section_title)
     );
 
+    CREATE TABLE IF NOT EXISTS request_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL,
+      request TEXT NOT NULL,
+      response TEXT NOT NULL,
+      success INTEGER NOT NULL,
+      error TEXT,
+      git_commit TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_date ON memories(date DESC);
     CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_filename ON memories(filename);
