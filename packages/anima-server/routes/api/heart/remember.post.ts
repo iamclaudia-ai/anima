@@ -67,9 +67,9 @@ export default defineEventHandler(async (event) => {
     const MEMORY_ROOT = path.join(HOME, "memory");
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
 
-    // Get existing sections from database (only section-based categories)
+    // Get existing sections from database
     const tempDb = new MemoryDB(DB_PATH);
-    const existingSections = tempDb.getSectionBasedSections();
+    const existingSections = tempDb.getAllSections();
     tempDb.close();
 
     // Call Libby to categorize (with existing sections context)
