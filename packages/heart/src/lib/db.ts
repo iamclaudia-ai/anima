@@ -203,32 +203,46 @@ export class MemoryDB {
   /**
    * Upsert a section record
    */
-  upsertSection(filePath: string, sectionTitle: string, summary: string | null = null): void {
+  upsertSection(filePath: string, sectionTitle: string, summary: string | null = null, folder: string | null | undefined = null): void {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO sections (file_path, section_title, summary, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO sections (file_path, section_title, summary, folder, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(file_path, section_title) DO UPDATE SET
         summary = excluded.summary,
+        folder = excluded.folder,
         updated_at = excluded.updated_at
     `);
 
-    stmt.run(filePath, sectionTitle, summary, now, now);
+    stmt.run(filePath, sectionTitle, summary, folder ?? null, now, now);
   }
 
   /**
    * Get all sections across all files
+   * For project sections, filters by folder (cwd) if provided
    * Returns: { file_path, section_title, summary }[]
    */
-  getAllSections(): Array<{ file_path: string; section_title: string; summary: string | null }> {
-    const stmt = this.db.prepare(`
+  getAllSections(cwd?: string): Array<{ file_path: string; section_title: string; summary: string | null }> {
+    let query = `
       SELECT file_path, section_title, summary
       FROM sections
-      ORDER BY file_path, section_title
-    `);
+      WHERE 1=1
+    `;
 
-    return stmt.all() as Array<{ file_path: string; section_title: string; summary: string | null }>;
+    const params: string[] = [];
+
+    if (cwd) {
+      // Include all non-project sections (folder IS NULL)
+      // AND project sections that match the current folder
+      query += ` AND (folder IS NULL OR folder = ?)`;
+      params.push(cwd);
+    }
+
+    query += ` ORDER BY file_path, section_title`;
+
+    const stmt = this.db.prepare(query);
+    return stmt.all(...params) as Array<{ file_path: string; section_title: string; summary: string | null }>;
   }
 
   /**

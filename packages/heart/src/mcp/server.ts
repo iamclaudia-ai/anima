@@ -161,7 +161,9 @@ Direct JSON - no temp files needed! One-step memory updates.`,
         }
 
         try {
-          const result = await this.memoryManager.remember(content);
+          // Get current working directory to scope project sections
+          const cwd = process.cwd();
+          const result = await this.memoryManager.remember(content, cwd);
           const config = getConfig();
 
           let message = `Remembered! 👑💙\n\n`;

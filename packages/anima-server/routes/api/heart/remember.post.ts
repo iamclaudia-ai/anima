@@ -17,6 +17,7 @@ const SECTION_BASED_CATEGORIES = ["core", "relationships", "projects"] as const;
 
 interface RememberRequest {
   content: string; // What to remember
+  cwd?: string; // Current working directory (for project scoping)
 }
 
 interface LibbyCategorizationResult {
@@ -60,16 +61,16 @@ export default defineEventHandler(async (event) => {
       };
     }
 
-    const { content } = body;
+    const { content, cwd } = body;
 
     // Build paths
     const HOME = process.env.HOME || "/Users/claudia";
     const MEMORY_ROOT = path.join(HOME, "memory");
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
 
-    // Get existing sections from database
+    // Get existing sections from database (filtered by cwd for projects)
     const tempDb = new MemoryDB(DB_PATH);
-    const existingSections = tempDb.getAllSections();
+    const existingSections = tempDb.getAllSections(cwd);
     tempDb.close();
 
     // Call Libby to categorize (with existing sections context)
@@ -178,8 +179,10 @@ export default defineEventHandler(async (event) => {
       // Extract and store sections only for section-based categories
       if ((SECTION_BASED_CATEGORIES as readonly string[]).includes(categorization.category)) {
         const sections = extractSections(finalContentWithoutFrontmatter);
+        // Store folder with project sections for scoping
+        const folder = categorization.category === "projects" ? cwd : null;
         for (const sectionTitle of sections) {
-          db.upsertSection(relativeFilename, sectionTitle, categorization.summary);
+          db.upsertSection(relativeFilename, sectionTitle, categorization.summary, folder);
         }
       }
 

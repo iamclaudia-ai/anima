@@ -14,7 +14,7 @@ export class MemoryManager {
    * Remember something with automatic categorization by Libby! 👑
    * All processing happens server-side on anima-server
    */
-  async remember(content: string): Promise<RememberResult> {
+  async remember(content: string, cwd?: string): Promise<RememberResult> {
     const config = getConfig()
 
     try {
@@ -24,7 +24,7 @@ export class MemoryManager {
           'Content-Type': 'application/json',
           ...(config.apiKey && { Authorization: `Bearer ${config.apiKey}` }),
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, cwd }),
       })
 
       const result = (await response.json()) as RememberResult

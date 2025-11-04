@@ -134,6 +134,7 @@ function createSchema(dbPath: string) {
       file_path TEXT NOT NULL,
       section_title TEXT NOT NULL,
       summary TEXT,
+      folder TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE(file_path, section_title)
