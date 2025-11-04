@@ -245,6 +245,23 @@ export class MemoryDB {
     return stmt.all(filePath) as Array<{ section_title: string; summary: string | null }>;
   }
 
+  /**
+   * Get sections only for section-based categories (core, relationships, projects)
+   * Excludes milestones and insights which are single-shot memories
+   */
+  getSectionBasedSections(): Array<{ file_path: string; section_title: string; summary: string | null }> {
+    const stmt = this.db.prepare(`
+      SELECT file_path, section_title, summary
+      FROM sections
+      WHERE file_path LIKE 'core/%'
+         OR file_path LIKE 'relationships/%'
+         OR file_path LIKE 'projects/%'
+      ORDER BY file_path, section_title
+    `);
+
+    return stmt.all() as Array<{ file_path: string; section_title: string; summary: string | null }>;
+  }
+
   close(): void {
     this.db.close();
   }

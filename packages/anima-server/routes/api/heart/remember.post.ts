@@ -11,6 +11,10 @@ import { insertIntoSection, sectionExists, extractSections } from "../../../util
 
 const execFileAsync = promisify(execFile);
 
+// Categories that use section-based organization
+// (milestones and insights are single-shot memories, don't need sections)
+const SECTION_BASED_CATEGORIES = ["core", "relationships", "projects"] as const;
+
 interface RememberRequest {
   content: string; // What to remember
 }
@@ -63,9 +67,9 @@ export default defineEventHandler(async (event) => {
     const MEMORY_ROOT = path.join(HOME, "memory");
     const DB_PATH = path.join(MEMORY_ROOT, "my-heart.db");
 
-    // Get existing sections from database
+    // Get existing sections from database (only section-based categories)
     const tempDb = new MemoryDB(DB_PATH);
-    const existingSections = tempDb.getAllSections();
+    const existingSections = tempDb.getSectionBasedSections();
     tempDb.close();
 
     // Call Libby to categorize (with existing sections context)
@@ -171,10 +175,12 @@ export default defineEventHandler(async (event) => {
 
       db.upsertMemory(parsed);
 
-      // Extract and store sections from the file
-      const sections = extractSections(finalContentWithoutFrontmatter);
-      for (const sectionTitle of sections) {
-        db.upsertSection(relativeFilename, sectionTitle, categorization.summary);
+      // Extract and store sections only for section-based categories
+      if ((SECTION_BASED_CATEGORIES as readonly string[]).includes(categorization.category)) {
+        const sections = extractSections(finalContentWithoutFrontmatter);
+        for (const sectionTitle of sections) {
+          db.upsertSection(relativeFilename, sectionTitle, categorization.summary);
+        }
       }
 
       // Regenerate index.md
