@@ -50,6 +50,11 @@ const LIBBY_CWD = join(homedir(), "libby");
 if (!existsSync(LIBBY_CWD)) mkdirSync(LIBBY_CWD, { recursive: true });
 
 const MEMORY_ROOT = join(homedir(), "memory");
+const LIBBY_LOGS_DIR = join(MEMORY_ROOT, "libby", "logs");
+if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
+
+const LIBBY_TRANSCRIPTS_DIR = join(LIBBY_CWD, "transcripts");
+if (!existsSync(LIBBY_TRANSCRIPTS_DIR)) mkdirSync(LIBBY_TRANSCRIPTS_DIR, { recursive: true });
 
 // ============================================================================
 // Types
@@ -347,7 +352,16 @@ export class LibbyWorker {
     }
 
     // Build the prompt — transcript + context (system prompt already sent)
-    const prompt = `${contextBlock}Process this conversation transcript. Use your tools to write memories to ~/memory/, then respond with SUMMARY or SKIP:\n\n${transcript.text}`;
+    // Include conversation ID explicitly so Libby uses it for the reasoning log filename
+    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}). FIRST write your reasoning log to ~/memory/libby/logs/${conv.id}.md, THEN write memories to ~/memory/, then respond with SUMMARY or SKIP:\n\n${transcript.text}`;
+
+    // Save transcript to ~/libby/transcripts/{id}.md for easy cross-reference
+    try {
+      const transcriptPath = join(LIBBY_TRANSCRIPTS_DIR, `${conv.id}.md`);
+      Bun.write(transcriptPath, transcript.text);
+    } catch {
+      // Non-fatal — transcript saving is for debugging convenience
+    }
 
     this.log(
       "INFO",
@@ -374,11 +388,22 @@ export class LibbyWorker {
         // Git commit the memory changes
         const filesWritten = commitMemoryChanges(conv.id, result.summary, this.log);
 
-        updateConversationProcessed(conv.id, "archived", result.summary, filesWritten);
-        this.log(
-          "INFO",
-          `Libby: [${conv.id}] Archived in ${elapsed}s — ${filesWritten.length} files changed`,
-        );
+        // Verification: flag for review if something looks wrong
+        const reviewReason = verifyProcessing(conv.id, result.summary, filesWritten, this.log);
+
+        if (reviewReason) {
+          updateConversationProcessed(conv.id, "review", result.summary, filesWritten);
+          this.log(
+            "WARN",
+            `Libby: [${conv.id}] Flagged for review in ${elapsed}s — ${reviewReason}`,
+          );
+        } else {
+          updateConversationProcessed(conv.id, "archived", result.summary, filesWritten);
+          this.log(
+            "INFO",
+            `Libby: [${conv.id}] Archived in ${elapsed}s — ${filesWritten.length} files changed`,
+          );
+        }
       }
 
       this.ctx?.emit("memory.conversation_processed", {
@@ -437,14 +462,14 @@ interface LibbyResult {
 function parseLibbyResponse(rawText: string): LibbyResult {
   const text = rawText.trim();
 
-  // Check for SKIP
-  const skipMatch = text.match(/^SKIP:\s*(.+)$/im);
+  // Check for SKIP — may appear at start of line or inline after tool output
+  const skipMatch = text.match(/SKIP:\s*(.+?)(?:\n|$)/i);
   if (skipMatch) {
     return { skipped: true, summary: skipMatch[1].trim() };
   }
 
-  // Check for SUMMARY
-  const summaryMatch = text.match(/^SUMMARY:\s*(.+)$/im);
+  // Check for SUMMARY — may appear at start of line or inline after tool output
+  const summaryMatch = text.match(/SUMMARY:\s*(.+?)(?:\n|$)/i);
   if (summaryMatch) {
     return { skipped: false, summary: summaryMatch[1].trim() };
   }
@@ -453,6 +478,84 @@ function parseLibbyResponse(rawText: string): LibbyResult {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
   const lastLine = lines[lines.length - 1]?.trim() || "Processed by Libby";
   return { skipped: false, summary: lastLine };
+}
+
+// ============================================================================
+// Verification
+// ============================================================================
+
+/** Minimum summary length that indicates a meaningful conversation was processed */
+const MIN_MEANINGFUL_SUMMARY_LENGTH = 50;
+
+/**
+ * Verify that Libby's processing looks correct.
+ * Returns a reason string if flagging for review, or null if everything looks good.
+ *
+ * Checks:
+ * 1. Long summary but 0 files written → Libby understood but didn't write
+ * 2. Reasoning log planned writes that don't match actual files → mismatch
+ */
+function verifyProcessing(
+  conversationId: number,
+  summary: string,
+  filesWritten: string[],
+  log: (level: string, msg: string) => void,
+): string | null {
+  // Check 1: Meaningful summary but no files written
+  // Filter out the log file itself from the count — only count memory files
+  const memoryFiles = filesWritten.filter((f) => !f.includes("libby/logs/"));
+  if (memoryFiles.length === 0 && summary.length >= MIN_MEANINGFUL_SUMMARY_LENGTH) {
+    log(
+      "WARN",
+      `Libby: [${conversationId}] Verification failed: summary is ${summary.length} chars but 0 memory files written`,
+    );
+    return `Summary produced (${summary.length} chars) but no memory files written`;
+  }
+
+  // Check 2: Reasoning log exists and planned writes don't match actual writes
+  // Libby should use the numeric conversation ID, but may use session UUID — check both
+  const logPath = join(LIBBY_LOGS_DIR, `${conversationId}.md`);
+  const logExists = existsSync(logPath) || filesWritten.some((f) => f.includes("libby/logs/"));
+  if (logExists && existsSync(logPath)) {
+    try {
+      const logContent = readFileSync(logPath, "utf-8");
+      const plannedPaths = parseLogPlannedFiles(logContent);
+
+      if (plannedPaths.length > 0 && memoryFiles.length === 0) {
+        log(
+          "WARN",
+          `Libby: [${conversationId}] Verification failed: log planned ${plannedPaths.length} files but 0 were written`,
+        );
+        return `Reasoning log planned ${plannedPaths.length} file(s) but none were written`;
+      }
+    } catch {
+      // Log parsing failed — not a reason to flag
+    }
+  } else if (memoryFiles.length > 0 && !logExists) {
+    // Files were written but no reasoning log — worth noting but not blocking
+    log("WARN", `Libby: [${conversationId}] No reasoning log found at ${logPath}`);
+  }
+
+  return null;
+}
+
+/**
+ * Parse the reasoning log to extract planned file paths.
+ * Looks for lines like "1. **episodes/...** —" or "- episodes/..." in the "Files to write/edit" section.
+ */
+function parseLogPlannedFiles(logContent: string): string[] {
+  const paths: string[] = [];
+  // Match lines with bold paths like **episodes/2025-10/...**  or **projects/...**
+  const boldPathRegex = /\*\*([a-z][\w-]+\/[\w/.-]+)\*\*/gi;
+  let match: RegExpExecArray | null;
+  while ((match = boldPathRegex.exec(logContent)) !== null) {
+    const p = match[1];
+    // Filter to only memory-relevant paths (not libby/logs)
+    if (!p.startsWith("libby/logs")) {
+      paths.push(p);
+    }
+  }
+  return paths;
 }
 
 // ============================================================================

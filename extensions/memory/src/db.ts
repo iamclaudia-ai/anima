@@ -452,7 +452,7 @@ export function getEntriesForConversation(conversationId: number): TranscriptEnt
  */
 export function updateConversationProcessed(
   id: number,
-  status: "archived" | "skipped",
+  status: "archived" | "skipped" | "review",
   summary: string | null,
   filesWritten?: string[],
 ): void {

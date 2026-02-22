@@ -147,7 +147,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
         description: "List conversations with optional status filter",
         inputSchema: z.object({
           status: z
-            .enum(["active", "ready", "queued", "processing", "archived", "skipped"])
+            .enum(["active", "ready", "queued", "processing", "archived", "skipped", "review"])
             .optional()
             .describe("Filter by conversation status"),
           limit: z.number().optional().describe("Max conversations to return (default: 50)"),
@@ -174,6 +174,14 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             .boolean()
             .optional()
             .describe("Format transcript only, don't call API or write files"),
+        }),
+      },
+      {
+        name: "memory.get_transcript",
+        description:
+          "Get the formatted transcript for a conversation by ID. Returns the same text that Libby receives for processing.",
+        inputSchema: z.object({
+          id: z.number().describe("Conversation ID"),
         }),
       },
     ],
@@ -567,6 +575,45 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             ...preview,
             status: "queued",
             message: `Conversation ${id} queued for processing. Watch memory.log for progress.`,
+          };
+        }
+
+        case "memory.get_transcript": {
+          const id = params.id as number;
+
+          const d = getDb();
+          const conv = d
+            .query(
+              `SELECT
+                id, session_id AS sessionId, source_file AS sourceFile,
+                first_message_at AS firstMessageAt,
+                last_message_at AS lastMessageAt, entry_count AS entryCount,
+                status, summary
+              FROM memory_conversations WHERE id = ?`,
+            )
+            .get(id) as Record<string, unknown> | null;
+
+          if (!conv) {
+            throw new Error(`Conversation ${id} not found`);
+          }
+
+          const entries = getEntriesForConversation(id);
+          if (entries.length === 0) {
+            return { error: "No entries found for this conversation", conversationId: id };
+          }
+
+          const transcript = formatTranscript(conv as any, entries, cfg.timezone);
+
+          return {
+            conversationId: id,
+            status: conv.status,
+            summary: conv.summary,
+            date: transcript.date,
+            timeRange: transcript.timeRange,
+            cwd: transcript.primaryCwd,
+            entryCount: transcript.entryCount,
+            chars: transcript.text.length,
+            transcript: transcript.text,
           };
         }
 

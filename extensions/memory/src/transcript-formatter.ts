@@ -35,8 +35,6 @@ export interface FormattedTranscript {
   entryCount: number;
 }
 
-/** Max characters per individual message before truncation */
-const MAX_MESSAGE_CHARS = 2000;
 /** Max total transcript characters (~20K tokens) */
 const MAX_TRANSCRIPT_CHARS = 80_000;
 
@@ -101,12 +99,7 @@ export function formatTranscript(
     const time = formatTime(ts, timezone);
     const speaker = entry.role === "user" ? "Michael" : "Claudia";
 
-    let content = entry.content;
-
-    // Truncate long messages
-    if (content.length > MAX_MESSAGE_CHARS) {
-      content = content.slice(0, MAX_MESSAGE_CHARS) + "\n[... truncated ...]";
-    }
+    const content = entry.content;
 
     // Add tool names for assistant messages
     let toolLine = "";
