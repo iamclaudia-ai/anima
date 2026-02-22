@@ -11,6 +11,7 @@
  * - Sentence-level chunking for low-latency speech
  * - Auto-speak assistant responses (configurable)
  * - Audio saving for future playback
+ * - Per-connection state isolation (multiple tabs / sessions)
  */
 
 import type {
@@ -183,6 +184,58 @@ async function batchSpeak(text: string, cfg: Required<VoiceConfig>): Promise<Buf
 }
 
 // ============================================================================
+// Per-Connection Voice State
+// ============================================================================
+
+/** Sentence queue entries carry their own routing context so sentences
+ *  from a previous stream continue to synthesize even after a new stream starts. */
+interface QueueEntry {
+  text: string;
+  streamId: string;
+  sessionId: string;
+  connectionId: string;
+}
+
+/** All mutable voice state scoped to a single client connection (tab). */
+interface ConnectionVoiceState {
+  connectionId: string;
+  currentChunker: SentenceChunker | null;
+  currentStreamId: string | null;
+  currentSessionId: string | null;
+  streamGeneration: number;
+  streamChunkIndex: number;
+  sentenceQueue: QueueEntry[];
+  processingQueue: boolean;
+  activeSentenceStream: CartesiaStream | null;
+  queueDrainResolve: (() => void) | null;
+  abortRequested: boolean;
+  currentBlockType: string | null;
+  textBuffer: string;
+  currentAudioChunks: Buffer[];
+  isSpeaking: boolean;
+}
+
+function createConnectionState(connectionId: string): ConnectionVoiceState {
+  return {
+    connectionId,
+    currentChunker: null,
+    currentStreamId: null,
+    currentSessionId: null,
+    streamGeneration: 0,
+    streamChunkIndex: 0,
+    sentenceQueue: [],
+    processingQueue: false,
+    activeSentenceStream: null,
+    queueDrainResolve: null,
+    abortRequested: false,
+    currentBlockType: null,
+    textBuffer: "",
+    currentAudioChunks: [],
+    isSpeaking: false,
+  };
+}
+
+// ============================================================================
 // Voice Extension
 // ============================================================================
 
@@ -194,28 +247,18 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
   let ctx: ExtensionContext | null = null;
   let unsubscribers: Array<() => void> = [];
 
-  // --- Streaming state (per response turn) ---
-  let currentChunker: SentenceChunker | null = null;
-  let currentStreamId: string | null = null;
-  let currentSessionId: string | null = null;
-  let streamEnding = false;
-  let streamChunkIndex = 0;
-  let sentenceQueue: string[] = [];
-  let processingQueue = false;
-  let activeSentenceStream: CartesiaStream | null = null;
-  let queueDrainResolve: (() => void) | null = null;
-  let abortRequested = false;
+  // Per-connection voice state — keyed by connectionId
+  const connections = new Map<string, ConnectionVoiceState>();
 
-  // --- Stream routing: streamId → connectionId ---
-  // Voice owns its own connection-scoped routing. When a stream starts,
-  // we capture the connectionId from the event envelope and use it to
-  // emit all audio events with { connectionId, source: "gateway.caller" }.
-  const streamOrigins = new Map<string, string>();
-
-  // --- Shared state ---
-  let currentBlockType: string | null = null;
-  let textBuffer = "";
-  let isSpeaking = false;
+  function getOrCreateConnection(connectionId: string): ConnectionVoiceState {
+    let state = connections.get(connectionId);
+    if (!state) {
+      state = createConnectionState(connectionId);
+      connections.set(connectionId, state);
+      fileLog("INFO", `Created voice state for connection=${connectionId}`);
+    }
+    return state;
+  }
 
   /** Generate a unique stream ID for this utterance */
   function newStreamId(): string {
@@ -223,42 +266,40 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
   }
 
   /** Get emit options for connection-scoped routing */
-  function callerEmitOptions(streamId: string): { connectionId?: string; source: string } {
-    const connId = streamOrigins.get(streamId);
+  function callerEmitOptions(connectionId: string): { connectionId: string; source: string } {
     return {
-      connectionId: connId || undefined,
+      connectionId,
       source: "gateway.caller",
     };
   }
 
-  // --- Streaming TTS ---
+  // --- Per-connection streaming functions ---
 
-  // Current stream audio accumulator (for final save)
-  let currentAudioChunks: Buffer[] = [];
-
-  function resolveQueueDrainIfIdle(): void {
-    if (!processingQueue && sentenceQueue.length === 0 && queueDrainResolve) {
-      queueDrainResolve();
-      queueDrainResolve = null;
+  function resolveQueueDrainIfIdle(cs: ConnectionVoiceState): void {
+    if (!cs.processingQueue && cs.sentenceQueue.length === 0 && cs.queueDrainResolve) {
+      cs.queueDrainResolve();
+      cs.queueDrainResolve = null;
     }
   }
 
-  async function waitForQueueDrain(): Promise<void> {
-    if (!processingQueue && sentenceQueue.length === 0) return;
+  async function waitForQueueDrain(cs: ConnectionVoiceState): Promise<void> {
+    if (!cs.processingQueue && cs.sentenceQueue.length === 0) return;
     await new Promise<void>((resolve) => {
-      queueDrainResolve = resolve;
+      cs.queueDrainResolve = resolve;
     });
   }
 
   async function sendSentenceToCartesia(
+    cs: ConnectionVoiceState,
     sentence: string,
     streamId: string,
     sessionId: string,
+    connectionId: string,
   ): Promise<void> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= 2; attempt++) {
-      if (abortRequested || currentStreamId !== streamId) return;
+      if (cs.abortRequested) return;
 
       let streamHadError = false;
       const sentenceStream = new CartesiaStream({
@@ -270,28 +311,31 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
         speed: cfg.speed,
         log: fileLog,
         onAudioChunk: ({ audio }) => {
-          if (abortRequested || currentStreamId !== streamId) return;
+          if (cs.abortRequested) return;
 
           const pcmChunk = Buffer.from(audio, "base64");
           const wavChunk = pcmToWav(pcmChunk, 24000, 1);
-          const index = streamChunkIndex++;
+          const index = cs.streamChunkIndex++;
           ctx?.emit(
             "voice.audio_chunk",
             { audio: wavChunk.toString("base64"), format: "wav", index, streamId, sessionId },
-            callerEmitOptions(streamId),
+            callerEmitOptions(connectionId),
           );
-          currentAudioChunks.push(pcmChunk);
+          cs.currentAudioChunks.push(pcmChunk);
         },
         onError: (error) => {
           streamHadError = true;
           lastError = error;
         },
         onDone: () => {
-          fileLog("INFO", `Sentence done: stream=${streamId}, queued=${sentenceQueue.length}`);
+          fileLog(
+            "INFO",
+            `Sentence done: stream=${streamId}, conn=${connectionId}, queued=${cs.sentenceQueue.length}`,
+          );
         },
       });
 
-      activeSentenceStream = sentenceStream;
+      cs.activeSentenceStream = sentenceStream;
       try {
         await sentenceStream.connect();
         sentenceStream.startStream();
@@ -305,8 +349,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
         lastError = error instanceof Error ? error : new Error(String(error));
       } finally {
         await sentenceStream.close();
-        if (activeSentenceStream === sentenceStream) {
-          activeSentenceStream = null;
+        if (cs.activeSentenceStream === sentenceStream) {
+          cs.activeSentenceStream = null;
         }
       }
 
@@ -319,114 +363,153 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     }
 
     const err = lastError ?? new Error("Failed to send sentence to Cartesia");
-    ctx?.emit("voice.error", { error: err.message, streamId });
+    ctx?.emit("voice.error", { error: err.message, streamId }, callerEmitOptions(connectionId));
     fileLog("ERROR", `Dropped sentence after retries: ${err.message}`);
   }
 
-  async function processSentenceQueue(streamId: string, sessionId: string): Promise<void> {
-    if (processingQueue) return;
-    processingQueue = true;
+  async function processSentenceQueue(cs: ConnectionVoiceState): Promise<void> {
+    if (cs.processingQueue) return;
+    cs.processingQueue = true;
     try {
-      while (!abortRequested && currentStreamId === streamId && sentenceQueue.length > 0) {
-        const sentence = sentenceQueue.shift();
-        if (!sentence) continue;
-        await sendSentenceToCartesia(sentence, streamId, sessionId);
+      while (!cs.abortRequested && cs.sentenceQueue.length > 0) {
+        const entry = cs.sentenceQueue.shift();
+        if (!entry) continue;
+        await sendSentenceToCartesia(
+          cs,
+          entry.text,
+          entry.streamId,
+          entry.sessionId,
+          entry.connectionId,
+        );
       }
     } finally {
-      processingQueue = false;
-      resolveQueueDrainIfIdle();
+      cs.processingQueue = false;
+      resolveQueueDrainIfIdle(cs);
     }
   }
 
-  function enqueueSentence(sentence: string): void {
-    if (!currentStreamId || !currentSessionId) return;
-    sentenceQueue.push(sentence);
-    void processSentenceQueue(currentStreamId, currentSessionId);
+  function enqueueSentence(cs: ConnectionVoiceState, sentence: string): void {
+    if (!cs.currentStreamId || !cs.currentSessionId) return;
+    cs.sentenceQueue.push({
+      text: sentence,
+      streamId: cs.currentStreamId,
+      sessionId: cs.currentSessionId,
+      connectionId: cs.connectionId,
+    });
+    void processSentenceQueue(cs);
   }
 
-  async function startStream(sessionId: string, connectionId?: string): Promise<void> {
+  async function startStream(cs: ConnectionVoiceState, sessionId: string): Promise<void> {
     if (!cfg.apiKey) {
       fileLog("WARN", "startStream called but no apiKey");
       return;
     }
 
-    // End any active stream session first
-    if (currentStreamId) {
-      fileLog("WARN", "startStream: ending existing stream session before starting new one");
-      await endStream();
+    // If a previous stream is active, flush its remaining text into the queue
+    // but do NOT wait for drain or clear the queue — old sentences keep playing.
+    if (cs.currentStreamId && cs.currentChunker) {
+      const remaining = cs.currentChunker.flush();
+      if (remaining) {
+        const cleaned = cleanForSpeech(remaining);
+        if (cleaned) {
+          fileLog(
+            "INFO",
+            `startStream: flushing previous stream text before new stream: "${cleaned.substring(0, 80)}"`,
+          );
+          enqueueSentence(cs, cleaned);
+        }
+      }
+      // Emit stream_end for the old stream so clients can track segments
+      ctx?.emit(
+        "voice.stream_end",
+        { streamId: cs.currentStreamId, sessionId: cs.currentSessionId },
+        callerEmitOptions(cs.connectionId),
+      );
     }
 
     const streamId = newStreamId();
-    currentStreamId = streamId;
-    currentSessionId = sessionId;
-    currentAudioChunks = [];
-    currentChunker = new SentenceChunker();
-    sentenceQueue = [];
-    streamChunkIndex = 0;
-    streamEnding = false;
-    abortRequested = false;
-
-    // Track which connection originated this stream for routing
-    if (connectionId) {
-      streamOrigins.set(streamId, connectionId);
-    }
+    cs.currentStreamId = streamId;
+    cs.currentSessionId = sessionId;
+    cs.currentAudioChunks = [];
+    cs.currentChunker = new SentenceChunker();
+    // NOTE: sentenceQueue is NOT cleared — old sentences keep synthesizing
+    cs.streamChunkIndex = 0;
+    cs.streamGeneration++;
+    cs.abortRequested = false;
 
     fileLog(
       "INFO",
-      `startStream: session=${sessionId}, stream=${streamId}, connection=${connectionId || "none"}`,
+      `startStream: session=${sessionId}, stream=${streamId}, connection=${cs.connectionId}`,
     );
 
-    isSpeaking = true;
+    cs.isSpeaking = true;
     ctx?.emit(
       "voice.stream_start",
-      { streamId: currentStreamId, sessionId: currentSessionId },
-      callerEmitOptions(streamId),
+      { streamId: cs.currentStreamId, sessionId: cs.currentSessionId },
+      callerEmitOptions(cs.connectionId),
     );
-    ctx?.log.info(`Streaming TTS started (stream=${currentStreamId})`);
+    ctx?.log.info(`Streaming TTS started (stream=${cs.currentStreamId}, conn=${cs.connectionId})`);
   }
 
-  async function feedStreamingText(text: string): Promise<void> {
-    if (!currentChunker || !currentStreamId) return;
+  async function feedStreamingText(cs: ConnectionVoiceState, text: string): Promise<void> {
+    if (!cs.currentChunker || !cs.currentStreamId) return;
 
-    fileLog("INFO", `🔤 FEEDING TEXT: "${text}"`);
-    const sentences = currentChunker.feed(text);
+    fileLog("INFO", `FEEDING TEXT [conn=${cs.connectionId}]: "${text}"`);
+    const sentences = cs.currentChunker.feed(text);
     for (const sentence of sentences) {
       const cleaned = cleanForSpeech(sentence);
       if (cleaned) {
-        fileLog("INFO", `🗣️ SPEAKING SENTENCE: "${cleaned}"`);
-        enqueueSentence(cleaned);
+        fileLog("INFO", `SPEAKING SENTENCE [conn=${cs.connectionId}]: "${cleaned}"`);
+        enqueueSentence(cs, cleaned);
       }
     }
   }
 
-  async function endStream(): Promise<void> {
-    if (!currentChunker || !currentStreamId || streamEnding) return;
+  async function endStream(cs: ConnectionVoiceState): Promise<void> {
+    if (!cs.currentChunker || !cs.currentStreamId) return;
 
-    streamEnding = true;
-
-    const streamId = currentStreamId;
-    const sessionId = currentSessionId;
+    // Capture generation so we can detect if a new stream started while we await.
+    const generation = cs.streamGeneration;
+    const streamId = cs.currentStreamId;
+    const sessionId = cs.currentSessionId;
 
     // Flush any remaining text in the chunker
-    const remaining = currentChunker.flush();
+    const remaining = cs.currentChunker.flush();
     if (remaining) {
       const cleaned = cleanForSpeech(remaining);
       if (cleaned) {
         fileLog("INFO", `endStream: flushing remaining text: "${cleaned.substring(0, 80)}"`);
-        enqueueSentence(cleaned);
+        enqueueSentence(cs, cleaned);
       }
     }
 
     // Wait until all queued sentences are synthesized.
-    fileLog("INFO", `endStream: waiting for sentence queue drain (stream=${streamId})`);
-    await waitForQueueDrain();
-    fileLog("INFO", `endStream: session ended (stream=${streamId})`);
+    fileLog(
+      "INFO",
+      `endStream: waiting for sentence queue drain (stream=${streamId}, conn=${cs.connectionId})`,
+    );
+    await waitForQueueDrain(cs);
+    fileLog("INFO", `endStream: session ended (stream=${streamId}, conn=${cs.connectionId})`);
 
-    ctx?.log.info(`Streaming TTS ended (stream=${streamId})`);
+    // If a new stream started while we were waiting, don't touch current state.
+    if (cs.streamGeneration !== generation) {
+      fileLog(
+        "INFO",
+        `endStream: stale generation (${generation} != ${cs.streamGeneration}), skipping state reset`,
+      );
+      // Still save audio for this stream segment
+      if (streamId && sessionId && cs.currentAudioChunks.length > 0) {
+        const fullAudio = Buffer.concat(cs.currentAudioChunks);
+        saveAudio(fullAudio, sessionId, streamId).catch(() => {});
+      }
+      return;
+    }
+
+    ctx?.log.info(`Streaming TTS ended (stream=${streamId}, conn=${cs.connectionId})`);
 
     // Save accumulated audio from all sentences to disk
-    if (streamId && sessionId && currentAudioChunks && currentAudioChunks.length > 0) {
-      const fullAudio = Buffer.concat(currentAudioChunks);
+    if (streamId && sessionId && cs.currentAudioChunks && cs.currentAudioChunks.length > 0) {
+      const fullAudio = Buffer.concat(cs.currentAudioChunks);
       saveAudio(fullAudio, sessionId, streamId)
         .then((path) => {
           ctx?.log.info(
@@ -440,50 +523,62 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
 
     // Signal stream end to clients
     if (streamId) {
-      ctx?.emit("voice.stream_end", { streamId, sessionId }, callerEmitOptions(streamId));
-      streamOrigins.delete(streamId);
+      ctx?.emit("voice.stream_end", { streamId, sessionId }, callerEmitOptions(cs.connectionId));
     }
 
-    // Reset streaming state
-    isSpeaking = false;
-    currentChunker = null;
-    currentStreamId = null;
-    currentSessionId = null;
-    currentAudioChunks = [];
-    sentenceQueue = [];
-    streamChunkIndex = 0;
-    streamEnding = false;
-    abortRequested = false;
+    // Reset streaming state — safe because generation matches.
+    cs.isSpeaking = false;
+    cs.currentChunker = null;
+    cs.currentStreamId = null;
+    cs.currentSessionId = null;
+    cs.currentAudioChunks = [];
+    cs.streamChunkIndex = 0;
+
+    // Clean up connection state if fully idle
+    if (!cs.processingQueue && cs.sentenceQueue.length === 0) {
+      connections.delete(cs.connectionId);
+      fileLog("INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
+    }
   }
 
-  function abortStream(): void {
-    if (!currentStreamId) return;
-
-    const streamId = currentStreamId;
-    fileLog("INFO", `Aborting stream session: ${streamId}`);
+  function abortStream(cs: ConnectionVoiceState): void {
+    const streamId = cs.currentStreamId;
+    fileLog("INFO", `Aborting stream: stream=${streamId || "none"}, conn=${cs.connectionId}`);
 
     // Signal abort to clients
-    ctx?.emit(
-      "voice.stream_end",
-      { streamId, sessionId: currentSessionId, aborted: true },
-      callerEmitOptions(streamId),
-    );
-    ctx?.log.info(`Streaming TTS aborted (stream=${streamId})`);
+    if (streamId) {
+      ctx?.emit(
+        "voice.stream_end",
+        { streamId, sessionId: cs.currentSessionId, aborted: true },
+        callerEmitOptions(cs.connectionId),
+      );
+      ctx?.log.info(`Streaming TTS aborted (stream=${streamId}, conn=${cs.connectionId})`);
+    }
 
-    streamOrigins.delete(streamId);
-    abortRequested = true;
-    sentenceQueue = [];
-    streamEnding = false;
-    resolveQueueDrainIfIdle();
-    activeSentenceStream?.abort();
-    activeSentenceStream = null;
+    cs.abortRequested = true;
+    cs.sentenceQueue = [];
+    cs.streamGeneration++; // invalidate any in-flight endStream()
+    resolveQueueDrainIfIdle(cs);
+    cs.activeSentenceStream?.abort();
+    cs.activeSentenceStream = null;
 
-    isSpeaking = false;
-    currentChunker = null;
-    currentStreamId = null;
-    currentSessionId = null;
-    currentAudioChunks = [];
-    streamChunkIndex = 0;
+    cs.isSpeaking = false;
+    cs.currentChunker = null;
+    cs.currentStreamId = null;
+    cs.currentSessionId = null;
+    cs.currentAudioChunks = [];
+    cs.streamChunkIndex = 0;
+
+    connections.delete(cs.connectionId);
+    fileLog("INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
+  }
+
+  /** Abort all active connections (used on extension stop) */
+  function abortAll(): void {
+    for (const cs of connections.values()) {
+      abortStream(cs);
+    }
+    connections.clear();
   }
 
   // --- Batch TTS (for voice.speak method) ---
@@ -495,7 +590,6 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
 
     if (!text.trim()) return;
 
-    isSpeaking = true;
     ctx?.emit("voice.speaking", { text: text.substring(0, 100) });
 
     try {
@@ -512,8 +606,6 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
       ctx?.log.error(`Batch TTS error: ${errorMsg}`);
       ctx?.emit("voice.error", { error: errorMsg });
       throw error;
-    } finally {
-      isSpeaking = false;
     }
   }
 
@@ -585,38 +677,48 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
       // --- Event Subscriptions ---
       // Voice activates when events carry the "voice.speak" tag on the envelope.
       // Tags are set by the client (e.g., web chat sends tags: ["voice.speak"]).
+      // State is tracked per connectionId so multiple tabs and non-voiced
+      // sessions (e.g., Libby) never interfere with each other.
 
-      // Track content block type — start streaming if voice.speak tag present
+      // Track content block type — start streaming if voice.speak tag present.
       unsubscribers.push(
         ctx.on("session.*.content_block_start", (event: GatewayEvent) => {
           const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+          if (!wantsVoice || !event.connectionId) return;
+
           const payload = event.payload as {
             content_block?: { type: string };
             sessionId?: string;
           };
-          currentBlockType = payload.content_block?.type || null;
+          const blockType = payload.content_block?.type || null;
+
+          const cs = getOrCreateConnection(event.connectionId);
+          cs.currentBlockType = blockType;
 
           fileLog(
             "INFO",
-            `content_block_start: type=${currentBlockType}, voice.speak=${wantsVoice}, streaming=${cfg.streaming}`,
+            `content_block_start: type=${blockType}, conn=${event.connectionId}, session=${payload.sessionId || event.sessionId || "?"}`,
           );
 
-          if (currentBlockType === "text") {
-            textBuffer = "";
+          if (cs.currentBlockType === "text") {
+            cs.textBuffer = "";
 
-            // Start streaming if voice.speak tag is present
-            if (cfg.streaming && wantsVoice && cfg.apiKey) {
+            if (cfg.streaming && cfg.apiKey) {
               const sessionId = payload.sessionId || event.sessionId || "unknown";
-              startStream(sessionId, event.connectionId || undefined);
+              startStream(cs, sessionId);
             }
           }
         }),
       );
 
-      // Process text deltas
+      // Process text deltas — only for voiced events
       unsubscribers.push(
         ctx.on("session.*.content_block_delta", (event: GatewayEvent) => {
-          if (currentBlockType !== "text") return;
+          const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+          if (!wantsVoice || !event.connectionId) return;
+
+          const cs = connections.get(event.connectionId);
+          if (!cs || cs.currentBlockType !== "text") return;
 
           const payload = event.payload as {
             delta?: { type: string; text?: string };
@@ -624,11 +726,11 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
 
           if (payload.delta?.type === "text_delta" && payload.delta.text) {
             const deltaText = payload.delta.text;
-            textBuffer += deltaText;
+            cs.textBuffer += deltaText;
 
             // Stream text to Cartesia in real-time
-            if (cfg.streaming && currentStreamId) {
-              feedStreamingText(deltaText).catch((err) => {
+            if (cfg.streaming && cs.currentStreamId) {
+              feedStreamingText(cs, deltaText).catch((err) => {
                 fileLog("ERROR", `feedStreamingText error: ${err.message}`);
               });
             }
@@ -636,28 +738,32 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
         }),
       );
 
-      // On message complete
+      // On message complete — only for voiced events
       unsubscribers.push(
-        ctx.on("session.*.message_stop", async (_event: GatewayEvent) => {
+        ctx.on("session.*.message_stop", async (event: GatewayEvent) => {
+          const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+          if (!wantsVoice || !event.connectionId) return;
+
+          const cs = connections.get(event.connectionId);
+          if (!cs) return;
+
           fileLog(
             "INFO",
-            `message_stop: streaming=${cfg.streaming}, hasActiveStream=${!!currentStreamId}, textBuffer=${textBuffer.length} chars`,
+            `message_stop: conn=${cs.connectionId}, hasActiveStream=${!!cs.currentStreamId}, textBuffer=${cs.textBuffer.length} chars`,
           );
 
-          if (cfg.streaming && currentStreamId) {
-            // End the streaming session
-            await endStream();
-          } else if (!cfg.streaming && textBuffer && currentStreamId) {
-            // Batch mode fallback: speak accumulated text (only if stream was started)
-            const cleaned = cleanForSpeech(textBuffer);
+          if (cfg.streaming && cs.currentStreamId) {
+            await endStream(cs);
+          } else if (!cfg.streaming && cs.textBuffer && cs.currentStreamId) {
+            const cleaned = cleanForSpeech(cs.textBuffer);
             if (cleaned) {
               await speakBatch(cleaned);
             }
           }
 
-          // Reset for next request
-          textBuffer = "";
-          currentBlockType = null;
+          // Reset for next content block
+          cs.textBuffer = "";
+          cs.currentBlockType = null;
         }),
       );
 
@@ -667,8 +773,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     async stop() {
       ctx?.log.info("Stopping voice extension...");
 
-      // Abort any active stream
-      abortStream();
+      // Abort all active connection streams
+      abortAll();
 
       for (const unsub of unsubscribers) {
         unsub();
@@ -689,17 +795,24 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
         }
 
         case "voice.stop": {
-          abortStream();
+          // Stop all active streams (could be refined to stop by connectionId)
+          abortAll();
           return { ok: true };
         }
 
         case "voice.status": {
+          const activeConnections = Array.from(connections.entries()).map(([connId, cs]) => ({
+            connectionId: connId,
+            speaking: cs.isSpeaking,
+            activeStream: cs.currentStreamId,
+            sessionId: cs.currentSessionId,
+            queueLength: cs.sentenceQueue.length,
+          }));
           return {
-            speaking: isSpeaking,
             streaming: cfg.streaming,
-            activeStream: currentStreamId,
             voiceId: cfg.voiceId,
             model: cfg.model,
+            activeConnections,
           };
         }
 
@@ -721,6 +834,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
         }
 
         case "voice.health_check": {
+          const anyActive = Array.from(connections.values()).some((cs) => cs.isSpeaking);
           const response: HealthCheckResponse = {
             ok: !!cfg.apiKey,
             status: cfg.apiKey ? "healthy" : "disconnected",
@@ -731,7 +845,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
               { label: "Model", value: cfg.model },
               { label: "Emotions", value: cfg.emotions?.join(", ") || "none" },
               { label: "Speed", value: cfg.speed?.toString() || "1.0" },
-              { label: "Speaking", value: isSpeaking ? "yes" : "no" },
+              { label: "Speaking", value: anyActive ? "yes" : "no" },
+              { label: "Connections", value: connections.size.toString() },
             ],
           };
           return response;
@@ -743,15 +858,15 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     },
 
     health() {
+      const anyActive = Array.from(connections.values()).some((cs) => cs.isSpeaking);
       return {
         ok: !!cfg.apiKey,
         details: {
           apiKeyConfigured: !!cfg.apiKey,
           streaming: cfg.streaming,
           voiceId: cfg.voiceId,
-          speaking: isSpeaking,
-          activeStream: currentStreamId,
-          activeStreams: streamOrigins.size,
+          speaking: anyActive,
+          activeConnections: connections.size,
         },
       };
     },

@@ -60,7 +60,6 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
   const isPlayingRef = useRef(false);
   const isStreamingRef = useRef(false);
   const playbackCursorRef = useRef(0);
-  const activeStreamIdRef = useRef<string | null>(null);
 
   /** Ensure AudioContext is initialized and resumed */
   const ensureAudioContext = useCallback((): AudioContext => {
@@ -83,6 +82,8 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
     }
   }, []);
 
+  const chunkCounterRef = useRef(0);
+
   const scheduleBuffer = useCallback(
     (buffer: AudioBuffer) => {
       const ctx = ensureAudioContext();
@@ -90,8 +91,15 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
       source.buffer = buffer;
       source.connect(ctx.destination);
 
-      const startAt = Math.max(playbackCursorRef.current, ctx.currentTime + 0.01);
+      const now = ctx.currentTime;
+      const startAt = Math.max(playbackCursorRef.current, now + 0.01);
+      const gap = startAt - now;
       playbackCursorRef.current = startAt + buffer.duration;
+      const chunkNum = ++chunkCounterRef.current;
+
+      console.log(
+        `[Audio] #${chunkNum} dur=${buffer.duration.toFixed(3)}s startAt=${startAt.toFixed(3)} now=${now.toFixed(3)} gap=${gap.toFixed(3)}s cursor→${playbackCursorRef.current.toFixed(3)} queued=${activeSourcesRef.current.size}`,
+      );
 
       activeSourcesRef.current.add(source);
       isPlayingRef.current = true;
@@ -121,7 +129,6 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
     isPlayingRef.current = false;
     isStreamingRef.current = false;
     playbackCursorRef.current = 0;
-    activeStreamIdRef.current = null;
     setIsPlaying(false);
     setIsStreaming(false);
 
@@ -134,22 +141,25 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
       const data = payload as Record<string, unknown>;
 
       if (event === "voice.stream_start") {
-        const streamId = data.streamId as string | undefined;
         const ctx = ensureAudioContext();
+        const streamId = (data.streamId as string) || "?";
 
         isStreamingRef.current = true;
         setIsStreaming(true);
-        activeStreamIdRef.current = streamId ?? null;
+        const oldCursor = playbackCursorRef.current;
         playbackCursorRef.current = Math.max(playbackCursorRef.current, ctx.currentTime + 0.02);
+        console.log(
+          `[Audio] STREAM_START id=${streamId} now=${ctx.currentTime.toFixed(3)} cursor=${oldCursor.toFixed(3)}→${playbackCursorRef.current.toFixed(3)}`,
+        );
         return;
       }
 
       if (event === "voice.audio_chunk") {
-        const streamId = data.streamId as string | undefined;
         const audio = data.audio as string | undefined;
         const format = data.format as string | undefined;
         if (!audio) return;
-        if (activeStreamIdRef.current && streamId && streamId !== activeStreamIdRef.current) return;
+        // Play all audio chunks regardless of streamId — sentences from
+        // previous streams should continue playing seamlessly.
 
         const ctx = ensureAudioContext();
         const arrayBuffer = base64ToArrayBuffer(audio);
@@ -171,14 +181,22 @@ export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackRet
       }
 
       if (event === "voice.stream_end") {
-        const streamId = data.streamId as string | undefined;
-        if (activeStreamIdRef.current && streamId && streamId !== activeStreamIdRef.current) return;
-
-        isStreamingRef.current = false;
-        activeStreamIdRef.current = null;
-        if (!isPlayingRef.current && activeSourcesRef.current.size === 0) {
-          setIsStreaming(false);
+        const streamId = (data.streamId as string) || "?";
+        console.log(
+          `[Audio] STREAM_END id=${streamId} aborted=${data.aborted ?? false} activeSources=${activeSourcesRef.current.size}`,
+        );
+        // Only mark streaming as done if this wasn't an intermediate stream_end
+        // (a new stream_start may have already fired). Check aborted flag for
+        // explicit stop requests.
+        const aborted = data.aborted as boolean | undefined;
+        if (aborted) {
+          isStreamingRef.current = false;
+          if (!isPlayingRef.current && activeSourcesRef.current.size === 0) {
+            setIsStreaming(false);
+          }
         }
+        // For non-aborted stream_end, let isStreaming stay true — it will
+        // clear naturally when the last AudioBufferSourceNode finishes.
         return;
       }
 

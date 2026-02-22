@@ -204,6 +204,21 @@ interface RequestContext {
   responseText: string;
 }
 
+/**
+ * Merge tags from a primary (streaming) context and the current transient context.
+ * The primary context's tags are authoritative — e.g., voice.speak from the web UI
+ * should persist even when a CLI command or notification temporarily overrides
+ * the requestContext for routing purposes.
+ */
+function mergeTags(primary: string[] | null, current: string[] | null): string[] | null {
+  if (!primary && !current) return null;
+  if (!primary) return current;
+  if (!current) return primary;
+  // Deduplicate
+  const merged = new Set([...primary, ...current]);
+  return Array.from(merged);
+}
+
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
@@ -211,8 +226,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   const manager = new SessionManager();
   let ctx: ExtensionContext;
 
-  // Per-session request context (for streaming events)
+  // Per-session request context (for streaming events).
+  // requestContexts holds the CURRENT active context (may be transient from CLI/notification).
+  // primaryContexts holds the long-lived streaming context from the original caller (e.g., web UI).
+  // When emitting events, tags are merged from both so voice.speak persists across tool calls.
   const requestContexts = new Map<string, RequestContext>();
+  const primaryContexts = new Map<string, RequestContext>();
 
   // Set session defaults from config
   manager.setDefaults({
@@ -229,15 +248,23 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
       const { eventName, sessionId, ...payload } = event;
       const reqCtx = requestContexts.get(sessionId);
+      const primaryCtx = primaryContexts.get(sessionId);
 
       // Emit stream events with envelope context restored from requestContexts.
       // We store connectionId/tags at prompt time because the extension host's
       // currentConnectionId/currentTags are restored to null after the method returns,
       // but async stream events keep firing via the manager's EventEmitter.
+      //
+      // Tags are merged from the primary streaming context (e.g., web UI with voice.speak)
+      // and the current transient context (e.g., CLI or notification). This ensures
+      // voice tags persist even when a transient caller temporarily overrides requestContexts.
       const emitOptions: { source?: string; connectionId?: string; tags?: string[] } = {};
       if (reqCtx?.source) emitOptions.source = reqCtx.source;
-      if (reqCtx?.connectionId) emitOptions.connectionId = reqCtx.connectionId;
-      if (reqCtx?.tags) emitOptions.tags = reqCtx.tags;
+      // Use primary connectionId if the current context is transient (different connection)
+      const connId = primaryCtx?.connectionId ?? reqCtx?.connectionId;
+      if (connId) emitOptions.connectionId = connId;
+      const mergedTags = mergeTags(primaryCtx?.tags ?? null, reqCtx?.tags ?? null);
+      if (mergedTags) emitOptions.tags = mergedTags;
 
       ctx.emit(
         eventName,
@@ -471,12 +498,30 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         // Set up request context — capture envelope data now because the extension
         // host restores currentConnectionId/currentTags after this method returns,
         // but async stream events keep firing via the manager's EventEmitter.
-        requestContexts.set(sessionId, {
+        const newCtx: RequestContext = {
           connectionId: ctx.connectionId,
           tags: ctx.tags,
           source,
           responseText: "",
-        });
+        };
+
+        // If there's already a primary context from a different connection (e.g., web UI
+        // with voice.speak), preserve it so its tags persist through tool calls and
+        // transient prompts from CLI/notifications.
+        const existingPrimary = primaryContexts.get(sessionId);
+        if (streaming && ctx.tags?.length) {
+          // This caller has tags (e.g., voice.speak) — promote to primary
+          primaryContexts.set(sessionId, newCtx);
+        } else if (existingPrimary && existingPrimary.connectionId !== ctx.connectionId) {
+          // Different connection without tags — don't clobber primary
+          log.info("Preserving primary context", {
+            sessionId: sid(sessionId),
+            primaryConn: existingPrimary.connectionId?.slice(0, 8),
+            transientConn: ctx.connectionId?.slice(0, 8),
+          });
+        }
+
+        requestContexts.set(sessionId, newCtx);
 
         if (streaming) {
           // Fire and forget — events stream back via ctx.emit
@@ -530,6 +575,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             clearTimeout(timeout);
             manager.removeListener("session.event", onEvent);
             requestContexts.delete(sessionId);
+            primaryContexts.delete(sessionId);
           };
 
           manager.on("session.event", onEvent);
@@ -550,6 +596,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         log.info("Closing session", { sessionId: sid(params.sessionId as string) });
         await manager.close(params.sessionId as string);
         requestContexts.delete(params.sessionId as string);
+        primaryContexts.delete(params.sessionId as string);
         log.info("Session closed", { sessionId: sid(params.sessionId as string) });
         return { ok: true };
       }
@@ -655,12 +702,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
         log.info("Sending notification", { sessionId: sid(sessionId), text: truncate(text) });
 
-        // Set up request context so the session's response streams to the right connection
-        requestContexts.set(sessionId, {
+        // Set up request context so the session's response streams to the right connection.
+        // Don't clobber the primary context — notifications are transient.
+        const notifCtx: RequestContext = {
           connectionId: ctx.connectionId,
           tags: ctx.tags,
           responseText: "",
-        });
+        };
+        requestContexts.set(sessionId, notifCtx);
+        // primaryContexts is NOT modified — voice tags persist through notifications
 
         const wrapped = `<user_notification>\n${text}\n</user_notification>`;
         await manager.prompt(sessionId, wrapped);

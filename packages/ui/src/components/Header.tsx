@@ -13,6 +13,10 @@ interface HeaderProps {
   sendRequest: (method: string, params?: Record<string, unknown>) => void;
   /** Optional back navigation (web client uses this to go to session list) */
   onBack?: () => void;
+  /** Whether voice (TTS) is enabled for this session */
+  voiceEnabled?: boolean;
+  /** Toggle voice on/off */
+  onToggleVoice?: () => void;
 }
 
 export function Header({
@@ -24,6 +28,8 @@ export function Header({
   onSwitchSession,
   sendRequest,
   onBack,
+  voiceEnabled,
+  onToggleVoice,
 }: HeaderProps) {
   const bridge = useBridge();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -190,7 +196,7 @@ export function Header({
         </div>
       </div>
 
-      {/* YOLO button */}
+      {/* Session controls */}
       {sessionId && (
         <div className="flex items-center gap-2 mt-2 text-xs">
           <button
@@ -205,6 +211,21 @@ export function Header({
           >
             YOLO
           </button>
+          {onToggleVoice && (
+            <button
+              onClick={onToggleVoice}
+              className={`px-2 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${
+                voiceEnabled
+                  ? "bg-purple-100 text-purple-700 hover:bg-purple-200"
+                  : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+              }`}
+              title={
+                voiceEnabled ? "Voice enabled — click to mute" : "Voice muted — click to enable"
+              }
+            >
+              {voiceEnabled ? "🔊 Voice" : "🔇 Voice"}
+            </button>
+          )}
         </div>
       )}
     </header>

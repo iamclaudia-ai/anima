@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Transition } from "@headlessui/react";
 import { BridgeContext, useBridge } from "../bridge";
 import type { PlatformBridge } from "../bridge";
@@ -44,6 +44,27 @@ function ChatInner({
 
   const [input, setInput] = useState(() => bridge.loadDraft());
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("claudia:voice") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleVoice = useCallback(() => {
+    setVoiceEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("claudia:voice", String(next));
+      } catch {
+        /* noop */
+      }
+      return next;
+    });
+  }, []);
+
+  const voiceTags = useMemo(() => (voiceEnabled ? ["voice.speak"] : undefined), [voiceEnabled]);
 
   // Get editor context if bridge provides it
   const editorContext = bridge.useEditorContext?.();
@@ -55,7 +76,7 @@ function ChatInner({
       setInput(text);
       // Auto-send after a tick so the input renders first
       setTimeout(() => {
-        gateway.sendPrompt(text, []);
+        gateway.sendPrompt(text, [], voiceTags);
         setInput("");
         bridge.saveDraft("");
       }, 0);
@@ -66,11 +87,11 @@ function ChatInner({
     const text = input.trim();
     if (!text && attachments.length === 0) return;
 
-    gateway.sendPrompt(input, attachments);
+    gateway.sendPrompt(input, attachments, voiceTags);
     setInput("");
     setAttachments([]);
     bridge.saveDraft("");
-  }, [input, attachments, gateway, bridge]);
+  }, [input, attachments, gateway, bridge, voiceTags]);
 
   const handleInputChange = useCallback((value: string) => {
     setInput(value);
@@ -79,9 +100,9 @@ function ChatInner({
   /** For interactive tools (AskUserQuestion, ExitPlanMode) to send messages */
   const handleToolMessage = useCallback(
     (text: string) => {
-      gateway.sendPrompt(text, []);
+      gateway.sendPrompt(text, [], voiceTags);
     },
-    [gateway],
+    [gateway, voiceTags],
   );
 
   /** For interactive tools to send tool_result directly */
@@ -104,6 +125,8 @@ function ChatInner({
           onSwitchSession={gateway.switchSession}
           sendRequest={gateway.sendRequest}
           onBack={onBack}
+          voiceEnabled={voiceEnabled}
+          onToggleVoice={toggleVoice}
         />
 
         {bridge.showContextBar && <ContextBar context={editorContext} />}

@@ -457,7 +457,6 @@ export function printMethodList(methods: MethodCatalogEntry[], namespace?: strin
 export function printCliHelp(methods: MethodCatalogEntry[]): void {
   console.log("Claudia CLI — gateway client for the Claudia AI assistant platform.\n");
   console.log("Usage:\n");
-  console.log('  claudia "your message here"                Send a quick prompt');
   console.log("  claudia <namespace> <action> --param value  Call a method");
   console.log("  claudia <namespace> <action> --help          Show method help");
   console.log("  claudia <namespace> <action> --examples      Show usage examples");
@@ -1034,7 +1033,7 @@ async function main(): Promise<void> {
   const methodMap = new Map(methods.map((m) => [m.method, m] as const));
 
   if (args.length === 0) {
-    await promptCompat(args);
+    printCliHelp(methods);
     return;
   }
 
@@ -1068,8 +1067,16 @@ async function main(): Promise<void> {
   }
 
   if (!resolvedMethod) {
-    await promptCompat(args);
-    return;
+    // Check if the first arg looks like a known namespace
+    const namespaces = new Set(methods.map((m) => m.method.split(".")[0]));
+    if (namespaces.has(args[0])) {
+      console.error(`Unknown method: ${args[0]}.${args[1] || "?"}\n`);
+      printNamespaceHelp(args[0], methods);
+    } else {
+      console.error(`Unknown command: ${args.join(" ")}\n`);
+      printCliHelp(methods);
+    }
+    process.exit(1);
   }
 
   const methodDef = methodMap.get(resolvedMethod)!;
