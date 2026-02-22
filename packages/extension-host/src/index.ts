@@ -117,6 +117,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
   // ── Event Bus ───────────────────────────────────────────────
 
   const eventHandlers = new Map<string, Set<EventHandler>>();
+  let _debugEventSeq = 0;
 
   async function broadcastToHandlers(event: GatewayEvent): Promise<void> {
     const handlers: EventHandler[] = [];
@@ -124,6 +125,17 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       if (matchesEventPattern(event.type, pattern)) {
         handlers.push(...handlerSet);
       }
+    }
+    // Debug: log event delivery to trace duplication
+    if (event.type.includes("content_block_start") || event.type.includes("message_stop")) {
+      _debugEventSeq++;
+      hostLog.info("EVENT_DEBUG", {
+        seq: _debugEventSeq,
+        type: event.type,
+        conn: event.connectionId?.slice(0, 8),
+        handlers: handlers.length,
+        patterns: Array.from(eventHandlers.keys()),
+      });
     }
     await Promise.all(handlers.map((h) => h(event)));
   }

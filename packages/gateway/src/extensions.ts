@@ -123,6 +123,16 @@ export class ExtensionManager {
    * Broadcast an event to all out-of-process extension hosts.
    */
   async broadcast(event: GatewayEvent, skipExtensionId?: string): Promise<void> {
+    // Debug: trace event broadcast to extensions
+    if (event.type.includes("content_block_start") || event.type.includes("message_stop")) {
+      const targets = Array.from(this.remoteHosts.keys()).filter((id) => id !== skipExtensionId);
+      log.info("BROADCAST_DEBUG", {
+        type: event.type,
+        skip: skipExtensionId,
+        targets,
+        conn: event.connectionId?.slice(0, 8),
+      });
+    }
     // Forward to all remote extension hosts — skip the emitter extension if requested.
     for (const [extId, host] of this.remoteHosts) {
       if (extId !== skipExtensionId) {
