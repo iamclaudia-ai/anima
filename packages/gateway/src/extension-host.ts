@@ -66,6 +66,8 @@ export class ExtensionHostProcess {
   /** In-flight ctx.call() count for rate limiting */
   private inFlightCalls = 0;
   private static readonly MAX_IN_FLIGHT = 50;
+  /** Monotonic counter to distinguish stale exit callbacks from current process */
+  private spawnGeneration = 0;
 
   constructor(
     private extensionId: string,
@@ -117,7 +119,10 @@ export class ExtensionHostProcess {
       this.readStderr(this.proc.stderr);
     }
 
-    this.proc.exited.then((exitCode) => this.handleExit(exitCode));
+    // Capture spawn generation so handleExit can ignore stale exits
+    // from a previous process after restart() has already spawned a new one.
+    const generation = ++this.spawnGeneration;
+    this.proc.exited.then((exitCode) => this.handleExit(exitCode, generation));
 
     // Wait for the register message
     return new Promise<ExtensionRegistration>((resolve, reject) => {
@@ -205,6 +210,7 @@ export class ExtensionHostProcess {
   async kill(): Promise<void> {
     this.killed = true;
     if (this.proc) {
+      const exitPromise = this.proc.exited;
       // Close stdin first — the host process exits cleanly when stdin closes
       try {
         const stdin = this.proc.stdin;
@@ -216,6 +222,14 @@ export class ExtensionHostProcess {
       }
       this.proc.kill("SIGTERM");
       this.proc = null;
+      // Wait for the process to fully exit (with 5s timeout as safety net).
+      // The spawnGeneration guard in handleExit is the primary protection
+      // against stale exit callbacks — this await is a best-effort cleanup.
+      try {
+        await Promise.race([exitPromise, new Promise((r) => setTimeout(r, 5000))]);
+      } catch {
+        // Process may already be dead
+      }
     }
     // Reject all pending requests
     for (const [id, pending] of this.pendingRequests) {
@@ -495,11 +509,27 @@ export class ExtensionHostProcess {
     }
   }
 
-  private handleExit(exitCode: number | null): void {
+  private handleExit(exitCode: number | null, generation: number): void {
+    // Ignore stale exit callbacks from a previous spawn.
+    // After restart(), the old process's .exited promise resolves AFTER
+    // killed is reset to false and a new process is spawned. Without this
+    // guard, the stale callback sees killed=false and triggers auto-restart,
+    // creating duplicate processes.
+    if (generation !== this.spawnGeneration) {
+      log.info("Ignoring stale exit callback", {
+        extensionId: this.extensionId,
+        exitCode,
+        generation,
+        currentGeneration: this.spawnGeneration,
+      });
+      return;
+    }
+
     log.info("Extension host exited", {
       extensionId: this.extensionId,
       exitCode,
       killed: this.killed,
+      generation,
     });
 
     this.proc = null;
