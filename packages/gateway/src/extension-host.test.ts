@@ -412,13 +412,17 @@ describe("ExtensionHostProcess protocol", () => {
     });
 
     // restart path
-    (host as unknown as { handleExit: (code: number | null) => void }).handleExit(1);
+    (
+      host as unknown as { handleExit: (code: number | null, generation: number) => void }
+    ).handleExit(1, (host as unknown as { spawnGeneration: number }).spawnGeneration);
     expect(timeoutSpy).toHaveBeenCalled();
 
     // exceeded max restarts path (should not schedule another timeout)
     (host as unknown as { restartCount: number }).restartCount = 5;
     const before = timeoutSpy.mock.calls.length;
-    (host as unknown as { handleExit: (code: number | null) => void }).handleExit(1);
+    (
+      host as unknown as { handleExit: (code: number | null, generation: number) => void }
+    ).handleExit(1, (host as unknown as { spawnGeneration: number }).spawnGeneration);
     expect(timeoutSpy.mock.calls.length).toBe(before);
 
     spawnSpy.mockRestore();
@@ -505,7 +509,9 @@ describe("ExtensionHostProcess protocol", () => {
     }) as unknown as typeof setTimeout);
     const spawnSpy = spyOn(host, "spawn").mockRejectedValue(new Error("restart failed"));
 
-    (host as unknown as { handleExit: (code: number | null) => void }).handleExit(1);
+    (
+      host as unknown as { handleExit: (code: number | null, generation: number) => void }
+    ).handleExit(1, (host as unknown as { spawnGeneration: number }).spawnGeneration);
     expect(scheduled.length).toBe(1);
     scheduled[0]?.();
     await Promise.resolve();
@@ -598,5 +604,48 @@ describe("ExtensionHostProcess protocol", () => {
       timeoutSpy.mockRestore();
       await host.kill();
     }
+  });
+
+  it("ignores stale exit callbacks from previous spawns (restart race condition regression)", async () => {
+    const { host } = createHostHarness();
+    const spawnSpy = spyOn(host, "spawn").mockResolvedValue({
+      id: "test-ext",
+      name: "Test",
+      methods: [],
+      events: [],
+      sourceRoutes: [],
+    });
+    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
+      cb: (...args: unknown[]) => void,
+    ) => {
+      // Don't actually execute restart callbacks
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+
+    // Simulate: process was spawned at generation 1
+    (host as unknown as { spawnGeneration: number }).spawnGeneration = 1;
+
+    // After restart(), generation increments to 2 but the OLD process's
+    // .exited callback fires with the stale generation (1).
+    // This should be ignored — no auto-restart triggered.
+    (host as unknown as { spawnGeneration: number }).spawnGeneration = 2;
+    (host as unknown as { killed: boolean }).killed = false; // restart() resets this
+
+    const handleExit = (
+      host as unknown as {
+        handleExit: (code: number | null, generation: number) => void;
+      }
+    ).handleExit;
+    handleExit.call(host, 1, 1); // stale generation
+
+    // spawn should NOT have been called — the stale exit was ignored
+    expect(spawnSpy).not.toHaveBeenCalled();
+
+    // Now verify a current-generation exit DOES trigger auto-restart
+    handleExit.call(host, 1, 2); // current generation
+    expect(timeoutSpy).toHaveBeenCalled(); // auto-restart scheduled
+
+    spawnSpy.mockRestore();
+    timeoutSpy.mockRestore();
   });
 });
