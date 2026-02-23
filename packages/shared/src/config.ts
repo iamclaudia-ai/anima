@@ -45,6 +45,15 @@ export interface ExtensionConfig {
 
 export type ExtensionsConfig = Record<string, ExtensionConfig>;
 
+export interface AgentHostConfig {
+  /** Enable agent-host mode (session extension proxies to agent-host server) */
+  enabled: boolean;
+  /** Agent-host WebSocket URL */
+  url: string;
+  /** Agent-host HTTP port (for watchdog health checks) */
+  port: number;
+}
+
 export interface FederationPeer {
   id: string;
   url: string;
@@ -61,6 +70,7 @@ export interface ClaudiaConfig {
   gateway: GatewayConfig;
   session: SessionConfig;
   extensions: ExtensionsConfig;
+  agentHost: AgentHostConfig;
   federation: FederationConfig;
 }
 
@@ -80,6 +90,11 @@ const DEFAULT_CONFIG: ClaudiaConfig = {
     systemPrompt: null,
   },
   extensions: {},
+  agentHost: {
+    enabled: false,
+    url: "ws://localhost:30087/ws",
+    port: 30087,
+  },
   federation: {
     enabled: false,
     nodeId: "default",
@@ -183,6 +198,7 @@ export function loadConfig(configPath?: string): ClaudiaConfig {
     gateway: { ...DEFAULT_CONFIG.gateway, ...interpolated.gateway },
     session: { ...DEFAULT_CONFIG.session, ...interpolated.session },
     extensions: interpolated.extensions ?? DEFAULT_CONFIG.extensions,
+    agentHost: { ...DEFAULT_CONFIG.agentHost, ...interpolated.agentHost },
     federation: { ...DEFAULT_CONFIG.federation, ...interpolated.federation },
   };
 

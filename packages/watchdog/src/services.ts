@@ -40,6 +40,19 @@ export interface ManagedService {
 // ── Service Definitions ─────────────────────────────────
 
 export const services: Record<string, ManagedService> = {
+  // Agent-host starts BEFORE gateway — extensions need to connect to it during startup
+  "agent-host": {
+    name: "Agent Host",
+    id: "agent-host",
+    command: ["bun", "run", "packages/agent-host/src/index.ts"],
+    healthUrl: "http://localhost:30087/health",
+    port: 30087,
+    restartBackoff: 1000,
+    lastRestart: 0,
+    consecutiveFailures: 0,
+    history: [],
+    proc: null,
+  },
   gateway: {
     name: "Gateway",
     id: "gateway",

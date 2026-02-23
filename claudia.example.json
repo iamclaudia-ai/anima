@@ -115,6 +115,14 @@
     }
   },
 
+  // Agent Host — separate server for SDK processes (survives gateway/extension restarts)
+  // When enabled, session extension proxies to agent-host via WebSocket
+  "agentHost": {
+    "enabled": false,
+    "url": "ws://localhost:30087/ws",
+    "port": 30087
+  },
+
   "federation": {
     // Multi-gateway federation (future)
     "enabled": false,

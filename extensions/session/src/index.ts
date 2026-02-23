@@ -17,7 +17,7 @@ import type {
   ExtensionMethodDefinition,
   HealthCheckResponse,
 } from "@claudia/shared";
-import { createLogger } from "@claudia/shared";
+import { createLogger, loadConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -30,6 +30,7 @@ import {
   closeSync,
 } from "node:fs";
 import { SessionManager } from "./session-manager";
+import { AgentHostClient } from "./agent-client";
 import {
   parseSessionFile,
   parseSessionFilePaginated,
@@ -223,8 +224,20 @@ function mergeTags(primary: string[] | null, current: string[] | null): string[]
 
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
   const sessionConfig = config as SessionConfig;
-  const manager = new SessionManager();
   let ctx: ExtensionContext;
+
+  // ── Dual-mode: direct SessionManager or proxied via AgentHostClient ──
+  // When agentHost.enabled is true, session operations proxy through the agent-host
+  // server via WebSocket. SDK processes survive gateway/extension restarts.
+  const agentHostConfig = loadConfig().agentHost;
+  const useAgentHost = agentHostConfig.enabled;
+
+  const manager = useAgentHost ? null : new SessionManager();
+  const agentClient = useAgentHost ? new AgentHostClient(agentHostConfig.url) : null;
+
+  // The "backend" — either SessionManager or AgentHostClient, both extend EventEmitter.
+  // Cast to EventEmitter to avoid union type signature conflicts on .on()/.removeListener().
+  const backend = (manager || agentClient)! as import("node:events").EventEmitter;
 
   // Per-session request context (for streaming events).
   // requestContexts holds the CURRENT active context (may be transient from CLI/notification).
@@ -233,15 +246,17 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   const requestContexts = new Map<string, RequestContext>();
   const primaryContexts = new Map<string, RequestContext>();
 
-  // Set session defaults from config
-  manager.setDefaults({
-    model: sessionConfig.model,
-    thinking: sessionConfig.thinking,
-    effort: sessionConfig.effort as "low" | "medium" | "high" | "max" | undefined,
-  });
+  // Set session defaults from config (direct mode only — agent-host loads its own config)
+  if (manager) {
+    manager.setDefaults({
+      model: sessionConfig.model,
+      thinking: sessionConfig.thinking,
+      effort: sessionConfig.effort as "low" | "medium" | "high" | "max" | undefined,
+    });
+  }
 
-  // Wire manager events → ctx.emit
-  manager.on(
+  // Wire backend events → ctx.emit
+  backend.on(
     "session.event",
     (event: { eventName: string; sessionId: string; [key: string]: unknown }) => {
       if (!ctx) return;
@@ -469,14 +484,21 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       case "session.create_session": {
         const cwd = params.cwd as string;
         const model = params.model as string | undefined;
-        log.info("Creating session", { cwd, model: model || sessionConfig.model || "default" });
-        const result = await manager.create({
+        log.info("Creating session", {
+          cwd,
+          model: model || sessionConfig.model || "default",
+          mode: useAgentHost ? "agent-host" : "direct",
+        });
+        const createParams = {
           cwd,
           model,
           systemPrompt: params.systemPrompt as string | undefined,
           thinking: params.thinking as boolean | undefined,
           effort: params.effort as "low" | "medium" | "high" | "max" | undefined,
-        });
+        };
+        const result = useAgentHost
+          ? await agentClient!.createSession(createParams)
+          : await manager!.create(createParams);
         log.info("Session created", { sessionId: sid(result.sessionId), cwd });
         return result;
       }
@@ -526,7 +548,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         if (streaming) {
           // Fire and forget — events stream back via ctx.emit
           const promptStart = Date.now();
-          await manager.prompt(sessionId, content, cwd);
+          if (useAgentHost) {
+            await agentClient!.prompt(sessionId, content, cwd);
+          } else {
+            await manager!.prompt(sessionId, content, cwd);
+          }
 
           // Log turn completion when we see turn_stop
           const turnListener = (event: { sessionId: string; type?: string }) => {
@@ -539,9 +565,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
               elapsed: `${elapsed}ms`,
               responseChars: responseLen,
             });
-            manager.removeListener("session.event", turnListener);
+            backend.removeListener("session.event", turnListener);
           };
-          manager.on("session.event", turnListener);
+          backend.on("session.event", turnListener);
 
           return { status: "streaming", sessionId };
         }
@@ -573,13 +599,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
           const cleanup = () => {
             clearTimeout(timeout);
-            manager.removeListener("session.event", onEvent);
+            backend.removeListener("session.event", onEvent);
             requestContexts.delete(sessionId);
             primaryContexts.delete(sessionId);
           };
 
-          manager.on("session.event", onEvent);
-          manager.prompt(sessionId, content, cwd).catch((err) => {
+          backend.on("session.event", onEvent);
+          const promptFn = useAgentHost
+            ? agentClient!.prompt(sessionId, content, cwd)
+            : manager!.prompt(sessionId, content, cwd);
+          promptFn.catch((err) => {
             cleanup();
             reject(err);
           });
@@ -588,13 +617,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
       case "session.interrupt_session": {
         log.info("Interrupting session", { sessionId: sid(params.sessionId as string) });
-        const ok = manager.interrupt(params.sessionId as string);
+        const ok = useAgentHost
+          ? await agentClient!.interrupt(params.sessionId as string)
+          : manager!.interrupt(params.sessionId as string);
         return { ok };
       }
 
       case "session.close_session": {
         log.info("Closing session", { sessionId: sid(params.sessionId as string) });
-        await manager.close(params.sessionId as string);
+        if (useAgentHost) {
+          await agentClient!.close(params.sessionId as string);
+        } else {
+          await manager!.close(params.sessionId as string);
+        }
         requestContexts.delete(params.sessionId as string);
         primaryContexts.delete(params.sessionId as string);
         log.info("Session closed", { sessionId: sid(params.sessionId as string) });
@@ -642,27 +677,37 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const model = params.model as string | undefined;
 
         log.info("Switching session", { sessionId: sid(sessionId), cwd, model });
-        await manager.resume({
-          sessionId,
-          cwd,
-          model,
-        });
+        if (useAgentHost) {
+          // Agent-host handles resume internally via prompt with cwd
+          await agentClient!.prompt(sessionId, "", cwd);
+        } else {
+          await manager!.resume({
+            sessionId,
+            cwd,
+            model,
+          });
+        }
         return { sessionId };
       }
 
       case "session.reset_session": {
         const cwd = params.cwd as string;
         log.info("Resetting session", { cwd });
-        const result = await manager.create({
+        const createParams = {
           cwd,
           model: params.model as string | undefined,
-        });
+        };
+        const result = useAgentHost
+          ? await agentClient!.createSession(createParams)
+          : await manager!.create(createParams);
         return result;
       }
 
       case "session.get_info": {
         const sessionId = params.sessionId as string | undefined;
-        const activeSessions = manager.list();
+        const activeSessions = useAgentHost
+          ? ((await agentClient!.list()) as Array<{ id: string }>)
+          : manager!.list();
 
         if (sessionId) {
           const session = activeSessions.find((s) => s.id === sessionId);
@@ -677,7 +722,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           sessionId: sid(params.sessionId as string),
           mode: params.mode,
         });
-        const ok = manager.setPermissionMode(params.sessionId as string, params.mode as string);
+        const ok = useAgentHost
+          ? await agentClient!.setPermissionMode(params.sessionId as string, params.mode as string)
+          : manager!.setPermissionMode(params.sessionId as string, params.mode as string);
         return { ok };
       }
 
@@ -687,12 +734,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           toolUseId: params.toolUseId,
           isError: params.isError,
         });
-        const ok = manager.sendToolResult(
-          params.sessionId as string,
-          params.toolUseId as string,
-          params.content as string,
-          params.isError as boolean,
-        );
+        const ok = useAgentHost
+          ? await agentClient!.sendToolResult(
+              params.sessionId as string,
+              params.toolUseId as string,
+              params.content as string,
+              params.isError as boolean,
+            )
+          : manager!.sendToolResult(
+              params.sessionId as string,
+              params.toolUseId as string,
+              params.content as string,
+              params.isError as boolean,
+            );
         return { ok };
       }
 
@@ -713,7 +767,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         // primaryContexts is NOT modified — voice tags persist through notifications
 
         const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-        await manager.prompt(sessionId, wrapped);
+        if (useAgentHost) {
+          await agentClient!.prompt(sessionId, wrapped);
+        } else {
+          await manager!.prompt(sessionId, wrapped);
+        }
 
         return { ok: true, sessionId };
       }
@@ -749,12 +807,18 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   // ── Health Check ───────────────────────────────────────────
 
   function health(): HealthCheckResponse {
-    const sessions = manager.list();
+    const sessions = manager ? manager.list() : [];
+    const agentHostConnected = agentClient?.isConnected ?? false;
     return {
       ok: true,
-      status: "healthy",
+      status: useAgentHost ? (agentHostConnected ? "healthy" : "degraded") : "healthy",
       label: "Sessions",
-      metrics: [{ label: "Active Sessions", value: sessions.length }],
+      metrics: [
+        { label: "Active Sessions", value: sessions.length },
+        ...(useAgentHost
+          ? [{ label: "Agent Host", value: agentHostConnected ? "connected" : "disconnected" }]
+          : []),
+      ],
       actions: [
         {
           method: "session.close_session",
@@ -787,11 +851,26 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
     async start(extCtx: ExtensionContext): Promise<void> {
       ctx = extCtx;
-      log.info("Session extension started");
+      if (useAgentHost && agentClient) {
+        try {
+          await agentClient.connect();
+          log.info("Session extension started (agent-host mode) 🚀", { url: agentHostConfig.url });
+        } catch (error) {
+          log.warn("Failed to connect to agent-host, will retry in background", {
+            error: String(error),
+          });
+        }
+      } else {
+        log.info("Session extension started (direct mode)");
+      }
     },
 
     async stop(): Promise<void> {
-      await manager.closeAll();
+      if (useAgentHost && agentClient) {
+        agentClient.disconnect();
+      } else if (manager) {
+        await manager.closeAll();
+      }
       closeDb();
       log.info("Session extension stopped");
     },
