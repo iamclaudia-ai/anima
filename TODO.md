@@ -60,6 +60,7 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
 - [ ] Session history loading from Claude Code JSONL files
 - [ ] Multiple named sessions support
 - [ ] SQLite for session metadata (future)
+- [ ] **Fix TypeScript errors in comprehensive test files** - agent-client.test.ts and server.test.ts have type annotation issues (tests pass, but tsc complains)
 
 ### Clients
 
@@ -86,6 +87,12 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
   - [ ] Gateway extension for context injection (before prompts)
   - [ ] Vector search with Qdrant
 - [ ] **Browser Extension** - DOMINATRIX integration
+- [ ] **Codex Extension** - Add configurable preambles for command types
+  - Add `preambles` config section to codex extension config
+  - Define standard preambles for `review`, `test`, and `task` commands
+  - Update `extensions/codex/src/index.ts` to prepend appropriate preamble based on command type
+  - This ensures consistent prompt structure without Claudia having to remember every time
+  - Preambles should be configurable in `~/.claudia/claudia.json` (not hardcoded)
 
 ### Web UI Enhancements
 
