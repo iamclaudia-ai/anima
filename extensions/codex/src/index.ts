@@ -52,6 +52,12 @@ export interface CodexConfig {
   effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Auto-approve all command and file change requests (default: true) */
   autoApprove?: boolean;
+  /** Task-specific preambles that get prepended to prompts */
+  preambles?: {
+    review?: string;
+    test?: string;
+    task?: string;
+  };
 }
 
 const DEFAULT_PERSONALITY =
@@ -771,7 +777,12 @@ export function createCodexExtension(config: CodexConfig = {}): ClaudiaExtension
           const { prompt, sessionId, cwd, sandbox, model, effort } = params as z.infer<
             typeof TaskSchema
           >;
-          return startTask("task", prompt, { sessionId, cwd, sandbox, model, effort });
+
+          // Apply preamble if configured
+          const preamble = cfg.preambles?.task || "";
+          const fullPrompt = preamble ? `${preamble}\n\n${prompt}` : prompt;
+
+          return startTask("task", fullPrompt, { sessionId, cwd, sandbox, model, effort });
         }
 
         // ── Code Review (read-only) ───────────────────────
@@ -784,7 +795,11 @@ export function createCodexExtension(config: CodexConfig = {}): ClaudiaExtension
             reviewPrompt = `Review the following files: ${files.join(", ")}\n\n${prompt}`;
           }
 
-          return startTask("review", reviewPrompt, {
+          // Apply preamble if configured
+          const preamble = cfg.preambles?.review || "";
+          const fullPrompt = preamble ? `${preamble}\n\n${reviewPrompt}` : reviewPrompt;
+
+          return startTask("review", fullPrompt, {
             sessionId,
             cwd,
             sandbox: "read-only", // Always read-only for reviews
@@ -794,7 +809,12 @@ export function createCodexExtension(config: CodexConfig = {}): ClaudiaExtension
         // ── Test Writing (workspace-write) ─────────────────
         case "codex.test": {
           const { prompt, sessionId, cwd } = params as z.infer<typeof TestSchema>;
-          return startTask("test", prompt, {
+
+          // Apply preamble if configured
+          const preamble = cfg.preambles?.test || "";
+          const fullPrompt = preamble ? `${preamble}\n\n${prompt}` : prompt;
+
+          return startTask("test", fullPrompt, {
             sessionId,
             cwd,
             sandbox: "workspace-write", // Tests need write access
