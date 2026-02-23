@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { ExtensionContext } from "@claudia/shared";
 import { createSessionExtension } from "./index";
-import { SessionManager } from "./session-manager";
+import { AgentHostClient } from "./agent-client";
 import * as workspace from "./workspace";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import * as os from "node:os";
+
+const testHome = join("/tmp", `claudia-test-home-${Date.now()}`);
+mkdirSync(testHome, { recursive: true });
+process.env.HOME = testHome;
 
 const sessionId = "session-test-123";
 
@@ -26,10 +30,8 @@ function createTestContext(overrides: Partial<ExtensionContext> = {}): Extension
 
 describe("session extension", () => {
   let promptSpy: ReturnType<typeof spyOn>;
-  let closeAllSpy: ReturnType<typeof spyOn>;
   let emitEventSpy: ReturnType<typeof spyOn>;
   let createSpy: ReturnType<typeof spyOn>;
-  let resumeSpy: ReturnType<typeof spyOn>;
   let interruptSpy: ReturnType<typeof spyOn>;
   let closeSpy: ReturnType<typeof spyOn>;
   let listSpy: ReturnType<typeof spyOn>;
@@ -39,19 +41,30 @@ describe("session extension", () => {
   let getWorkspaceSpy: ReturnType<typeof spyOn>;
   let getOrCreateWorkspaceSpy: ReturnType<typeof spyOn>;
   let closeDbSpy: ReturnType<typeof spyOn>;
+  let connectSpy: ReturnType<typeof spyOn>;
+  let disconnectSpy: ReturnType<typeof spyOn>;
+  let homedirSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    emitEventSpy = spyOn(SessionManager.prototype, "emit");
-    closeAllSpy = spyOn(SessionManager.prototype, "closeAll").mockResolvedValue(undefined);
-    createSpy = spyOn(SessionManager.prototype, "create").mockResolvedValue({
+    homedirSpy = spyOn(os, "homedir").mockReturnValue(testHome);
+    emitEventSpy = spyOn(AgentHostClient.prototype, "emit");
+    connectSpy = spyOn(AgentHostClient.prototype, "connect").mockImplementation(function (
+      this: AgentHostClient,
+    ) {
+      (this as unknown as { _isConnected: boolean })._isConnected = true;
+      return Promise.resolve();
+    });
+    disconnectSpy = spyOn(AgentHostClient.prototype, "disconnect").mockImplementation(function (
+      this: AgentHostClient,
+    ) {
+      (this as unknown as { _isConnected: boolean })._isConnected = false;
+    });
+    createSpy = spyOn(AgentHostClient.prototype, "createSession").mockResolvedValue({
       sessionId: "created-session-1",
     });
-    resumeSpy = spyOn(SessionManager.prototype, "resume").mockResolvedValue({
-      sessionId: "resumed-session-1",
-    });
-    interruptSpy = spyOn(SessionManager.prototype, "interrupt").mockReturnValue(true);
-    closeSpy = spyOn(SessionManager.prototype, "close").mockResolvedValue(undefined);
-    listSpy = spyOn(SessionManager.prototype, "list").mockReturnValue([
+    interruptSpy = spyOn(AgentHostClient.prototype, "interrupt").mockResolvedValue(true);
+    closeSpy = spyOn(AgentHostClient.prototype, "close").mockResolvedValue(undefined);
+    listSpy = spyOn(AgentHostClient.prototype, "list").mockResolvedValue([
       {
         id: sessionId,
         cwd: "/repo/project",
@@ -64,10 +77,10 @@ describe("session extension", () => {
         lastActivity: new Date().toISOString(),
       },
     ]);
-    setPermissionModeSpy = spyOn(SessionManager.prototype, "setPermissionMode").mockReturnValue(
+    setPermissionModeSpy = spyOn(AgentHostClient.prototype, "setPermissionMode").mockResolvedValue(
       true,
     );
-    sendToolResultSpy = spyOn(SessionManager.prototype, "sendToolResult").mockReturnValue(true);
+    sendToolResultSpy = spyOn(AgentHostClient.prototype, "sendToolResult").mockResolvedValue(true);
     listWorkspacesSpy = spyOn(workspace, "listWorkspaces").mockReturnValue([
       {
         id: "ws-1",
@@ -96,8 +109,8 @@ describe("session extension", () => {
     });
     closeDbSpy = spyOn(workspace, "closeDb").mockImplementation(() => {});
 
-    promptSpy = spyOn(SessionManager.prototype, "prompt").mockImplementation(function (
-      this: SessionManager,
+    promptSpy = spyOn(AgentHostClient.prototype, "prompt").mockImplementation(function (
+      this: AgentHostClient,
       sid: string,
     ) {
       this.emit("session.event", {
@@ -125,11 +138,10 @@ describe("session extension", () => {
   });
 
   afterEach(() => {
+    homedirSpy.mockRestore();
     promptSpy.mockRestore();
-    closeAllSpy.mockRestore();
     emitEventSpy.mockRestore();
     createSpy.mockRestore();
-    resumeSpy.mockRestore();
     interruptSpy.mockRestore();
     closeSpy.mockRestore();
     listSpy.mockRestore();
@@ -139,6 +151,8 @@ describe("session extension", () => {
     getWorkspaceSpy.mockRestore();
     getOrCreateWorkspaceSpy.mockRestore();
     closeDbSpy.mockRestore();
+    connectSpy.mockRestore();
+    disconnectSpy.mockRestore();
   });
 
   it("returns accumulated text for non-streaming prompts", async () => {
@@ -210,7 +224,7 @@ describe("session extension", () => {
   it("propagates envelope data in streaming mode for async events", async () => {
     const emitted: Array<{ eventName: string; options?: Record<string, unknown> }> = [];
 
-    promptSpy.mockImplementation(function (this: SessionManager, sid: string) {
+    promptSpy.mockImplementation(function (this: AgentHostClient, sid: string) {
       queueMicrotask(() => {
         this.emit("session.event", {
           eventName: `session.${sid}.content_block_delta`,
@@ -310,11 +324,7 @@ describe("session extension", () => {
       cwd: "/repo/project",
       model: "claude-sonnet",
     });
-    expect(resumeSpy).toHaveBeenCalledWith({
-      sessionId: "resume-1",
-      cwd: "/repo/project",
-      model: "claude-sonnet",
-    });
+    expect(promptSpy).toHaveBeenCalledWith("resume-1", "", "/repo/project");
     expect(switched).toEqual({ sessionId: "resume-1" });
 
     const reset = await ext.handleMethod("session.reset_session", {
@@ -380,14 +390,14 @@ describe("session extension", () => {
       ok: boolean;
       label: string;
       status: string;
-      metrics?: Array<{ label: string; value: number }>;
+      metrics?: Array<{ label: string; value: string }>;
       items?: Array<{ id: string }>;
     };
     expect(health.ok).toBe(true);
     expect(health.label).toBe("Sessions");
     expect(health.status).toBe("healthy");
-    expect(health.metrics?.[0]).toEqual({ label: "Active Sessions", value: 1 });
-    expect(health.items?.[0]?.id).toBe(sessionId);
+    expect(health.metrics?.[0]).toEqual({ label: "Agent Host", value: "connected" });
+    expect(health.items).toEqual([]);
 
     await ext.stop();
   });
@@ -457,7 +467,7 @@ describe("session extension", () => {
     await ext.start(createTestContext());
     const cwd = `/tmp/claudia-test-${Date.now()}-sessions`;
     const encodedCwd = cwd.replace(/\//g, "-");
-    const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
+    const projectDir = join(os.homedir(), ".claude", "projects", encodedCwd);
     try {
       mkdirSync(projectDir, { recursive: true });
 
@@ -517,8 +527,8 @@ describe("session extension", () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
     const cwd = `/tmp/claudia-test-${Date.now()}-fallback`;
-    const fallbackDir = join(homedir(), ".claude", "projects", `fallback-${Date.now()}`);
-    const badDir = join(homedir(), ".claude", "projects", `bad-${Date.now()}`);
+    const fallbackDir = join(os.homedir(), ".claude", "projects", `fallback-${Date.now()}`);
+    const badDir = join(os.homedir(), ".claude", "projects", `bad-${Date.now()}`);
 
     try {
       mkdirSync(fallbackDir, { recursive: true });
@@ -557,8 +567,8 @@ describe("session extension", () => {
   });
 
   it("handles delayed turn_stop logging path for streaming prompts", async () => {
-    const removeListenerSpy = spyOn(SessionManager.prototype, "removeListener");
-    promptSpy.mockImplementation(function (this: SessionManager, sid: string) {
+    const removeListenerSpy = spyOn(AgentHostClient.prototype, "removeListener");
+    promptSpy.mockImplementation(function (this: AgentHostClient, sid: string) {
       setTimeout(() => {
         this.emit("session.event", {
           eventName: `session.${sid}.content_block_delta`,
@@ -597,7 +607,7 @@ describe("session extension", () => {
     await ext.start(createTestContext());
     const cwd = `/tmp/claudia-test-${Date.now()}-history`;
     const encodedCwd = cwd.replace(/\//g, "-");
-    const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
+    const projectDir = join(os.homedir(), ".claude", "projects", encodedCwd);
     try {
       mkdirSync(projectDir, { recursive: true });
 
@@ -652,7 +662,7 @@ describe("session extension", () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
     const cwd = `/tmp/claudia-test-${Date.now()}-no-fallback-match`;
-    const badDir = join(homedir(), ".claude", "projects", `bad-only-${Date.now()}`);
+    const badDir = join(os.homedir(), ".claude", "projects", `bad-only-${Date.now()}`);
     try {
       mkdirSync(badDir, { recursive: true });
       writeFileSync(join(badDir, "sessions-index.json"), "{ broken json");
@@ -672,7 +682,7 @@ describe("session extension", () => {
     await ext.start(createTestContext());
     const cwd = `/tmp/claudia-test-${Date.now()}-malformed-prompt`;
     const encodedCwd = cwd.replace(/\//g, "-");
-    const projectDir = join(homedir(), ".claude", "projects", encodedCwd);
+    const projectDir = join(os.homedir(), ".claude", "projects", encodedCwd);
     try {
       mkdirSync(projectDir, { recursive: true });
 

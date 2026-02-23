@@ -1,5 +1,24 @@
 # Claudia - Development Roadmap
 
+## 🧪 Development Practices
+
+### Cody Test Prompt Best Practices
+
+When asking Cody to write tests, always include these instructions:
+
+- Write the tests
+- Run the tests after writing them
+- Iterate until all tests pass
+- Only stop if:
+  - All tests pass ✅
+  - Hit a blocker in the actual code (not the test mocking)
+  - Need clarification from Claudia or the human
+
+Example prompt:
+```
+Fix the tests in [file]. After writing your fixes, run the tests with 'bun test [file]' and keep iterating until ALL tests pass. If you can't get them to pass due to actual code issues (not test mocking issues), document the blocker clearly.
+```
+
 ## ✅ Completed
 
 ### Phase 1: Foundation
