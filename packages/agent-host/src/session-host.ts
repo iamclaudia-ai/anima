@@ -112,10 +112,10 @@ export class SessionHost extends EventEmitter {
   async create(params: SessionCreateParams): Promise<{ sessionId: string }> {
     const options: CreateSessionOptions = {
       cwd: params.cwd,
-      model: params.model,
+      model: params.model ?? this.defaults.model,
       systemPrompt: params.systemPrompt,
-      thinking: params.thinking,
-      effort: params.effort,
+      thinking: params.thinking ?? this.defaults.thinking,
+      effort: params.effort ?? this.defaults.effort,
     };
 
     const session = this.deps.create(options);
@@ -142,9 +142,9 @@ export class SessionHost extends EventEmitter {
 
     const options: ResumeSessionOptions = {
       cwd: params.cwd,
-      model: params.model,
-      thinking: params.thinking,
-      effort: params.effort,
+      model: params.model ?? this.defaults.model,
+      thinking: params.thinking ?? this.defaults.thinking,
+      effort: params.effort ?? this.defaults.effort,
     };
 
     const session = this.deps.resume(params.sessionId, options);

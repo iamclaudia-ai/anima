@@ -150,6 +150,19 @@ function handleExtensionEvent(
   const payloadObj =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
 
+  // Log streaming events for debugging (filter out noisy events)
+  if (!["ping", "heartbeat"].includes(type)) {
+    const payloadSummary = payloadObj
+      ? {
+          ...(payloadObj.status ? { status: payloadObj.status } : {}),
+          ...(payloadObj.message ? { message: String(payloadObj.message).slice(0, 100) } : {}),
+          ...(payloadObj.attempt ? { attempt: payloadObj.attempt } : {}),
+          ...(payloadObj.text ? { text: String(payloadObj.text).slice(0, 50) + "..." } : {}),
+        }
+      : payload;
+    log.info("Event", { type, source, connectionId, tags, payload: payloadSummary });
+  }
+
   // Determine source extension ID for loop prevention
   const sourceExtId = source?.startsWith("extension:")
     ? source.slice("extension:".length)
@@ -441,11 +454,16 @@ function broadcastEvent(
 ): void {
   const event: Event = { type: "event", event: eventName, payload };
   const data = JSON.stringify(event);
+  let clientCount = 0;
 
   // 1. Exclusive subscriber — last subscriber wins, only they get the event
   const exclusiveWs = exclusiveSubscribers.get(eventName);
   if (exclusiveWs && clients.has(exclusiveWs)) {
     exclusiveWs.send(data);
+    clientCount = 1;
+    if (!["ping", "heartbeat"].includes(eventName)) {
+      log.info("Broadcast exclusive", { event: eventName, clients: clientCount });
+    }
     return;
   }
 
@@ -457,6 +475,23 @@ function broadcastEvent(
 
     if (isSubscribed) {
       ws.send(data);
+      clientCount++;
+    }
+  }
+
+  // Log broadcast (filter out noisy events)
+  if (!["ping", "heartbeat"].includes(eventName) && clientCount > 0) {
+    // Add detailed logging for debugging streaming issues
+    if (eventName.startsWith("session.")) {
+      const sessionEventType = eventName.split(".").slice(2).join(".");
+      log.info("Session Event", {
+        event: sessionEventType,
+        clients: clientCount,
+        payload:
+          typeof payload === "object" ? JSON.stringify(payload).slice(0, 200) + "..." : payload,
+      });
+    } else {
+      log.info("Broadcast", { event: eventName, clients: clientCount });
     }
   }
 }

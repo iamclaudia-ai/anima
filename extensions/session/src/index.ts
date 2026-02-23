@@ -18,6 +18,7 @@ import type {
   HealthCheckResponse,
 } from "@claudia/shared";
 import { createLogger, loadConfig } from "@claudia/shared";
+import type { SessionConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -39,14 +40,6 @@ import {
 import { listWorkspaces, getWorkspace, getOrCreateWorkspace, closeDb } from "./workspace";
 
 const log = createLogger("SessionExt", join(homedir(), ".claudia", "logs", "session.log"));
-
-// ── Types ────────────────────────────────────────────────────
-
-interface SessionConfig {
-  model?: string;
-  thinking?: boolean;
-  effort?: string;
-}
 
 // ── Session Discovery ────────────────────────────────────────
 
@@ -222,13 +215,16 @@ function mergeTags(primary: string[] | null, current: string[] | null): string[]
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
-  const sessionConfig = config as SessionConfig;
   let ctx: ExtensionContext;
+
+  // Load global configuration (claudia.json + defaults)
+  const globalConfig = loadConfig();
+  const sessionConfig = globalConfig.session;
+  const agentHostConfig = globalConfig.agentHost;
 
   // Connect to agent-host via WebSocket for SDK process isolation.
   // SDK processes (Claude query()) run in the agent-host server and survive
   // gateway/extension restarts. Session extension is a thin RPC client.
-  const agentHostConfig = loadConfig().agentHost;
   const agentClient = new AgentHostClient(agentHostConfig.url);
 
   // Per-session request context (for streaming events).
@@ -247,6 +243,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       const { eventName, sessionId, ...payload } = event;
       const reqCtx = requestContexts.get(sessionId);
       const primaryCtx = primaryContexts.get(sessionId);
+
+      // Log streaming events for debugging (Michael requested this)
+      const shortSessionId = sessionId.slice(0, 8);
+      const eventSize = JSON.stringify(payload).length;
+      log.info(`[Stream] ${eventName} → session.${shortSessionId} (${eventSize}b)`, {
+        eventName,
+        sessionId: shortSessionId,
+        payloadKeys: Object.keys(payload),
+      });
 
       // Emit stream events with envelope context restored from requestContexts.
       // We store connectionId/tags at prompt time because the extension host's
@@ -466,17 +471,25 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     switch (method) {
       case "session.create_session": {
         const cwd = params.cwd as string;
-        const model = params.model as string | undefined;
+        const model = (params.model as string | undefined) || sessionConfig.model;
+        const thinking = (params.thinking as boolean | undefined) ?? sessionConfig.thinking;
+        const effort =
+          (params.effort as "low" | "medium" | "high" | "max" | undefined) || sessionConfig.effort;
+        const systemPrompt =
+          (params.systemPrompt as string | undefined) || sessionConfig.systemPrompt || undefined;
+
         log.info("Creating session", {
           cwd,
-          model: model || sessionConfig.model || "default",
+          model,
+          thinking,
+          effort,
         });
         const result = await agentClient.createSession({
           cwd,
           model,
-          systemPrompt: params.systemPrompt as string | undefined,
-          thinking: params.thinking as boolean | undefined,
-          effort: params.effort as "low" | "medium" | "high" | "max" | undefined,
+          systemPrompt,
+          thinking,
+          effort,
         });
         log.info("Session created", { sessionId: sid(result.sessionId), cwd });
         return result;
