@@ -75,6 +75,37 @@ const DEFAULT_CONFIG: IMessageConfig = {
 // iMessage Extension
 // ============================================================================
 
+function isLikelyPhoneNumber(value: string): boolean {
+  if (!value) return false;
+  if (value.includes("@")) return false;
+  if (!/^[+\d().\s-]+$/.test(value)) return false;
+  const digits = value.replace(/\D/g, "");
+  return digits.length > 0;
+}
+
+function normalizePhoneNumber(value: string): string {
+  return value.replace(/^\+1/, "").replace(/\D/g, "");
+}
+
+export function isAllowedSender(sender: string, allowedSenders?: string[]): boolean {
+  if (!allowedSenders?.length) {
+    return false; // No allowed senders = deny all (safe default)
+  }
+  if (!sender) return false;
+  return allowedSenders.some((allowed) => {
+    if (!allowed) return false;
+    // Exact match
+    if (sender === allowed) return true;
+    // Normalize phone numbers (strip +1, etc.) only when both are phone numbers.
+    if (isLikelyPhoneNumber(sender) && isLikelyPhoneNumber(allowed)) {
+      const normalizedSender = normalizePhoneNumber(sender);
+      const normalizedAllowed = normalizePhoneNumber(allowed);
+      return normalizedSender !== "" && normalizedSender === normalizedAllowed;
+    }
+    return false;
+  });
+}
+
 export function createIMessageExtension(config: IMessageConfig = {}): ClaudiaExtension {
   const cfg: IMessageConfig = { ...DEFAULT_CONFIG, ...config };
 
@@ -194,18 +225,8 @@ export function createIMessageExtension(config: IMessageConfig = {}): ClaudiaExt
   /**
    * Check if a sender is allowed
    */
-  function isAllowedSender(sender: string): boolean {
-    if (!cfg.allowedSenders?.length) {
-      return false; // No allowed senders = deny all (safe default)
-    }
-    return cfg.allowedSenders.some((allowed) => {
-      // Exact match
-      if (sender === allowed) return true;
-      // Normalize phone numbers (strip +1, etc.)
-      const normalizedSender = sender.replace(/^\+1/, "").replace(/\D/g, "");
-      const normalizedAllowed = allowed.replace(/^\+1/, "").replace(/\D/g, "");
-      return normalizedSender === normalizedAllowed;
-    });
+  function isAllowedSenderForConfig(sender: string): boolean {
+    return isAllowedSender(sender, cfg.allowedSenders);
   }
 
   /**
@@ -223,7 +244,7 @@ export function createIMessageExtension(config: IMessageConfig = {}): ClaudiaExt
     ctx?.log.info(`Received message from ${message.sender} in chat ${message.chat_id}`);
 
     // Filter: only process messages from allowed senders
-    if (!isAllowedSender(message.sender)) {
+    if (!isAllowedSenderForConfig(message.sender)) {
       ctx?.log.info(`Ignoring message from ${message.sender} (not in allowed list)`);
       return;
     }
