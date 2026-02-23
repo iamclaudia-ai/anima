@@ -333,6 +333,8 @@ export class SessionHost extends EventEmitter {
 
     session.on("closed", () => {
       this.sessions.delete(sessionId);
+      this.eventBuffers.delete(sessionId);
+      log.info("Cleaned up session buffers", { sessionId: sessionId.slice(0, 8) });
     });
   }
 }

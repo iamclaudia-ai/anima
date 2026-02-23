@@ -105,11 +105,15 @@ export class AgentHostClient extends EventEmitter {
 
         ws.onclose = () => {
           const wasConnected = this._isConnected;
+          const wasConnecting = this.isConnecting;
           this._isConnected = false;
           this.ws = null;
           this.isConnecting = false;
 
-          if (wasConnected) {
+          if (wasConnecting && !wasConnected) {
+            // Socket closed before onopen fired — reject the connection promise
+            reject(new Error(`Connection closed before open: ${this.url}`));
+          } else if (wasConnected) {
             log.warn("Disconnected from agent-host, scheduling reconnect");
             this.scheduleReconnect();
           }
