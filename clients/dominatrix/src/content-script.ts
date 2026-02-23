@@ -255,26 +255,26 @@ function initDominatrix() {
                 ? getFullSnapshot()
                 : await getInteractiveSnapshot(message.scope, message.sources);
               break;
-            case "get-text":
+            case "get_text":
               result = message.ref ? getElementText(message.ref) : getText();
               break;
-            case "get-markdown":
+            case "get_markdown":
               result = message.ref ? getElementMarkdown(message.ref) : getMarkdown();
               break;
-            case "get-url":
+            case "get_url":
               result = location.href;
               break;
-            case "get-title":
+            case "get_title":
               result = document.title;
               break;
-            case "get-html":
+            case "get_html":
               result = getHTML(message.selector);
               break;
 
             // --- React source mapping (via main world bridge) ---
-            case "get-source": {
+            case "get_source": {
               const el = resolveElement(message.ref, message.selector);
-              const ancestry = await callBridgeForElement("get-react-ancestry", el);
+              const ancestry = await callBridgeForElement("get_react_ancestry", el);
 
               if (!ancestry || ancestry.length === 0) {
                 throw new Error(
@@ -311,37 +311,37 @@ function initDominatrix() {
               break;
 
             // --- Semantic find ---
-            case "find-text":
+            case "find_text":
               result = findByText(message.text, message.perform, message.value);
               break;
-            case "find-label":
+            case "find_label":
               result = findByLabel(message.label, message.perform, message.value);
               break;
-            case "find-role":
+            case "find_role":
               result = findByRole(message.role, message.name, message.perform, message.value);
               break;
-            case "find-placeholder":
+            case "find_placeholder":
               result = findByPlaceholder(message.placeholder, message.perform, message.value);
               break;
 
             // --- Scrolling ---
-            case "scroll-down":
+            case "scroll_down":
               window.scrollBy(0, message.value || 300);
               result = { scrollY: window.scrollY };
               break;
-            case "scroll-up":
+            case "scroll_up":
               window.scrollBy(0, -(message.value || 300));
               result = { scrollY: window.scrollY };
               break;
-            case "scroll-to":
+            case "scroll_to":
               result = doScrollTo(message.ref, message.position);
               break;
 
             // --- Wait ---
-            case "wait-for-element":
+            case "wait_for_element":
               result = await waitForElement(message.selector, message.timeout);
               break;
-            case "wait-for-text":
+            case "wait_for_text":
               result = await waitForText(message.text, message.timeout);
               break;
             case "wait":

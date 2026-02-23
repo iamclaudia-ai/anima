@@ -5,10 +5,10 @@
  * This gives access to page-level JS properties like __reactFiber$, __vue__, etc.
  *
  * Communication: CustomEvent-based RPC with the content script.
- * - Content script dispatches "dmx-bridge-req" with { id, method, selector, ... }
- * - Bridge dispatches "dmx-bridge-res" with { id, result, error }
+ * - Content script dispatches "dmx_bridge_req" with { id, method, selector, ... }
+ * - Bridge dispatches "dmx_bridge_res" with { id, result, error }
  *
- * Element targeting: Content script stamps data-dmx-target on elements,
+ * Element targeting: Content script stamps data_dmx_target on elements,
  * bridge queries by that attribute selector.
  *
  * Source map symbolication: When _debugSource is unavailable (production builds),
@@ -52,20 +52,20 @@
 
   function sendResponse(id: string, result: any, error: string | null) {
     document.dispatchEvent(
-      new CustomEvent("dmx-bridge-res", {
+      new CustomEvent("dmx_bridge_res", {
         detail: { id, result, error },
       }),
     );
   }
 
-  document.addEventListener("dmx-bridge-req", ((e: CustomEvent) => {
+  document.addEventListener("dmx_bridge_req", ((e: CustomEvent) => {
     const { id, method, selector } = e.detail;
 
     try {
       const el = selector ? document.querySelector(selector) : null;
 
       switch (method) {
-        case "get-react-ancestry": {
+        case "get_react_ancestry": {
           // Async — uses source map resolution when _debugSource is unavailable
           getReactAncestryWithSources(el)
             .then((result) => sendResponse(id, result, null))
@@ -75,7 +75,7 @@
           return; // Don't send synchronous response
         }
 
-        case "get-page-global": {
+        case "get_page_global": {
           const path = e.detail.path as string;
           let result = path.split(".").reduce((o: any, k: string) => o?.[k], window);
           result = JSON.parse(JSON.stringify(result ?? null));
@@ -83,7 +83,7 @@
           return;
         }
 
-        case "get-element-keys": {
+        case "get_element_keys": {
           const result = el
             ? Object.keys(el).filter((k) => k.startsWith("__") || k.startsWith("$"))
             : null;

@@ -213,7 +213,7 @@ const responseParam = z.object({
 // Extension Factory
 // ============================================================================
 
-export default function createDominatrixExtension(): ClaudiaExtension {
+export function createDominatrixExtension(): ClaudiaExtension {
   let ctx: ExtensionContext;
   const clients = new Map<string, ChromeClient>();
   const pendingRequests = new Map<string, PendingRequest>();
@@ -601,3 +601,9 @@ export default function createDominatrixExtension(): ClaudiaExtension {
     },
   };
 }
+
+export default createDominatrixExtension;
+
+// ── Direct execution with HMR ────────────────────────────────
+import { runExtensionHost } from "@claudia/extension-host";
+if (import.meta.main) runExtensionHost(createDominatrixExtension);

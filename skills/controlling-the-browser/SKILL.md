@@ -58,14 +58,14 @@ claudia dominatrix snapshot --scope "#main"  # Scope to CSS selector
 claudia dominatrix snapshot --sources        # Include React component source info
 
 # Content extraction
-claudia dominatrix get-text               # Page innerText (plain text, most efficient)
-claudia dominatrix get-text --ref @e5     # Text of specific element
-claudia dominatrix get-markdown           # Page as Markdown
-claudia dominatrix get-markdown --ref @e5 # Markdown of specific element
-claudia dominatrix get-url                # Current URL
-claudia dominatrix get-title              # Page title
-claudia dominatrix get-html               # Full page HTML
-claudia dominatrix get-html --selector "div.main"  # Scoped HTML
+claudia dominatrix get_text               # Page innerText (plain text, most efficient)
+claudia dominatrix get_text --ref @e5     # Text of specific element
+claudia dominatrix get_markdown           # Page as Markdown
+claudia dominatrix get_markdown --ref @e5 # Markdown of specific element
+claudia dominatrix get_url                # Current URL
+claudia dominatrix get_title              # Page title
+claudia dominatrix get_html               # Full page HTML
+claudia dominatrix get_html --selector "div.main"  # Scoped HTML
 ```
 
 ### Interaction (ref-based — preferred)
@@ -90,11 +90,11 @@ claudia dominatrix select --ref @e5 --value "option-1"
 ### Semantic Find (locate + act in one call)
 
 ```bash
-claudia dominatrix find-text --text "Posts" --perform click
-claudia dominatrix find-text --text "Email" --perform fill --value "user@example.com"
-claudia dominatrix find-label --label "Password" --perform fill --value "secret"
-claudia dominatrix find-role --role button --name "Submit" --perform click
-claudia dominatrix find-placeholder --placeholder "Search..." --perform fill --value "query"
+claudia dominatrix find_text --text "Posts" --perform click
+claudia dominatrix find_text --text "Email" --perform fill --value "user@example.com"
+claudia dominatrix find_label --label "Password" --perform fill --value "secret"
+claudia dominatrix find_role --role button --name "Submit" --perform click
+claudia dominatrix find_placeholder --placeholder "Search..." --perform fill --value "query"
 ```
 
 ### Navigation & Scrolling
@@ -102,27 +102,27 @@ claudia dominatrix find-placeholder --placeholder "Search..." --perform fill --v
 ```bash
 claudia dominatrix navigate --url "https://example.com"
 
-claudia dominatrix scroll-down --value 500      # Scroll down 500px (default: 300)
-claudia dominatrix scroll-up --value 300         # Scroll up
-claudia dominatrix scroll-to --ref @e5           # Scroll element into view
-claudia dominatrix scroll-to --position top      # Scroll to top
-claudia dominatrix scroll-to --position bottom   # Scroll to bottom
+claudia dominatrix scroll_down --value 500      # Scroll down 500px (default: 300)
+claudia dominatrix scroll_up --value 300         # Scroll up
+claudia dominatrix scroll_to --ref @e5           # Scroll element into view
+claudia dominatrix scroll_to --position top      # Scroll to top
+claudia dominatrix scroll_to --position bottom   # Scroll to bottom
 ```
 
 ### Wait
 
 ```bash
-claudia dominatrix wait-for-element --selector "div.loaded"  # Wait for element
-claudia dominatrix wait-for-text --text "Success"            # Wait for text to appear
-claudia dominatrix wait-for-url --pattern "**/posts"         # Wait for URL change
+claudia dominatrix wait_for_element --selector "div.loaded"  # Wait for element
+claudia dominatrix wait_for_text --text "Success"            # Wait for text to appear
+claudia dominatrix wait_for_url --pattern "**/posts"         # Wait for URL change
 claudia dominatrix wait --ms 2000                            # Wait milliseconds
 ```
 
 ### React Source Inspection
 
 ```bash
-claudia dominatrix get-source --ref @e12             # Component ancestry + source for element
-claudia dominatrix get-source --selector ".my-button" # Same, via CSS selector
+claudia dominatrix get_source --ref @e12             # Component ancestry + source for element
+claudia dominatrix get_source --selector ".my-button" # Same, via CSS selector
 ```
 
 ### Debugging
@@ -130,10 +130,10 @@ claudia dominatrix get-source --selector ".my-button" # Same, via CSS selector
 ```bash
 claudia dominatrix exec --script "document.title = 'hi'"     # Execute JS
 claudia dominatrix eval --expression "document.title"         # Evaluate JS
-claudia dominatrix get-console                                # Console logs
-claudia dominatrix get-network                                # Network requests
-claudia dominatrix get-storage                                # localStorage/sessionStorage
-claudia dominatrix get-cookies                                # Cookies
+claudia dominatrix get_console                                # Console logs
+claudia dominatrix get_network                                # Network requests
+claudia dominatrix get_storage                                # localStorage/sessionStorage
+claudia dominatrix get_cookies                                # Cookies
 claudia dominatrix screenshot                                 # Screenshot as PNG data URL
 ```
 
@@ -143,7 +143,7 @@ Map DOM elements back to React component source files. Works on any React dev ap
 
 ```bash
 # Get source for a specific element
-claudia dominatrix get-source --ref @e12
+claudia dominatrix get_source --ref @e12
 # Returns: component name, file path, line number, full ancestry chain
 
 # Enriched snapshot with source annotations
@@ -156,7 +156,7 @@ claudia dominatrix snapshot --sources
 
 1. `claudia dominatrix snapshot --sources` — see elements with component names
 2. Identify the problematic element by its ref
-3. `claudia dominatrix get-source --ref @eN` — get full ancestry chain
+3. `claudia dominatrix get_source --ref @eN` — get full ancestry chain
 4. Open the source file and fix the issue
 
 ### Requirements
@@ -171,10 +171,10 @@ claudia dominatrix snapshot --sources
 | -------------------- | -------------------------------------------------- | --------------- |
 | `snapshot`           | **Default** — find interactive elements with @refs | ~200-400 tokens |
 | `snapshot --sources` | Elements + React component names & source files    | ~300-600 tokens |
-| `get-text`           | Quick content reading, search results              | Medium          |
-| `get-markdown`       | Structured content (articles, docs)                | Medium          |
+| `get_text`           | Quick content reading, search results              | Medium          |
+| `get_markdown`       | Structured content (articles, docs)                | Medium          |
 | `snapshot --full`    | Deep DOM inspection (rarely needed)                | ~50,000+ tokens |
-| `get-html`           | Specific element inspection                        | Variable        |
+| `get_html`           | Specific element inspection                        | Variable        |
 | `screenshot`         | Visual verification, layout issues                 | PNG data URL    |
 
 ## Ref Lifecycle
@@ -190,4 +190,4 @@ claudia dominatrix snapshot --sources
 - **CSP bypass**: Script execution uses JailJS (AST interpreter) for sites with strict CSP
 - **Resilient injection**: If the content script isn't loaded (page reload, manual navigation), it's automatically injected on demand
 - **Console/Network**: Collected passively from content script load — retrieve history anytime
-- **Side panel context**: When the Claudia side panel is open, commands without `--tab-id` target that tab
+- **Side panel context**: When the Claudia side panel is open, commands without `--tabId` target that tab

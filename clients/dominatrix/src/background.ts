@@ -303,31 +303,31 @@ class DominatrixBackground {
     switch (action) {
       // --- Content script commands: pass action + params straight through ---
       case "snapshot":
-      case "get-text":
-      case "get-markdown":
-      case "get-url":
-      case "get-title":
-      case "get-html":
-      case "get-source":
+      case "get_text":
+      case "get_markdown":
+      case "get_url":
+      case "get_title":
+      case "get_html":
+      case "get_source":
       case "click":
       case "fill":
       case "check":
       case "uncheck":
       case "select":
-      case "find-text":
-      case "find-label":
-      case "find-role":
-      case "find-placeholder":
-      case "scroll-down":
-      case "scroll-up":
-      case "scroll-to":
-      case "wait-for-element":
-      case "wait-for-text":
+      case "find_text":
+      case "find_label":
+      case "find_role":
+      case "find_placeholder":
+      case "scroll_down":
+      case "scroll_up":
+      case "scroll_to":
+      case "wait_for_element":
+      case "wait_for_text":
       case "wait":
       case "executeScript":
       case "evaluateExpression":
       case "getStorage":
-      case "get-storage":
+      case "get_storage":
         return this.delegateToContentScript(tabId, { ...params, action });
 
       // --- Legacy content script actions ---
@@ -342,16 +342,16 @@ class DominatrixBackground {
         return this.takeScreenshot(tabId);
       case "navigate":
         return this.navigate(tabId, params.url as string);
-      case "get-console":
+      case "get_console":
       case "getConsoleLogs":
         return this.getConsoleLogs(tabId);
-      case "get-network":
+      case "get_network":
       case "listNetworkRequests":
         return this.listNetworkRequests(tabId);
-      case "get-cookies":
+      case "get_cookies":
       case "getCookies":
         return this.getCookies(tabId);
-      case "wait-for-url":
+      case "wait_for_url":
         return this.waitForUrl(
           tabId,
           params.pattern as string,
