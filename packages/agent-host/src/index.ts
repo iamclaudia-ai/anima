@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { SessionHost } from "./session-host";
 import { loadState, saveState } from "./state";
+import { restorePersistedSessions } from "./restore";
 import type { ClientMessage, ResponseMessage, SessionEventMessage } from "./protocol";
 
 const log = createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
@@ -53,6 +54,7 @@ try {
 // Load persisted session registry (for crash recovery)
 const persistedState = loadState();
 log.info("Persisted state loaded", { sessions: persistedState.sessions.length });
+await restorePersistedSessions(sessionHost, persistedState, log);
 
 // ── WebSocket Client Tracking ────────────────────────────────
 

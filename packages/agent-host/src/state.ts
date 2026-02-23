@@ -15,9 +15,10 @@ import { homedir } from "node:os";
 import { createLogger } from "@claudia/shared";
 import type { SessionRecord } from "./session-host";
 
-const log = createLogger("State", join(homedir(), ".claudia", "logs", "agent-host.log"));
+const homeDir = process.env.HOME ?? homedir();
+const log = createLogger("State", join(homeDir, ".claudia", "logs", "agent-host.log"));
 
-const STATE_DIR = join(homedir(), ".claudia", "agent-host");
+const STATE_DIR = join(homeDir, ".claudia", "agent-host");
 const STATE_FILE = join(STATE_DIR, "sessions.json");
 
 export interface PersistedState {
