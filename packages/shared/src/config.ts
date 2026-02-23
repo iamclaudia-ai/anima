@@ -46,8 +46,6 @@ export interface ExtensionConfig {
 export type ExtensionsConfig = Record<string, ExtensionConfig>;
 
 export interface AgentHostConfig {
-  /** Enable agent-host mode (session extension proxies to agent-host server) */
-  enabled: boolean;
   /** Agent-host WebSocket URL */
   url: string;
   /** Agent-host HTTP port (for watchdog health checks) */
@@ -91,7 +89,6 @@ const DEFAULT_CONFIG: ClaudiaConfig = {
   },
   extensions: {},
   agentHost: {
-    enabled: false,
     url: "ws://localhost:30087/ws",
     port: 30087,
   },
