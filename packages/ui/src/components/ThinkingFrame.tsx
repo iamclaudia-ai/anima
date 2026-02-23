@@ -34,29 +34,74 @@ function randomStyle(): StyleTypes {
 type ThinkingFrameProps = {
   count: number;
   className?: string;
+  isActive?: boolean; // Whether turn is currently active
+  inactivityTimeout?: number; // MS to wait before going dark (default 60s)
 };
 
-export default function ThinkingFrame({ count, className }: ThinkingFrameProps) {
+export default function ThinkingFrame({
+  count,
+  className,
+  isActive = true,
+  inactivityTimeout = 60000,
+}: ThinkingFrameProps) {
   const baseRef = useRef(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Effect 1: Set random colors when stream events come in
   useEffect(() => {
     if (!baseRef.current || count === 0) return;
     const svg = baseRef.current as SVGElement;
+
+    // Set random colors for all segments
     for (let i = 1; i <= 7; i++) {
       updateStyle(svg, i, randomStyle());
     }
-  }, [count]);
 
+    // Clear any existing inactivity timer
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Start new inactivity timer - go dark after timeout if no new events
+    if (isActive) {
+      timerRef.current = setTimeout(() => {
+        if (baseRef.current) {
+          const svg = baseRef.current as SVGElement;
+          for (let i = 1; i <= 7; i++) {
+            updateStyle(svg, i, "none");
+          }
+        }
+      }, inactivityTimeout);
+    }
+  }, [count, isActive, inactivityTimeout]);
+
+  // Effect 2: Clean up on unmount or when turn becomes inactive
   useEffect(() => {
-    if (!baseRef.current) return;
-    const svg = baseRef.current as SVGElement;
-    const timer = setTimeout(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Effect 3: Immediately go dark when turn becomes inactive
+  useEffect(() => {
+    if (!isActive && baseRef.current) {
+      // Clear any pending timer
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+
+      // Set all segments to dark
+      const svg = baseRef.current as SVGElement;
       for (let i = 1; i <= 7; i++) {
         updateStyle(svg, i, "none");
       }
-    }, 1000);
-    return () => clearTimeout(timer);
-  });
+    }
+  }, [isActive]);
 
   return (
     <svg viewBox="0 0 450 450" className={className} ref={baseRef}>

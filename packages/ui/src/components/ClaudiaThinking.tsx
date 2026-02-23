@@ -9,9 +9,17 @@ interface ClaudiaThinkingProps {
   count?: number;
   size?: "sm" | "md" | "lg";
   speed?: number;
+  isActive?: boolean;
+  inactivityTimeout?: number;
 }
 
-export function ClaudiaThinking({ count = 0, size = "md", speed = 2 }: ClaudiaThinkingProps) {
+export function ClaudiaThinking({
+  count = 0,
+  size = "md",
+  speed = 2,
+  isActive = true,
+  inactivityTimeout = 60000,
+}: ClaudiaThinkingProps) {
   const adjustedCount = Math.floor(count / speed);
   const sizeClasses = {
     sm: "w-12 h-12",
@@ -23,6 +31,8 @@ export function ClaudiaThinking({ count = 0, size = "md", speed = 2 }: ClaudiaTh
     <div className="flex items-center justify-center">
       <ThinkingFrame
         count={adjustedCount}
+        isActive={isActive}
+        inactivityTimeout={inactivityTimeout}
         className={`${sizeClasses[size]} transition-opacity duration-100`}
       />
     </div>

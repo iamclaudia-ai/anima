@@ -175,7 +175,7 @@ function ChatInner({
             leaveTo="opacity-0 translate-y-2 scale-95"
           >
             <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
-              <ClaudiaThinking count={gateway.eventCount} size="lg" />
+              <ClaudiaThinking count={gateway.eventCount} size="lg" isActive={gateway.isQuerying} />
             </div>
           </Transition>
         )}
