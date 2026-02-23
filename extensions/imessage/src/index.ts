@@ -284,14 +284,14 @@ export function createIMessageExtension(config: IMessageConfig = {}): ClaudiaExt
       // Ensure we have a session
       if (!currentSessionId) {
         const cwd = cfg.workspaceCwd || process.cwd();
-        await ctx!.call("session.get_or_create_workspace", { cwd });
-        const created = (await ctx!.call("session.create_session", { cwd })) as {
+        await ctx!.call("session.get-or-create-workspace", { cwd });
+        const created = (await ctx!.call("session.create-session", { cwd })) as {
           sessionId: string;
         };
         currentSessionId = created.sessionId;
       }
 
-      const result = (await ctx!.call("session.send_prompt", {
+      const result = (await ctx!.call("session.send-prompt", {
         sessionId: currentSessionId,
         content,
         streaming: false,

@@ -105,10 +105,10 @@ class LibbySession {
     await this.close(); // Clean up any existing session
 
     // Get or create Libby's workspace
-    await this.ctx.call("session.get_or_create_workspace", { cwd: LIBBY_CWD });
+    await this.ctx.call("session.get-or-create-workspace", { cwd: LIBBY_CWD });
 
     // Create a session
-    const result = (await this.ctx.call("session.create_session", { cwd: LIBBY_CWD })) as {
+    const result = (await this.ctx.call("session.create-session", { cwd: LIBBY_CWD })) as {
       sessionId: string;
     };
     this._sessionId = result.sessionId;
@@ -117,7 +117,7 @@ class LibbySession {
     // Send system prompt as first message
     const initPrompt = `${SYSTEM_PROMPT}\n\n---\n\nYou are now ready to process conversation transcripts. For each transcript I send, use your tools to write memories to ~/memory/, then respond with a SUMMARY or SKIP line.\n\nRespond with "ready" to confirm you understand.`;
 
-    await this.ctx.call("session.send_prompt", {
+    await this.ctx.call("session.send-prompt", {
       sessionId: this._sessionId,
       content: initPrompt,
       streaming: false,
@@ -144,7 +144,7 @@ class LibbySession {
 
     this.promptCount++;
 
-    const result = (await this.ctx.call("session.send_prompt", {
+    const result = (await this.ctx.call("session.send-prompt", {
       sessionId: this._sessionId,
       content,
       streaming: false,
@@ -161,7 +161,7 @@ class LibbySession {
   async close(): Promise<void> {
     if (this._sessionId) {
       try {
-        await this.ctx.call("session.close_session", { sessionId: this._sessionId });
+        await this.ctx.call("session.close-session", { sessionId: this._sessionId });
       } catch {
         // Session may already be closed
       }
