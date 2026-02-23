@@ -284,7 +284,7 @@ export function MissionControlPage() {
     try {
       // Step 1: Discover extensions
       const { extensions } = await request<{ extensions: ExtensionInfo[] }>(
-        "gateway.list-extensions",
+        "gateway.list_extensions",
       );
 
       // Step 2: Filter for health-check capable extensions

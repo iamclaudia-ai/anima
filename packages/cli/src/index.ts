@@ -482,7 +482,7 @@ async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
     const reqId = generateId();
 
     ws.onopen = () => {
-      const msg: Message = { type: "req", id: reqId, method: "gateway.list-methods", params: {} };
+      const msg: Message = { type: "req", id: reqId, method: "gateway.list_methods", params: {} };
       ws.send(JSON.stringify(msg));
     };
 
@@ -493,7 +493,7 @@ async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
 
         if (!msg.ok) {
           ws.close();
-          reject(new Error(msg.error || "gateway.list-methods failed"));
+          reject(new Error(msg.error || "gateway.list_methods failed"));
           return;
         }
 
@@ -517,7 +517,7 @@ async function invokeMethod(method: string, params: Record<string, unknown>): Pr
 
   return new Promise((resolve, reject) => {
     const reqId = generateId();
-    const streamPrompt = method === "session.send-prompt";
+    const streamPrompt = method === "session.send_prompt";
     let gotFinalStreamEvent = false;
     let gotResponse = false;
 
@@ -679,7 +679,7 @@ async function promptCompat(args: string[]): Promise<void> {
 
   ws.onopen = () => {
     sendRequest("gateway.subscribe", { events: ["session.*"] });
-    sendRequest("session.get-or-create-workspace", { cwd: process.cwd() });
+    sendRequest("session.get_or_create_workspace", { cwd: process.cwd() });
   };
 
   ws.onmessage = (event) => {
@@ -690,24 +690,24 @@ async function promptCompat(args: string[]): Promise<void> {
       if (msg.id) pendingMethods.delete(msg.id);
       const payload = (msg.payload || {}) as Record<string, unknown>;
 
-      if (method === "session.get-or-create-workspace") {
+      if (method === "session.get_or_create_workspace") {
         // Workspace exists, now find sessions
-        sendRequest("session.list-sessions", { cwd: process.cwd() });
+        sendRequest("session.list_sessions", { cwd: process.cwd() });
         return;
       }
 
-      if (method === "session.list-sessions") {
+      if (method === "session.list_sessions") {
         const sessions = payload.sessions as { sessionId: string }[] | undefined;
         if (sessions && sessions.length > 0) {
           sessionRecordId = sessions[0].sessionId;
           console.error(`[session] Reusing ${sessionRecordId}`);
         } else {
-          sendRequest("session.create-session", { cwd: process.cwd() });
+          sendRequest("session.create_session", { cwd: process.cwd() });
           return;
         }
       }
 
-      if (method === "session.create-session") {
+      if (method === "session.create_session") {
         const sid = payload.sessionId as string | undefined;
         if (sid) {
           sessionRecordId = sid;
@@ -716,10 +716,10 @@ async function promptCompat(args: string[]): Promise<void> {
       }
 
       if (
-        (method === "session.list-sessions" || method === "session.create-session") &&
+        (method === "session.list_sessions" || method === "session.create_session") &&
         sessionRecordId
       ) {
-        sendRequest("session.send-prompt", {
+        sendRequest("session.send_prompt", {
           sessionId: sessionRecordId,
           content: prompt,
         });

@@ -80,7 +80,7 @@ export interface MemoryConfig {
   minConversationMessages?: number;
   /** Timezone for Libby's transcript formatting (default: America/New_York) */
   timezone?: string;
-  /** Model for Libby to use via session.send-prompt (default: claude-sonnet-4-6) */
+  /** Model for Libby to use via session.send_prompt (default: claude-sonnet-4-6) */
   model?: string;
   /** Max conversations per memory.process invocation (default: 10) */
   processBatchSize?: number;
