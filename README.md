@@ -10,39 +10,45 @@ A personal AI assistant platform built around Claude Code CLI. One gateway, one 
 
 Claudia is a gateway-centric platform for interacting with Claude through any interface you want — web browser, CLI, iOS, macOS menubar, VS Code, iMessage, and voice. Instead of wrapping the CLI for remote control, Claudia's gateway **is** the control plane. Sessions can be created from any client, anywhere.
 
-**Port 30086** — SHA256("Claudia") = `7586...` = `30086`
+**Ports:**
+
+- **30086** — Gateway (SHA256("Claudia") = `7586...`)
+- **30087** — Agent Host (SDK process isolation)
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│              Gateway (port 30086)                         │
+│                Watchdog (port 30085)                     │
 │                                                          │
-│  Bun.serve:                                              │
-│    /ws  → WebSocket (all client communication)           │
-│    /*   → Web UI (SPA shell + extension pages)           │
-│                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │   Session    │  │   Event      │  │   Extension    │  │
-│  │   Manager    │  │   Bus        │  │   System       │  │
-│  │  (SQLite)    │  │  (WS pub/sub)│  │  (pluggable)   │  │
-│  └──────────────┘  └──────────────┘  └────────────────┘  │
-│                          │                                │
-│         ┌────────────────┼────────────────┐               │
-│         │                │                │               │
-│    ┌────┴────┐     ┌─────┴─────┐    ┌─────┴─────┐        │
-│    │  Chat   │     │   Voice   │    │ iMessage  │        │
-│    │  ext    │     │   ext     │    │   ext     │        │
-│    └─────────┘     └───────────┘    └───────────┘        │
+│  ┌────────────────────┐  ┌──────────────────────────┐   │
+│  │   Agent Host       │  │   Gateway (30086)        │   │
+│  │   (port 30087)     │  │                          │   │
+│  │                    │  │  Bun.serve:              │   │
+│  │  SDK Sessions:     │  │    /ws  → WebSocket      │   │
+│  │  ├─ Claude query() │  │    /*   → Web UI         │   │
+│  │  └─ Codex Thread   │  │                          │   │
+│  │                    │  │  Extensions (NDJSON):    │   │
+│  │  Ring buffers for  │  │  ├─ session ──┐          │   │
+│  │  reconnection      │  │  ├─ voice     │          │   │
+│  └─────────▲──────────┘  │  └─ chat      │          │   │
+│            │             └────────────────┼──────────┘   │
+│            │ WebSocket                    │              │
+│            └──────────────────────────────┘              │
 └──────────────────────────────────────────────────────────┘
-         │ WebSocket (ws://localhost:30086/ws)
-    ┌────┼─────────┬──────────┬──────────┐
-    │    │         │          │          │
- ┌──┴──┐ ┌──┴──┐ ┌──┴──┐ ┌───┴───┐ ┌───┴───┐
- │ Web │ │ CLI │ │ 💋  │ │  iOS  │ │VS Code│
- │ UI  │ │     │ │Menu │ │  App  │ │  ext  │
- └─────┘ └─────┘ └─────┘ └───────┘ └───────┘
+                   │ WebSocket (ws://localhost:30086/ws)
+              ┌────┼─────────┬──────────┬──────────┐
+              │    │         │          │          │
+           ┌──┴──┐ ┌──┴──┐ ┌──┴──┐ ┌───┴───┐ ┌───┴───┐
+           │ Web │ │ CLI │ │ 💋  │ │  iOS  │ │VS Code│
+           │ UI  │ │     │ │Menu │ │  App  │ │  ext  │
+           └─────┘ └─────┘ └─────┘ └───────┘ └───────┘
 ```
 
-Server extensions run in separate extension-host child processes and are loaded dynamically from `~/.claudia/claudia.json` (`extensions/<id>/src/index.ts`).
+**Process Architecture:**
+
+- **Watchdog** manages gateway and agent-host as direct child processes
+- **Agent-host** owns all SDK processes (Claude, Codex) and survives restarts
+- **Gateway** runs extensions as child processes via NDJSON stdio
+- **Extensions** connect to agent-host via WebSocket for SDK operations
 
 ## Quick Start
 
@@ -90,11 +96,12 @@ Server extension code is config-driven and runs out-of-process by default: gatew
 ```
 claudia/
 ├── packages/
-│   ├── gateway/          # Core server — single port serves everything
-│   ├── runtime/          # Session runtime — dual-engine (CLI subprocess or Agent SDK)
-│   ├── extension-host/   # Generic shim for out-of-process extension processes
+│   ├── gateway/          # Event bus + extension host
+│   ├── agent-host/       # SDK process isolation server (Claude, Codex)
+│   ├── watchdog/         # Process supervisor for gateway + agent-host
+│   ├── extension-host/   # Generic shim for out-of-process extensions
 │   ├── cli/              # Schema-driven CLI with method discovery
-│   ├── shared/           # Shared types, config, and protocol definitions
+│   ├── shared/           # Shared types, config, protocol definitions
 │   ├── ui/               # Shared React components + pushState router
 │   └── memory-mcp/       # MCP server for persistent memory system
 ├── clients/
@@ -102,6 +109,7 @@ claudia/
 │   ├── menubar/          # macOS menubar app (SwiftUI) 💋
 │   └── vscode/           # VS Code extension with sidebar chat
 ├── extensions/
+│   ├── session/          # Session management (thin client to agent-host)
 │   ├── chat/             # Web chat pages (workspaces, sessions, chat)
 │   ├── voice/            # Cartesia TTS + auto-speak + audio store
 │   ├── imessage/         # iMessage bridge + auto-reply
@@ -139,8 +147,9 @@ See the [docs index](./docs/README.md) for a full guide to all documentation, or
 - **Runtime**: [Bun](https://bun.sh)
 - **Language**: TypeScript (strict)
 - **Server**: Bun.serve (HTTP + WebSocket on single port)
+- **Process Management**: Watchdog supervises gateway + agent-host
+- **SDK Isolation**: Agent-host server (WebSocket RPC) owns Claude Agent SDK processes
 - **Database**: SQLite (workspaces + sessions)
-- **Sessions**: Dual-engine — CLI subprocess (stdio pipes) or Agent SDK `query()`, configurable per deployment
 - **TTS**: Cartesia Sonic 3.0 (real-time) + ElevenLabs v3 (pre-generated content)
 - **Router**: Hand-rolled pushState router (~75 lines, zero deps)
 - **Network**: Tailscale for secure remote access

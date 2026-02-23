@@ -2,7 +2,13 @@
 
 ## System Overview
 
-Claudia is a single-tier system: a **Gateway** that routes messages between clients and **Extensions** that contain all business logic. The gateway is a pure hub — it validates, routes, and fans out events but owns no domain logic. Extensions run as separate processes communicating over NDJSON stdio.
+Claudia is a three-tier system:
+
+1. **Watchdog** (port 30085) — Process supervisor
+2. **Agent Host** (port 30087) — SDK process isolation
+3. **Gateway** (port 30086) — Event bus + extension host
+
+The watchdog manages gateway and agent-host as direct child processes. The agent-host owns all SDK processes (Claude `query()`, Codex `Thread`) and survives gateway/extension restarts. The gateway is a pure event bus that validates, routes, and fans out messages but owns no domain logic. Extensions run as separate processes communicating over NDJSON stdio.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -11,30 +17,32 @@ Claudia is a single-tier system: a **Gateway** that routes messages between clie
 └──────────────────────────┬─────────────────────────────────────────┘
                            │ WebSocket (req/res/event protocol)
 ┌──────────────────────────▼─────────────────────────────────────────┐
-│                    Gateway (port 30086)                             │
+│                      Watchdog (port 30085)                          │
 │                                                                    │
-│  Bun.serve:                                                        │
-│    /ws      → WebSocket (all client communication)                 │
-│    /health  → JSON status endpoint                                 │
-│    /*       → SPA (web UI + extension pages)                       │
-│                                                                    │
-│  ┌──────────────────┐  ┌──────────────────┐                        │
-│  │  Event Bus        │  │  Extension       │                        │
-│  │  (sub-based WS,   │  │  Manager         │                        │
-│  │   pattern-based   │  │  (method/event   │                        │
-│  │   extensions)     │  │   routing,       │                        │
-│  │                   │  │   ctx.call hub)  │                        │
-│  └──────────────────┘  └──────────────────┘                        │
-└────────┬───────────┬───────────┬───────────┬───────────────────────┘
-         │           │           │           │  NDJSON stdio
-    ┌────▼───┐  ┌────▼───┐  ┌───▼────┐  ┌───▼────┐
-    │session │  │ voice  │  │  chat  │  │  ...   │
-    │        │  │        │  │        │  │        │
-    │SDK     │  │Cartesia│  │Web     │  │hooks,  │
-    │engine, │  │TTS,    │  │pages,  │  │imsg,   │
-    │CRUD,   │  │stream  │  │routes  │  │memory, │
-    │history │  │audio   │  │        │  │ctrl   │
-    └────────┘  └────────┘  └────────┘  └────────┘
+│  ┌─────────────────────────┐  ┌──────────────────────────────────┐ │
+│  │   Agent Host (30087)    │  │      Gateway (30086)             │ │
+│  │                         │  │                                  │ │
+│  │  SDK Sessions:          │  │  Bun.serve:                      │ │
+│  │  ├─ Claude query()      │  │    /ws      → WebSocket          │ │
+│  │  └─ Codex Thread        │  │    /health  → Status             │ │
+│  │                         │  │    /*       → SPA                │ │
+│  │  Event Buffers          │  │                                  │ │
+│  │  (ring, seq numbers)    │  │  ┌──────────┐  ┌──────────────┐  │ │
+│  │                         │  │  │Event Bus │  │  Extension   │  │ │
+│  │  WebSocket Server       │  │  │(WS pub/  │  │  Manager     │  │ │
+│  └─────────▲───────────────┘  │  │ sub)     │  │  (routing)   │  │ │
+│            │                  │  └──────────┘  └──────────────┘  │ │
+│            │ WebSocket (RPC)  └────┬───────────┬───────────┬─────┘ │
+│            └───────────────────────┘           │           │       │
+└────────────────────────────────────────────────┼───────────┼───────┘
+                                        NDJSON stdio        │
+                                    ┌───▼────┐  ┌───▼────┐  ┌──▼────┐
+                                    │session │  │ voice  │  │  ...  │
+                                    │        │  │        │  │       │
+                                    │WS proxy│  │Cartesia│  │hooks, │
+                                    │to agent│  │TTS,    │  │imsg,  │
+                                    │host    │  │stream  │  │memory │
+                                    └────────┘  └────────┘  └───────┘
 ```
 
 ## Gateway (port 30086)
