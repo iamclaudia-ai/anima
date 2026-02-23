@@ -15,6 +15,7 @@ When asking Cody to write tests, always include these instructions:
   - Need clarification from Claudia or the human
 
 Example prompt:
+
 ```
 Fix the tests in [file]. After writing your fixes, run the tests with 'bun test [file]' and keep iterating until ALL tests pass. If you can't get them to pass due to actual code issues (not test mocking issues), document the blocker clearly.
 ```

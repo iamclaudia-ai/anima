@@ -48,17 +48,17 @@ describe("session extension", () => {
   beforeEach(() => {
     homedirSpy = spyOn(os, "homedir").mockReturnValue(testHome);
     emitEventSpy = spyOn(AgentHostClient.prototype, "emit");
-    connectSpy = spyOn(AgentHostClient.prototype, "connect").mockImplementation(function (
-      this: AgentHostClient,
-    ) {
-      (this as unknown as { _isConnected: boolean })._isConnected = true;
-      return Promise.resolve();
-    });
-    disconnectSpy = spyOn(AgentHostClient.prototype, "disconnect").mockImplementation(function (
-      this: AgentHostClient,
-    ) {
-      (this as unknown as { _isConnected: boolean })._isConnected = false;
-    });
+    connectSpy = spyOn(AgentHostClient.prototype, "connect").mockImplementation(
+      function (this: AgentHostClient) {
+        (this as unknown as { _isConnected: boolean })._isConnected = true;
+        return Promise.resolve();
+      },
+    );
+    disconnectSpy = spyOn(AgentHostClient.prototype, "disconnect").mockImplementation(
+      function (this: AgentHostClient) {
+        (this as unknown as { _isConnected: boolean })._isConnected = false;
+      },
+    );
     createSpy = spyOn(AgentHostClient.prototype, "createSession").mockResolvedValue({
       sessionId: "created-session-1",
     });

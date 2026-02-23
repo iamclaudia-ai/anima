@@ -71,9 +71,19 @@ describe("restorePersistedSessions", () => {
 
     const hostA = new SessionHost({
       create: (options) =>
-        new FakeSession(`s${nextId++}`, options.cwd, options.model ?? "default", prompted) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        new FakeSession(
+          `s${nextId++}`,
+          options.cwd,
+          options.model ?? "default",
+          prompted,
+        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
       resume: (sessionId, options) =>
-        new FakeSession(sessionId, options.cwd, options.model ?? "default", prompted) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        new FakeSession(
+          sessionId,
+          options.cwd,
+          options.model ?? "default",
+          prompted,
+        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
     });
 
     const { sessionId } = await hostA.create({ cwd: "/repo", model: "sonnet" });
@@ -81,9 +91,19 @@ describe("restorePersistedSessions", () => {
 
     const hostB = new SessionHost({
       create: (options) =>
-        new FakeSession(`s${nextId++}`, options.cwd, options.model ?? "default", prompted) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        new FakeSession(
+          `s${nextId++}`,
+          options.cwd,
+          options.model ?? "default",
+          prompted,
+        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
       resume: (sessionId, options) =>
-        new FakeSession(sessionId, options.cwd, options.model ?? "default", prompted) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        new FakeSession(
+          sessionId,
+          options.cwd,
+          options.model ?? "default",
+          prompted,
+        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
     });
 
     const state = mod.loadState();

@@ -1,22 +1,24 @@
-import type { EventEmitter } from "node:events";
 import { createLogger, loadConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { SessionHost, type SessionDefaults, type SessionRecord } from "./session-host";
+import {
+  SessionHost,
+  type SessionCreateParams,
+  type SessionDefaults,
+  type SessionRecord,
+  type SessionResumeParams,
+} from "./session-host";
 import { loadState, saveState, type PersistedState } from "./state";
 import { restorePersistedSessions } from "./restore";
 import type { BufferedEvent } from "./event-buffer";
 import type { ClientMessage, ResponseMessage, SessionEventMessage } from "./protocol";
+import type { ThinkingEffort } from "@claudia/shared";
 
-export interface SessionHostLike extends EventEmitter {
+export interface SessionHostLike {
+  on: (eventName: "session.event", listener: (msg: SessionEventMessage) => void) => unknown;
   setDefaults: (defaults: SessionDefaults) => void;
-  create: (params: {
-    cwd: string;
-    model?: string;
-    systemPrompt?: string;
-    thinking?: boolean;
-    effort?: string;
-  }) => Promise<{ sessionId: string }>;
+  create: (params: SessionCreateParams) => Promise<{ sessionId: string }>;
+  resume: (params: SessionResumeParams) => Promise<{ sessionId: string }>;
   prompt: (sessionId: string, content: string | unknown[], cwd?: string) => Promise<void> | void;
   interrupt: (sessionId: string) => boolean;
   close: (sessionId: string) => Promise<void>;
@@ -64,7 +66,8 @@ export async function createAgentHostServer(
 ): Promise<AgentHostServerContext> {
   const port = options.port ?? 30087;
   const log =
-    options.logger ?? createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
+    options.logger ??
+    createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
   const sessionHost = options.sessionHost ?? new SessionHost();
   const loadConfigFn = options.loadConfig ?? loadConfig;
   const loadStateFn = options.loadState ?? loadState;
@@ -185,7 +188,7 @@ export async function createAgentHostServer(
               model?: string;
               systemPrompt?: string;
               thinking?: boolean;
-              effort?: "low" | "medium" | "high" | "max";
+              effort?: ThinkingEffort;
             },
           );
 
@@ -291,7 +294,12 @@ export async function createAgentHostServer(
       }
 
       case "session.send_tool_result": {
-        const ok = sessionHost.sendToolResult(msg.sessionId, msg.toolUseId, msg.content, msg.isError);
+        const ok = sessionHost.sendToolResult(
+          msg.sessionId,
+          msg.toolUseId,
+          msg.content,
+          msg.isError,
+        );
         sendResponse(ws, {
           type: "res",
           requestId: msg.requestId,

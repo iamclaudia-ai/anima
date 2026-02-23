@@ -253,10 +253,9 @@ describe("agent-host server", () => {
       params: { cwd: "/repo" },
     });
 
-    const res = await clientA.waitFor(
-      (msg) => msg.type === "res" && msg.requestId === "req-1",
-    );
-    const sessionId = String(res.payload?.sessionId);
+    const res = await clientA.waitFor((msg) => msg.type === "res" && msg.requestId === "req-1");
+    const payload = (res.payload ?? {}) as { sessionId?: string };
+    const sessionId = String(payload.sessionId);
 
     const eventMsg: SessionEventMessage = {
       type: "session.event",
@@ -266,9 +265,7 @@ describe("agent-host server", () => {
     };
     fakeHost.emit("session.event", eventMsg);
 
-    await clientA.waitFor(
-      (msg) => msg.type === "session.event" && msg.sessionId === sessionId,
-    );
+    await clientA.waitFor((msg) => msg.type === "session.event" && msg.sessionId === sessionId);
 
     await Bun.sleep(100);
     const bEvents = clientB

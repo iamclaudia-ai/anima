@@ -1,7 +1,11 @@
 import type { PersistedState } from "./state";
 
 type SessionResumer = {
-  resume: (params: { sessionId: string; cwd: string; model?: string }) => Promise<{ sessionId: string }>;
+  resume: (params: {
+    sessionId: string;
+    cwd: string;
+    model?: string;
+  }) => Promise<{ sessionId: string }>;
 };
 
 type RestoreLogger = {

@@ -27,11 +27,7 @@ async function getFreePort(): Promise<number> {
   });
 }
 
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 5000,
-  stepMs = 10,
-): Promise<void> {
+async function waitFor(predicate: () => boolean, timeoutMs = 5000, stepMs = 10): Promise<void> {
   const start = Date.now();
   while (!predicate() && Date.now() - start < timeoutMs) {
     await Bun.sleep(stepMs);
@@ -149,7 +145,7 @@ describe("AgentHostClient", () => {
       },
       websocket: {
         open(ws) {
-          latestWs = ws;
+          latestWs = ws as unknown as { send: (data: string) => void; close: () => void };
         },
         message(ws, message) {
           const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
@@ -178,7 +174,7 @@ describe("AgentHostClient", () => {
     await client.connect();
     await client.createSession({ cwd: "/repo" });
 
-    latestWs?.send(
+    (latestWs as { send: (data: string) => void } | null)?.send(
       JSON.stringify({
         type: "session.event",
         sessionId: "s1",
@@ -188,7 +184,7 @@ describe("AgentHostClient", () => {
     );
 
     await waitFor(() => events.length === 1);
-    latestWs?.close();
+    (latestWs as { close: () => void } | null)?.close();
 
     await waitFor(() => auths.length >= 2, 5000);
     const resume = auths[1].resumeSessions as Array<{ sessionId: string; lastSeq: number }>;

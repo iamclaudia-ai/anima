@@ -39,7 +39,8 @@ describe("SessionHost", () => {
   it("cleans up event buffers when a session closes", async () => {
     const fake = new FakeSession("s-cleanup");
     const host = new SessionHost({
-      create: () => fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      create: () =>
+        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
     });
 
     await host.create({ cwd: "/repo" });
@@ -60,7 +61,8 @@ describe("SessionHost", () => {
     };
 
     const host = new SessionHost({
-      create: () => fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      create: () =>
+        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
       resume: (sessionId, options) => {
         resumed.push({ sessionId, options });
         return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
