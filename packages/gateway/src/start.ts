@@ -11,6 +11,7 @@ import {
   getEnabledExtensions,
   createLogger,
   clearConfigCache,
+  loadConfig,
   type ExtensionConfig,
 } from "@claudia/shared";
 import { existsSync, watch } from "node:fs";
@@ -25,6 +26,7 @@ import {
 
 const log = createLogger("Startup", join(homedir(), ".claudia", "logs", "gateway.log"));
 const ROOT_DIR = join(import.meta.dir, "..", "..", "..");
+const config = loadConfig();
 
 /**
  * Kill orphaned extension host processes from previous gateway instances.
@@ -71,6 +73,8 @@ async function killOrphanExtensionHosts(): Promise<void> {
 
 const startedExtensions = new Set<string>();
 const runningExtensions = new Map<string, ExtensionHostProcess>();
+// Track in-progress spawns to prevent concurrent spawns of same extension
+const spawningExtensions = new Map<string, Promise<void>>();
 
 function resolveExtensionEntrypoint(extensionId: string): string | null {
   const entryPath = join(ROOT_DIR, "extensions", extensionId, "src", "index.ts");
@@ -86,68 +90,88 @@ async function spawnOutOfProcessExtension(
   sourceRoutes?: string[],
   hot: boolean = true,
 ): Promise<void> {
+  // Check if already started
   if (startedExtensions.has(id)) {
+    log.info("Extension already started", { id });
     return;
   }
 
-  const moduleSpec = resolveExtensionEntrypoint(id);
-  if (!moduleSpec) {
-    log.warn("Extension entrypoint not found", {
-      id,
-      expected: `extensions/${id}/src/index.ts`,
-    });
+  // Check if currently spawning — wait for existing spawn to complete
+  const existingSpawn = spawningExtensions.get(id);
+  if (existingSpawn) {
+    log.info("Extension spawn already in progress, waiting", { id });
+    await existingSpawn;
     return;
   }
 
-  log.info("Spawning out-of-process extension", { id, module: moduleSpec });
-
-  // ctx.call handler: route calls from this extension through the gateway hub
-  const onCall: OnCallCallback = async (callerExtensionId, method, params, meta) => {
+  // Create spawn promise
+  const spawnPromise = (async () => {
     try {
-      const result = await extensions.handleMethod(
-        method,
-        params,
-        meta.connectionId,
-        {
-          traceId: meta.traceId,
-          depth: meta.depth,
-          deadlineMs: meta.deadlineMs,
-        },
-        meta.tags,
-      );
-      return { ok: true as const, payload: result };
-    } catch (error) {
-      return { ok: false as const, error: String(error) };
-    }
-  };
-
-  const host = new ExtensionHostProcess(
-    id,
-    moduleSpec,
-    config,
-    (type, payload, source, connectionId, tags) =>
-      handleExtensionEvent(type, payload, source || `extension:${id}`, connectionId, tags),
-    (registration: ExtensionRegistration) => {
-      // Allow config-level sourceRoutes to augment extension-declared routes.
-      if (sourceRoutes?.length) {
-        registration.sourceRoutes = Array.from(
-          new Set([...(registration.sourceRoutes || []), ...sourceRoutes]),
-        );
+      const moduleSpec = resolveExtensionEntrypoint(id);
+      if (!moduleSpec) {
+        log.warn("Extension entrypoint not found", {
+          id,
+          expected: `extensions/${id}/src/index.ts`,
+        });
+        return;
       }
-      extensions.registerRemote(registration, host);
-    },
-    onCall,
-    hot,
-  );
 
-  const registration = await host.spawn();
-  log.info("Out-of-process extension ready", {
-    id: registration.id,
-    methods: registration.methods.map((m) => m.name),
-  });
+      log.info("Spawning out-of-process extension", { id, module: moduleSpec });
 
-  startedExtensions.add(id);
-  runningExtensions.set(id, host);
+      // ctx.call handler: route calls from this extension through the gateway hub
+      const onCall: OnCallCallback = async (callerExtensionId, method, params, meta) => {
+        try {
+          const result = await extensions.handleMethod(
+            method,
+            params,
+            meta.connectionId,
+            {
+              traceId: meta.traceId,
+              depth: meta.depth,
+              deadlineMs: meta.deadlineMs,
+            },
+            meta.tags,
+          );
+          return { ok: true as const, payload: result };
+        } catch (error) {
+          return { ok: false as const, error: String(error) };
+        }
+      };
+
+      const host = new ExtensionHostProcess(
+        id,
+        moduleSpec,
+        config,
+        (type, payload, source, connectionId, tags) =>
+          handleExtensionEvent(type, payload, source || `extension:${id}`, connectionId, tags),
+        (registration: ExtensionRegistration) => {
+          // Allow config-level sourceRoutes to augment extension-declared routes.
+          if (sourceRoutes?.length) {
+            registration.sourceRoutes = Array.from(
+              new Set([...(registration.sourceRoutes || []), ...sourceRoutes]),
+            );
+          }
+          extensions.registerRemote(registration, host);
+        },
+        onCall,
+        hot,
+      );
+
+      const registration = await host.spawn();
+      log.info("Out-of-process extension ready", {
+        id: registration.id,
+        methods: registration.methods.map((m) => m.name),
+      });
+
+      startedExtensions.add(id);
+      runningExtensions.set(id, host);
+    } finally {
+      spawningExtensions.delete(id);
+    }
+  })();
+
+  spawningExtensions.set(id, spawnPromise);
+  await spawnPromise;
 }
 
 /**
@@ -209,6 +233,13 @@ async function startExtension(id: string, extensionConfig: ExtensionConfig): Pro
  * Stop a single extension dynamically
  */
 async function stopExtension(id: string): Promise<void> {
+  // Wait for any in-progress spawn to complete
+  const spawning = spawningExtensions.get(id);
+  if (spawning) {
+    log.info("Extension spawn in progress, waiting before stop", { id });
+    await spawning;
+  }
+
   const host = runningExtensions.get(id);
   if (!host) {
     log.warn("Extension not running", { id });
@@ -280,6 +311,39 @@ async function handleConfigChange(): Promise<void> {
 }
 
 /**
+ * Start periodic heartbeat timer for extensions
+ */
+function startHeartbeat(): NodeJS.Timeout | null {
+  const intervalMs = config.gateway.heartbeatIntervalMs || 300000; // Default 5 minutes
+
+  if (intervalMs <= 0) {
+    log.info("Heartbeat disabled (heartbeatIntervalMs <= 0)");
+    return null;
+  }
+
+  log.info("Starting heartbeat timer", { intervalMs: intervalMs / 1000 + "s" });
+
+  const timer = setInterval(async () => {
+    try {
+      await extensions.broadcast({
+        type: "gateway.heartbeat",
+        timestamp: Date.now(),
+        payload: {
+          timestamp: Date.now(),
+          uptime: process.uptime(),
+        },
+        source: "gateway",
+      });
+      log.info("Heartbeat sent to extensions");
+    } catch (error) {
+      log.error("Failed to send heartbeat", { error: String(error) });
+    }
+  }, intervalMs);
+
+  return timer;
+}
+
+/**
  * Start config file watcher for dynamic extension management
  */
 function startConfigWatcher(): void {
@@ -330,5 +394,11 @@ killOrphanExtensionHosts()
 
     // Start config file watcher for dynamic extension management
     startConfigWatcher();
+
+    // Start heartbeat timer for extensions
+    const heartbeatTimer = startHeartbeat();
+    if (heartbeatTimer) {
+      log.info("Extension heartbeat system started");
+    }
   })
   .catch((err) => log.error("Extension startup failed", { error: String(err) }));

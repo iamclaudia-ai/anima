@@ -35,6 +35,7 @@ export function InputArea({
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
+  const hadFocusBeforeDisconnectRef = useRef(false);
   const bridge = useBridge();
 
   // Auto-resize textarea to fit content
@@ -54,16 +55,21 @@ export function InputArea({
     }
   }, []);
 
-  // Restore focus when reconnected (but only if we had focus before)
+  // Restore focus when reconnected (but only if we had focus before disconnect)
   useEffect(() => {
     const el = textareaRef.current;
-    if (isConnected && el && document.activeElement !== el) {
+    if (isConnected && el && hadFocusBeforeDisconnectRef.current && document.activeElement !== el) {
       // Small delay to ensure UI has updated
       setTimeout(() => {
+        // Save the cursor position before focusing
+        const savedPosition = cursorPositionRef.current;
         el.focus();
-        // Restore cursor position if we had one saved
-        if (cursorPositionRef.current) {
-          el.setSelectionRange(cursorPositionRef.current.start, cursorPositionRef.current.end);
+        // Restore cursor position after focus, with another small delay
+        if (savedPosition) {
+          // Use requestAnimationFrame to ensure focus is fully applied
+          requestAnimationFrame(() => {
+            el.setSelectionRange(savedPosition.start, savedPosition.end);
+          });
         }
       }, 50);
     }
@@ -72,12 +78,20 @@ export function InputArea({
   // Save cursor position when connection is lost
   useEffect(() => {
     const el = textareaRef.current;
-    if (!isConnected && el && document.activeElement === el) {
-      // Save current cursor position
-      cursorPositionRef.current = {
-        start: el.selectionStart,
-        end: el.selectionEnd,
-      };
+    if (!isConnected && el) {
+      const hadFocus = document.activeElement === el;
+      hadFocusBeforeDisconnectRef.current = hadFocus;
+
+      if (hadFocus) {
+        // Save current cursor position
+        cursorPositionRef.current = {
+          start: el.selectionStart,
+          end: el.selectionEnd,
+        };
+      }
+    } else if (isConnected) {
+      // Clear the flag when reconnected
+      hadFocusBeforeDisconnectRef.current = false;
     }
   }, [isConnected]);
 
