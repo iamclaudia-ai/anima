@@ -1,0 +1,343 @@
+/**
+ * Memory Extension State Machine (XState)
+ *
+ * Manages the extension lifecycle with automatic crash recovery and state persistence.
+ * State is persisted to SQLite on every transition, allowing recovery after crashes.
+ *
+ * States:
+ * - stopped: Extension is not running
+ * - recovering: Performing crash recovery (rollback stuck files, reset conversations)
+ * - scanning: Running startup scan of watchPath
+ * - startingWatcher: Initializing file watcher
+ * - running: Fully operational, watching files and processing
+ * - stopping: Shutting down cleanly
+ *
+ * The gateway heartbeat (every 60s) sends HEARTBEAT events to update last_heartbeat timestamp.
+ * This is used to detect stale processes on startup.
+ */
+
+import { setup, assign, fromPromise } from "xstate";
+import type { ExtensionContext } from "@claudia/shared";
+import { existsSync } from "node:fs";
+import {
+  getDb,
+  getProcessingConversations,
+  resetConversationToQueued,
+  queueConversations,
+  markConversationsReady,
+} from "./db";
+import { recoverStuckFiles, ingestDirectory, type IngestResult } from "./ingest";
+import { MemoryWatcher } from "./watcher";
+import type { MemoryConfig } from "./index";
+
+// ============================================================================
+// Context & Events
+// ============================================================================
+
+interface MemoryExtensionContext {
+  processId: number;
+  startedAt: string | null;
+  lastHeartbeat: string | null;
+  config: Required<MemoryConfig>;
+  basePath: string;
+  watcher: MemoryWatcher | null;
+  ctx: ExtensionContext | null;
+  fileLog: (level: string, msg: string) => void;
+}
+
+type MemoryExtensionEvent =
+  | { type: "START" }
+  | { type: "RECOVERY_COMPLETE"; recovered: number }
+  | { type: "RECOVERY_FAILED"; error: string }
+  | { type: "SCAN_COMPLETE"; result: IngestResult }
+  | { type: "SCAN_FAILED"; error: string }
+  | { type: "WATCHER_READY" }
+  | { type: "WATCHER_FAILED"; error: string }
+  | { type: "HEARTBEAT" }
+  | { type: "FILE_CHANGED"; filePath: string }
+  | { type: "STOP" }
+  | { type: "CLEANUP_COMPLETE" };
+
+// ============================================================================
+// State Machine Definition
+// ============================================================================
+
+export const memoryExtensionMachine = setup({
+  types: {
+    context: {} as MemoryExtensionContext,
+    events: {} as MemoryExtensionEvent,
+    input: {} as MemoryExtensionContext,
+  },
+  guards: {
+    noRecentRunningInstance: () => {
+      const state = getDb()
+        .query(
+          `SELECT process_id, last_heartbeat,
+                 (julianday('now') - julianday(updated_at)) * 1440 as minutes_since_update
+           FROM memory_state_machines
+           WHERE machine_id = 'extension'`,
+        )
+        .get() as { process_id: number; minutes_since_update: number } | null;
+
+      // Allow start if:
+      // - No previous state, OR
+      // - Last update > 5 min ago (stale), OR
+      // - Different process (previous crashed)
+      return !state || state.minutes_since_update > 5 || state.process_id !== process.pid;
+    },
+  },
+  actions: {
+    recordStartTime: assign({
+      startedAt: () => new Date().toISOString(),
+    }),
+    updateHeartbeat: assign({
+      lastHeartbeat: () => new Date().toISOString(),
+    }),
+    clearState: assign({
+      startedAt: null,
+      lastHeartbeat: null,
+      watcher: null,
+      ctx: null,
+    }),
+    logStateTransition: ({ context, event }) => {
+      context.fileLog("INFO", `[StateMachine] Event: ${event.type}`);
+    },
+  },
+  actors: {
+    performCrashRecovery: fromPromise<number, { context: MemoryExtensionContext }>(
+      async ({ input }) => {
+        const { context } = input;
+        let totalRecovered = 0;
+
+        // Step 1: Rollback stuck files
+        const recovered = recoverStuckFiles(context.config.conversationGapMinutes, context.fileLog);
+        if (recovered > 0) {
+          context.fileLog("INFO", `Crash recovery: rolled back ${recovered} stuck file(s)`);
+          totalRecovered += recovered;
+        }
+
+        // Step 2: Reset stuck conversations
+        const processing = getProcessingConversations();
+        if (processing.length > 0) {
+          for (const conv of processing) {
+            resetConversationToQueued(conv.id);
+          }
+          context.fileLog("INFO", `Reset ${processing.length} conversations stuck in processing`);
+          totalRecovered += processing.length;
+        }
+
+        // Step 3: Clean up stale file locks (older than 5 min)
+        const result = getDb()
+          .query(
+            `DELETE FROM memory_file_locks
+             WHERE datetime(locked_at, '+5 minutes') < datetime('now')`,
+          )
+          .run();
+
+        if (result.changes > 0) {
+          context.fileLog("INFO", `Cleaned up ${result.changes} stale file locks`);
+          totalRecovered += result.changes;
+        }
+
+        return totalRecovered;
+      },
+    ),
+    performStartupScan: fromPromise<IngestResult, { context: MemoryExtensionContext }>(
+      async ({ input }) => {
+        const { context } = input;
+
+        if (!existsSync(context.basePath)) {
+          return {
+            filesProcessed: 0,
+            entriesInserted: 0,
+            entriesDeleted: 0,
+            conversationsUpdated: 0,
+            errors: [],
+          };
+        }
+
+        context.fileLog("INFO", `Startup scan: ${context.basePath}`);
+        const scanResult = ingestDirectory(context.basePath, context.config.conversationGapMinutes);
+
+        if (scanResult.filesProcessed > 0 || scanResult.entriesInserted > 0) {
+          context.fileLog(
+            "INFO",
+            `Startup scan complete: ${scanResult.filesProcessed} files, ${scanResult.entriesInserted} new entries`,
+          );
+        } else {
+          context.fileLog("INFO", "Startup scan complete: no changes");
+        }
+
+        if (scanResult.errors.length > 0) {
+          for (const err of scanResult.errors) {
+            context.fileLog("ERROR", `Startup scan error: ${err}`);
+          }
+        }
+
+        return scanResult;
+      },
+    ),
+    initializeWatcher: fromPromise<void, { context: MemoryExtensionContext }>(async ({ input }) => {
+      const { context } = input;
+
+      if (!context.config.watch) {
+        // Watch disabled, skip to running
+        context.fileLog("INFO", "File watching disabled (watch: false)");
+        return;
+      }
+
+      const watcher = new MemoryWatcher(
+        {
+          basePath: context.basePath,
+          gapMinutes: context.config.conversationGapMinutes,
+        },
+        context.fileLog,
+      );
+
+      watcher.start();
+      context.watcher = watcher;
+      context.ctx?.log.info(`File watcher started on ${context.basePath}`);
+    }),
+  },
+}).createMachine({
+  id: "memoryExtension",
+  initial: "stopped",
+  context: ({ input }) => input,
+  states: {
+    stopped: {
+      on: {
+        START: {
+          target: "recovering",
+          guard: "noRecentRunningInstance",
+          actions: ["recordStartTime", "logStateTransition"],
+        },
+      },
+    },
+    recovering: {
+      entry: "logStateTransition",
+      invoke: {
+        src: "performCrashRecovery",
+        input: ({ context }) => ({ context }),
+        onDone: {
+          target: "scanning",
+          actions: assign({
+            // Recovery complete, log the count
+            startedAt: ({ context, event }) => {
+              if (event.output > 0) {
+                context.fileLog("INFO", `Crash recovery complete: ${event.output} items recovered`);
+              }
+              return context.startedAt;
+            },
+          }),
+        },
+        onError: {
+          target: "stopped",
+          actions: ({ context, event }) => {
+            context.fileLog("ERROR", `Crash recovery failed: ${event.error}`);
+          },
+        },
+      },
+    },
+    scanning: {
+      entry: "logStateTransition",
+      invoke: {
+        src: "performStartupScan",
+        input: ({ context }) => ({ context }),
+        onDone: {
+          target: "startingWatcher",
+        },
+        onError: {
+          target: "stopped",
+          actions: ({ context, event }) => {
+            context.fileLog("ERROR", `Startup scan failed: ${event.error}`);
+          },
+        },
+      },
+    },
+    startingWatcher: {
+      entry: "logStateTransition",
+      invoke: {
+        src: "initializeWatcher",
+        input: ({ context }) => ({ context }),
+        onDone: {
+          target: "running",
+        },
+        onError: {
+          target: "stopped",
+          actions: ({ context, event }) => {
+            context.fileLog("ERROR", `Watcher initialization failed: ${event.error}`);
+          },
+        },
+      },
+    },
+    running: {
+      entry: [
+        "logStateTransition",
+        ({ context }) => {
+          context.ctx?.log.info("Memory extension started");
+          context.fileLog("INFO", "[memory] Memory extension started");
+        },
+      ],
+      on: {
+        HEARTBEAT: {
+          target: "running",
+          actions: [
+            "updateHeartbeat",
+            ({ context }) => {
+              // Mark conversations as ready based on time gap
+              try {
+                const marked = markConversationsReady(context.config.conversationGapMinutes);
+                if (marked > 0) {
+                  context.fileLog("INFO", `Marked ${marked} conversations as ready (heartbeat)`);
+                  context.ctx?.emit("memory.conversation_ready", {
+                    count: marked,
+                  });
+
+                  // Auto-process if enabled
+                  if (context.config.autoProcess) {
+                    const queued = queueConversations(context.config.processBatchSize);
+                    if (queued > 0) {
+                      context.fileLog("INFO", `Auto-queued ${queued} conversations for processing`);
+                      context.ctx?.emit("memory.processing_started", {
+                        count: queued,
+                      });
+                    }
+                  }
+                }
+              } catch (error) {
+                context.fileLog(
+                  "ERROR",
+                  `Heartbeat handler error: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            },
+          ],
+        },
+        STOP: {
+          target: "stopping",
+          actions: "logStateTransition",
+        },
+      },
+    },
+    stopping: {
+      entry: [
+        "logStateTransition",
+        async ({ context }) => {
+          context.ctx?.log.info("Stopping memory extension...");
+
+          // Stop watcher
+          if (context.watcher) {
+            await context.watcher.stop();
+            context.watcher = null;
+          }
+
+          context.fileLog("INFO", "[memory] Memory extension stopped");
+        },
+      ],
+      always: {
+        target: "stopped",
+        actions: "clearState",
+      },
+    },
+  },
+});

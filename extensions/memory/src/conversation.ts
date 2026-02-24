@@ -86,6 +86,7 @@ function segmentByGaps(
  * Rebuild conversation groupings for a source file.
  * Called after ingestion to update conversation boundaries.
  *
+ * Uses database-level advisory locks to prevent concurrent rebuilds of the same file.
  * Scoped to file: only touches conversations for this file.
  * Archived conversations are left untouched.
  */
@@ -94,30 +95,54 @@ export function rebuildConversationsForFile(
   sessionId: string,
   gapMinutes: number,
 ): number {
-  // Get all entries for this file, ordered by timestamp (with size for chunking)
-  const entries = getDb()
+  const db = getDb();
+
+  // Try to acquire advisory lock for this source file
+  const lockAcquired = db
     .query(
-      `SELECT timestamp, length(content) as messageSize FROM memory_transcript_entries
-      WHERE source_file = ?
-      ORDER BY timestamp ASC, id ASC`,
+      `INSERT INTO memory_file_locks (source_file, operation, locked_by_pid, locked_at)
+       VALUES (?, 'rebuilding', ?, datetime('now'))
+       ON CONFLICT(source_file) DO NOTHING
+       RETURNING source_file`,
     )
-    .all(sourceFile) as Array<{ timestamp: string; messageSize: number }>;
+    .get(sourceFile, process.pid);
 
-  if (entries.length === 0) return 0;
-
-  // Delete existing active/ready conversations for this file (re-import safe)
-  deleteActiveConversationsForFile(sourceFile);
-
-  // Segment by time gaps
-  const segments = segmentByGaps(sessionId, sourceFile, entries, gapMinutes);
-
-  // Upsert each segment as a conversation
-  for (const seg of segments) {
-    upsertConversation(seg);
+  if (!lockAcquired) {
+    // Another process is already rebuilding this file
+    throw new Error(
+      `Cannot rebuild conversations for ${sourceFile}: already being rebuilt by another process`,
+    );
   }
 
-  // Mark conversations as ready if their gap has elapsed
-  markConversationsReady(gapMinutes);
+  try {
+    // Get all entries for this file, ordered by timestamp (with size for chunking)
+    const entries = db
+      .query(
+        `SELECT timestamp, length(content) as messageSize FROM memory_transcript_entries
+        WHERE source_file = ?
+        ORDER BY timestamp ASC, id ASC`,
+      )
+      .all(sourceFile) as Array<{ timestamp: string; messageSize: number }>;
 
-  return segments.length;
+    if (entries.length === 0) return 0;
+
+    // Delete existing active/ready conversations for this file (re-import safe)
+    deleteActiveConversationsForFile(sourceFile);
+
+    // Segment by time gaps
+    const segments = segmentByGaps(sessionId, sourceFile, entries, gapMinutes);
+
+    // Upsert each segment as a conversation
+    for (const seg of segments) {
+      upsertConversation(seg);
+    }
+
+    // Mark conversations as ready if their gap has elapsed
+    markConversationsReady(gapMinutes);
+
+    return segments.length;
+  } finally {
+    // Release lock
+    db.query(`DELETE FROM memory_file_locks WHERE source_file = ?`).run(sourceFile);
+  }
 }

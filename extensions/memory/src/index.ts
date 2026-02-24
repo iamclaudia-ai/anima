@@ -10,7 +10,7 @@
  * 1. Connect to DB
  * 2. Scan all JSONL files in watchPath — incremental import (skip unchanged, import new/grown files)
  * 3. Start chokidar watcher for real-time changes
- * 4. Start poll timer for marking conversations as ready
+ * 4. Register gateway.heartbeat handler for marking conversations as ready
  *
  * All files are keyed relative to watchPath, so importing from
  * ~/.claude/projects-backup and watching ~/.claude/projects produce
@@ -27,6 +27,7 @@ import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
+import { createActor, type ActorRefFrom, type SnapshotFrom } from "xstate";
 import {
   getDb,
   closeDb,
@@ -45,6 +46,7 @@ import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import { formatTranscript } from "./transcript-formatter";
 import { LibbyWorker, type LibbyConfig } from "./libby";
+import { memoryExtensionMachine } from "./state-machine";
 
 // ============================================================================
 // File Logging (tail -f ~/.claudia/logs/memory.log)
@@ -70,12 +72,10 @@ function fileLog(level: string, msg: string): void {
 export interface MemoryConfig {
   /** Base directory to watch for JSONL sessions (default: ~/.claude/projects) */
   watchPath?: string;
-  /** Enable file watching + startup scan + poll timer (default: true) */
+  /** Enable file watching + startup scan (default: true) */
   watch?: boolean;
   /** Minutes of silence before a conversation is considered "done" (default: 60) */
   conversationGapMinutes?: number;
-  /** Interval in ms to poll for conversations that became ready (default: 30000) */
-  pollIntervalMs?: number;
   /** Minimum messages in a conversation for Libby to process it (default: 5) */
   minConversationMessages?: number;
   /** Timezone for Libby's transcript formatting (default: America/New_York) */
@@ -92,13 +92,46 @@ const DEFAULT_CONFIG: Required<MemoryConfig> = {
   watchPath: "~/.claude/projects",
   watch: true,
   conversationGapMinutes: 60,
-  pollIntervalMs: 30000,
   minConversationMessages: 5,
   timezone: "America/New_York",
   model: "claude-sonnet-4-6",
   processBatchSize: 10,
   autoProcess: false,
 };
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Wait for an XState actor to reach a specific state
+ */
+function waitForState(
+  actor: ActorRefFrom<typeof memoryExtensionMachine>,
+  targetState: "stopped" | "recovering" | "scanning" | "startingWatcher" | "running" | "stopping",
+  timeoutMs = 30000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Check if already in target state
+    if (actor.getSnapshot().value === targetState) {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      subscription.unsubscribe();
+      reject(new Error(`Timeout waiting for state: ${targetState}`));
+    }, timeoutMs);
+
+    const subscription = actor.subscribe((snapshot) => {
+      if (snapshot.value === targetState) {
+        clearTimeout(timeout);
+        subscription.unsubscribe();
+        resolve();
+      }
+    });
+  });
+}
 
 // ============================================================================
 // Memory Extension
@@ -114,8 +147,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
 
   let ctx: ExtensionContext | null = null;
   let watcher: MemoryWatcher | null = null;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
   let worker: LibbyWorker | null = null;
+  let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
 
   return {
     id: "memory",
@@ -199,102 +232,70 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
         "INFO",
         `Memory extension starting (watchPath=${basePath}, gap=${cfg.conversationGapMinutes}min)`,
       );
-      ctx.log.info("Starting memory extension...");
+      ctx.log.info("[memory] Starting memory extension...");
 
       // Ensure DB connection works
       try {
         getDb();
-        ctx.log.info("Database connection established");
+        ctx.log.info("[memory] Database connection established");
       } catch (error) {
         ctx.log.error(
-          `Database connection failed: ${error instanceof Error ? error.message : String(error)}`,
+          `[memory] Database connection failed: ${error instanceof Error ? error.message : String(error)}`,
         );
         return;
       }
 
-      // Step 1a: Crash recovery — rollback any files stuck in "ingesting" state
-      try {
-        const recovered = recoverStuckFiles(cfg.conversationGapMinutes, fileLog);
-        if (recovered > 0) {
-          fileLog("INFO", `Crash recovery: rolled back ${recovered} stuck file(s)`);
-          ctx.log.info(`Crash recovery: rolled back ${recovered} stuck file(s)`);
-        }
-      } catch (error) {
-        fileLog(
-          "ERROR",
-          `Crash recovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      // Restore previous state from DB if exists
+      const savedSnapshot = getDb()
+        .query(`SELECT state_json FROM memory_state_machines WHERE machine_id = 'extension'`)
+        .get() as { state_json: string } | null;
 
-      // Step 1b: Reset conversations stuck in "processing" state
-      // TODO: Once we have a gateway client SDK, check if the runtime session
-      // is still alive before resetting — avoid killing in-flight work.
-      try {
-        const processing = getProcessingConversations();
-        if (processing.length > 0) {
-          for (const conv of processing) {
-            resetConversationToQueued(conv.id);
-          }
-          fileLog("INFO", `Reset ${processing.length} conversations stuck in processing`);
-          ctx.log.info(`Reset ${processing.length} stuck processing conversations`);
-        }
-      } catch (error) {
-        fileLog(
-          "ERROR",
-          `Processing recovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      // Create XState actor
+      extensionActor = createActor(memoryExtensionMachine, {
+        snapshot: savedSnapshot ? JSON.parse(savedSnapshot.state_json) : undefined,
+        input: {
+          processId: process.pid,
+          startedAt: null,
+          lastHeartbeat: null,
+          config: cfg,
+          basePath,
+          watcher: null,
+          ctx,
+          fileLog,
+        },
+      });
 
-      if (cfg.watch) {
-        // Step 2: Startup scan — import any new/changed files in watchPath
-        if (existsSync(basePath)) {
-          fileLog("INFO", `Startup scan: ${basePath}`);
-          const scanResult = ingestDirectory(basePath, cfg.conversationGapMinutes);
-          if (scanResult.filesProcessed > 0 || scanResult.entriesInserted > 0) {
-            fileLog(
-              "INFO",
-              `Startup scan complete: ${scanResult.filesProcessed} files, ${scanResult.entriesInserted} new entries`,
-            );
-            ctx.log.info(
-              `Startup scan: ${scanResult.filesProcessed} files processed, ${scanResult.entriesInserted} entries imported`,
-            );
-          } else {
-            fileLog("INFO", "Startup scan complete: no changes");
-            ctx.log.info("Startup scan: no changes");
-          }
-          if (scanResult.errors.length > 0) {
-            for (const err of scanResult.errors) {
-              fileLog("ERROR", `Startup scan error: ${err}`);
-            }
-          }
+      // Subscribe to state changes and persist to DB
+      extensionActor.subscribe((snapshot) => {
+        try {
+          getDb()
+            .query(
+              `INSERT OR REPLACE INTO memory_state_machines
+               (machine_id, state_json, process_id, updated_at)
+               VALUES ('extension', ?, ?, datetime('now'))`,
+            )
+            .run(JSON.stringify(snapshot), process.pid);
+        } catch (error) {
+          fileLog("ERROR", `Failed to persist state: ${error}`);
         }
 
-        // Step 3: Start file watcher for real-time changes
-        watcher = new MemoryWatcher({ basePath, gapMinutes: cfg.conversationGapMinutes }, fileLog);
-        watcher.start();
-        ctx.log.info(`File watcher started on ${basePath}`);
+        // Update local watcher reference
+        watcher = snapshot.context.watcher;
+      });
 
-        // Step 4: Start poll timer to mark conversations as ready
-        pollTimer = setInterval(() => {
-          try {
-            const marked = markConversationsReady(cfg.conversationGapMinutes);
-            if (marked > 0) {
-              fileLog("INFO", `Marked ${marked} conversations as ready`);
-              ctx?.emit("memory.conversation_ready", { count: marked });
-            }
-          } catch (error) {
-            fileLog(
-              "ERROR",
-              `Poll error: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        }, cfg.pollIntervalMs);
-      } else {
-        ctx.log.info("File watching disabled (watch: false) — DB and methods available");
-        fileLog("INFO", "File watching disabled (watch: false)");
-      }
+      // Start the state machine
+      extensionActor.start();
+      extensionActor.send({ type: "START" });
 
-      // Step 5: Start Libby's background worker
+      // Wait for 'running' state
+      await waitForState(extensionActor, "running");
+
+      // Subscribe to gateway heartbeat and forward to state machine
+      ctx.on("gateway.heartbeat", () => {
+        extensionActor?.send({ type: "HEARTBEAT" });
+      });
+
+      // Start Libby's background worker
       const libbyConfig: LibbyConfig = {
         model: cfg.model,
         timezone: cfg.timezone,
@@ -309,27 +310,27 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
         fileLog("INFO", `Found ${queuedCount} queued conversations from previous run`);
         worker.wake();
       }
-
-      ctx.log.info("Memory extension started");
     },
 
     async stop() {
-      ctx?.log.info("Stopping memory extension...");
+      ctx?.log.info("[memory] Stopping memory extension...");
 
+      // Stop Libby worker first
       if (worker) {
         await worker.stop();
         worker = null;
       }
 
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+      // Send STOP event to state machine
+      if (extensionActor) {
+        extensionActor.send({ type: "STOP" });
+        await waitForState(extensionActor, "stopped");
+        extensionActor.stop();
+        extensionActor = null;
       }
 
-      if (watcher) {
-        await watcher.stop();
-        watcher = null;
-      }
+      // Watcher is stopped by the state machine, just clear reference
+      watcher = null;
 
       closeDb();
       ctx = null;
