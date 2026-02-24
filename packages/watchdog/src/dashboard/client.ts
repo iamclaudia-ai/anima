@@ -338,6 +338,31 @@ async function refreshStatus(): Promise<void> {
 
 // ── Diagnose & Fix ───────────────────────────────────────
 
+async function launchDiagnoseWithPrompt(): Promise<void> {
+  const input = $("diagnoseInput") as HTMLInputElement | null;
+  const prompt = input?.value.trim() || undefined;
+  if (prompt) {
+    // Use continue endpoint for custom prompts
+    try {
+      const res = await fetch("/diagnose/continue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        alert(data.message);
+        return;
+      }
+      pollDiagnose();
+    } catch (e) {
+      alert(`Failed to start: ${e}`);
+    }
+  } else {
+    await launchDiagnose();
+  }
+}
+
 async function launchDiagnose(): Promise<void> {
   if (!confirm("Launch Claude to diagnose and fix the client error?")) return;
   const btn = $("diagnoseBtn") as HTMLButtonElement | null;
@@ -385,17 +410,14 @@ async function sendDiagnoseMessage(): Promise<void> {
 async function clearDiagnose(): Promise<void> {
   try {
     await fetch("/diagnose/clear", { method: "POST" });
-    const section = $("diagnoseSection");
-    if (section) section.classList.remove("visible");
+    checkDiagnose(); // Re-render idle state
   } catch {
     // Ignore
   }
 }
 
-function showDiagnosePanel(): void {
-  const section = $("diagnoseSection");
-  if (section) section.classList.add("visible");
-}
+// Panel is always visible — no-op kept for call sites
+function showDiagnosePanel(): void {}
 
 async function pollDiagnose(): Promise<void> {
   try {
@@ -460,7 +482,19 @@ function renderDiagnosePanel(data: DiagnoseData): void {
 
   // Actions
   if (actionsEl) {
-    if (data.status === "running") {
+    if (data.status === "idle") {
+      actionsEl.innerHTML =
+        `<div style="display:flex;gap:8px;flex:1;align-items:center;">` +
+        `<input id="diagnoseInput" type="text" placeholder="Describe the issue or leave blank for auto-detect..." ` +
+        `style="flex:1;background:#09090b;color:#e4e4e7;border:1px solid #3f3f46;padding:8px 12px;border-radius:6px;font-size:13px;font-family:inherit;" />` +
+        `<button class="btn-diagnose" id="diagnoseLaunchBtn">🔧 Launch</button>` +
+        `</div>`;
+
+      $("diagnoseInput")?.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") launchDiagnoseWithPrompt();
+      });
+      $("diagnoseLaunchBtn")?.addEventListener("click", launchDiagnoseWithPrompt);
+    } else if (data.status === "running") {
       actionsEl.innerHTML = `<span class="spinner"></span> <span style="color:#71717a;font-size:12px;">Claude is working...</span>`;
     } else if (data.status === "done" || data.status === "error") {
       actionsEl.innerHTML =
@@ -490,10 +524,8 @@ async function checkDiagnose(): Promise<void> {
   try {
     const res = await fetch("/diagnose");
     const data: DiagnoseData = await res.json();
-    if (data.status !== "idle") {
-      renderDiagnosePanel(data);
-      if (data.status === "running") pollDiagnose();
-    }
+    renderDiagnosePanel(data);
+    if (data.status === "running") pollDiagnose();
   } catch {
     // Ignore
   }

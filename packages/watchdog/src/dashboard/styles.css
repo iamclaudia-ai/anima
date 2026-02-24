@@ -194,10 +194,6 @@ select:focus {
 /* Diagnose & Fix */
 .diagnose-section {
   padding: 0 24px 24px;
-  display: none;
-}
-.diagnose-section.visible {
-  display: block;
 }
 .diagnose-header {
   display: flex;
