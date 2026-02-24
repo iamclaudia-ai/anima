@@ -7,8 +7,13 @@
  */
 
 import { extensions, handleExtensionEvent } from "./index";
-import { getEnabledExtensions, createLogger } from "@claudia/shared";
-import { existsSync } from "node:fs";
+import {
+  getEnabledExtensions,
+  createLogger,
+  clearConfigCache,
+  type ExtensionConfig,
+} from "@claudia/shared";
+import { existsSync, watch } from "node:fs";
 import { join } from "node:path";
 
 import { homedir } from "node:os";
@@ -65,6 +70,7 @@ async function killOrphanExtensionHosts(): Promise<void> {
 }
 
 const startedExtensions = new Set<string>();
+const runningExtensions = new Map<string, ExtensionHostProcess>();
 
 function resolveExtensionEntrypoint(extensionId: string): string | null {
   const entryPath = join(ROOT_DIR, "extensions", extensionId, "src", "index.ts");
@@ -141,6 +147,7 @@ async function spawnOutOfProcessExtension(
   });
 
   startedExtensions.add(id);
+  runningExtensions.set(id, host);
 }
 
 /**
@@ -168,6 +175,160 @@ async function loadExtensions(): Promise<void> {
   }
 }
 
+/**
+ * Start a single extension dynamically
+ */
+async function startExtension(id: string, extensionConfig: ExtensionConfig): Promise<void> {
+  if (runningExtensions.has(id)) {
+    log.warn("Extension already running", { id });
+    return;
+  }
+
+  const moduleSpec = resolveExtensionEntrypoint(id);
+  if (!moduleSpec) {
+    log.warn("Extension entrypoint not found", { id, expected: `extensions/${id}/src/index.ts` });
+    return;
+  }
+
+  log.info("Starting extension dynamically", { id });
+
+  try {
+    await spawnOutOfProcessExtension(
+      id,
+      extensionConfig.config,
+      extensionConfig.sourceRoutes,
+      extensionConfig.hot !== false,
+    );
+    log.info("Extension started successfully", { id });
+  } catch (error) {
+    log.error("Failed to start extension", { id, error: String(error) });
+  }
+}
+
+/**
+ * Stop a single extension dynamically
+ */
+async function stopExtension(id: string): Promise<void> {
+  const host = runningExtensions.get(id);
+  if (!host) {
+    log.warn("Extension not running", { id });
+    return;
+  }
+
+  log.info("Stopping extension dynamically", { id });
+
+  try {
+    await host.kill();
+    runningExtensions.delete(id);
+    startedExtensions.delete(id);
+    // Unregister from gateway extension manager
+    extensions.unregisterRemote(id);
+    log.info("Extension stopped successfully", { id });
+  } catch (error) {
+    log.error("Failed to stop extension", { id, error: String(error) });
+  }
+}
+
+/**
+ * Handle config file changes - manage extension enable/disable
+ */
+async function handleConfigChange(): Promise<void> {
+  try {
+    log.info("Config file changed, checking for extension enable/disable changes");
+
+    // Clear cache to get fresh config
+    clearConfigCache();
+
+    const newEnabledExtensions = getEnabledExtensions();
+    const newEnabledIds = new Set(newEnabledExtensions.map(([id]) => id));
+    const currentRunningIds = new Set(runningExtensions.keys());
+
+    // Find extensions to start (newly enabled)
+    const toStart = newEnabledExtensions.filter(([id]) => !currentRunningIds.has(id));
+
+    // Find extensions to stop (newly disabled)
+    const toStop = Array.from(currentRunningIds).filter((id) => !newEnabledIds.has(id));
+
+    if (toStart.length === 0 && toStop.length === 0) {
+      log.info("No extension enable/disable changes detected");
+      return;
+    }
+
+    log.info("Processing extension changes", {
+      toStart: toStart.map(([id]) => id),
+      toStop,
+    });
+
+    // Stop disabled extensions
+    for (const id of toStop) {
+      await stopExtension(id);
+    }
+
+    // Start newly enabled extensions
+    for (const [id, config] of toStart) {
+      await startExtension(id, config);
+    }
+
+    log.info("Extension changes processed successfully", {
+      started: toStart.map(([id]) => id),
+      stopped: toStop,
+      note: "Extension config changes require manual restart via CLI",
+    });
+  } catch (error) {
+    log.error("Failed to handle config changes", { error: String(error) });
+  }
+}
+
+/**
+ * Start config file watcher for dynamic extension management
+ */
+function startConfigWatcher(): void {
+  const configPath = join(homedir(), ".claudia", "claudia.json");
+
+  if (!existsSync(configPath)) {
+    log.warn("Config file not found, skipping file watcher", { configPath });
+    return;
+  }
+
+  log.info("Starting config file watcher", { configPath });
+
+  try {
+    const watcher = watch(configPath, { persistent: true }, (eventType, filename) => {
+      log.info("File watcher event detected", {
+        eventType,
+        filename,
+        timestamp: new Date().toISOString(),
+      });
+      if (eventType === "change" || eventType === "rename") {
+        log.info("Config file change detected, processing in 100ms");
+        // Debounce rapid file changes
+        setTimeout(() => {
+          log.info("Executing handleConfigChange");
+          handleConfigChange();
+        }, 100);
+      }
+    });
+
+    // Test if watcher is actually working
+    setTimeout(() => {
+      log.info("File watcher test - manually checking config", {
+        watcherActive: !!watcher,
+        configExists: existsSync(configPath),
+      });
+    }, 2000);
+
+    log.info("Config file watcher started successfully", { watcherCreated: !!watcher });
+  } catch (error) {
+    log.error("Failed to start config file watcher", { error: String(error) });
+  }
+}
+
 killOrphanExtensionHosts()
-  .then(() => loadExtensions())
+  .then(async () => {
+    // Initial extension load
+    await loadExtensions();
+
+    // Start config file watcher for dynamic extension management
+    startConfigWatcher();
+  })
   .catch((err) => log.error("Extension startup failed", { error: String(err) }));

@@ -46,33 +46,75 @@ export default function ThinkingFrame({
 }: ThinkingFrameProps) {
   const baseRef = useRef(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPropsRef = useRef({ count, isActive, inactivityTimeout });
+  const lastThrottledCountRef = useRef(-1);
+  const simulationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCountRef = useRef(count);
 
-  // Effect 1: Set random colors when stream events come in
+  lastPropsRef.current = { count, isActive, inactivityTimeout };
+
+  // Effect 1: Set random colors when stream events come in (throttled)
   useEffect(() => {
-    if (!baseRef.current || count === 0) return;
-    const svg = baseRef.current as SVGElement;
+    if (!baseRef.current) return;
 
-    // Set random colors for all segments
-    for (let i = 1; i <= 7; i++) {
-      updateStyle(svg, i, randomStyle());
+    // Handle count changes (real activity)
+    if (count > 0) {
+      // Throttle animation updates - only update colors every 3 events to reduce flicker
+      const throttledCount = Math.floor(count / 3);
+
+      // Only update colors if throttled count actually changed
+      if (throttledCount !== lastThrottledCountRef.current) {
+        lastThrottledCountRef.current = throttledCount;
+
+        const svg = baseRef.current as SVGElement;
+
+        // Set random colors for all segments
+        for (let i = 1; i <= 7; i++) {
+          updateStyle(svg, i, randomStyle());
+        }
+      }
     }
 
-    // Clear any existing inactivity timer
+    // Clear any existing timers
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    if (simulationTimerRef.current) {
+      clearTimeout(simulationTimerRef.current);
+      simulationTimerRef.current = null;
+    }
 
-    // Start new inactivity timer - go dark after timeout if no new events
+    // Handle activity state
     if (isActive) {
-      timerRef.current = setTimeout(() => {
-        if (baseRef.current) {
-          const svg = baseRef.current as SVGElement;
-          for (let i = 1; i <= 7; i++) {
-            updateStyle(svg, i, "none");
+      // Check if count has changed recently
+      const countChanged = count !== lastCountRef.current;
+      lastCountRef.current = count;
+
+      if (countChanged || count === 0) {
+        // Real activity or initial state - start normal inactivity timer
+        timerRef.current = setTimeout(() => {
+          if (baseRef.current) {
+            const svg = baseRef.current as SVGElement;
+            for (let i = 1; i <= 7; i++) {
+              updateStyle(svg, i, "none");
+            }
           }
-        }
-      }, inactivityTimeout);
+        }, inactivityTimeout);
+      } else {
+        // Active but no count change - likely a tool call, simulate activity
+        const simulateActivity = () => {
+          if (baseRef.current && isActive) {
+            const svg = baseRef.current as SVGElement;
+            for (let i = 1; i <= 7; i++) {
+              updateStyle(svg, i, randomStyle());
+            }
+            // Continue simulation every 2 seconds while active
+            simulationTimerRef.current = setTimeout(simulateActivity, 2000);
+          }
+        };
+        simulateActivity();
+      }
     }
   }, [count, isActive, inactivityTimeout]);
 
@@ -82,6 +124,10 @@ export default function ThinkingFrame({
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
+      }
+      if (simulationTimerRef.current) {
+        clearTimeout(simulationTimerRef.current);
+        simulationTimerRef.current = null;
       }
     };
   }, []);

@@ -34,6 +34,7 @@ export function InputArea({
 }: InputAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
   const bridge = useBridge();
 
   // Auto-resize textarea to fit content
@@ -43,6 +44,42 @@ export function InputArea({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
+
+  // Maintain focus on mount and when connection is restored
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el) {
+      // Focus on mount
+      el.focus();
+    }
+  }, []);
+
+  // Restore focus when reconnected (but only if we had focus before)
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (isConnected && el && document.activeElement !== el) {
+      // Small delay to ensure UI has updated
+      setTimeout(() => {
+        el.focus();
+        // Restore cursor position if we had one saved
+        if (cursorPositionRef.current) {
+          el.setSelectionRange(cursorPositionRef.current.start, cursorPositionRef.current.end);
+        }
+      }, 50);
+    }
+  }, [isConnected]);
+
+  // Save cursor position when connection is lost
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!isConnected && el && document.activeElement === el) {
+      // Save current cursor position
+      cursorPositionRef.current = {
+        start: el.selectionStart,
+        end: el.selectionEnd,
+      };
+    }
+  }, [isConnected]);
 
   const processFile = useCallback(
     (file: File) => {
@@ -120,9 +157,26 @@ export function InputArea({
       const value = e.target.value;
       onInputChange(value);
       bridge.saveDraft(value);
+
+      // Save cursor position on every change
+      cursorPositionRef.current = {
+        start: e.target.selectionStart,
+        end: e.target.selectionEnd,
+      };
     },
     [onInputChange, bridge],
   );
+
+  const handleBlur = useCallback(() => {
+    const el = textareaRef.current;
+    if (el) {
+      // Save cursor position when losing focus
+      cursorPositionRef.current = {
+        start: el.selectionStart,
+        end: el.selectionEnd,
+      };
+    }
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -185,9 +239,13 @@ export function InputArea({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Type a message... (⌘↵ send, ESC stop)"
-          disabled={!isConnected}
-          className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 placeholder:text-gray-300"
+          onBlur={handleBlur}
+          placeholder={
+            isConnected
+              ? "Type a message... (⌘↵ send, ESC stop)"
+              : "Disconnected - type to compose (will send when reconnected)"
+          }
+          className={`w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-gray-300 ${!isConnected ? "bg-orange-50 border-orange-200" : ""}`}
           rows={1}
           style={{ maxHeight: "200px", overflow: "auto" }}
         />
