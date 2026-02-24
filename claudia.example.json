@@ -16,7 +16,17 @@
       "config": {
         "model": "claude-sonnet-4-6",
         "thinking": true,
-        "effort": "medium"
+        "effort": "medium",
+        // Image processing — resize/compress images before sending to API
+        // Prevents 5MB limit errors and improves performance
+        "imageProcessing": {
+          "enabled": true,
+          "maxWidth": 1600,
+          "maxHeight": 1600,
+          "maxFileSizeBytes": 1048576, // 1MB
+          "format": "webp", // webp | jpeg | png (webp best for screenshots)
+          "quality": 85
+        }
       }
     },
 

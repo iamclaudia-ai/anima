@@ -170,7 +170,20 @@ describe("agent-host server", () => {
   let serverCtx: Awaited<ReturnType<typeof createAgentHostServer>> | null = null;
   const fakeConfig: ClaudiaConfig = {
     gateway: { port: 0, host: "127.0.0.1" },
-    session: { model: "sonnet", thinking: false, effort: "medium", systemPrompt: null },
+    session: {
+      model: "sonnet",
+      thinking: false,
+      effort: "medium",
+      systemPrompt: null,
+      imageProcessing: {
+        enabled: true,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        maxFileSizeBytes: 1024 * 1024,
+        format: "webp",
+        quality: 85,
+      },
+    },
     extensions: {},
     agentHost: { url: "ws://127.0.0.1:0/ws", port: 0 },
     federation: { enabled: false, nodeId: "test", peers: [] },

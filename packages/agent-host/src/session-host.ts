@@ -187,7 +187,7 @@ export class SessionHost extends EventEmitter {
       session = this.sessions.get(sessionId)!;
     }
 
-    session.prompt(content);
+    await session.prompt(content);
   }
 
   /**

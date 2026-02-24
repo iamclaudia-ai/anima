@@ -22,15 +22,34 @@ export interface GatewayConfig {
   host: string;
   /** Public endpoint hostname for remote clients (e.g., "claudia-gateway.kiliman.dev") */
   endpoint?: string;
+  /** Heartbeat interval in milliseconds for broadcasting to extensions (default: 300000 = 5min) */
+  heartbeatIntervalMs?: number;
 }
 
 export type ThinkingEffort = "low" | "medium" | "high" | "max";
+
+export interface ImageProcessingConfig {
+  /** Enable automatic image resizing/compression before sending to API */
+  enabled: boolean;
+  /** Target max width in pixels (default: 1600) */
+  maxWidth: number;
+  /** Target max height in pixels (default: 1600) */
+  maxHeight: number;
+  /** Target max file size in bytes (default: 1MB) */
+  maxFileSizeBytes: number;
+  /** Output format: 'webp' | 'jpeg' | 'png' (default: 'webp') */
+  format: "webp" | "jpeg" | "png";
+  /** Output quality 1-100 (default: 85) */
+  quality: number;
+}
 
 export interface SessionConfig {
   model: string;
   thinking: boolean;
   effort: ThinkingEffort;
   systemPrompt: string | null;
+  /** Image processing settings */
+  imageProcessing: ImageProcessingConfig;
 }
 
 export interface ExtensionConfig {
@@ -80,12 +99,21 @@ const DEFAULT_CONFIG: ClaudiaConfig = {
   gateway: {
     port: 30086,
     host: "localhost",
+    heartbeatIntervalMs: 300000, // 5 minutes
   },
   session: {
     model: "sonnet",
     thinking: false,
     effort: "medium",
     systemPrompt: null,
+    imageProcessing: {
+      enabled: true,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      maxFileSizeBytes: 1024 * 1024, // 1MB
+      format: "webp",
+      quality: 85,
+    },
   },
   extensions: {},
   agentHost: {
@@ -217,6 +245,7 @@ function buildConfigFromEnv(): Partial<ClaudiaConfig> {
       thinking: process.env.CLAUDIA_THINKING === "true",
       effort: (process.env.CLAUDIA_THINKING_EFFORT || "medium") as ThinkingEffort,
       systemPrompt: process.env.CLAUDIA_SYSTEM_PROMPT || null,
+      imageProcessing: DEFAULT_CONFIG.session.imageProcessing,
     },
     extensions: {},
   };

@@ -18,7 +18,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
-import { createLogger } from "@claudia/shared";
+import { createLogger, loadConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -30,7 +30,8 @@ import type {
   SDKPartialAssistantMessage,
   PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ThinkingEffort } from "@claudia/shared";
+import type { ThinkingEffort, ImageProcessingConfig } from "@claudia/shared";
+import { processContent } from "./image-processor";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -173,6 +174,7 @@ export class SDKSession extends EventEmitter {
   private systemPrompt?: string;
   private effort?: ThinkingEffort;
   private isFirstPrompt: boolean;
+  private imageProcessingConfig: ImageProcessingConfig;
 
   // Timestamps for health reporting
   private createdAt = Date.now();
@@ -202,6 +204,10 @@ export class SDKSession extends EventEmitter {
     this.effort = options.effort;
     this.isFirstPrompt = !isResume;
 
+    // Load image processing config from global settings
+    const globalConfig = loadConfig();
+    this.imageProcessingConfig = globalConfig.session.imageProcessing;
+
     // Set up log directory
     const logDir = join(homedir(), ".claudia", "sessions", this.id);
     if (!existsSync(logDir)) {
@@ -229,23 +235,49 @@ export class SDKSession extends EventEmitter {
   /**
    * Send a prompt to Claude.
    * Creates the SDK query if not already running.
+   * Processes images before sending (resize/compress to meet API limits).
    * Pushes the message into the message channel for query() to consume.
    */
-  prompt(content: string | unknown[]): void {
+  async prompt(content: string | unknown[]): Promise<void> {
     if (!this._isStarted) throw new Error("Session not started");
 
     this.ensureQuery();
 
+    // Process images in content (resize/compress if needed)
+    const { content: processedContent, stats } = await processContent(
+      content,
+      this.imageProcessingConfig,
+    );
+
+    // Log image processing results
+    if (stats.length > 0) {
+      const processedCount = stats.filter((s) => s.wasProcessed).length;
+      if (processedCount > 0) {
+        this.logger.info(`Processed ${processedCount} image(s)`, {
+          images: stats.map((s) => ({
+            wasProcessed: s.wasProcessed,
+            originalSize: `${(s.originalSize / 1024 / 1024).toFixed(2)} MB`,
+            finalSize: `${(s.finalSize / 1024 / 1024).toFixed(2)} MB`,
+            reduction: `${(((s.originalSize - s.finalSize) / s.originalSize) * 100).toFixed(1)}%`,
+            dimensions: `${s.originalDimensions.width}×${s.originalDimensions.height} → ${s.finalDimensions.width}×${s.finalDimensions.height}`,
+          })),
+        });
+      }
+    }
+
     const msg = {
       type: "user" as const,
-      message: { role: "user" as const, content: typeof content === "string" ? content : content },
+      message: {
+        role: "user" as const,
+        content: typeof processedContent === "string" ? processedContent : processedContent,
+      },
       parent_tool_use_id: null,
       session_id: this.id,
     } as SDKUserMessage;
     this.messageChannel!.push(msg);
 
     this.isFirstPrompt = false;
-    this.emit("prompt_sent", { content });
+    this.emit("prompt_sent", { content: processedContent });
   }
 
   /**
