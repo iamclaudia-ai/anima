@@ -273,6 +273,45 @@ export class SessionHost extends EventEmitter {
     await Promise.all(promises);
   }
 
+  /**
+   * Close sessions with a running SDK query that have been idle beyond the threshold.
+   * Session metadata remains persisted, so next prompt can lazy-resume.
+   */
+  async reapIdleRunningSessions(idleMs: number, nowMs: number = Date.now()): Promise<string[]> {
+    if (!Number.isFinite(idleMs) || idleMs <= 0) {
+      return [];
+    }
+
+    const staleSessions: Array<{ sessionId: string; idleForMs: number }> = [];
+    for (const [sessionId, session] of this.sessions) {
+      const info = session.getInfo();
+      if (!info.isActive || !info.isProcessRunning) {
+        continue;
+      }
+
+      const lastActivityMs = Date.parse(info.lastActivity);
+      if (!Number.isFinite(lastActivityMs)) {
+        continue;
+      }
+
+      const idleForMs = nowMs - lastActivityMs;
+      if (idleForMs >= idleMs) {
+        staleSessions.push({ sessionId, idleForMs });
+      }
+    }
+
+    for (const { sessionId, idleForMs } of staleSessions) {
+      log.info("Idle reaper closing session", {
+        sessionId: sessionId.slice(0, 8),
+        idleForMs,
+        idleThresholdMs: idleMs,
+      });
+      await this.close(sessionId);
+    }
+
+    return staleSessions.map((s) => s.sessionId);
+  }
+
   // ── Private ────────────────────────────────────────────────
 
   /**

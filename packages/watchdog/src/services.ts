@@ -12,7 +12,7 @@ import {
   UNHEALTHY_RESTART_THRESHOLD,
 } from "./constants";
 import { log } from "./logger";
-import { existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
@@ -37,6 +37,14 @@ export interface ManagedService {
   proc: Subprocess | null;
 }
 
+function gatewayCommand(): string[] {
+  // Watch mode is useful for local dev, but too expensive for always-on watchdog usage.
+  if (process.env.CLAUDIA_GATEWAY_WATCH === "true") {
+    return ["bun", "run", "--watch", "packages/gateway/src/start.ts"];
+  }
+  return ["bun", "run", "packages/gateway/src/start.ts"];
+}
+
 // ── Service Definitions ─────────────────────────────────
 
 export const services: Record<string, ManagedService> = {
@@ -56,7 +64,7 @@ export const services: Record<string, ManagedService> = {
   gateway: {
     name: "Gateway",
     id: "gateway",
-    command: ["bun", "run", "--watch", "packages/gateway/src/start.ts"],
+    command: gatewayCommand(),
     healthUrl: "http://localhost:30086/health",
     port: 30086,
     restartBackoff: 1000,
@@ -101,6 +109,24 @@ async function killOrphanProcesses(port: number): Promise<void> {
   }
 }
 
+async function drainToLog(
+  stream: ReadableStream<Uint8Array> | number | null | undefined,
+  logPath: string,
+): Promise<void> {
+  if (!stream || typeof stream === "number") return;
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      appendFileSync(logPath, decoder.decode(value, { stream: true }));
+    }
+  } catch {
+    // Stream closed on process exit
+  }
+}
+
 export async function startService(service: ManagedService): Promise<void> {
   // Kill existing process if still alive
   if (service.proc && service.proc.exitCode === null) {
@@ -123,13 +149,18 @@ export async function startService(service: ManagedService): Promise<void> {
 
   const logPath = join(LOGS_DIR, `${service.id}.log`);
 
-  // Spawn as direct child process, pipe stdout+stderr to log file
+  // Spawn as direct child process. Use pipes + explicit drains to avoid
+  // Bun.file stdio redirection issues that can cause runaway CPU.
   service.proc = Bun.spawn(service.command, {
     cwd: PROJECT_DIR,
-    stdout: Bun.file(logPath),
-    stderr: Bun.file(logPath),
+    stdout: "pipe",
+    stderr: "pipe",
     env: { ...process.env, FORCE_COLOR: "0" },
   });
+
+  // Drain child output into the service log asynchronously.
+  drainToLog(service.proc.stdout, logPath);
+  drainToLog(service.proc.stderr, logPath);
 
   service.lastRestart = Date.now();
   service.consecutiveFailures = 0;

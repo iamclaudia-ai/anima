@@ -30,6 +30,15 @@ const log = createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent
 
 const PORT = 30087;
 
+function parseMs(value: string | undefined, fallbackMs: number): number {
+  if (!value) return fallbackMs;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+}
+
+const IDLE_REAP_INTERVAL_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_REAP_INTERVAL_MS, 60000);
+const IDLE_STALE_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_STALE_MS, 600000);
+
 // ── State ────────────────────────────────────────────────────
 
 const sessionHost = new SessionHost();
@@ -349,6 +358,33 @@ const stateSaveTimer = setInterval(() => {
   }
 }, STATE_SAVE_INTERVAL);
 
+let idleReapRunning = false;
+const idleReapTimer = setInterval(async () => {
+  if (idleReapRunning) return;
+  idleReapRunning = true;
+  try {
+    const closedIds = await sessionHost.reapIdleRunningSessions(IDLE_STALE_MS);
+    if (closedIds.length > 0) {
+      // Remove closed-session subscriptions from connected clients.
+      for (const [, client] of clients) {
+        for (const sessionId of closedIds) {
+          client.subscribedSessions.delete(sessionId);
+        }
+      }
+      saveState(sessionHost.getSessionRecords());
+      log.info("Auto-closed idle SDK sessions", {
+        idleMs: IDLE_STALE_MS,
+        count: closedIds.length,
+        sessions: closedIds.map((id) => id.slice(0, 8)),
+      });
+    }
+  } catch (error) {
+    log.warn("Idle session reaper failed", { error: String(error) });
+  } finally {
+    idleReapRunning = false;
+  }
+}, IDLE_REAP_INTERVAL_MS);
+
 // ── Graceful Shutdown ────────────────────────────────────────
 
 async function shutdown(signal: string): Promise<void> {
@@ -356,6 +392,7 @@ async function shutdown(signal: string): Promise<void> {
 
   // Stop periodic saves
   clearInterval(stateSaveTimer);
+  clearInterval(idleReapTimer);
 
   // Persist final state
   saveState(sessionHost.getSessionRecords());

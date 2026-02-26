@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events";
 import { SessionHost } from "./session-host";
 
 class FakeSession extends EventEmitter {
+  public isProcessRunning = false;
+  public lastActivityIso = new Date().toISOString();
+
   constructor(
     public id: string,
     public isActive = true,
@@ -29,8 +32,12 @@ class FakeSession extends EventEmitter {
       id: this.id,
       cwd: "/tmp/test",
       model: "claude-test",
+      isActive: this.isActive,
+      isProcessRunning: this.isProcessRunning,
       createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString(),
+      lastActivity: this.lastActivityIso,
+      healthy: true,
+      stale: false,
     };
   }
 }
@@ -79,5 +86,33 @@ describe("SessionHost", () => {
         options: { cwd: "/repo", model: "sonnet", thinking: true, effort: "low" },
       },
     ]);
+  });
+
+  it("reaps stale sessions with running SDK process", async () => {
+    const stale = new FakeSession("s-stale");
+    stale.isProcessRunning = true;
+    stale.lastActivityIso = new Date(1_000).toISOString();
+
+    const fresh = new FakeSession("s-fresh");
+    fresh.isProcessRunning = true;
+    fresh.lastActivityIso = new Date(299_500).toISOString();
+
+    let createCalls = 0;
+    const host = new SessionHost({
+      create: () => {
+        createCalls += 1;
+        return (createCalls === 1
+          ? stale
+          : fresh) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+      },
+    });
+
+    await host.create({ cwd: "/repo" });
+    await host.create({ cwd: "/repo" });
+
+    const closed = await host.reapIdleRunningSessions(300_000, 301_000);
+    expect(closed).toEqual(["s-stale"]);
+
+    expect(host.list().map((s) => (s as { id: string }).id)).toEqual(["s-fresh"]);
   });
 });
