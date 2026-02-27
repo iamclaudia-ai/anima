@@ -654,13 +654,17 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         }
 
         const result = parseSessionFilePaginated(filepath, { limit, offset });
+        const usage = parseSessionUsage(filepath);
+
         log.info("Loaded history", {
           sessionId: sid(sessionId),
           total: (result as { total: number }).total,
           limit,
           offset,
+          hasUsage: !!usage,
         });
-        return result;
+
+        return { ...result, usage };
       }
 
       case "session.switch_session": {
