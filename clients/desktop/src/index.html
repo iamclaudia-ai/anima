@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claudia</title>
+    <style>
+      body {
+        margin: 0;
+        background: #1a1a1a;
+        color: #e5e5e5;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+      }
+      .loading {
+        text-align: center;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading">
+      <p>Connecting to Claudia gateway...</p>
+    </div>
+    <script>
+      // Redirect to the gateway — this page is only shown briefly
+      // while Tauri loads, or as fallback if gateway is unreachable.
+      window.location.replace("http://localhost:30086");
+    </script>
+  </body>
+</html>

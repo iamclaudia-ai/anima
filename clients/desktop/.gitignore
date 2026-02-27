@@ -1,0 +1,27 @@
+# Rust / Cargo
+src-tauri/target/
+Cargo.lock
+
+# Tauri
+src-tauri/WixTools/
+
+# Node
+node_modules/
+dist/
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build outputs
+*.app
+*.dmg
+*.deb
+*.AppImage

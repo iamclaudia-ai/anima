@@ -1,0 +1,24 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Claudia desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:window:allow-center",
+    "core:window:allow-is-visible",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:tray:default",
+    "core:tray:allow-set-icon",
+    "core:menu:default",
+    "core:menu:allow-set-text",
+    "core:menu:allow-get",
+    "shell:allow-open"
+  ]
+}
