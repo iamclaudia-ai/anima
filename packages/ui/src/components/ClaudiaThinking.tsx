@@ -7,6 +7,9 @@ import ThinkingFrame from "./ThinkingFrame";
 
 interface ClaudiaThinkingProps {
   count?: number;
+  streamCount?: number;
+  simulatedCount?: number;
+  showCounters?: boolean;
   size?: "sm" | "md" | "lg";
   speed?: number;
   isActive?: boolean;
@@ -15,6 +18,9 @@ interface ClaudiaThinkingProps {
 
 export function ClaudiaThinking({
   count = 0,
+  streamCount = 0,
+  simulatedCount = 0,
+  showCounters = true,
   size = "md",
   speed = 1,
   isActive = true,
@@ -28,13 +34,19 @@ export function ClaudiaThinking({
   };
 
   return (
-    <div className="flex items-center justify-center">
+    <div className="flex flex-col items-center justify-center gap-1">
       <ThinkingFrame
         count={adjustedCount}
         isActive={isActive}
         inactivityTimeout={inactivityTimeout}
         className={`${sizeClasses[size]} transition-opacity duration-100`}
       />
+      {showCounters && (
+        <div className="text-xs font-medium text-blue-700 tabular-nums select-none">
+          <span className="mr-2">💜 {streamCount}</span>
+          <span>🔵 {simulatedCount}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,6 +15,10 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+const MIN_TOOL_SIM_TICK_MS = 30;
+const MAX_TOOL_SIM_TICK_MS = 2000;
+const DEFAULT_TOOL_SIM_TICK_MS = 100;
+
 // Re-export workspace/session types for consumers
 export interface WorkspaceInfo {
   id: string;
@@ -71,6 +75,9 @@ export interface UseGatewayReturn {
   sessionId: string | null;
   usage: Usage | null;
   eventCount: number;
+  streamEventCount: number;
+  simulatedEventCount: number;
+  toolSimulationIntervalMs: number;
   visibleCount: number;
   /** Total messages in the full session history */
   totalMessages: number;
@@ -86,6 +93,7 @@ export interface UseGatewayReturn {
   switchSession(sessionId: string): void;
   /** Send a raw gateway request (for listing pages) */
   sendRequest(method: string, params?: Record<string, unknown>, tags?: string[]): void;
+  setToolSimulationIntervalMs(ms: number): void;
   /** Subscribe to raw gateway events. Returns unsubscribe function. */
   onEvent(listener: EventListener): () => void;
   /** Server-assigned connection ID for this WebSocket session */
@@ -106,6 +114,11 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [eventCount, setEventCount] = useState(0);
+  const [streamEventCount, setStreamEventCount] = useState(0);
+  const [simulatedEventCount, setSimulatedEventCount] = useState(0);
+  const [toolSimulationIntervalMs, setToolSimulationIntervalMsState] = useState(
+    DEFAULT_TOOL_SIM_TICK_MS,
+  );
   const [visibleCount, setVisibleCount] = useState(50);
   const [totalMessages, setTotalMessages] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -129,6 +142,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const eventListenersRef = useRef<Set<EventListener>>(new Set());
   const activeToolUseIdsRef = useRef<Set<string>>(new Set());
   const toolTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const toolSimTickMsRef = useRef(toolSimulationIntervalMs);
 
   useEffect(() => {
     isQueryingRef.current = isQuerying;
@@ -141,6 +155,10 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   useEffect(() => {
     workspaceRef.current = workspace;
   }, [workspace]);
+
+  useEffect(() => {
+    toolSimTickMsRef.current = toolSimulationIntervalMs;
+  }, [toolSimulationIntervalMs]);
 
   // Auto-scroll to bottom (instant for history load, smooth for streaming)
   useEffect(() => {
@@ -196,7 +214,8 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     toolTickIntervalRef.current = setInterval(() => {
       if (!isQueryingRef.current) return;
       setEventCount((c) => c + 1);
-    }, 900);
+      setSimulatedEventCount((c) => c + 1);
+    }, toolSimTickMsRef.current);
   }, []);
 
   const markToolUseStarted = useCallback(
@@ -213,6 +232,23 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
       if (activeToolUseIdsRef.current.size === 0) stopToolTickSimulation();
     },
     [stopToolTickSimulation],
+  );
+
+  const setToolSimulationIntervalMs = useCallback(
+    (ms: number) => {
+      const next = Math.max(MIN_TOOL_SIM_TICK_MS, Math.min(MAX_TOOL_SIM_TICK_MS, Math.round(ms)));
+      setToolSimulationIntervalMsState(next);
+      toolSimTickMsRef.current = next;
+
+      if (toolTickIntervalRef.current) {
+        clearInterval(toolTickIntervalRef.current);
+        toolTickIntervalRef.current = null;
+        if (activeToolUseIdsRef.current.size > 0 && isQueryingRef.current) {
+          startToolTickSimulation();
+        }
+      }
+    },
+    [startToolTickSimulation],
   );
 
   const addBlock = useCallback(
@@ -268,6 +304,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const handleStreamEvent = useCallback(
     (eventType: string, payload: Record<string, unknown>) => {
       setEventCount((c) => c + 1);
+      setStreamEventCount((c) => c + 1);
 
       // Auto-enable thinking for streaming content events (mid-turn recovery after HMR/refresh)
       // Only after history has loaded — otherwise stale events during reconnect cause false positives
@@ -289,6 +326,8 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
       ) {
         setIsQuerying(true);
         setEventCount(0);
+        setStreamEventCount(0);
+        setSimulatedEventCount(0);
       }
 
       switch (eventType) {
@@ -330,6 +369,8 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
         case "turn_start":
           setIsQuerying(true);
           setEventCount(0);
+          setStreamEventCount(0);
+          setSimulatedEventCount(0);
           break;
 
         case "turn_stop":
@@ -820,6 +861,13 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const sendPrompt = useCallback(
     (text: string, attachments: Attachment[], tags?: string[]) => {
       if ((!text.trim() && attachments.length === 0) || !wsRef.current) return;
+      // Optimistic turn-start so thinking UI appears immediately even if stream
+      // turn_start event is delayed or dropped.
+      setIsQuerying(true);
+      setEventCount(0);
+      setStreamEventCount(0);
+      setSimulatedEventCount(0);
+      stopToolTickSimulation();
 
       const blocks: ContentBlock[] = [
         ...attachments
@@ -879,7 +927,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
       };
       sendRequest("session.send_prompt", params, tags);
     },
-    [sendRequest, setMessages],
+    [sendRequest, setMessages, stopToolTickSimulation],
   );
 
   const sendToolResult = useCallback(
@@ -943,6 +991,9 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     sessionId,
     usage,
     eventCount,
+    streamEventCount,
+    simulatedEventCount,
+    toolSimulationIntervalMs,
     visibleCount,
     totalMessages,
     hasMore,
@@ -955,6 +1006,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     createNewSession,
     switchSession,
     sendRequest,
+    setToolSimulationIntervalMs,
     onEvent,
     connectionId: connectionIdRef.current,
     hookState,

@@ -15,6 +15,8 @@ import { ClaudiaThinking } from "./ClaudiaThinking";
 import { StatusBar } from "./StatusBar";
 import CompactionIndicator from "./CompactionIndicator";
 
+const ENABLE_THINKING_TUNER = false;
+
 interface ClaudiaChatProps {
   bridge: PlatformBridge;
   /** Gateway options (sessionId for web, autoDiscoverCwd for VS Code) */
@@ -51,6 +53,31 @@ function ChatInner({
       return false;
     }
   });
+  const [thinkingVisible, setThinkingVisible] = useState(() => {
+    try {
+      return localStorage.getItem("claudia:thinking:visible") !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [thinkingInactivityMs, setThinkingInactivityMs] = useState(() => {
+    try {
+      const raw = Number(localStorage.getItem("claudia:thinking:inactivityMs"));
+      if (Number.isFinite(raw) && raw >= 100) return raw;
+    } catch {
+      /* noop */
+    }
+    return 300;
+  });
+  const [toolTickMs, setToolTickMs] = useState(() => {
+    try {
+      const raw = Number(localStorage.getItem("claudia:thinking:toolTickMs"));
+      if (Number.isFinite(raw) && raw >= 30) return raw;
+    } catch {
+      /* noop */
+    }
+    return 100;
+  });
 
   const toggleVoice = useCallback(() => {
     setVoiceEnabled((prev) => {
@@ -65,6 +92,23 @@ function ChatInner({
   }, []);
 
   const voiceTags = useMemo(() => (voiceEnabled ? ["voice.speak"] : undefined), [voiceEnabled]);
+  const shouldShowThinkingPanel = ENABLE_THINKING_TUNER
+    ? thinkingVisible
+    : gateway.isQuerying || gateway.isCompacting;
+
+  useEffect(() => {
+    gateway.setToolSimulationIntervalMs(toolTickMs);
+  }, [gateway.setToolSimulationIntervalMs, toolTickMs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("claudia:thinking:visible", String(thinkingVisible));
+      localStorage.setItem("claudia:thinking:inactivityMs", String(thinkingInactivityMs));
+      localStorage.setItem("claudia:thinking:toolTickMs", String(toolTickMs));
+    } catch {
+      /* noop */
+    }
+  }, [thinkingVisible, thinkingInactivityMs, toolTickMs]);
 
   // Get editor context if bridge provides it
   const editorContext = bridge.useEditorContext?.();
@@ -159,24 +203,112 @@ function ChatInner({
           </button>
         )}
 
-        {/* Compaction indicator — shown instead of thinking indicator during compaction */}
-        {gateway.isCompacting ? (
-          <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
-            <CompactionIndicator />
-          </div>
+        {/* Thinking + tuning controls */}
+        {ENABLE_THINKING_TUNER ? (
+          shouldShowThinkingPanel ? (
+            gateway.isCompacting ? (
+              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
+                <div className="flex items-center justify-end p-2">
+                  <button
+                    type="button"
+                    onClick={() => setThinkingVisible(false)}
+                    className="text-xs px-2 py-1 rounded border border-purple-200 text-purple-700 hover:bg-purple-50"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <CompactionIndicator />
+              </div>
+            ) : (
+              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
+                <div className="mb-2 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setThinkingVisible(false)}
+                    className="text-xs px-2 py-1 rounded border border-purple-200 text-purple-700 hover:bg-purple-50"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <ClaudiaThinking
+                  count={gateway.eventCount}
+                  streamCount={gateway.streamEventCount}
+                  simulatedCount={gateway.simulatedEventCount}
+                  showCounters
+                  size="lg"
+                  isActive={gateway.isQuerying}
+                  inactivityTimeout={thinkingInactivityMs}
+                />
+                <div className="mt-3 space-y-2 text-xs text-purple-900">
+                  <label className="block">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span>Simulated Tick</span>
+                      <span>{toolTickMs}ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={30}
+                      max={500}
+                      step={10}
+                      value={toolTickMs}
+                      onChange={(e) => setToolTickMs(Number(e.target.value))}
+                      className="w-full accent-purple-600"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span>Fade To Black</span>
+                      <span>{thinkingInactivityMs}ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={100}
+                      max={2000}
+                      step={50}
+                      value={thinkingInactivityMs}
+                      onChange={(e) => setThinkingInactivityMs(Number(e.target.value))}
+                      className="w-full accent-purple-600"
+                    />
+                  </label>
+                </div>
+              </div>
+            )
+          ) : (
+            <button
+              type="button"
+              onClick={() => setThinkingVisible(true)}
+              className="fixed bottom-40 right-8 z-50 rounded-full border border-purple-200 bg-white/80 px-3 py-2 text-xs font-medium text-purple-800 shadow-lg backdrop-blur-sm hover:bg-purple-50"
+            >
+              Show Claudia
+            </button>
+          )
         ) : (
           <Transition
-            show={gateway.isQuerying}
-            enter="transition-all duration-300 ease-out"
-            enterFrom="opacity-0 translate-y-4 scale-95"
+            show={shouldShowThinkingPanel}
+            enter="transition-all duration-350 ease-out"
+            enterFrom="opacity-0 translate-y-2 scale-95"
             enterTo="opacity-100 translate-y-0 scale-100"
-            leave="transition-all duration-200 ease-in"
+            leave="transition-all duration-350 ease-in"
             leaveFrom="opacity-100 translate-y-0 scale-100"
-            leaveTo="opacity-0 translate-y-2 scale-95"
+            leaveTo="opacity-0 translate-y-1 scale-95"
           >
-            <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
-              <ClaudiaThinking count={gateway.eventCount} size="lg" isActive={gateway.isQuerying} />
-            </div>
+            {gateway.isCompacting ? (
+              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
+                <CompactionIndicator />
+              </div>
+            ) : (
+              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
+                <ClaudiaThinking
+                  count={gateway.eventCount}
+                  streamCount={gateway.streamEventCount}
+                  simulatedCount={gateway.simulatedEventCount}
+                  showCounters={false}
+                  size="lg"
+                  isActive={gateway.isQuerying}
+                  inactivityTimeout={thinkingInactivityMs}
+                />
+              </div>
+            )}
           </Transition>
         )}
 
