@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Plus } from "lucide-react";
 import type { GatewayMessage } from "../types";
 import type { WorkspaceInfo } from "../hooks/useGateway";
 
@@ -114,7 +115,7 @@ export function WorkspaceList({
   );
 
   const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr + "Z");
+    const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -129,34 +130,30 @@ export function WorkspaceList({
 
   return (
     <div className="flex flex-col h-screen max-w-3xl mx-auto">
-      <header className="p-6 border-b border-gray-200">
+      <header className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Claudia</h1>
-          <div className="flex items-center gap-3 text-sm">
+          {/* Left side: Claudia title */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <h1 className="text-lg font-semibold text-gray-900">Claudia</h1>
+          </div>
+
+          {/* Right side: New workspace button and connection indicator */}
+          <div className="flex items-center gap-2 flex-shrink-0 pr-1">
             <button
               onClick={() => setShowCreateForm(!showCreateForm)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+              className="p-1.5 rounded-md transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
+              title="New workspace"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              New Workspace
+              <Plus className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
-              />
-              <span className="text-gray-500">{isConnected ? "Connected" : "Disconnected"}</span>
-            </div>
+            <div
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+              title={isConnected ? "Connected" : "Disconnected"}
+            />
           </div>
         </div>
-        <p className="text-gray-500 mt-1">Workspaces</p>
       </header>
 
       {/* Create workspace form */}
@@ -242,7 +239,9 @@ export function WorkspaceList({
                     <div className="font-medium text-gray-900 group-hover:text-blue-700 truncate">
                       {ws.name}
                     </div>
-                    <div className="text-xs text-gray-400 truncate mt-0.5">{ws.cwd}</div>
+                    <div className="text-xs text-gray-400 truncate mt-0.5">
+                      {ws.cwdDisplay || ws.cwd}
+                    </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0 ml-4">
                     <span className="text-xs text-gray-400">{formatTime(ws.updatedAt)}</span>

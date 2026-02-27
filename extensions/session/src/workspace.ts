@@ -22,6 +22,7 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  cwdDisplay: string; // Normalized path with ~ for display
   createdAt: string;
   updatedAt: string;
 }
@@ -36,12 +37,24 @@ interface WorkspaceRow {
   updated_at: string;
 }
 
+/**
+ * Normalize path for display by replacing home directory with ~
+ */
+function normalizePathForDisplay(path: string): string {
+  const home = homedir();
+  if (path.startsWith(home)) {
+    return "~" + path.slice(home.length);
+  }
+  return path;
+}
+
 /** Convert DB row to API type */
 function toWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
-    cwd: normalizePath(row.cwd),
+    cwd: row.cwd, // Keep full path for operations
+    cwdDisplay: normalizePathForDisplay(row.cwd), // Normalized for display
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -91,17 +104,6 @@ export function closeDb(): void {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-
-/**
- * Normalize path by replacing home directory with ~
- */
-function normalizePath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) {
-    return "~" + path.slice(home.length);
-  }
-  return path;
-}
 
 /**
  * Resolve the Claude Code project directory for a given CWD.
@@ -172,7 +174,7 @@ export function listWorkspaces(): Workspace[] {
   // Enrich with most recent session timestamp from filesystem
   const workspaces = rows.map((row) => {
     const workspace = toWorkspace(row);
-    const recentTimestamp = getMostRecentSessionTimestamp(workspace.cwd);
+    const recentTimestamp = getMostRecentSessionTimestamp(row.cwd);
     // Use the most recent session timestamp if available, otherwise fall back to DB updated_at
     if (recentTimestamp) {
       workspace.updatedAt = recentTimestamp;

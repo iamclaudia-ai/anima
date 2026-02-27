@@ -51,7 +51,9 @@ export function Header({
             <h1 className="text-lg font-semibold text-gray-900 truncate">
               {workspace?.name || "..."}
             </h1>
-            <p className="text-xs text-gray-500 truncate">{workspace?.cwd || ""}</p>
+            <p className="text-xs text-gray-500 truncate">
+              {workspace?.cwdDisplay || workspace?.cwd || ""}
+            </p>
           </div>
         </div>
 

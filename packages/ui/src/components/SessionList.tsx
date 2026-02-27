@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ChevronLeft, Plus } from "lucide-react";
 import type { GatewayMessage } from "../types";
 import type { WorkspaceInfo, SessionInfo } from "../hooks/useGateway";
 
@@ -121,31 +122,29 @@ export function SessionList({
 
   return (
     <div className="flex flex-col h-screen max-w-3xl mx-auto">
-      <header className="p-6 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-1 rounded hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
-            title="Back to workspaces"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+      <header className="p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between">
+          {/* Left side: Back button + Workspace info */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <button
+              onClick={onBack}
+              className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+              title="Back to workspaces"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div>
-            <h1 className="text-2xl font-semibold">{workspace?.name || "..."}</h1>
-            {workspace && <p className="text-xs text-gray-400 mt-0.5">{workspace.cwd}</p>}
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-gray-900 truncate">
+                {workspace?.name || "..."}
+              </h1>
+              <p className="text-xs text-gray-500 truncate">
+                {workspace?.cwdDisplay || workspace?.cwd || ""}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center justify-between mt-2">
-          <p className="text-gray-500">Sessions</p>
-          <div className="flex items-center gap-3 text-sm">
+
+          {/* Right side: New session button and connection indicator */}
+          <div className="flex items-center gap-2 flex-shrink-0 pr-1">
             <button
               onClick={() => {
                 if (!workspace?.cwd) return;
@@ -153,27 +152,17 @@ export function SessionList({
                 sendRequest("session.create_session", { cwd: workspace.cwd });
               }}
               disabled={isCreating || !workspace?.cwd}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+              className="p-1.5 rounded-md transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="New session"
             >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              {isCreating ? "Creating..." : "New Session"}
+              <Plus className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
-              />
-              <span className="text-gray-500">
-                {sessions.length} session{sessions.length !== 1 ? "s" : ""}
-              </span>
-            </div>
+            <div
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+              title={isConnected ? "Connected" : "Disconnected"}
+            />
           </div>
         </div>
       </header>
@@ -226,7 +215,6 @@ function SessionCard({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />
           <span className="font-medium text-gray-900 truncate">{formatName(session)}</span>
           {session.gitBranch && (
             <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">
