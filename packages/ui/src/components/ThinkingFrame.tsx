@@ -50,11 +50,7 @@ export default function ThinkingFrame({
 }: ThinkingFrameProps) {
   const baseRef = useRef(null);
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const simulationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const prevCountRef = useRef(count);
-  const latestCountRef = useRef(count);
-  const lastRealActivityAtRef = useRef(Date.now());
-  const lastSimObservedCountRef = useRef(count);
 
   const applyRandomTick = () => {
     if (!baseRef.current) return;
@@ -81,12 +77,10 @@ export default function ThinkingFrame({
 
   // Real stream ticks
   useEffect(() => {
-    latestCountRef.current = count;
     if (!isActive) return;
     if (count === prevCountRef.current) return;
 
     prevCountRef.current = count;
-    lastRealActivityAtRef.current = Date.now();
     applyRandomTick();
     resetFadeTimer();
   }, [count, isActive, inactivityTimeout]);
@@ -98,35 +92,13 @@ export default function ThinkingFrame({
         clearTimeout(fadeTimerRef.current);
         fadeTimerRef.current = null;
       }
-      if (simulationIntervalRef.current) {
-        clearInterval(simulationIntervalRef.current);
-        simulationIntervalRef.current = null;
-      }
       goDark();
       return;
     }
 
-    prevCountRef.current = latestCountRef.current;
-    lastSimObservedCountRef.current = latestCountRef.current;
-    lastRealActivityAtRef.current = Date.now();
+    prevCountRef.current = count;
     resetFadeTimer();
-
-    if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
-    simulationIntervalRef.current = setInterval(() => {
-      if (!isActive) return;
-      const idleMs = Date.now() - lastRealActivityAtRef.current;
-      if (idleMs >= inactivityTimeout) {
-        goDark();
-        return;
-      }
-
-      const latestCount = latestCountRef.current;
-      if (latestCount === lastSimObservedCountRef.current) {
-        applyRandomTick();
-      }
-      lastSimObservedCountRef.current = latestCount;
-    }, 2000);
-  }, [isActive, inactivityTimeout]);
+  }, [isActive, inactivityTimeout, count]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -134,10 +106,6 @@ export default function ThinkingFrame({
       if (fadeTimerRef.current) {
         clearTimeout(fadeTimerRef.current);
         fadeTimerRef.current = null;
-      }
-      if (simulationIntervalRef.current) {
-        clearInterval(simulationIntervalRef.current);
-        simulationIntervalRef.current = null;
       }
     };
   }, []);

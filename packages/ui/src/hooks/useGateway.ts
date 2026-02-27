@@ -127,6 +127,8 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const subscribedSessionRef = useRef<string | null>(null);
   const ignoringHaikuMessageRef = useRef(false);
   const eventListenersRef = useRef<Set<EventListener>>(new Set());
+  const activeToolUseIdsRef = useRef<Set<string>>(new Set());
+  const toolTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     isQueryingRef.current = isQuerying;
@@ -180,6 +182,38 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   );
 
   // ── Message mutation helpers ────────────────────────────────
+
+  const stopToolTickSimulation = useCallback(() => {
+    activeToolUseIdsRef.current.clear();
+    if (toolTickIntervalRef.current) {
+      clearInterval(toolTickIntervalRef.current);
+      toolTickIntervalRef.current = null;
+    }
+  }, []);
+
+  const startToolTickSimulation = useCallback(() => {
+    if (toolTickIntervalRef.current) return;
+    toolTickIntervalRef.current = setInterval(() => {
+      if (!isQueryingRef.current) return;
+      setEventCount((c) => c + 1);
+    }, 900);
+  }, []);
+
+  const markToolUseStarted = useCallback(
+    (toolUseId: string) => {
+      activeToolUseIdsRef.current.add(toolUseId);
+      startToolTickSimulation();
+    },
+    [startToolTickSimulation],
+  );
+
+  const markToolUseCompleted = useCallback(
+    (toolUseId: string) => {
+      activeToolUseIdsRef.current.delete(toolUseId);
+      if (activeToolUseIdsRef.current.size === 0) stopToolTickSimulation();
+    },
+    [stopToolTickSimulation],
+  );
 
   const addBlock = useCallback(
     (block: ContentBlock) => {
@@ -299,6 +333,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
           break;
 
         case "turn_stop":
+          stopToolTickSimulation();
           setIsQuerying(false);
           break;
 
@@ -338,7 +373,9 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
           if (block.type === "text") addBlock({ type: "text", content: "" });
           else if (block.type === "thinking") addBlock({ type: "thinking", content: "" });
           else if (block.type === "tool_use") {
-            addBlock({ type: "tool_use", id: block.id || "", name: block.name || "", input: "" });
+            const toolUseId = block.id || generateId();
+            addBlock({ type: "tool_use", id: toolUseId, name: block.name || "", input: "" });
+            markToolUseStarted(toolUseId);
           }
           break;
         }
@@ -363,6 +400,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
             | Array<{ tool_use_id: string; content: string; is_error?: boolean }>
             | undefined;
           for (const result of results || []) {
+            markToolUseCompleted(result.tool_use_id);
             updateToolResult(result.tool_use_id, {
               content: result.content,
               is_error: result.is_error,
@@ -420,6 +458,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
         }
 
         case "process_died": {
+          stopToolTickSimulation();
           setIsCompacting(false); // Clear stuck compaction state
           setIsQuerying(false); // Clear stuck querying state
           const exitCode = (payload.exitCode as number) || 0;
@@ -450,6 +489,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
         }
 
         case "api_error": {
+          stopToolTickSimulation();
           console.error(`[API Error] ${payload.status}: ${payload.message}`);
           const errorBlock: ErrorBlock = {
             type: "error",
@@ -499,7 +539,15 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
           break;
       }
     },
-    [addBlock, appendToCurrentBlock, updateToolResult, setMessages],
+    [
+      addBlock,
+      appendToCurrentBlock,
+      updateToolResult,
+      setMessages,
+      markToolUseStarted,
+      markToolUseCompleted,
+      stopToolTickSimulation,
+    ],
   );
 
   // ── Gateway message handler ────────────────────────────────
@@ -762,6 +810,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     };
 
     return () => {
+      stopToolTickSimulation();
       ws.close();
     };
   }, [gatewayUrl]);
