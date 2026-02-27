@@ -37,7 +37,13 @@ import {
   parseSessionUsage,
   resolveSessionPath,
 } from "./parse-session";
-import { listWorkspaces, getWorkspace, getOrCreateWorkspace, closeDb } from "./workspace";
+import {
+  listWorkspaces,
+  getWorkspace,
+  getOrCreateWorkspace,
+  deleteWorkspace,
+  closeDb,
+} from "./workspace";
 
 const log = createLogger("SessionExt", join(homedir(), ".claudia", "logs", "session.log"));
 
@@ -417,6 +423,13 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }),
     },
     {
+      name: "session.delete_workspace",
+      description: "Delete a workspace by CWD",
+      inputSchema: z.object({
+        cwd: z.string().describe("Working directory of workspace to delete"),
+      }),
+    },
+    {
       name: "session.health_check",
       description: "Health status of session extension",
       inputSchema: z.object({}),
@@ -749,6 +762,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           created: (result as { created: boolean }).created,
         });
         return result;
+      }
+
+      case "session.delete_workspace": {
+        const cwd = params.cwd as string;
+        const deleted = deleteWorkspace(cwd);
+        return { deleted };
       }
 
       case "session.health_check": {

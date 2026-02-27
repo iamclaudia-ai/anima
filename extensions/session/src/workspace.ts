@@ -9,7 +9,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { generateWorkspaceId, createLogger } from "@claudia/shared";
@@ -90,13 +90,87 @@ export function closeDb(): void {
   }
 }
 
+// ── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Resolve the Claude Code project directory for a given CWD.
+ * Claude Code encodes paths by replacing / with - (dash).
+ */
+function resolveProjectDir(cwd: string): string | null {
+  const projectsDir = join(homedir(), ".claude", "projects");
+  if (!existsSync(projectsDir)) return null;
+
+  // Primary: Claude Code encodes cwd by replacing / with - (dash)
+  const encodedCwd = cwd.replace(/\//g, "-");
+  const primaryDir = join(projectsDir, encodedCwd);
+  if (existsSync(primaryDir)) return primaryDir;
+
+  // Fallback: scan for matching originalPath in sessions-index.json
+  const dirs = readdirSync(projectsDir);
+  for (const dir of dirs) {
+    const indexPath = join(projectsDir, dir, "sessions-index.json");
+    if (!existsSync(indexPath)) continue;
+    try {
+      const data = JSON.parse(readFileSync(indexPath, "utf-8"));
+      if (data.originalPath === cwd) return join(projectsDir, dir);
+    } catch {
+      // skip
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get the most recent JSONL file timestamp for a workspace.
+ * Returns ISO string or null if no sessions found.
+ */
+function getMostRecentSessionTimestamp(cwd: string): string | null {
+  const projectDir = resolveProjectDir(cwd);
+  if (!projectDir) return null;
+
+  try {
+    const files = readdirSync(projectDir).filter((f) => f.endsWith(".jsonl"));
+    if (files.length === 0) return null;
+
+    let mostRecent = 0;
+    for (const file of files) {
+      try {
+        const stats = statSync(join(projectDir, file));
+        if (stats.mtimeMs > mostRecent) {
+          mostRecent = stats.mtimeMs;
+        }
+      } catch {
+        // skip
+      }
+    }
+
+    return mostRecent > 0 ? new Date(mostRecent).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── CRUD ─────────────────────────────────────────────────────
 
 export function listWorkspaces(): Workspace[] {
   const rows = getDb()
     .query("SELECT * FROM workspaces ORDER BY updated_at DESC")
     .all() as WorkspaceRow[];
-  return rows.map(toWorkspace);
+
+  // Enrich with most recent session timestamp from filesystem
+  const workspaces = rows.map((row) => {
+    const workspace = toWorkspace(row);
+    const recentTimestamp = getMostRecentSessionTimestamp(workspace.cwd);
+    // Use the most recent session timestamp if available, otherwise fall back to DB updated_at
+    if (recentTimestamp) {
+      workspace.updatedAt = recentTimestamp;
+    }
+    return workspace;
+  });
+
+  // Sort by updatedAt descending (most recent first)
+  return workspaces.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export function getWorkspace(id: string): Workspace | null {
@@ -133,4 +207,13 @@ export function getOrCreateWorkspace(
   const derivedName = name || basename(cwd);
   const workspace = createWorkspace({ name: derivedName, cwd });
   return { workspace, created: true };
+}
+
+export function deleteWorkspace(cwd: string): boolean {
+  const existing = getWorkspaceByCwd(cwd);
+  if (!existing) return false;
+
+  getDb().query("DELETE FROM workspaces WHERE cwd = ?").run(cwd);
+  log.info("Deleted workspace", { cwd, id: existing.id });
+  return true;
 }
