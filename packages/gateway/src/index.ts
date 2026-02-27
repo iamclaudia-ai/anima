@@ -28,6 +28,9 @@ import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
 
 // Web UI — served as SPA fallback for all non-WS routes
 import index from "./web/index.html";
+// @ts-ignore - Bun's file import syntax
+import serviceWorker from "./web/service-worker.js" with { type: "file" };
+import manifestData from "./web/manifest.json";
 
 // Load configuration (claudia.json or env var fallback)
 const config = loadConfig();
@@ -591,6 +594,33 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
+    },
+
+    // PWA files
+    "/service-worker.js": () => {
+      return new globalThis.Response(Bun.file(serviceWorker), {
+        headers: {
+          "Content-Type": "application/javascript",
+          "Service-Worker-Allowed": "/",
+        },
+      });
+    },
+    "/manifest.json": () => {
+      return new globalThis.Response(JSON.stringify(manifestData), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    // PWA icons — must be before SPA fallback
+    "/icons/*": (req: globalThis.Request) => {
+      const url = new URL(req.url);
+      const filename = url.pathname.slice("/icons/".length);
+      if (filename && !filename.includes("..") && !filename.includes("/")) {
+        const iconPath = join(import.meta.dir, "web", "public", "icons", filename);
+        return new globalThis.Response(Bun.file(iconPath), {
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      return new globalThis.Response("Not found", { status: 404 });
     },
 
     // SPA fallback — serves the web UI for all other paths
