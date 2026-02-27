@@ -32,34 +32,34 @@ export interface ToolBadgeConfig {
 /** Single source of truth for tool icons and color schemes */
 export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
   switch (toolName) {
-    // File operations — Emerald
+    // File operations — distinct colors for read vs write vs edit
     case "Read":
       return {
         icon: <FileText className="size-2.5" />,
-        colors: emeraldColors,
+        colors: emeraldColors, // Green = safe viewing
       };
     case "Write":
       return {
         icon: <FilePen className="size-2.5" />,
-        colors: emeraldColors,
+        colors: tealColors, // Teal = creating new
       };
     case "Edit":
       return {
         icon: <FileEdit className="size-2.5" />,
-        colors: emeraldColors,
+        colors: orangeColors, // Orange = modifying existing
       };
 
-    // Shell operations — Amber
+    // Shell operations — Sky
     case "Bash":
     case "BashOutput":
       return {
         icon: <Terminal className="size-2.5" />,
-        colors: amberColors,
+        colors: skyColors,
       };
     case "KillShell":
       return {
         icon: <XCircle className="size-2.5" />,
-        colors: amberColors,
+        colors: skyColors,
       };
 
     // Search operations — Violet
@@ -349,6 +349,24 @@ const purpleColors = {
   hoverBg: "hover:bg-purple-100/80",
   chevron: "text-purple-400",
   iconColor: "text-purple-500",
+};
+
+const orangeColors = {
+  border: "border-orange-200/60",
+  bg: "bg-orange-50/80",
+  text: "text-orange-600",
+  hoverBg: "hover:bg-orange-100/80",
+  chevron: "text-orange-400",
+  iconColor: "text-orange-500",
+};
+
+const skyColors = {
+  border: "border-sky-200/60",
+  bg: "bg-sky-50/80",
+  text: "text-sky-600",
+  hoverBg: "hover:bg-sky-100/80",
+  chevron: "text-sky-400",
+  iconColor: "text-sky-500",
 };
 
 // ── Thinking badge config ──────────────────────────────────
