@@ -13,7 +13,6 @@ class AppState {
     var voiceState: VoiceState = .idle
     var isConnected = false
     var statusText = "Connecting..."
-    var sessionDebugText = ""
     var micAvailable = true
     private var isRecoveringMic = false
     private var postSpeechRecoveryWorkItem: DispatchWorkItem?
@@ -53,9 +52,8 @@ class AppState {
             self.startListening()
         }
 
-        gateway.onSessionResolved = { [weak self] message in
+        gateway.onSessionResolved = { message in
             print("[App] Session: \(message)")
-            self?.sessionDebugText = message
         }
 
         gateway.onDisconnected = { [weak self] in
@@ -168,14 +166,14 @@ class AppState {
         postSpeechRecoveryWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if self.voiceState == .speaking {
-                // If callbacks didn't drain in background, force transition.
-                self.audioPlayer.stop()
+            // Safety net only: don't force-stop active playback, which can clip
+            // tail audio on longer buffered responses.
+            if self.voiceState == .speaking && !self.audioPlayer.isPlaying {
                 self.resumeListeningAfterSpeech()
             }
         }
         postSpeechRecoveryWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0, execute: work)
     }
 
     private func resumeListeningAfterSpeech() {

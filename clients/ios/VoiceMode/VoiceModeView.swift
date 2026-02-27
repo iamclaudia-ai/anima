@@ -18,9 +18,7 @@ struct VoiceModeView: View {
             // Background
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 40) {
-                Spacer()
-
+            VStack(spacing: 32) {
                 // Top bar: connection indicator + browser button
                 HStack {
                     // Connection indicator
@@ -43,6 +41,7 @@ struct VoiceModeView: View {
                     }
                 }
                 .padding(.horizontal, 24)
+                .padding(.top, 8)
 
                 Spacer()
 
@@ -102,15 +101,6 @@ struct VoiceModeView: View {
                     .fontWeight(.medium)
                     .foregroundColor(.white)
 
-                if !appState.sessionDebugText.isEmpty {
-                    Text(appState.sessionDebugText)
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                        .lineLimit(2)
-                }
-
                 // Current transcript (while listening)
                 if appState.voiceState == .listening && !appState.speechRecognizer.currentTranscript.isEmpty {
                     Text(appState.speechRecognizer.currentTranscript)
@@ -121,7 +111,6 @@ struct VoiceModeView: View {
                         .lineLimit(3)
                 }
 
-                Spacer()
                 Spacer()
             }
         }
