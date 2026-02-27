@@ -202,7 +202,24 @@ pub fn run() {
                 }
             }
 
-            // Build menu bar with Window menu
+            // Build menu bar with Edit and Window menus
+
+            // Edit menu with standard shortcuts
+            let cut = PredefinedMenuItem::cut(app, None)?;
+            let copy = PredefinedMenuItem::copy(app, None)?;
+            let paste = PredefinedMenuItem::paste(app, None)?;
+            let select_all = PredefinedMenuItem::select_all(app, None)?;
+            let undo = PredefinedMenuItem::undo(app, None)?;
+            let redo = PredefinedMenuItem::redo(app, None)?;
+
+            let edit_menu = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[&undo, &redo, &cut, &copy, &paste, &select_all],
+            )?;
+
+            // Window menu
             let on_top_label = if always_on_top {
                 "Always on Top ✓"
             } else {
@@ -221,7 +238,7 @@ pub fn run() {
                 &[&on_top_menubar, &minimize, &zoom, &close],
             )?;
 
-            let menu_bar = Menu::with_items(app, &[&window_menu])?;
+            let menu_bar = Menu::with_items(app, &[&edit_menu, &window_menu])?;
             app.set_menu(menu_bar)?;
 
             // Handle menubar events
