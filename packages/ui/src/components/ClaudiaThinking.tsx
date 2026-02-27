@@ -16,7 +16,7 @@ interface ClaudiaThinkingProps {
 export function ClaudiaThinking({
   count = 0,
   size = "md",
-  speed = 2,
+  speed = 1,
   isActive = true,
   inactivityTimeout = 60000,
 }: ClaudiaThinkingProps) {

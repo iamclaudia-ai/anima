@@ -15,12 +15,16 @@ const floodColors = {
 function updateStyle(svg: SVGElement, index: number, style: StyleTypes) {
   const circuit = svg.querySelector(`#circuit-${index}`);
   if (!circuit) return;
+  const hasPurple = circuit.classList.contains("purple");
+  const hasBlue = circuit.classList.contains("blue");
+  const currentStyle: StyleTypes = hasPurple ? "purple" : hasBlue ? "blue" : "none";
+  if (currentStyle === style) return;
 
   circuit.classList.remove("blue", "purple");
   const filter = svg.querySelector(`#outer-glow-${index}`);
   if (!filter) return;
 
-  circuit.classList.add(style);
+  if (style !== "none") circuit.classList.add(style);
   filter.querySelector("feFlood")?.setAttribute("flood-color", floodColors[style]);
 }
 
@@ -45,109 +49,98 @@ export default function ThinkingFrame({
   inactivityTimeout = 60000,
 }: ThinkingFrameProps) {
   const baseRef = useRef(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastPropsRef = useRef({ count, isActive, inactivityTimeout });
-  const lastThrottledCountRef = useRef(-1);
-  const simulationTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastCountRef = useRef(count);
+  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const simulationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const prevCountRef = useRef(count);
+  const latestCountRef = useRef(count);
+  const lastRealActivityAtRef = useRef(Date.now());
+  const lastSimObservedCountRef = useRef(count);
 
-  lastPropsRef.current = { count, isActive, inactivityTimeout };
-
-  // Effect 1: Set random colors when stream events come in (throttled)
-  useEffect(() => {
+  const applyRandomTick = () => {
     if (!baseRef.current) return;
-
-    // Handle count changes (real activity)
-    if (count > 0) {
-      // Throttle animation updates - only update colors every 3 events to reduce flicker
-      const throttledCount = Math.floor(count / 3);
-
-      // Only update colors if throttled count actually changed
-      if (throttledCount !== lastThrottledCountRef.current) {
-        lastThrottledCountRef.current = throttledCount;
-
-        const svg = baseRef.current as SVGElement;
-
-        // Set random colors for all segments
-        for (let i = 1; i <= 7; i++) {
-          updateStyle(svg, i, randomStyle());
-        }
-      }
+    const svg = baseRef.current as SVGElement;
+    for (let i = 1; i <= 7; i++) {
+      updateStyle(svg, i, randomStyle());
     }
+  };
 
-    // Clear any existing timers
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+  const goDark = () => {
+    if (!baseRef.current) return;
+    const svg = baseRef.current as SVGElement;
+    for (let i = 1; i <= 7; i++) {
+      updateStyle(svg, i, "none");
     }
-    if (simulationTimerRef.current) {
-      clearTimeout(simulationTimerRef.current);
-      simulationTimerRef.current = null;
-    }
+  };
 
-    // Handle activity state
-    if (isActive) {
-      // Check if count has changed recently
-      const countChanged = count !== lastCountRef.current;
-      lastCountRef.current = count;
+  const resetFadeTimer = () => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      goDark();
+    }, inactivityTimeout);
+  };
 
-      if (countChanged || count === 0) {
-        // Real activity or initial state - start normal inactivity timer
-        timerRef.current = setTimeout(() => {
-          if (baseRef.current) {
-            const svg = baseRef.current as SVGElement;
-            for (let i = 1; i <= 7; i++) {
-              updateStyle(svg, i, "none");
-            }
-          }
-        }, inactivityTimeout);
-      } else {
-        // Active but no count change - likely a tool call, simulate activity
-        const simulateActivity = () => {
-          if (baseRef.current && isActive) {
-            const svg = baseRef.current as SVGElement;
-            for (let i = 1; i <= 7; i++) {
-              updateStyle(svg, i, randomStyle());
-            }
-            // Continue simulation every 2 seconds while active
-            simulationTimerRef.current = setTimeout(simulateActivity, 2000);
-          }
-        };
-        simulateActivity();
-      }
-    }
+  // Real stream ticks
+  useEffect(() => {
+    latestCountRef.current = count;
+    if (!isActive) return;
+    if (count === prevCountRef.current) return;
+
+    prevCountRef.current = count;
+    lastRealActivityAtRef.current = Date.now();
+    applyRandomTick();
+    resetFadeTimer();
   }, [count, isActive, inactivityTimeout]);
 
-  // Effect 2: Clean up on unmount or when turn becomes inactive
+  // Turn active state
+  useEffect(() => {
+    if (!isActive) {
+      if (fadeTimerRef.current) {
+        clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+      }
+      if (simulationIntervalRef.current) {
+        clearInterval(simulationIntervalRef.current);
+        simulationIntervalRef.current = null;
+      }
+      goDark();
+      return;
+    }
+
+    prevCountRef.current = latestCountRef.current;
+    lastSimObservedCountRef.current = latestCountRef.current;
+    lastRealActivityAtRef.current = Date.now();
+    resetFadeTimer();
+
+    if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
+    simulationIntervalRef.current = setInterval(() => {
+      if (!isActive) return;
+      const idleMs = Date.now() - lastRealActivityAtRef.current;
+      if (idleMs >= inactivityTimeout) {
+        goDark();
+        return;
+      }
+
+      const latestCount = latestCountRef.current;
+      if (latestCount === lastSimObservedCountRef.current) {
+        applyRandomTick();
+      }
+      lastSimObservedCountRef.current = latestCount;
+    }, 2000);
+  }, [isActive, inactivityTimeout]);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+      if (fadeTimerRef.current) {
+        clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = null;
       }
-      if (simulationTimerRef.current) {
-        clearTimeout(simulationTimerRef.current);
-        simulationTimerRef.current = null;
+      if (simulationIntervalRef.current) {
+        clearInterval(simulationIntervalRef.current);
+        simulationIntervalRef.current = null;
       }
     };
   }, []);
-
-  // Effect 3: Immediately go dark when turn becomes inactive
-  useEffect(() => {
-    if (!isActive && baseRef.current) {
-      // Clear any pending timer
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-
-      // Set all segments to dark
-      const svg = baseRef.current as SVGElement;
-      for (let i = 1; i <= 7; i++) {
-        updateStyle(svg, i, "none");
-      }
-    }
-  }, [isActive]);
 
   return (
     <svg viewBox="0 0 450 450" className={className} ref={baseRef}>
@@ -164,11 +157,11 @@ export default function ThinkingFrame({
 
       .blue {
         fill: #1f41ea;
-        transition: fill 1.0s ease-in-out;
+        transition: fill 180ms ease-out;
       }
       .purple {
         fill: #6e1fff;
-        transition: fill 1.0s ease-in-out;
+        transition: fill 180ms ease-out;
       }
       .glow-1 {
         filter: url(#outer-glow-1);
