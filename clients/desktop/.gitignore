@@ -4,6 +4,7 @@ Cargo.lock
 
 # Tauri
 src-tauri/WixTools/
+src-tauri/gen/
 
 # Node
 node_modules/

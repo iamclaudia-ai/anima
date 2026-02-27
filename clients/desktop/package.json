@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "Claudia desktop app — native Tauri wrapper with always-on-top + system tray",
+  "os": [
+    "darwin"
+  ],
   "scripts": {
     "dev": "cargo tauri dev",
     "build": "cargo tauri build",
     "icons": "cargo tauri icon src-tauri/icons/app-icon.png"
-  },
-  "os": ["darwin"]
+  }
 }
