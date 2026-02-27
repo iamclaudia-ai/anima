@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { FileText, FileImage, File, X } from "lucide-react";
+import { FileText, FileImage, File, X, ArrowUp } from "lucide-react";
 import type { Attachment, Usage } from "../types";
 import { useBridge } from "../bridge";
 
@@ -208,6 +208,18 @@ export function InputArea({
     [onSend, onInterrupt],
   );
 
+  // Calculate context usage for the ring indicator
+  const contextData = usage
+    ? (() => {
+        const total =
+          usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
+        const max = 200000;
+        const percent = (total / max) * 100;
+        const strokeColor = percent >= 80 ? "#dc2626" : percent >= 60 ? "#f97316" : "#10b981"; // red-600, orange-500, emerald-500
+        return { total, max, percent, strokeColor };
+      })()
+    : null;
+
   return (
     <footer className="p-4 border-t border-gray-200">
       {attachments.length > 0 && (
@@ -241,8 +253,10 @@ export function InputArea({
           })}
         </div>
       )}
+
+      {/* Textarea with integrated send/stop button */}
       <div
-        className={`relative ${isDragging ? "ring-2 ring-blue-500 ring-offset-2" : ""}`}
+        className={`relative ${isDragging ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -259,53 +273,72 @@ export function InputArea({
               ? "Type a message... (⌘↵ send, ESC stop)"
               : "Disconnected - type to compose (will send when reconnected)"
           }
-          className={`w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-gray-300 ${!isConnected ? "bg-orange-50 border-orange-200" : ""}`}
+          className={`w-full p-3 pr-12 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-gray-300 ${!isConnected ? "bg-orange-50 border-orange-200" : ""}`}
           rows={1}
-          style={{ maxHeight: "200px", overflow: "auto" }}
+          style={{ minHeight: "96px", maxHeight: "200px", overflow: "auto" }}
         />
+
+        {/* Context ring indicator - positioned above send/stop button */}
+        {contextData && (
+          <div className="absolute bottom-14 right-2 flex flex-col items-center">
+            <svg width="32" height="32" viewBox="0 0 32 32">
+              {/* Background ring (darker gray) */}
+              <circle
+                cx="16"
+                cy="16"
+                r="14"
+                fill="none"
+                stroke="#9ca3af"
+                strokeWidth="2.5"
+                className="transform -rotate-90 origin-center"
+                style={{ transformOrigin: "16px 16px" }}
+              />
+              {/* Progress ring (colored) */}
+              <circle
+                cx="16"
+                cy="16"
+                r="14"
+                fill="none"
+                stroke={contextData.strokeColor}
+                strokeWidth="2.5"
+                strokeDasharray={`${(contextData.percent / 100) * 87.96} 87.96`}
+                strokeLinecap="round"
+                className="transform -rotate-90 origin-center"
+                style={{ transformOrigin: "16px 16px" }}
+              />
+              {/* Percentage text in center */}
+              <text
+                x="16"
+                y="16"
+                textAnchor="middle"
+                dominantBaseline="middle"
+                className="text-[9px] font-mono font-semibold fill-gray-600"
+              >
+                {Math.round(contextData.percent)}
+              </text>
+            </svg>
+          </div>
+        )}
+
+        {/* Send/Stop button - toggles based on isQuerying */}
+        <button
+          onClick={isQuerying ? onInterrupt : onSend}
+          disabled={!isQuerying && (!isConnected || (!input.trim() && attachments.length === 0))}
+          className={`absolute bottom-4 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            isQuerying
+              ? "bg-red-500 hover:bg-red-600"
+              : "bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          } text-white`}
+          aria-label={isQuerying ? "Stop" : "Send message"}
+        >
+          {isQuerying ? <X className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
+        </button>
+
         {isDragging && (
           <div className="absolute inset-0 bg-blue-50/80 rounded-lg flex items-center justify-center pointer-events-none">
             <span className="text-blue-600 font-medium">Drop files here</span>
           </div>
         )}
-      </div>
-
-      <div className="mt-2 flex items-center justify-between">
-        {usage ? (
-          (() => {
-            const total =
-              usage.input_tokens +
-              usage.cache_read_input_tokens +
-              usage.cache_creation_input_tokens;
-            const max = 200000;
-            const percent = Math.round((total / max) * 100);
-            const colorClass =
-              percent >= 80 ? "text-red-600" : percent >= 60 ? "text-orange-500" : "text-gray-600";
-            return (
-              <div className={`text-xs font-mono ${colorClass}`}>
-                Context: {total.toLocaleString()}/{max.toLocaleString()} {percent}%
-              </div>
-            );
-          })()
-        ) : (
-          <div />
-        )}
-        <div className="flex gap-2">
-          <button
-            onClick={onInterrupt}
-            disabled={!isQuerying}
-            className="px-3 py-1.5 rounded-md text-sm text-white bg-red-500 hover:bg-red-600 disabled:opacity-0 transition-opacity"
-          >
-            Stop
-          </button>
-          <button
-            onClick={onSend}
-            disabled={!isConnected || (!input.trim() && attachments.length === 0)}
-            className="px-4 py-1.5 rounded-md text-sm text-white bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300"
-          >
-            Send
-          </button>
-        </div>
       </div>
     </footer>
   );
