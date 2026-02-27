@@ -116,9 +116,8 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const [eventCount, setEventCount] = useState(0);
   const [streamEventCount, setStreamEventCount] = useState(0);
   const [simulatedEventCount, setSimulatedEventCount] = useState(0);
-  const [toolSimulationIntervalMs, setToolSimulationIntervalMsState] = useState(
-    DEFAULT_TOOL_SIM_TICK_MS,
-  );
+  const [toolSimulationIntervalMs, setToolSimulationIntervalMsState] =
+    useState(DEFAULT_TOOL_SIM_TICK_MS);
   const [visibleCount, setVisibleCount] = useState(50);
   const [totalMessages, setTotalMessages] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -648,7 +647,18 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
             }
             setTotalMessages(total);
             setHasMore(more);
-            if (historyUsage) setUsage(historyUsage);
+            // Always set usage - use provided data or initialize to zero if not available
+            if (historyUsage) {
+              setUsage(historyUsage);
+            } else if (offset === 0) {
+              // Initialize with zero usage on first load if backend doesn't provide it
+              setUsage({
+                input_tokens: 0,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+                output_tokens: 0,
+              });
+            }
           }
 
           // ── session.get_or_create_workspace (VS Code auto-discover) ──

@@ -215,7 +215,15 @@ export function InputArea({
           usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
         const max = 200000;
         const percent = (total / max) * 100;
-        const strokeColor = percent >= 80 ? "#dc2626" : percent >= 60 ? "#f97316" : "#10b981"; // red-600, orange-500, emerald-500
+        // Use lighter gray for 0%, color coded for usage levels
+        const strokeColor =
+          percent === 0
+            ? "#d1d5db" // gray-300 (lighter gray for zero state)
+            : percent >= 80
+              ? "#dc2626" // red-600
+              : percent >= 60
+                ? "#f97316" // orange-500
+                : "#10b981"; // emerald-500
         return { total, max, percent, strokeColor };
       })()
     : null;
@@ -306,16 +314,18 @@ export function InputArea({
                 className="transform -rotate-90 origin-center"
                 style={{ transformOrigin: "16px 16px" }}
               />
-              {/* Percentage text in center */}
-              <text
-                x="16"
-                y="16"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                className="text-[9px] font-mono font-semibold fill-gray-600"
-              >
-                {Math.round(contextData.percent)}
-              </text>
+              {/* Percentage text in center - only show if non-zero */}
+              {contextData.percent > 0 && (
+                <text
+                  x="16"
+                  y="16"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  className="text-[9px] font-mono font-semibold fill-gray-600"
+                >
+                  {Math.round(contextData.percent)}
+                </text>
+              )}
             </svg>
           </div>
         )}

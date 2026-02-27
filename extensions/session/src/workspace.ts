@@ -41,7 +41,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
-    cwd: row.cwd,
+    cwd: normalizePath(row.cwd),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -91,6 +91,17 @@ export function closeDb(): void {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Normalize path by replacing home directory with ~
+ */
+function normalizePath(path: string): string {
+  const home = homedir();
+  if (path.startsWith(home)) {
+    return "~" + path.slice(home.length);
+  }
+  return path;
+}
 
 /**
  * Resolve the Claude Code project directory for a given CWD.

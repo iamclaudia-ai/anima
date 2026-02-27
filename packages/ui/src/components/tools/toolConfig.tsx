@@ -390,5 +390,5 @@ export function getThinkingLabel(isComplete: boolean, durationMs?: number): stri
   if (isComplete) {
     return "Thought";
   }
-  return "thinking...";
+  return "Thinking...";
 }
