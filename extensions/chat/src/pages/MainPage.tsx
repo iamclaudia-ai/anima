@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ClaudiaChat, NavigationDrawer, navigate } from "@claudia/ui";
+import { ClaudiaChat, NavigationDrawer, navigate, useGatewayClient } from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
-import { createGatewayClient, type GatewayClient } from "@claudia/shared";
 import { bridge, GATEWAY_URL } from "../app";
 import {
   createSessionForWorkspace,
@@ -14,8 +13,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const gatewayRef = useRef<GatewayClient | null>(null);
+  const { call, isConnected } = useGatewayClient(GATEWAY_URL);
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
 
@@ -25,21 +23,16 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   const callGateway = useCallback(
     async <T,>(method: string, params?: Record<string, unknown>): Promise<T | null> => {
-      if (!gatewayRef.current) return null;
-      return (await gatewayRef.current.call(method, params)) as T;
+      return (await call<T>(method, params)) as T;
     },
-    [],
+    [call],
   );
 
   useEffect(() => {
-    const gateway = createGatewayClient({ url: GATEWAY_URL });
-    gatewayRef.current = gateway;
-    const unsubscribeConnection = gateway.onConnection(setIsConnected);
     let cancelled = false;
 
     const bootstrap = async () => {
       try {
-        await gateway.connect();
         const data = await loadMainPageBootstrapData(callGateway, {
           workspaceId,
           sessionId,
@@ -56,7 +49,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
           setActiveSessionId(data.activeSessionId);
         }
       } catch {
-        if (!cancelled) setIsConnected(false);
+        // ignore bootstrap errors; connection status handled by gateway hook
       }
     };
 
@@ -64,9 +57,6 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
     return () => {
       cancelled = true;
-      unsubscribeConnection();
-      gateway.disconnect();
-      gatewayRef.current = null;
     };
   }, [callGateway]);
 
