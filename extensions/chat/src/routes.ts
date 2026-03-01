@@ -12,5 +12,6 @@ import { MainPage } from "./pages/MainPage";
 
 export const chatRoutes: Route[] = [
   { path: "/", component: MainPage, label: "Claudia" },
+  { path: "/workspace/:workspaceId", component: MainPage, label: "Workspace" },
   { path: "/workspace/:workspaceId/session/:sessionId", component: MainPage, label: "Chat" },
 ];

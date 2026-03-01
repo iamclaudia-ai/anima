@@ -8,6 +8,24 @@ import {
   loadSessionsForWorkspace,
 } from "./helpers/main-page-gateway";
 
+// Get latest session ID for a workspace from localStorage
+function getLatestSessionId(workspaceId: string): string | null {
+  try {
+    return localStorage.getItem(`claudia:workspace:${workspaceId}:latestSession`);
+  } catch {
+    return null;
+  }
+}
+
+// Save latest session ID for a workspace to localStorage
+function setLatestSessionId(workspaceId: string, sessionId: string): void {
+  try {
+    localStorage.setItem(`claudia:workspace:${workspaceId}:latestSession`, sessionId);
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
 export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; sessionId?: string }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -66,6 +84,8 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       activeWorkspaceRef.current = workspace;
       setActiveSessionId(null);
       setSessions([]);
+      // Navigate to workspace's latest session
+      navigate(`/workspace/${workspace.id}/session/latest`);
       void loadSessionsForWorkspace(callGateway, workspace.cwd)
         .then((payload) => {
           setSessions(payload);
@@ -100,6 +120,13 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       .catch(() => undefined);
   }, [callGateway]);
 
+  // Save active session to localStorage as "latest" for this workspace
+  useEffect(() => {
+    if (activeSessionId && activeWorkspace && sessionId !== "latest") {
+      setLatestSessionId(activeWorkspace.id, activeSessionId);
+    }
+  }, [activeSessionId, activeWorkspace, sessionId]);
+
   // Update URL when new session is created
   useEffect(() => {
     if (activeSessionId && activeWorkspace) {
@@ -109,11 +136,28 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   // Watch for prop changes (when router updates URL without re-mounting)
   useEffect(() => {
+    // Handle "latest" session ID - resolve from localStorage or most recent session
+    if (sessionId === "latest" && workspaceId) {
+      const latestSessionId = getLatestSessionId(workspaceId);
+      if (latestSessionId && latestSessionId !== activeSessionId) {
+        // Use stored latest session
+        setActiveSessionId(latestSessionId);
+      } else if (!latestSessionId && sessions.length > 0) {
+        // No stored session, use most recent from list (already sorted by modified desc)
+        const mostRecent = sessions[0];
+        if (mostRecent.sessionId !== activeSessionId) {
+          setActiveSessionId(mostRecent.sessionId);
+        }
+      } else if (sessions.length === 0) {
+        // No sessions at all, show empty state
+        setActiveSessionId(null);
+      }
+    }
     // If sessionId prop changes and differs from current state, update state
-    if (sessionId && sessionId !== activeSessionId) {
+    else if (sessionId && sessionId !== "latest" && sessionId !== activeSessionId) {
       setActiveSessionId(sessionId);
     }
-  }, [sessionId, activeSessionId]);
+  }, [sessionId, activeSessionId, workspaceId, sessions]);
 
   // Watch for workspace prop changes
   useEffect(() => {
@@ -158,10 +202,20 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
             key={`${activeWorkspace.id}-${activeSessionId}`}
           />
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            {activeWorkspace
-              ? "Select a session or create a new one"
-              : "Select a workspace to get started"}
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <p className="text-gray-400">
+              {activeWorkspace
+                ? "No sessions yet for this workspace"
+                : "Select a workspace to get started"}
+            </p>
+            {activeWorkspace && (
+              <button
+                onClick={handleNewSession}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Create new session
+              </button>
+            )}
           </div>
         )}
       </div>
