@@ -152,6 +152,23 @@ export function useChatGateway(
   const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
   const [isAtBottom, setIsAtBottom] = useState(true); // Expose for UI indicator
 
+  const normalizeUsage = useCallback((usageData: Usage): Usage => {
+    return {
+      input_tokens: usageData.input_tokens || 0,
+      cache_creation_input_tokens: usageData.cache_creation_input_tokens || 0,
+      cache_read_input_tokens: usageData.cache_read_input_tokens || 0,
+      output_tokens: usageData.output_tokens || 0,
+    };
+  }, []);
+
+  const applyUsage = useCallback(
+    (usageData?: Usage) => {
+      if (!usageData) return;
+      setUsage(normalizeUsage(usageData));
+    },
+    [normalizeUsage],
+  );
+
   useEffect(() => {
     isQueryingRef.current = isQuerying;
   }, [isQuerying]);
@@ -506,15 +523,7 @@ export function useChatGateway(
               if (lastMsg?.role === "assistant") lastMsg.aborted = true;
             });
           }
-          const usageData = payload.usage as Usage | undefined;
-          if (usageData) {
-            setUsage({
-              input_tokens: usageData.input_tokens || 0,
-              cache_creation_input_tokens: usageData.cache_creation_input_tokens || 0,
-              cache_read_input_tokens: usageData.cache_read_input_tokens || 0,
-              output_tokens: usageData.output_tokens || 0,
-            });
-          }
+          applyUsage(payload.usage as Usage | undefined);
           break;
         }
 
@@ -530,15 +539,7 @@ export function useChatGateway(
           console.log(`[Compaction] ✓ Complete (trigger: ${trigger}, pre_tokens: ${preTokens})`);
 
           // Update usage immediately after compaction
-          const usageData = payload.usage as Usage | undefined;
-          if (usageData) {
-            setUsage({
-              input_tokens: usageData.input_tokens || 0,
-              cache_creation_input_tokens: usageData.cache_creation_input_tokens || 0,
-              cache_read_input_tokens: usageData.cache_read_input_tokens || 0,
-              output_tokens: usageData.output_tokens || 0,
-            });
-          }
+          applyUsage(payload.usage as Usage | undefined);
 
           // Insert a compaction boundary marker into messages
           setMessages((draft) => {
@@ -644,6 +645,7 @@ export function useChatGateway(
       setMessages,
       markToolUseStarted,
       markToolUseCompleted,
+      applyUsage,
       stopToolTickSimulation,
     ],
   );
@@ -699,7 +701,7 @@ export function useChatGateway(
         setHasMore(more);
         // Always set usage - use provided data or initialize to zero if not available
         if (historyUsage) {
-          setUsage(historyUsage);
+          setUsage(normalizeUsage(historyUsage));
         } else if (offset === 0) {
           // Initialize with zero usage on first load if backend doesn't provide it
           setUsage({
@@ -811,7 +813,7 @@ export function useChatGateway(
         }
       }
     },
-    [setMessages, sendRequest, subscribeToSession],
+    [normalizeUsage, sendRequest, setMessages, subscribeToSession],
   );
 
   const handleGatewayEvent = useCallback(

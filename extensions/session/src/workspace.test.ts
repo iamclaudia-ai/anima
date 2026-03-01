@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   closeDb,
   createWorkspace,
@@ -33,15 +33,16 @@ describe("workspace db", () => {
   });
 
   it("creates, fetches, and lists workspaces", () => {
-    const created = createWorkspace({ name: "project-a", cwd: "/repo/a" });
+    const cwd = join(dataDir, "repo", "a");
+    const created = createWorkspace({ name: "project-a", cwd });
     expect(created.id).toMatch(/^ws_/);
     expect(created.name).toBe("project-a");
-    expect(created.cwd).toBe("/repo/a");
+    expect(created.cwd).toBe(cwd);
 
     const byId = getWorkspace(created.id);
     expect(byId).toEqual(created);
 
-    const byCwd = getWorkspaceByCwd("/repo/a");
+    const byCwd = getWorkspaceByCwd(cwd);
     expect(byCwd).toEqual(created);
 
     const listed = listWorkspaces();
@@ -50,20 +51,43 @@ describe("workspace db", () => {
   });
 
   it("getOrCreateWorkspace is idempotent per cwd", () => {
-    const first = getOrCreateWorkspace("/repo/b", "project-b");
+    const cwd = join(dataDir, "repo", "b");
+    const first = getOrCreateWorkspace(cwd, "project-b");
     expect(first.created).toBe(true);
     expect(first.workspace.name).toBe("project-b");
 
-    const second = getOrCreateWorkspace("/repo/b", "ignored-name");
+    const second = getOrCreateWorkspace(cwd, "ignored-name");
     expect(second.created).toBe(false);
     expect(second.workspace.id).toBe(first.workspace.id);
     expect(second.workspace.name).toBe("project-b");
   });
 
   it("derives workspace name from cwd basename when name is omitted", () => {
-    const result = getOrCreateWorkspace("/repo/my-folder");
+    const result = getOrCreateWorkspace(join(dataDir, "repo", "my-folder"));
     expect(result.created).toBe(true);
     expect(result.workspace.name).toBe("my-folder");
+  });
+
+  it("expands tilde paths and creates directories recursively", () => {
+    const uniqueFolder = `claudia-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const tildePath = `~/projects/${uniqueFolder}`;
+    const expectedPath = join(homedir(), "projects", uniqueFolder);
+
+    try {
+      const result = getOrCreateWorkspace(tildePath, "claudia");
+      expect(result.created).toBe(true);
+      expect(result.workspace.cwd).toBe(expectedPath);
+      expect(statSync(expectedPath).isDirectory()).toBe(true);
+    } finally {
+      rmSync(expectedPath, { recursive: true, force: true });
+    }
+  });
+
+  it("throws when cwd exists as a file", () => {
+    const filePath = join(dataDir, "not-a-directory");
+    writeFileSync(filePath, "x");
+
+    expect(() => getOrCreateWorkspace(filePath)).toThrow("Path exists but is not a directory");
   });
 
   it("reopens database after closeDb without data loss", () => {
@@ -76,6 +100,6 @@ describe("workspace db", () => {
 
   it("returns null for missing workspace id/cwd lookups", () => {
     expect(getWorkspace("ws_missing")).toBeNull();
-    expect(getWorkspaceByCwd("/repo/missing")).toBeNull();
+    expect(getWorkspaceByCwd(join(dataDir, "repo", "missing"))).toBeNull();
   });
 });

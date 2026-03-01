@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { X, Folder, ChevronUp } from "lucide-react";
+import {
+  buildWorkspacePath,
+  getWorkspaceParentPath,
+  joinWorkspacePath,
+} from "./createWorkspacePath";
 
 interface CreateWorkspaceModalProps {
   isOpen: boolean;
@@ -51,23 +56,16 @@ export function CreateWorkspaceModal({
   if (!isOpen) return null;
 
   const handleSubmit = () => {
-    // Build final path: currentPath + optional new folder name
-    const finalPath = newFolderName.trim() ? `${currentPath}/${newFolderName.trim()}` : currentPath;
+    const finalPath = buildWorkspacePath(currentPath, newFolderName);
     onSubmit(finalPath, name.trim() || undefined);
   };
 
   const handleNavigateToDir = (dirName: string) => {
-    setCurrentPath(`${currentPath}/${dirName}`);
+    setCurrentPath(joinWorkspacePath(currentPath, dirName));
   };
 
   const handleNavigateUp = () => {
-    const parts = currentPath.split("/").filter(Boolean);
-    if (parts.length <= 1) {
-      setCurrentPath("~");
-    } else {
-      parts.pop();
-      setCurrentPath("/" + parts.join("/"));
-    }
+    setCurrentPath(getWorkspaceParentPath(currentPath));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -184,7 +182,7 @@ export function CreateWorkspaceModal({
             className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title={
               newFolderName.trim()
-                ? `Will create: ${currentPath}/${newFolderName.trim()}`
+                ? `Will create: ${buildWorkspacePath(currentPath, newFolderName)}`
                 : `Use: ${currentPath}`
             }
           >

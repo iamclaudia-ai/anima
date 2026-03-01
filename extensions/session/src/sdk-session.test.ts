@@ -257,6 +257,16 @@ describe("SDKSession", () => {
     fakeQuery.push({ type: "system", subtype: "status", status: "compacting" });
     fakeQuery.push({ type: "system", subtype: "status", status: null });
     fakeQuery.push({
+      type: "result",
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: 42,
+        cache_creation_input_tokens: 5,
+        cache_read_input_tokens: 7,
+        output_tokens: 9,
+      },
+    });
+    fakeQuery.push({
       type: "system",
       subtype: "compact_boundary",
       compact_metadata: { trigger: "auto", pre_tokens: 123 },
@@ -275,6 +285,13 @@ describe("SDKSession", () => {
     expect(sseEvents.some((e) => e.type === "compaction_start")).toBe(true);
     expect(sseEvents.some((e) => e.type === "compaction_end")).toBe(true);
     expect(sseEvents.some((e) => e.type === "tool_progress")).toBe(true);
+    const compactionEnd = sseEvents.find((e) => e.type === "compaction_end");
+    expect(compactionEnd?.usage).toEqual({
+      input_tokens: 42,
+      cache_creation_input_tokens: 5,
+      cache_read_input_tokens: 7,
+      output_tokens: 9,
+    });
   });
 
   it("tracks AskUserQuestion as pending and does not auto-approve it", async () => {

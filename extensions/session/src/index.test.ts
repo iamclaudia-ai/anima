@@ -468,6 +468,45 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("lists child directories with tilde expansion and hides dot-directories", async () => {
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+    const rootName = `claudia-dir-list-${Date.now()}`;
+    const basePath = join(testHome, "Projects", rootName);
+    const tildePath = `~/Projects/${rootName}`;
+
+    try {
+      mkdirSync(join(basePath, "alpha"), { recursive: true });
+      mkdirSync(join(basePath, "beta"), { recursive: true });
+      mkdirSync(join(basePath, ".hidden"), { recursive: true });
+      writeFileSync(join(basePath, "README.md"), "not a directory");
+
+      const result = (await ext.handleMethod("session.get_directories", {
+        path: tildePath,
+      })) as { path: string; directories: string[] };
+
+      expect(result.path).toBe(tildePath);
+      expect(result.directories).toEqual(["alpha", "beta"]);
+    } finally {
+      rmSync(basePath, { recursive: true, force: true });
+      await ext.stop();
+    }
+  });
+
+  it("returns an empty directory list for missing paths", async () => {
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    try {
+      const result = (await ext.handleMethod("session.get_directories", {
+        path: "/definitely/missing/claudia-path",
+      })) as { path: string; directories: string[] };
+      expect(result.directories).toEqual([]);
+    } finally {
+      await ext.stop();
+    }
+  });
+
   it("lists sessions from ~/.claude/projects sorted by recency", async () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
