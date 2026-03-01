@@ -5,7 +5,7 @@
   "description": "Native Swift iOS VoiceMode client for Claudia gateway",
   "scripts": {
     "build": "echo \"Use xcodebuild with clients/ios/VoiceMode.xcodeproj\"",
-    "test": "echo \"No Bun tests for iOS client\"",
+    "test": "swift test",
     "typecheck": "echo \"No TypeScript typecheck for iOS client\""
   }
 }

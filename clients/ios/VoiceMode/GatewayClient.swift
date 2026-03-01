@@ -208,18 +208,12 @@ class GatewayClient: NSObject, @unchecked Sendable {
         completion: @escaping (Result<Any, Error>) -> Void
     ) {
         let id = UUID().uuidString
-        var message: [String: Any] = [
-            "type": "req",
-            "id": id,
-            "method": method,
-            "params": params
-        ]
-        if let tags, !tags.isEmpty {
-            message["tags"] = tags
-        }
-
-        guard let data = try? JSONSerialization.data(withJSONObject: message),
-              let jsonString = String(data: data, encoding: .utf8) else {
+        guard let jsonString = GatewayWireProtocol.makeRequest(
+            id: id,
+            method: method,
+            params: params,
+            tags: tags
+        ) else {
             completion(.failure(GatewayError.serializationFailed))
             return
         }
@@ -258,44 +252,30 @@ class GatewayClient: NSObject, @unchecked Sendable {
     }
 
     private func handleMessage(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else {
-            return
-        }
-
-        switch type {
-        case "ping":
-            handlePing(json)
-        case "res":
-            handleResponse(json)
-        case "event":
-            handleEvent(json)
-        default:
-            break
+        guard let message = GatewayWireProtocol.parse(text) else { return }
+        switch message {
+        case .ping(let id):
+            handlePing(id: id)
+        case .response(let id, let ok, let payload, let error):
+            handleResponse(id: id, ok: ok, payload: payload, error: error)
+        case .event(let name, let payload):
+            handleEvent(name: name, payload: payload)
         }
     }
 
-    private func handleResponse(_ json: [String: Any]) {
-        guard let id = json["id"] as? String,
-              let completion = pendingRequests.removeValue(forKey: id) else {
+    private func handleResponse(id: String, ok: Bool, payload: Any?, error: String?) {
+        guard let completion = pendingRequests.removeValue(forKey: id) else {
             return
         }
 
-        if json["ok"] as? Bool == true {
-            completion(.success(json["payload"] ?? [:]))
+        if ok {
+            completion(.success(payload ?? [:]))
         } else {
-            let error = json["error"] as? String ?? "Unknown error"
-            completion(.failure(GatewayError.serverError(error)))
+            completion(.failure(GatewayError.serverError(error ?? "Unknown error")))
         }
     }
 
-    private func handleEvent(_ json: [String: Any]) {
-        guard let event = json["event"] as? String,
-              let payload = json["payload"] as? [String: Any] else {
-            return
-        }
-
+    private func handleEvent(name event: String, payload: [String: Any]) {
         switch event {
         case "gateway.welcome":
             if let id = payload["connectionId"] as? String {
@@ -332,11 +312,8 @@ class GatewayClient: NSObject, @unchecked Sendable {
         }
     }
 
-    private func handlePing(_ json: [String: Any]) {
-        guard let pingId = json["id"] as? String else { return }
-        let pong: [String: Any] = ["type": "pong", "id": pingId]
-        guard let data = try? JSONSerialization.data(withJSONObject: pong),
-              let text = String(data: data, encoding: .utf8) else {
+    private func handlePing(id pingId: String) {
+        guard let text = GatewayWireProtocol.makePong(id: pingId) else {
             return
         }
         webSocket?.send(.string(text)) { error in

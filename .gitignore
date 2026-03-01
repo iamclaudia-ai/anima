@@ -44,6 +44,7 @@ DerivedData/
 
 # iOS/Xcode build artifacts
 clients/ios/build/
+clients/ios/.build/
 clients/ios/ios/build/
 clients/ios/android/build/
 clients/ios/android/.gradle/
