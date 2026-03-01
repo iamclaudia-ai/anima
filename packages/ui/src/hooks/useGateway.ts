@@ -143,6 +143,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const activeToolUseIdsRef = useRef<Set<string>>(new Set());
   const toolTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const toolSimTickMsRef = useRef(toolSimulationIntervalMs);
+  const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
 
   useEffect(() => {
     isQueryingRef.current = isQuerying;
@@ -160,8 +161,26 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     toolSimTickMsRef.current = toolSimulationIntervalMs;
   }, [toolSimulationIntervalMs]);
 
-  // Auto-scroll to bottom (instant for history load, smooth for streaming)
+  // Track scroll position to determine if auto-scroll should be enabled
   useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      // Consider "at bottom" if within 100px of bottom (accounts for rounding and smooth scroll)
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      isAtBottomRef.current = isAtBottom;
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Auto-scroll to bottom (instant for history load, smooth for streaming)
+  // Only scroll if user is already at the bottom
+  useEffect(() => {
+    if (!isAtBottomRef.current) return; // Don't fight the user if they scrolled up
     const behavior = historyLoadedRef.current ? "smooth" : "instant";
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, [messages]);
