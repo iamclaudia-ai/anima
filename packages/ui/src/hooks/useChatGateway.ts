@@ -529,6 +529,17 @@ export function useChatGateway(
           const preTokens = (payload.pre_tokens as number) || 0;
           console.log(`[Compaction] ✓ Complete (trigger: ${trigger}, pre_tokens: ${preTokens})`);
 
+          // Update usage immediately after compaction
+          const usageData = payload.usage as Usage | undefined;
+          if (usageData) {
+            setUsage({
+              input_tokens: usageData.input_tokens || 0,
+              cache_creation_input_tokens: usageData.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: usageData.cache_read_input_tokens || 0,
+              output_tokens: usageData.output_tokens || 0,
+            });
+          }
+
           // Insert a compaction boundary marker into messages
           setMessages((draft) => {
             draft.push({

@@ -180,6 +180,9 @@ export class SDKSession extends EventEmitter {
   private createdAt = Date.now();
   private lastActivityTime = Date.now();
 
+  // Latest usage stats (from most recent result message)
+  private lastUsage: Record<string, unknown> | null = null;
+
   // Logging
   private logFile?: string;
   private logger;
@@ -618,6 +621,9 @@ export class SDKSession extends EventEmitter {
   private handleResultMessage(msg: SDKResultMessage): void {
     const stopReason = msg.stop_reason || msg.subtype || "end_turn";
 
+    // Store latest usage for inclusion in compaction events
+    this.lastUsage = msg.usage || null;
+
     this.emit("sse", {
       type: "turn_stop",
       timestamp: new Date().toISOString(),
@@ -664,6 +670,8 @@ export class SDKSession extends EventEmitter {
         timestamp: new Date().toISOString(),
         trigger: metadata?.trigger || "auto",
         pre_tokens: metadata?.pre_tokens || 0,
+        // Include latest usage data so UI can update immediately
+        usage: this.lastUsage,
       });
     }
   }
