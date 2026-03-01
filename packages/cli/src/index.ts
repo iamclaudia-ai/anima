@@ -10,18 +10,9 @@
  *   claudia methods
  */
 
-const GATEWAY_URL = process.env.CLAUDIA_GATEWAY_URL || "ws://localhost:30086/ws";
+import { createGatewayClient } from "@claudia/shared";
 
-interface Message {
-  type: "req" | "res" | "event";
-  id?: string;
-  method?: string;
-  params?: Record<string, unknown>;
-  ok?: boolean;
-  payload?: unknown;
-  error?: string;
-  event?: string;
-}
+const GATEWAY_URL = process.env.CLAUDIA_GATEWAY_URL || "ws://localhost:30086/ws";
 
 export interface JsonSchema {
   $ref?: string;
@@ -50,10 +41,6 @@ export interface MethodCatalogEntry {
 export interface InjectSessionIdResult {
   didInject: boolean;
   error?: string;
-}
-
-function generateId(): string {
-  return Math.random().toString(36).slice(2, 10);
 }
 
 export function coerceValue(value: string): unknown {
@@ -476,156 +463,78 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
 }
 
 async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
-  const ws = new WebSocket(GATEWAY_URL);
-
-  return new Promise((resolve, reject) => {
-    const reqId = generateId();
-
-    ws.onopen = () => {
-      const msg: Message = { type: "req", id: reqId, method: "gateway.list_methods", params: {} };
-      ws.send(JSON.stringify(msg));
+  const client = createGatewayClient({ url: GATEWAY_URL });
+  try {
+    const payload = (await client.call("gateway.list_methods", {})) as {
+      methods?: MethodCatalogEntry[];
     };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: Message = JSON.parse(event.data as string);
-        if (msg.type !== "res" || msg.id !== reqId) return;
-
-        if (!msg.ok) {
-          ws.close();
-          reject(new Error(msg.error || "gateway.list_methods failed"));
-          return;
-        }
-
-        const payload = (msg.payload || {}) as { methods?: MethodCatalogEntry[] };
-        ws.close();
-        resolve(payload.methods ?? []);
-      } catch (err) {
-        ws.close();
-        reject(err);
-      }
-    };
-
-    ws.onerror = (error) => {
-      reject(error);
-    };
-  });
+    return payload.methods ?? [];
+  } finally {
+    client.disconnect();
+  }
 }
 
 async function invokeMethod(method: string, params: Record<string, unknown>): Promise<void> {
-  const ws = new WebSocket(GATEWAY_URL);
-
-  return new Promise((resolve, reject) => {
-    const reqId = generateId();
-    const streamPrompt = method === "session.send_prompt";
-    let gotFinalStreamEvent = false;
-    let gotResponse = false;
-
-    ws.onopen = () => {
-      if (streamPrompt) {
-        const subMsg: Message = {
-          type: "req",
-          id: generateId(),
-          method: "gateway.subscribe",
-          params: { events: ["session.*"] },
-        };
-        ws.send(JSON.stringify(subMsg));
-      }
-
-      const req: Message = { type: "req", id: reqId, method, params };
-      ws.send(JSON.stringify(req));
-    };
-
-    ws.onmessage = (event) => {
-      const msg: Message = JSON.parse(event.data as string);
-
-      if (msg.type === "res" && msg.id === reqId) {
-        gotResponse = true;
-        if (!msg.ok) {
-          ws.close();
-          reject(new Error(msg.error || `Request failed: ${method}`));
-          return;
-        }
-
-        if (!streamPrompt) {
-          if (msg.payload !== undefined) {
-            console.log(JSON.stringify(msg.payload, null, 2));
-          }
-          ws.close();
-          resolve();
-        }
-        return;
-      }
-
-      if (!streamPrompt || msg.type !== "event") return;
-
-      const payload = (msg.payload || {}) as Record<string, unknown>;
-      if (msg.event?.includes(".content_block_delta")) {
-        const delta = payload.delta as { type?: string; text?: string } | undefined;
-        if (delta?.type === "text_delta" && delta.text) {
-          process.stdout.write(delta.text);
-        }
-      }
-
-      if (msg.event?.includes(".message_stop")) {
-        gotFinalStreamEvent = true;
-        process.stdout.write("\n");
-        ws.close();
-        resolve();
-      }
-    };
-
-    ws.onerror = (error) => {
-      reject(error);
-    };
-
-    ws.onclose = () => {
-      if (streamPrompt && gotResponse && !gotFinalStreamEvent) {
-        resolve();
-      }
-    };
+  const client = createGatewayClient({ url: GATEWAY_URL });
+  const streamPrompt = method === "session.send_prompt";
+  let stopStreamResolve: (() => void) | null = null;
+  const stopStream = new Promise<void>((resolve) => {
+    stopStreamResolve = resolve;
   });
+  let unsub: (() => void) | null = null;
+
+  try {
+    if (streamPrompt) {
+      unsub = client.on("session.*", (event, payload) => {
+        const streamPayload = (payload || {}) as Record<string, unknown>;
+
+        if (event.includes(".content_block_delta")) {
+          const delta = streamPayload.delta as { type?: string; text?: string } | undefined;
+          if (delta?.type === "text_delta" && delta.text) {
+            process.stdout.write(delta.text);
+          }
+        }
+
+        if (event.includes(".message_stop")) {
+          process.stdout.write("\n");
+          stopStreamResolve?.();
+        }
+      });
+
+      await client.subscribe(["session.*"]);
+    }
+
+    const payload = await client.call(method, params);
+    if (!streamPrompt) {
+      if (payload !== undefined) {
+        console.log(JSON.stringify(payload, null, 2));
+      }
+      return;
+    }
+
+    await Promise.race([stopStream, Bun.sleep(1500)]);
+  } finally {
+    unsub?.();
+    client.disconnect();
+  }
 }
 
 async function speak(text: string): Promise<void> {
-  const ws = new WebSocket(GATEWAY_URL);
+  const client = createGatewayClient({ url: GATEWAY_URL });
+  let playbackQueue = Promise.resolve();
+  let finishResolve: (() => void) | null = null;
+  let finishReject: ((error: Error) => void) | null = null;
+  const done = new Promise<void>((resolve, reject) => {
+    finishResolve = resolve;
+    finishReject = reject;
+  });
 
-  return new Promise((resolve, reject) => {
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          type: "req",
-          id: generateId(),
-          method: "gateway.subscribe",
-          params: { events: ["voice.*"] },
-        }),
-      );
-
-      ws.send(
-        JSON.stringify({
-          type: "req",
-          id: generateId(),
-          method: "voice.speak",
-          params: { text },
-        }),
-      );
-    };
-
-    ws.onmessage = async (event) => {
-      const msg: Message = JSON.parse(event.data as string);
-
-      if (msg.type === "res" && !msg.ok) {
-        ws.close();
-        reject(new Error(msg.error));
-        return;
-      }
-
-      if (msg.type !== "event") return;
-
-      if (msg.event === "voice.audio") {
-        const payload = msg.payload as { format: string; data: string };
-        const audioBuffer = Buffer.from(payload.data, "base64");
-        const ext = payload.format === "wav" ? "wav" : payload.format || "bin";
+  const unsubscribe = client.on("voice.*", (event, payload) => {
+    if (event === "voice.audio") {
+      const voicePayload = payload as { format: string; data: string };
+      playbackQueue = playbackQueue.then(async () => {
+        const audioBuffer = Buffer.from(voicePayload.data, "base64");
+        const ext = voicePayload.format === "wav" ? "wav" : voicePayload.format || "bin";
         const tempFile = `/tmp/claudia-speech-${Date.now()}.${ext}`;
         await Bun.write(tempFile, audioBuffer);
 
@@ -634,18 +543,29 @@ async function speak(text: string): Promise<void> {
         if (await Bun.file(tempFile).exists()) {
           Bun.spawn(["rm", tempFile]);
         }
-      } else if (msg.event === "voice.done") {
-        ws.close();
-        resolve();
-      } else if (msg.event === "voice.error") {
-        const payload = msg.payload as { error: string };
-        ws.close();
-        reject(new Error(payload.error));
-      }
-    };
+      });
+      return;
+    }
 
-    ws.onerror = (error) => reject(error);
+    if (event === "voice.done") {
+      void playbackQueue.finally(() => finishResolve?.());
+      return;
+    }
+
+    if (event === "voice.error") {
+      const voicePayload = payload as { error: string };
+      finishReject?.(new Error(voicePayload.error));
+    }
   });
+
+  try {
+    await client.subscribe(["voice.*"]);
+    await client.call("voice.speak", { text });
+    await done;
+  } finally {
+    unsubscribe();
+    client.disconnect();
+  }
 }
 
 async function promptCompat(args: string[]): Promise<void> {
@@ -664,106 +584,79 @@ async function promptCompat(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const ws = new WebSocket(GATEWAY_URL);
+  const client = createGatewayClient({ url: GATEWAY_URL });
   let responseText = "";
   let isComplete = false;
   let sessionRecordId: string | null = null;
-  const pendingMethods = new Map<string, string>();
-
-  const sendRequest = (method: string, params?: Record<string, unknown>) => {
-    const id = generateId();
-    pendingMethods.set(id, method);
-    const msg: Message = { type: "req", id, method, params };
-    ws.send(JSON.stringify(msg));
+  const onSigint = () => {
+    console.log("\nInterrupted");
+    client.disconnect();
+    process.exit(0);
   };
+  process.on("SIGINT", onSigint);
 
-  ws.onopen = () => {
-    sendRequest("gateway.subscribe", { events: ["session.*"] });
-    sendRequest("session.get_or_create_workspace", { cwd: process.cwd() });
-  };
-
-  ws.onmessage = (event) => {
-    const msg: Message = JSON.parse(event.data as string);
-
-    if (msg.type === "res" && msg.ok) {
-      const method = msg.id ? pendingMethods.get(msg.id) : undefined;
-      if (msg.id) pendingMethods.delete(msg.id);
-      const payload = (msg.payload || {}) as Record<string, unknown>;
-
-      if (method === "session.get_or_create_workspace") {
-        // Workspace exists, now find sessions
-        sendRequest("session.list_sessions", { cwd: process.cwd() });
-        return;
+  const unsub = client.on("session.*", (event, payload) => {
+    const streamPayload = payload as Record<string, unknown>;
+    if (event.includes(".content_block_delta")) {
+      const delta = streamPayload.delta as { type: string; text?: string } | undefined;
+      if (delta?.type === "text_delta" && delta.text) {
+        process.stdout.write(delta.text);
+        responseText += delta.text;
       }
-
-      if (method === "session.list_sessions") {
-        const sessions = payload.sessions as { sessionId: string }[] | undefined;
-        if (sessions && sessions.length > 0) {
-          sessionRecordId = sessions[0].sessionId;
-          console.error(`[session] Reusing ${sessionRecordId}`);
-        } else {
-          sendRequest("session.create_session", { cwd: process.cwd() });
-          return;
-        }
-      }
-
-      if (method === "session.create_session") {
-        const sid = payload.sessionId as string | undefined;
-        if (sid) {
-          sessionRecordId = sid;
-          console.error(`[session] Created ${sessionRecordId}`);
-        }
-      }
-
-      if (
-        (method === "session.list_sessions" || method === "session.create_session") &&
-        sessionRecordId
-      ) {
-        sendRequest("session.send_prompt", {
-          sessionId: sessionRecordId,
-          content: prompt,
-        });
-      }
+      return;
     }
 
-    if (msg.type === "event") {
-      const payload = msg.payload as Record<string, unknown>;
-      if (msg.event?.includes(".content_block_delta")) {
-        const delta = payload.delta as { type: string; text?: string } | undefined;
-        if (delta?.type === "text_delta" && delta.text) {
-          process.stdout.write(delta.text);
-          responseText += delta.text;
-        }
-      } else if (msg.event?.includes(".message_stop")) {
-        isComplete = true;
-        if (responseText && !responseText.endsWith("\n")) console.log();
-        ws.close();
-      }
-    } else if (msg.type === "res" && !msg.ok) {
-      console.error("Error:", msg.error);
-      ws.close();
-      process.exit(1);
+    if (event.includes(".message_stop")) {
+      isComplete = true;
+      if (responseText && !responseText.endsWith("\n")) console.log();
     }
-  };
+  });
 
-  ws.onerror = (error) => {
-    console.error("WebSocket error:", error);
-    process.exit(1);
-  };
+  try {
+    await client.subscribe(["session.*"]);
+    await client.call("session.get_or_create_workspace", { cwd: process.cwd() });
 
-  ws.onclose = () => {
+    const sessionsResult = (await client.call("session.list_sessions", {
+      cwd: process.cwd(),
+    })) as { sessions?: Array<{ sessionId: string }> };
+
+    const existing = sessionsResult.sessions?.[0];
+    if (existing) {
+      sessionRecordId = existing.sessionId;
+      console.error(`[session] Reusing ${sessionRecordId}`);
+    } else {
+      const created = (await client.call("session.create_session", {
+        cwd: process.cwd(),
+      })) as { sessionId?: string };
+      if (!created.sessionId) {
+        throw new Error("session.create_session did not return sessionId");
+      }
+      sessionRecordId = created.sessionId;
+      console.error(`[session] Created ${sessionRecordId}`);
+    }
+
+    await client.call("session.send_prompt", {
+      sessionId: sessionRecordId,
+      content: prompt,
+    });
+
+    if (!isComplete) {
+      await Bun.sleep(1500);
+    }
+
     if (!isComplete && !responseText) {
       console.error("Connection closed before response");
       process.exit(1);
     }
     process.exit(0);
-  };
-
-  process.on("SIGINT", () => {
-    console.log("\nInterrupted");
-    ws.close();
-    process.exit(0);
-  });
+  } catch (error) {
+    console.error("Error:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  } finally {
+    unsub();
+    process.off("SIGINT", onSigint);
+    client.disconnect();
+  }
 }
 
 // ── Watchdog CLI ─────────────────────────────────────────

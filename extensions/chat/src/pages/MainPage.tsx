@@ -1,11 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ClaudiaChat, NavigationDrawer, navigate } from "@claudia/ui";
-import type { WorkspaceInfo, SessionInfo, GatewayMessage } from "@claudia/ui";
+import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
+import { createGatewayClient, type GatewayClient } from "@claudia/shared";
 import { bridge, GATEWAY_URL } from "../app";
-
-function generateId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
 
 export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; sessionId?: string }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
@@ -13,90 +10,76 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const pendingRef = useRef<Map<string, string>>(new Map());
+  const gatewayRef = useRef<GatewayClient | null>(null);
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
-
-  const sendRequest = useCallback((method: string, params?: Record<string, unknown>) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const id = generateId();
-    const msg: GatewayMessage = { type: "req", id, method, params };
-    pendingRef.current.set(id, method);
-    wsRef.current.send(JSON.stringify(msg));
-  }, []);
+  const activeSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(GATEWAY_URL);
-    wsRef.current = ws;
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
-    ws.onopen = () => {
-      setIsConnected(true);
-      sendRequest("session.list_workspaces");
-    };
+  const callGateway = useCallback(
+    async <T,>(method: string, params?: Record<string, unknown>): Promise<T | null> => {
+      if (!gatewayRef.current) return null;
+      return (await gatewayRef.current.call(method, params)) as T;
+    },
+    [],
+  );
 
-    ws.onclose = () => setIsConnected(false);
+  useEffect(() => {
+    const gateway = createGatewayClient({ url: GATEWAY_URL });
+    gatewayRef.current = gateway;
+    const unsubscribeConnection = gateway.onConnection(setIsConnected);
+    let cancelled = false;
 
-    ws.onmessage = (event) => {
-      const data: GatewayMessage = JSON.parse(event.data);
+    const loadSessions = async (cwd: string): Promise<void> => {
+      const payload = await callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
+        cwd,
+      });
+      if (cancelled || !payload) return;
+      const list = payload.sessions || [];
+      setSessions(list);
 
-      if (data.type === "res" && data.ok && data.payload) {
-        const payload = data.payload as Record<string, unknown>;
-        const method = data.id ? pendingRef.current.get(data.id) : undefined;
-        if (data.id) pendingRef.current.delete(data.id);
-
-        if (method === "session.list_workspaces") {
-          const list = payload.workspaces as WorkspaceInfo[] | undefined;
-          setWorkspaces(list || []);
-
-          // Auto-select workspace from URL params or first workspace
-          if (!activeWorkspaceRef.current && list && list.length > 0) {
-            const targetWorkspace = workspaceId
-              ? list.find((ws) => ws.id === workspaceId)
-              : list[0];
-
-            if (targetWorkspace) {
-              setActiveWorkspace(targetWorkspace);
-              activeWorkspaceRef.current = targetWorkspace;
-              sendRequest("session.list_sessions", { cwd: targetWorkspace.cwd });
-            }
-          }
-        }
-
-        if (method === "session.list_sessions") {
-          const list = payload.sessions as SessionInfo[] | undefined;
-          setSessions(list || []);
-
-          // Auto-select session from URL params if provided
-          if (sessionId && !activeSessionId && list && list.length > 0) {
-            const targetSession = list.find((s) => s.sessionId === sessionId);
-            if (targetSession) {
-              setActiveSessionId(targetSession.sessionId);
-            }
-          }
-        }
-
-        if (method === "session.create_session") {
-          const sessionId = payload.sessionId as string | undefined;
-          if (sessionId) {
-            setActiveSessionId(sessionId);
-            // Refresh sessions list
-            if (activeWorkspaceRef.current) {
-              sendRequest("session.list_sessions", { cwd: activeWorkspaceRef.current.cwd });
-            }
-          }
-        }
-
-        if (method === "session.get_or_create_workspace") {
-          // Refresh workspaces
-          sendRequest("session.list_workspaces");
+      if (sessionId && !activeSessionIdRef.current && list.length > 0) {
+        const targetSession = list.find((session) => session.sessionId === sessionId);
+        if (targetSession) {
+          setActiveSessionId(targetSession.sessionId);
         }
       }
     };
 
-    return () => {
-      ws.close();
+    const bootstrap = async () => {
+      try {
+        await gateway.connect();
+        const payload = await callGateway<{ workspaces?: WorkspaceInfo[] }>(
+          "session.list_workspaces",
+        );
+        if (cancelled || !payload) return;
+        const list = payload.workspaces || [];
+        setWorkspaces(list);
+
+        if (!activeWorkspaceRef.current && list.length > 0) {
+          const targetWorkspace = workspaceId ? list.find((ws) => ws.id === workspaceId) : list[0];
+          if (targetWorkspace) {
+            setActiveWorkspace(targetWorkspace);
+            activeWorkspaceRef.current = targetWorkspace;
+            await loadSessions(targetWorkspace.cwd);
+          }
+        }
+      } catch {
+        if (!cancelled) setIsConnected(false);
+      }
     };
-  }, [GATEWAY_URL, sendRequest]);
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+      unsubscribeConnection();
+      gateway.disconnect();
+      gatewayRef.current = null;
+    };
+  }, [callGateway]);
 
   const handleWorkspaceSelect = useCallback(
     (workspace: WorkspaceInfo) => {
@@ -104,9 +87,16 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       activeWorkspaceRef.current = workspace;
       setActiveSessionId(null);
       setSessions([]);
-      sendRequest("session.list_sessions", { cwd: workspace.cwd });
+      void callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
+        cwd: workspace.cwd,
+      })
+        .then((payload) => {
+          if (!payload) return;
+          setSessions(payload.sessions || []);
+        })
+        .catch(() => undefined);
     },
-    [sendRequest],
+    [callGateway],
   );
 
   const handleSessionSelect = useCallback((session: SessionInfo) => {
@@ -119,8 +109,22 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   const handleNewSession = useCallback(() => {
     if (!activeWorkspaceRef.current) return;
-    sendRequest("session.create_session", { cwd: activeWorkspaceRef.current.cwd });
-  }, [sendRequest]);
+    void callGateway<{ sessionId?: string }>("session.create_session", {
+      cwd: activeWorkspaceRef.current.cwd,
+    })
+      .then((payload) => {
+        const nextSessionId = payload?.sessionId;
+        if (!nextSessionId) return;
+        setActiveSessionId(nextSessionId);
+        if (!activeWorkspaceRef.current) return;
+        return callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
+          cwd: activeWorkspaceRef.current.cwd,
+        }).then((sessionsPayload) => {
+          setSessions(sessionsPayload?.sessions || []);
+        });
+      })
+      .catch(() => undefined);
+  }, [callGateway]);
 
   // Update URL when new session is created
   useEffect(() => {
@@ -144,10 +148,16 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       if (targetWorkspace && targetWorkspace.id !== activeWorkspace?.id) {
         setActiveWorkspace(targetWorkspace);
         activeWorkspaceRef.current = targetWorkspace;
-        sendRequest("session.list_sessions", { cwd: targetWorkspace.cwd });
+        void callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
+          cwd: targetWorkspace.cwd,
+        })
+          .then((payload) => {
+            setSessions(payload?.sessions || []);
+          })
+          .catch(() => undefined);
       }
     }
-  }, [workspaceId, workspaces, activeWorkspace, sendRequest]);
+  }, [workspaceId, workspaces, activeWorkspace, callGateway]);
 
   const handleNewWorkspace = useCallback(() => {
     // TODO: show create workspace modal

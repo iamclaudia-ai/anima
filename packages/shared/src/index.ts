@@ -8,3 +8,4 @@ export * from "./config";
 export * from "./typeid";
 export * from "./logger";
 export * from "./events";
+export * from "./gateway-client";

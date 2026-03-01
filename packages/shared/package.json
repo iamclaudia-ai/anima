@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
-    "./protocol": "./src/protocol.ts"
+    "./protocol": "./src/protocol.ts",
+    "./gateway-client": "./src/gateway-client.ts"
   },
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun",
