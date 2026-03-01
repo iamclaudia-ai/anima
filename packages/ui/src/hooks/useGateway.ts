@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useImmer } from "use-immer";
+import { useGatewayClient } from "./useGatewayClient";
 import type {
   Message,
   ContentBlock,
@@ -8,7 +9,6 @@ import type {
   ErrorBlock,
   Usage,
   Attachment,
-  GatewayMessage,
 } from "../types";
 
 function generateId(): string {
@@ -110,8 +110,8 @@ export interface UseGatewayReturn {
 // ─── Hook ────────────────────────────────────────────────────
 
 export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}): UseGatewayReturn {
+  const { client, isConnected, call } = useGatewayClient(gatewayUrl);
   const [messages, setMessages] = useImmer<Message[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -128,7 +128,6 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [hookState, setHookState] = useState<Record<string, unknown>>({});
 
-  const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const connectionIdRef = useRef<string | null>(null);
@@ -136,7 +135,9 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const sessionIdRef = useRef(sessionId);
   const workspaceRef = useRef(workspace);
   const historyLoadedRef = useRef(false);
-  const pendingRequestsRef = useRef<Map<string, string>>(new Map());
+  const sendRequestImplRef = useRef<
+    (method: string, params?: Record<string, unknown>, tags?: string[]) => void
+  >(() => undefined);
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const subscribedSessionRef = useRef<string | null>(null);
@@ -214,15 +215,9 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, [messages]);
 
-  // Send a request to the gateway
   const sendRequest = useCallback(
     (method: string, params?: Record<string, unknown>, tags?: string[]) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      const id = generateId();
-      const msg: GatewayMessage & { tags?: string[] } = { type: "req", id, method, params };
-      if (tags?.length) msg.tags = tags;
-      pendingRequestsRef.current.set(id, method);
-      wsRef.current.send(JSON.stringify(msg));
+      sendRequestImplRef.current(method, params, tags);
     },
     [],
   );
@@ -639,287 +634,284 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     ],
   );
 
-  // ── Gateway message handler ────────────────────────────────
-
-  const handleGatewayMessage = useCallback(
-    (msg: GatewayMessage) => {
-      if (msg.type === "res") {
-        if (msg.ok && msg.payload) {
-          const payload = msg.payload as Record<string, unknown>;
-          const method = msg.id ? pendingRequestsRef.current.get(msg.id) : undefined;
-          if (msg.id) pendingRequestsRef.current.delete(msg.id);
-
-          // Track session ID from any response that includes it
-          if (payload.sessionId && typeof payload.sessionId === "string") {
-            setSessionId(payload.sessionId as string);
-          }
-
-          // ── session.get_history ──
-          if (method === "session.get_history") {
-            const historyMessages = payload.messages as Message[] | undefined;
-            const historyUsage = payload.usage as Usage | undefined;
-            const total = (payload.total as number) || 0;
-            const more = (payload.hasMore as boolean) || false;
-            const offset = (payload.offset as number) || 0;
-
-            if (historyMessages && historyMessages.length > 0) {
-              if (offset > 0) {
-                // Loading earlier messages — prepend to existing
-                setMessages((draft) => {
-                  draft.unshift(...historyMessages);
-                });
-                setVisibleCount((c) => c + historyMessages.length);
-                // Preserve scroll position after prepend
-                const container = messagesContainerRef.current;
-                if (container) {
-                  const prevScrollHeight = container.scrollHeight;
-                  requestAnimationFrame(() => {
-                    const newScrollHeight = container.scrollHeight;
-                    container.scrollTop = newScrollHeight - prevScrollHeight;
-                  });
-                }
-              } else {
-                // Initial load — replace all messages
-                setMessages(() => historyMessages);
-                setVisibleCount(historyMessages.length);
-              }
-              console.log(
-                `[History] Loaded ${historyMessages.length}/${total} messages (offset: ${offset}, hasMore: ${more})`,
-              );
-            }
-            // Mark history as loaded (even if empty) so streaming auto-recovery can activate.
-            // Brief delay lets any stale events from reconnect settle first.
-            if (offset === 0) {
-              setTimeout(() => {
-                historyLoadedRef.current = true;
-              }, 100);
-            }
-            setTotalMessages(total);
-            setHasMore(more);
-            // Always set usage - use provided data or initialize to zero if not available
-            if (historyUsage) {
-              setUsage(historyUsage);
-            } else if (offset === 0) {
-              // Initialize with zero usage on first load if backend doesn't provide it
-              setUsage({
-                input_tokens: 0,
-                cache_creation_input_tokens: 0,
-                cache_read_input_tokens: 0,
-                output_tokens: 0,
-              });
-            }
-          }
-
-          // ── session.get_or_create_workspace (VS Code auto-discover) ──
-          if (method === "session.get_or_create_workspace") {
-            const ws = payload.workspace as WorkspaceInfo | undefined;
-            if (ws) {
-              setWorkspace(ws);
-              console.log(
-                `[Workspace] ${payload.created ? "Created" : "Loaded"}: ${ws.name} (${ws.id}), cwd: ${ws.cwd}`,
-              );
-
-              // Load session list for this workspace (uses cwd)
-              sendRequest("session.list_sessions", { cwd: ws.cwd });
-            }
-          }
-
-          // ── session.get_workspace (fetch single workspace) ──
-          if (method === "session.get_workspace") {
-            const ws = payload.workspace as WorkspaceInfo | undefined;
-            if (ws) {
-              setWorkspace(ws);
-              console.log(`[Workspace] Loaded: ${ws.name} (${ws.id})`);
-            }
-          }
-
-          // ── session.list_sessions ──
-          if (method === "session.list_sessions") {
-            const sessionList = payload.sessions as SessionInfo[] | undefined;
-            if (sessionList) {
-              setSessions(sessionList);
-              console.log(
-                `[Sessions] Loaded ${sessionList.length} sessions`,
-                sessionList.map((s) => `${s.sessionId.slice(0, 8)}…`),
-              );
-
-              // If we don't have a session yet, auto-select the most recent one
-              if (sessionList.length > 0 && !sessionIdRef.current) {
-                const mostRecent = sessionList[0]; // already sorted by modified desc
-                setSessionId(mostRecent.sessionId);
-                subscribeToSession(mostRecent.sessionId);
-                sendRequest("session.get_history", { sessionId: mostRecent.sessionId, limit: 50 });
-              }
-            }
-          }
-
-          // ── session.create_session ──
-          if (method === "session.create_session") {
-            const newSessionId = payload.sessionId as string | undefined;
-            if (newSessionId) {
-              setSessionId(newSessionId);
-              subscribeToSession(newSessionId);
-              setMessages(() => []);
-              setUsage(null);
-              setTotalMessages(0);
-              setHasMore(false);
-              historyLoadedRef.current = false;
-              console.log(`[Session] Created: ${newSessionId}`);
-              // Refresh session list
-              if (workspaceRef.current?.cwd) {
-                sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
-              }
-            }
-          }
-
-          // ── session.switch_session ──
-          if (method === "session.switch_session") {
-            const switchedSessionId = payload.sessionId as string | undefined;
-            if (switchedSessionId) {
-              setSessionId(switchedSessionId);
-              subscribeToSession(switchedSessionId);
-              setMessages(() => []);
-              setUsage(null);
-              setTotalMessages(0);
-              setHasMore(false);
-              historyLoadedRef.current = false;
-              console.log(`[Session] Switched to: ${switchedSessionId}`);
-              sendRequest("session.get_history", { sessionId: switchedSessionId, limit: 50 });
-              if (workspaceRef.current?.cwd) {
-                sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
-              }
-            }
-          }
-
-          // ── session.get_info ──
-          if (method === "session.get_info") {
-            if (payload.sessionId) {
-              setSessionId(payload.sessionId as string);
-              subscribeToSession(payload.sessionId as string);
-            }
-            if (payload.workspaceId && payload.workspaceName) {
-              setWorkspace((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      id: payload.workspaceId as string,
-                      name: payload.workspaceName as string,
-                    }
-                  : null,
-              );
-            }
-          }
-        }
-        return;
+  const handleGatewayResponse = useCallback(
+    (method: string, payload: Record<string, unknown>) => {
+      // Track session ID from any response that includes it
+      if (payload.sessionId && typeof payload.sessionId === "string") {
+        setSessionId(payload.sessionId as string);
       }
 
-      if (msg.type === "event" && msg.event) {
-        // Capture server-assigned connectionId on connect
-        if (msg.event === "gateway.welcome") {
-          const welcomePayload = msg.payload as { connectionId?: string };
-          if (welcomePayload?.connectionId) {
-            connectionIdRef.current = welcomePayload.connectionId;
+      // ── session.get_history ──
+      if (method === "session.get_history") {
+        const historyMessages = payload.messages as Message[] | undefined;
+        const historyUsage = payload.usage as Usage | undefined;
+        const total = (payload.total as number) || 0;
+        const more = (payload.hasMore as boolean) || false;
+        const offset = (payload.offset as number) || 0;
+
+        if (historyMessages && historyMessages.length > 0) {
+          if (offset > 0) {
+            // Loading earlier messages — prepend to existing
+            setMessages((draft) => {
+              draft.unshift(...historyMessages);
+            });
+            setVisibleCount((c) => c + historyMessages.length);
+            // Preserve scroll position after prepend
+            const container = messagesContainerRef.current;
+            if (container) {
+              const prevScrollHeight = container.scrollHeight;
+              requestAnimationFrame(() => {
+                const newScrollHeight = container.scrollHeight;
+                container.scrollTop = newScrollHeight - prevScrollHeight;
+              });
+            }
+          } else {
+            // Initial load — replace all messages
+            setMessages(() => historyMessages);
+            setVisibleCount(historyMessages.length);
           }
-          return;
+          console.log(
+            `[History] Loaded ${historyMessages.length}/${total} messages (offset: ${offset}, hasMore: ${more})`,
+          );
         }
-
-        // Streaming events: "session.{sessionId}.{eventType}"
-        // Extract the eventType (everything after "session.{sessionId}.")
-        const parts = msg.event.split(".");
-        if (parts[0] === "session" && parts.length >= 3) {
-          const eventType = parts.slice(2).join(".");
-          const payload = msg.payload as Record<string, unknown>;
-          handleStreamEvent(eventType, payload);
+        // Mark history as loaded (even if empty) so streaming auto-recovery can activate.
+        // Brief delay lets any stale events from reconnect settle first.
+        if (offset === 0) {
+          setTimeout(() => {
+            historyLoadedRef.current = true;
+          }, 100);
         }
-
-        // Hook events: "hook.{hookId}.{event}" — store latest state per hookId
-        if (parts[0] === "hook" && parts.length >= 3) {
-          const hookId = parts[1];
-          setHookState((prev) => ({ ...prev, [hookId]: msg.payload }));
+        setTotalMessages(total);
+        setHasMore(more);
+        // Always set usage - use provided data or initialize to zero if not available
+        if (historyUsage) {
+          setUsage(historyUsage);
+        } else if (offset === 0) {
+          // Initialize with zero usage on first load if backend doesn't provide it
+          setUsage({
+            input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: 0,
+          });
         }
+      }
 
-        // Fire raw event listeners (for voice, extensions, etc.)
-        for (const listener of eventListenersRef.current) {
-          try {
-            listener(msg.event, msg.payload);
-          } catch {
-            // Don't let listener errors break the event loop
+      // ── session.get_or_create_workspace (VS Code auto-discover) ──
+      if (method === "session.get_or_create_workspace") {
+        const ws = payload.workspace as WorkspaceInfo | undefined;
+        if (ws) {
+          setWorkspace(ws);
+          console.log(
+            `[Workspace] ${payload.created ? "Created" : "Loaded"}: ${ws.name} (${ws.id}), cwd: ${ws.cwd}`,
+          );
+
+          // Load session list for this workspace (uses cwd)
+          sendRequest("session.list_sessions", { cwd: ws.cwd });
+        }
+      }
+
+      // ── session.get_workspace (fetch single workspace) ──
+      if (method === "session.get_workspace") {
+        const ws = payload.workspace as WorkspaceInfo | undefined;
+        if (ws) {
+          setWorkspace(ws);
+          console.log(`[Workspace] Loaded: ${ws.name} (${ws.id})`);
+        }
+      }
+
+      // ── session.list_sessions ──
+      if (method === "session.list_sessions") {
+        const sessionList = payload.sessions as SessionInfo[] | undefined;
+        if (sessionList) {
+          setSessions(sessionList);
+          console.log(
+            `[Sessions] Loaded ${sessionList.length} sessions`,
+            sessionList.map((s) => `${s.sessionId.slice(0, 8)}…`),
+          );
+
+          // If we don't have a session yet, auto-select the most recent one
+          if (sessionList.length > 0 && !sessionIdRef.current) {
+            const mostRecent = sessionList[0]; // already sorted by modified desc
+            setSessionId(mostRecent.sessionId);
+            subscribeToSession(mostRecent.sessionId);
+            sendRequest("session.get_history", { sessionId: mostRecent.sessionId, limit: 50 });
           }
+        }
+      }
+
+      // ── session.create_session ──
+      if (method === "session.create_session") {
+        const newSessionId = payload.sessionId as string | undefined;
+        if (newSessionId) {
+          setSessionId(newSessionId);
+          subscribeToSession(newSessionId);
+          setMessages(() => []);
+          setUsage(null);
+          setTotalMessages(0);
+          setHasMore(false);
+          historyLoadedRef.current = false;
+          console.log(`[Session] Created: ${newSessionId}`);
+          // Refresh session list
+          if (workspaceRef.current?.cwd) {
+            sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
+          }
+        }
+      }
+
+      // ── session.switch_session ──
+      if (method === "session.switch_session") {
+        const switchedSessionId = payload.sessionId as string | undefined;
+        if (switchedSessionId) {
+          setSessionId(switchedSessionId);
+          subscribeToSession(switchedSessionId);
+          setMessages(() => []);
+          setUsage(null);
+          setTotalMessages(0);
+          setHasMore(false);
+          historyLoadedRef.current = false;
+          console.log(`[Session] Switched to: ${switchedSessionId}`);
+          sendRequest("session.get_history", { sessionId: switchedSessionId, limit: 50 });
+          if (workspaceRef.current?.cwd) {
+            sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
+          }
+        }
+      }
+
+      // ── session.get_info ──
+      if (method === "session.get_info") {
+        if (payload.sessionId) {
+          setSessionId(payload.sessionId as string);
+          subscribeToSession(payload.sessionId as string);
+        }
+        if (payload.workspaceId && payload.workspaceName) {
+          setWorkspace((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  id: payload.workspaceId as string,
+                  name: payload.workspaceName as string,
+                }
+              : null,
+          );
         }
       }
     },
-    [handleStreamEvent, setMessages, sendRequest, subscribeToSession],
+    [setMessages, sendRequest, subscribeToSession],
   );
 
-  // ── WebSocket connection ───────────────────────────────────
-
-  useEffect(() => {
-    const ws = new WebSocket(gatewayUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log("Connected to Claudia Gateway");
-      setIsConnected(true);
-
-      // Fetch session info on connect
-      // Streaming events are subscribed per-session via subscribeToSession()
-      // when we learn the sessionId from create/switch/info
-      sendRequest("session.get_info");
-
-      // Subscribe to voice and hook events (global, not session-scoped)
-      sendRequest("gateway.subscribe", { events: ["voice.*", "hook.*"] });
-
-      const opts = optionsRef.current;
-
-      if (opts.sessionId) {
-        // ── Web client: explicit session ID (CC UUID) ──
-        // Load history and subscribe to stream
-        setSessionId(opts.sessionId);
-        subscribeToSession(opts.sessionId);
-        sendRequest("session.get_history", { sessionId: opts.sessionId, limit: 50 });
-        // Look up workspace for CWD context (needed for send-prompt auto-resume)
-        if (opts.workspaceId) {
-          sendRequest("session.get_workspace", { id: opts.workspaceId });
+  const handleGatewayEvent = useCallback(
+    (eventName: string, payload: unknown) => {
+      // Capture server-assigned connectionId on connect
+      if (eventName === "gateway.welcome") {
+        const welcomePayload = payload as { connectionId?: string };
+        if (welcomePayload?.connectionId) {
+          connectionIdRef.current = welcomePayload.connectionId;
+        } else if (client?.connectionId) {
+          connectionIdRef.current = client.connectionId;
         }
-      } else if (opts.autoDiscoverCwd) {
-        // ── VS Code: auto-discover by CWD ──
-        // This triggers workspace creation + session discovery + history loading
-        sendRequest("session.get_or_create_workspace", { cwd: opts.autoDiscoverCwd });
-      } else {
-        // ── No session specified (e.g. listing pages) ──
-        // Just get basic info
-        sendRequest("session.get_info");
-      }
-    };
-
-    ws.onclose = () => {
-      console.log("Disconnected from Gateway");
-      setIsConnected(false);
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      // Respond to gateway pings to stay alive
-      if (data.type === "ping") {
-        ws.send(JSON.stringify({ type: "pong", id: data.id }));
         return;
       }
 
-      handleGatewayMessage(data as GatewayMessage);
-    };
+      // Streaming events: "session.{sessionId}.{eventType}"
+      // Extract the eventType (everything after "session.{sessionId}.")
+      const parts = eventName.split(".");
+      if (parts[0] === "session" && parts.length >= 3) {
+        const eventType = parts.slice(2).join(".");
+        handleStreamEvent(eventType, (payload ?? {}) as Record<string, unknown>);
+      }
 
+      // Hook events: "hook.{hookId}.{event}" — store latest state per hookId
+      if (parts[0] === "hook" && parts.length >= 3) {
+        const hookId = parts[1];
+        setHookState((prev) => ({ ...prev, [hookId]: payload }));
+      }
+
+      // Fire raw event listeners (for voice, extensions, etc.)
+      for (const listener of eventListenersRef.current) {
+        try {
+          listener(eventName, payload);
+        } catch {
+          // Don't let listener errors break the event loop
+        }
+      }
+    },
+    [client, handleStreamEvent],
+  );
+
+  useEffect(() => {
+    sendRequestImplRef.current = (method, params, tags) => {
+      const callOptions = tags?.length ? { tags } : undefined;
+      void call(method, params, callOptions)
+        .then((payload) => {
+          if (payload && typeof payload === "object") {
+            handleGatewayResponse(method, payload as Record<string, unknown>);
+          } else {
+            handleGatewayResponse(method, {});
+          }
+        })
+        .catch((error) => {
+          console.error(`[Gateway] ${method} failed`, error);
+        });
+    };
+  }, [call, handleGatewayResponse]);
+
+  useEffect(() => {
+    if (!client) return;
+    const unsubscribe = client.on("*", handleGatewayEvent);
+    return () => unsubscribe();
+  }, [client, handleGatewayEvent]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      console.log("Disconnected from Gateway");
+      return;
+    }
+
+    console.log("Connected to Claudia Gateway");
+
+    // Fetch session info on connect
+    // Streaming events are subscribed per-session via subscribeToSession()
+    // when we learn the sessionId from create/switch/info
+    sendRequest("session.get_info");
+
+    // Subscribe to voice and hook events (global, not session-scoped)
+    sendRequest("gateway.subscribe", { events: ["voice.*", "hook.*"] });
+
+    const opts = optionsRef.current;
+
+    if (opts.sessionId) {
+      // ── Web client: explicit session ID (CC UUID) ──
+      // Load history and subscribe to stream
+      setSessionId(opts.sessionId);
+      subscribeToSession(opts.sessionId);
+      sendRequest("session.get_history", { sessionId: opts.sessionId, limit: 50 });
+      // Look up workspace for CWD context (needed for send-prompt auto-resume)
+      if (opts.workspaceId) {
+        sendRequest("session.get_workspace", { id: opts.workspaceId });
+      }
+    } else if (opts.autoDiscoverCwd) {
+      // ── VS Code: auto-discover by CWD ──
+      // This triggers workspace creation + session discovery + history loading
+      sendRequest("session.get_or_create_workspace", { cwd: opts.autoDiscoverCwd });
+    } else {
+      // ── No session specified (e.g. listing pages) ──
+      // Just get basic info
+      sendRequest("session.get_info");
+    }
+  }, [isConnected, sendRequest, subscribeToSession]);
+
+  useEffect(() => {
     return () => {
       stopToolTickSimulation();
-      ws.close();
     };
-  }, [gatewayUrl]);
+  }, [stopToolTickSimulation]);
 
   // ── Actions ────────────────────────────────────────────────
 
   const sendPrompt = useCallback(
     (text: string, attachments: Attachment[], tags?: string[]) => {
-      if ((!text.trim() && attachments.length === 0) || !wsRef.current) return;
+      if ((!text.trim() && attachments.length === 0) || !isConnected) return;
       // Optimistic turn-start so thinking UI appears immediately even if stream
       // turn_start event is delayed or dropped.
       setIsQuerying(true);
@@ -986,7 +978,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
       };
       sendRequest("session.send_prompt", params, tags);
     },
-    [sendRequest, setMessages, stopToolTickSimulation],
+    [isConnected, sendRequest, setMessages, stopToolTickSimulation],
   );
 
   const sendToolResult = useCallback(
