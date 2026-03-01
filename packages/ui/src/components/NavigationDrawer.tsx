@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
-import type { WorkspaceInfo, SessionInfo } from "../hooks/useGateway";
+import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
 interface NavigationDrawerProps {
   workspaces: WorkspaceInfo[];

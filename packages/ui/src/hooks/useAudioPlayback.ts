@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { UseGatewayReturn } from "./useGateway";
+import type { UseChatGatewayReturn } from "./useChatGateway";
 
 export interface UseAudioPlaybackReturn {
   /** Whether audio is currently playing */
@@ -51,7 +51,7 @@ function pcm16ToAudioBuffer(
   return audioBuffer;
 }
 
-export function useAudioPlayback(gateway: UseGatewayReturn): UseAudioPlaybackReturn {
+export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybackReturn {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
 

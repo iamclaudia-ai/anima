@@ -3,8 +3,8 @@ import { Transition } from "@headlessui/react";
 import { BridgeContext, useBridge } from "../bridge";
 import type { PlatformBridge } from "../bridge";
 import type { Attachment } from "../types";
-import { useGateway } from "../hooks/useGateway";
-import type { UseGatewayOptions } from "../hooks/useGateway";
+import { useChatGateway } from "../hooks/useChatGateway";
+import type { UseChatGatewayOptions } from "../hooks/useChatGateway";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
 import { WorkspaceProvider } from "../contexts/WorkspaceContext";
 import { Header } from "./Header";
@@ -20,7 +20,7 @@ const ENABLE_THINKING_TUNER = false;
 interface ClaudiaChatProps {
   bridge: PlatformBridge;
   /** Gateway options (sessionId for web, autoDiscoverCwd for VS Code) */
-  gatewayOptions?: UseGatewayOptions;
+  gatewayOptions?: UseChatGatewayOptions;
   /** Optional back navigation callback */
   onBack?: () => void;
 }
@@ -37,11 +37,11 @@ function ChatInner({
   gatewayOptions,
   onBack,
 }: {
-  gatewayOptions?: UseGatewayOptions;
+  gatewayOptions?: UseChatGatewayOptions;
   onBack?: () => void;
 }) {
   const bridge = useBridge();
-  const gateway = useGateway(bridge.gatewayUrl, gatewayOptions);
+  const gateway = useChatGateway(bridge.gatewayUrl, gatewayOptions);
   const audio = useAudioPlayback(gateway);
 
   const [input, setInput] = useState(() => bridge.loadDraft());

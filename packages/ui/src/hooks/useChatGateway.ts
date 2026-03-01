@@ -40,7 +40,7 @@ export interface SessionInfo {
 
 // ─── Options ─────────────────────────────────────────────────
 
-export interface UseGatewayOptions {
+export interface UseChatGatewayOptions {
   /**
    * Explicit session ID (CC UUID) to load.
    * Used by web client when navigating to /workspace/:wsId/session/:id.
@@ -67,7 +67,7 @@ export interface UseGatewayOptions {
 /** Callback for subscribing to raw gateway events */
 export type EventListener = (event: string, payload: unknown) => void;
 
-export interface UseGatewayReturn {
+export interface UseChatGatewayReturn {
   messages: Message[];
   isConnected: boolean;
   isQuerying: boolean;
@@ -109,7 +109,10 @@ export interface UseGatewayReturn {
 
 // ─── Hook ────────────────────────────────────────────────────
 
-export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}): UseGatewayReturn {
+export function useChatGateway(
+  gatewayUrl: string,
+  options: UseChatGatewayOptions = {},
+): UseChatGatewayReturn {
   const { client, isConnected, call } = useGatewayClient(gatewayUrl);
   const [messages, setMessages] = useImmer<Message[]>([]);
   const [isQuerying, setIsQuerying] = useState(false);

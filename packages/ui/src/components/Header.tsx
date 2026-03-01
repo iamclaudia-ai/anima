@@ -1,6 +1,6 @@
 import { Volume2, VolumeX, ChevronLeft } from "lucide-react";
 import { useBridge } from "../bridge";
-import type { WorkspaceInfo, SessionInfo } from "../hooks/useGateway";
+import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
 interface HeaderProps {
   isConnected: boolean;

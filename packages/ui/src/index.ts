@@ -28,14 +28,14 @@ export { Router, Link, useRouter, navigate, matchPath } from "./router";
 export type { Route } from "./router";
 
 // Hooks
-export { useGateway } from "./hooks/useGateway";
+export { useChatGateway } from "./hooks/useChatGateway";
 export { useGatewayClient } from "./hooks/useGatewayClient";
 export type {
-  UseGatewayOptions,
-  UseGatewayReturn,
+  UseChatGatewayOptions,
+  UseChatGatewayReturn,
   WorkspaceInfo,
   SessionInfo,
-} from "./hooks/useGateway";
+} from "./hooks/useChatGateway";
 export type { UseGatewayClientOptions, UseGatewayClientReturn } from "./hooks/useGatewayClient";
 
 // Components (for direct use if needed)
