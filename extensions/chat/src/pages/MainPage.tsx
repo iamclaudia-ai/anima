@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ClaudiaChat, NavigationDrawer } from "@claudia/ui";
+import { ClaudiaChat, NavigationDrawer, navigate } from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo, GatewayMessage } from "@claudia/ui";
 import { bridge, GATEWAY_URL } from "../app";
 
@@ -7,7 +7,7 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-export function MainPage() {
+export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; sessionId?: string }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -48,18 +48,31 @@ export function MainPage() {
           const list = payload.workspaces as WorkspaceInfo[] | undefined;
           setWorkspaces(list || []);
 
-          // Auto-select first workspace if none selected
+          // Auto-select workspace from URL params or first workspace
           if (!activeWorkspaceRef.current && list && list.length > 0) {
-            const first = list[0];
-            setActiveWorkspace(first);
-            activeWorkspaceRef.current = first;
-            sendRequest("session.list_sessions", { cwd: first.cwd });
+            const targetWorkspace = workspaceId
+              ? list.find((ws) => ws.id === workspaceId)
+              : list[0];
+
+            if (targetWorkspace) {
+              setActiveWorkspace(targetWorkspace);
+              activeWorkspaceRef.current = targetWorkspace;
+              sendRequest("session.list_sessions", { cwd: targetWorkspace.cwd });
+            }
           }
         }
 
         if (method === "session.list_sessions") {
           const list = payload.sessions as SessionInfo[] | undefined;
           setSessions(list || []);
+
+          // Auto-select session from URL params if provided
+          if (sessionId && !activeSessionId && list && list.length > 0) {
+            const targetSession = list.find((s) => s.sessionId === sessionId);
+            if (targetSession) {
+              setActiveSessionId(targetSession.sessionId);
+            }
+          }
         }
 
         if (method === "session.create_session") {
@@ -98,12 +111,23 @@ export function MainPage() {
 
   const handleSessionSelect = useCallback((session: SessionInfo) => {
     setActiveSessionId(session.sessionId);
+    // Update URL to reflect current workspace/session
+    if (activeWorkspaceRef.current) {
+      navigate(`/workspace/${activeWorkspaceRef.current.id}/session/${session.sessionId}`);
+    }
   }, []);
 
   const handleNewSession = useCallback(() => {
     if (!activeWorkspaceRef.current) return;
     sendRequest("session.create_session", { cwd: activeWorkspaceRef.current.cwd });
   }, [sendRequest]);
+
+  // Update URL when new session is created
+  useEffect(() => {
+    if (activeSessionId && activeWorkspace) {
+      navigate(`/workspace/${activeWorkspace.id}/session/${activeSessionId}`);
+    }
+  }, [activeSessionId, activeWorkspace]);
 
   const handleNewWorkspace = useCallback(() => {
     // TODO: show create workspace modal
