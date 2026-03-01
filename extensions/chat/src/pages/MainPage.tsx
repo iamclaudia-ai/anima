@@ -3,6 +3,11 @@ import { ClaudiaChat, NavigationDrawer, navigate } from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
 import { createGatewayClient, type GatewayClient } from "@claudia/shared";
 import { bridge, GATEWAY_URL } from "../app";
+import {
+  createSessionForWorkspace,
+  loadMainPageBootstrapData,
+  loadSessionsForWorkspace,
+} from "./helpers/main-page-gateway";
 
 export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; sessionId?: string }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
@@ -32,39 +37,23 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
     const unsubscribeConnection = gateway.onConnection(setIsConnected);
     let cancelled = false;
 
-    const loadSessions = async (cwd: string): Promise<void> => {
-      const payload = await callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
-        cwd,
-      });
-      if (cancelled || !payload) return;
-      const list = payload.sessions || [];
-      setSessions(list);
-
-      if (sessionId && !activeSessionIdRef.current && list.length > 0) {
-        const targetSession = list.find((session) => session.sessionId === sessionId);
-        if (targetSession) {
-          setActiveSessionId(targetSession.sessionId);
-        }
-      }
-    };
-
     const bootstrap = async () => {
       try {
         await gateway.connect();
-        const payload = await callGateway<{ workspaces?: WorkspaceInfo[] }>(
-          "session.list_workspaces",
-        );
-        if (cancelled || !payload) return;
-        const list = payload.workspaces || [];
-        setWorkspaces(list);
-
-        if (!activeWorkspaceRef.current && list.length > 0) {
-          const targetWorkspace = workspaceId ? list.find((ws) => ws.id === workspaceId) : list[0];
-          if (targetWorkspace) {
-            setActiveWorkspace(targetWorkspace);
-            activeWorkspaceRef.current = targetWorkspace;
-            await loadSessions(targetWorkspace.cwd);
-          }
+        const data = await loadMainPageBootstrapData(callGateway, {
+          workspaceId,
+          sessionId,
+          hasActiveSession: activeSessionIdRef.current !== null,
+        });
+        if (cancelled) return;
+        setWorkspaces(data.workspaces);
+        setSessions(data.sessions);
+        if (!activeWorkspaceRef.current && data.activeWorkspace) {
+          setActiveWorkspace(data.activeWorkspace);
+          activeWorkspaceRef.current = data.activeWorkspace;
+        }
+        if (data.activeSessionId) {
+          setActiveSessionId(data.activeSessionId);
         }
       } catch {
         if (!cancelled) setIsConnected(false);
@@ -87,12 +76,9 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       activeWorkspaceRef.current = workspace;
       setActiveSessionId(null);
       setSessions([]);
-      void callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
-        cwd: workspace.cwd,
-      })
+      void loadSessionsForWorkspace(callGateway, workspace.cwd)
         .then((payload) => {
-          if (!payload) return;
-          setSessions(payload.sessions || []);
+          setSessions(payload);
         })
         .catch(() => undefined);
     },
@@ -109,19 +95,17 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   const handleNewSession = useCallback(() => {
     if (!activeWorkspaceRef.current) return;
-    void callGateway<{ sessionId?: string }>("session.create_session", {
-      cwd: activeWorkspaceRef.current.cwd,
-    })
+    void createSessionForWorkspace(callGateway, activeWorkspaceRef.current.cwd)
       .then((payload) => {
-        const nextSessionId = payload?.sessionId;
+        const nextSessionId = payload;
         if (!nextSessionId) return;
         setActiveSessionId(nextSessionId);
         if (!activeWorkspaceRef.current) return;
-        return callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
-          cwd: activeWorkspaceRef.current.cwd,
-        }).then((sessionsPayload) => {
-          setSessions(sessionsPayload?.sessions || []);
-        });
+        return loadSessionsForWorkspace(callGateway, activeWorkspaceRef.current.cwd).then(
+          (sessionsPayload) => {
+            setSessions(sessionsPayload);
+          },
+        );
       })
       .catch(() => undefined);
   }, [callGateway]);
@@ -148,11 +132,9 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       if (targetWorkspace && targetWorkspace.id !== activeWorkspace?.id) {
         setActiveWorkspace(targetWorkspace);
         activeWorkspaceRef.current = targetWorkspace;
-        void callGateway<{ sessions?: SessionInfo[] }>("session.list_sessions", {
-          cwd: targetWorkspace.cwd,
-        })
+        void loadSessionsForWorkspace(callGateway, targetWorkspace.cwd)
           .then((payload) => {
-            setSessions(payload?.sessions || []);
+            setSessions(payload);
           })
           .catch(() => undefined);
       }
