@@ -132,6 +132,59 @@ All communication uses a uniform envelope:
 { type: "event", event: "stream.{sessionId}.content_block_delta", payload: {...} }
 ```
 
+## Official Client Surface
+
+Outside extension runtime context, the **official way** to connect to the gateway is via the shared gateway client stack:
+
+- **Core (all environments):** `createGatewayClient()` from `@claudia/shared`
+- **React RPC wrapper:** `useGatewayClient()` from `@claudia/ui`
+- **React chat state machine:** `useChatGateway()` from `@claudia/ui`
+
+This keeps CLI/web/control clients on one transport implementation (request matching, ping/pong, subscriptions, connection tracking).
+
+### 1) Environment-agnostic core client
+
+```typescript
+import { createGatewayClient } from "@claudia/shared";
+
+const client = createGatewayClient({ url: "ws://localhost:30086/ws" });
+await client.connect();
+await client.subscribe(["session.*", "voice.*"]);
+const result = await client.call("session.list_sessions", { cwd: "/repo" });
+client.on("session.*", (event, payload) => {
+  // handle pushed events
+});
+```
+
+### 2) React RPC wrapper
+
+```typescript
+import { useGatewayClient } from "@claudia/ui";
+
+const { call, isConnected } = useGatewayClient(gatewayUrl);
+const data = await call("gateway.list_methods");
+```
+
+### 3) React chat workflow wrapper
+
+```typescript
+import { useChatGateway } from "@claudia/ui";
+
+const gateway = useChatGateway(gatewayUrl, { sessionId, workspaceId });
+gateway.sendPrompt("Hello", []);
+```
+
+### Extension runtime is different
+
+Extensions should **not** use `createGatewayClient()` for hub calls. Inside extensions, use `ExtensionContext` (`ctx.call`, `ctx.emit`, `ctx.on`) provided by `@claudia/extension-host`.
+
+### When direct raw WebSocket is acceptable
+
+- protocol-level tests/smoke scripts
+- non-TypeScript clients where sharing `@claudia/shared` is not practical
+
+For product code in this repo, prefer the shared client stack above.
+
 ---
 
 ## Method Routing
