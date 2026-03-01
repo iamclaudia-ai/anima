@@ -687,21 +687,21 @@ const allRoutes = [...controlRoutes, ...chatRoutes, ...myFeatureRoutes];
 
 - Chat owns `/` (workspaces, sessions)
 - Other extensions use `/{extension-name}` paths
-- Pages are React components using `@claudia/ui` hooks (`useGateway`, `useRouter`)
+- Pages are React components using `@claudia/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`)
 
 ---
 
 ## Existing Extensions
 
-| Extension       | ID           | Package                   | Web Pages                             | Source Routes |
-| --------------- | ------------ | ------------------------- | ------------------------------------- | ------------- |
-| Chat            | `chat`       | `@claudia/ext-chat`       | `/`, `/workspace/:id`, `/session/:id` | --            |
-| Voice           | `voice`      | `@claudia/voice`          | --                                    | --            |
-| iMessage        | `imessage`   | `@claudia/ext-imessage`   | --                                    | `imessage`    |
-| Mission Control | `control`    | `@claudia/ext-control`    | `/control`, `/logs`                   | --            |
-| Hooks           | `hooks`      | `@claudia/ext-hooks`      | --                                    | --            |
-| DOMINATRIX      | `dominatrix` | `@claudia/ext-dominatrix` | --                                    | --            |
-| Codex           | `codex`      | `@claudia/ext-codex`      | --                                    | --            |
+| Extension       | ID           | Package                   | Web Pages                                         | Source Routes |
+| --------------- | ------------ | ------------------------- | ------------------------------------------------- | ------------- |
+| Chat            | `chat`       | `@claudia/ext-chat`       | `/`, `/workspace/:workspaceId/session/:sessionId` | --            |
+| Voice           | `voice`      | `@claudia/voice`          | --                                                | --            |
+| iMessage        | `imessage`   | `@claudia/ext-imessage`   | --                                                | `imessage`    |
+| Mission Control | `control`    | `@claudia/ext-control`    | `/control`, `/logs`                               | --            |
+| Hooks           | `hooks`      | `@claudia/ext-hooks`      | --                                                | --            |
+| DOMINATRIX      | `dominatrix` | `@claudia/ext-dominatrix` | --                                                | --            |
+| Codex           | `codex`      | `@claudia/ext-codex`      | --                                                | --            |
 
 All extensions run out-of-process. There is no in-process mode.
 

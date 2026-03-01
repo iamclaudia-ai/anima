@@ -144,9 +144,10 @@ Schema-driven command-line client:
 Shared React components and router:
 
 - `ClaudiaChat` — Main chat interface with streaming
-- `WorkspaceList`, `SessionList` — Navigation components
+- `NavigationDrawer` — Workspace/session navigation component
 - `router.tsx` — Client-side pushState router (`Router`, `Link`, `useRouter`, `navigate`, `matchPath`)
-- `useGateway` hook — WebSocket connection + message/session state management
+- `useChatGateway` hook — Chat/session state management over gateway events
+- `useGatewayClient` hook — Thin React wrapper over the shared gateway client
 - `useAudioPlayback` hook — Timeline-based audio scheduling with Web Audio API
 
 ### Extensions

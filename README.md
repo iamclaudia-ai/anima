@@ -80,12 +80,12 @@ That's it. One command, one port, everything works.
 
 Every feature — including the web chat UI — is an extension that plugs into the gateway:
 
-| Extension  | What it does                                           |
-| ---------- | ------------------------------------------------------ |
-| `chat`     | Web chat pages — workspace list, session list, chat UI |
-| `voice`    | Cartesia TTS streaming, auto-speak, audio saving       |
-| `imessage` | iMessage bridge, auto-reply to allowed contacts        |
-| `control`  | System dashboard with extension health monitoring      |
+| Extension  | What it does                                                       |
+| ---------- | ------------------------------------------------------------------ |
+| `chat`     | Web chat pages — unified chat UI with workspace/session navigation |
+| `voice`    | Cartesia TTS streaming, auto-speak, audio saving                   |
+| `imessage` | iMessage bridge, auto-reply to allowed contacts                    |
+| `control`  | System dashboard with extension health monitoring                  |
 
 Extensions provide server methods (RPC over WebSocket), web pages (React components with routes), event handlers, and structured health checks. All methods use schema-driven validation at the gateway boundary.
 
@@ -101,7 +101,7 @@ claudia/
 │   ├── watchdog/         # Process supervisor for gateway + agent-host
 │   ├── extension-host/   # Generic shim for out-of-process extensions
 │   ├── cli/              # Schema-driven CLI with method discovery
-│   ├── shared/           # Shared types, config, protocol definitions
+│   ├── shared/           # Shared types, config, protocol + reusable gateway client
 │   ├── ui/               # Shared React components + pushState router
 │   └── memory-mcp/       # MCP server for persistent memory system
 ├── clients/

@@ -217,7 +217,7 @@ RPC metadata: `traceId`, `depth` (max 8), `deadlineMs`. Per-extension rate limit
 | Extension       | ID         | What It Does                                             |
 | --------------- | ---------- | -------------------------------------------------------- |
 | Session         | `session`  | SDK engine (Agent SDK query()), workspace CRUD, history  |
-| Chat            | `chat`     | Web pages: /, /workspace/:id, /workspace/:id/session/:id |
+| Chat            | `chat`     | Web pages: /, /workspace/:workspaceId/session/:sessionId |
 | Voice           | `voice`    | Cartesia Sonic 3.0 TTS, streaming audio                  |
 | iMessage        | `imessage` | iMessage bridge, auto-reply                              |
 | Mission Control | `control`  | System dashboard, health checks                          |
@@ -434,23 +434,24 @@ packages/
     src/
       index.ts            Method discovery, param validation, type coercion
 
-  shared/               # Types, config, protocol
+  shared/               # Types, config, protocol, reusable gateway client
     src/
       types.ts            Extension, session, workspace types
       protocol.ts         WebSocket protocol types (req/res/event)
       config.ts           claudia.json loader with env var interpolation
+      gateway-client.ts   Environment-agnostic Gateway RPC/event client
 
   ui/                   # React components + router
     src/
       router.tsx          Client-side pushState router
-      hooks/              useGateway, useAudioPlayback
-      components/         ClaudiaChat, MessageList, WorkspaceList, SessionList
+      hooks/              useChatGateway, useGatewayClient, useAudioPlayback
+      components/         ClaudiaChat, MessageList, NavigationDrawer
 
   memory-mcp/           # MCP server for persistent memory system
 
 extensions/
   session/src/          # Session lifecycle, SDK engine, workspace CRUD
-  chat/src/             # Web pages: /, /workspace/:id, /workspace/:id/session/:id
+  chat/src/             # Web pages: /, /workspace/:workspaceId/session/:sessionId
   voice/src/            # Cartesia Sonic 3.0 TTS, streaming audio
   imessage/src/         # iMessage bridge, auto-reply
   control/src/          # System dashboard, health checks
