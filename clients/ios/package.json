@@ -2,9 +2,9 @@
   "name": "@claudia/ios",
   "version": "0.1.0",
   "private": true,
-  "description": "React Native iOS app with CarPlay support",
+  "description": "Native Swift iOS VoiceMode client for Claudia gateway",
   "scripts": {
-    "build": "echo \"Use xcodebuild in clients/ios/VoiceMode\"",
+    "build": "echo \"Use xcodebuild with clients/ios/VoiceMode.xcodeproj\"",
     "test": "echo \"No Bun tests for iOS client\"",
     "typecheck": "echo \"No TypeScript typecheck for iOS client\""
   }

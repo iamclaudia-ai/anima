@@ -139,6 +139,7 @@ Outside extension runtime context, the **official way** to connect to the gatewa
 - **Core (all environments):** `createGatewayClient()` from `@claudia/shared`
 - **React RPC wrapper:** `useGatewayClient()` from `@claudia/ui`
 - **React chat state machine:** `useChatGateway()` from `@claudia/ui`
+- **Swift (iOS VoiceMode today):** `GatewayClient.swift` at `clients/ios/VoiceMode/GatewayClient.swift`
 
 This keeps CLI/web/control clients on one transport implementation (request matching, ping/pong, subscriptions, connection tracking).
 
@@ -173,6 +174,21 @@ import { useChatGateway } from "@claudia/ui";
 const gateway = useChatGateway(gatewayUrl, { sessionId, workspaceId });
 gateway.sendPrompt("Hello", []);
 ```
+
+### 4) Swift client (native iOS)
+
+Current native iOS app uses:
+
+- `clients/ios/VoiceMode/GatewayClient.swift`
+
+It should remain protocol-compatible with the shared client behavior:
+
+- request/response correlation by `id`
+- ping/pong keepalive handling
+- `gateway.welcome` connectionId handling
+- explicit event subscriptions via `gateway.subscribe`
+
+As more native apps are added, this Swift client should be extracted into a reusable native gateway transport module shared across iOS clients.
 
 ### Extension runtime is different
 

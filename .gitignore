@@ -38,12 +38,16 @@ coverage/
 xcuserdata/
 DerivedData/
 *.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/**
 
 # iOS/Xcode build artifacts
 clients/ios/build/
 clients/ios/ios/build/
 clients/ios/android/build/
 clients/ios/android/.gradle/
+clients/**/build/
 
 # Claudia data
 .claudia/
