@@ -23,7 +23,6 @@ interface CronField {
 }
 
 export class CronParser {
-
   /**
    * Parse a cron expression and return the next run time
    */
@@ -59,7 +58,7 @@ export class CronParser {
       hour: this.parseField(parts[1], 0, 23),
       dayOfMonth: this.parseField(parts[2], 1, 31),
       month: this.parseField(parts[3], 1, 12),
-      dayOfWeek: this.parseField(parts[4], 0, 6)
+      dayOfWeek: this.parseField(parts[4], 0, 6),
     };
   }
 
@@ -71,26 +70,26 @@ export class CronParser {
       values: [],
       isWildcard: false,
       isRange: false,
-      isStep: false
+      isStep: false,
     };
 
-    if (field === '*') {
+    if (field === "*") {
       result.isWildcard = true;
       result.values = this.range(min, max);
       return result;
     }
 
     // Handle step values (*/5, 0-23/2)
-    if (field.includes('/')) {
+    if (field.includes("/")) {
       result.isStep = true;
-      const [range, step] = field.split('/');
+      const [range, step] = field.split("/");
       const stepValue = parseInt(step);
 
       let rangeValues: number[];
-      if (range === '*') {
+      if (range === "*") {
         rangeValues = this.range(min, max);
-      } else if (range.includes('-')) {
-        const [start, end] = range.split('-').map(n => parseInt(n));
+      } else if (range.includes("-")) {
+        const [start, end] = range.split("-").map((n) => parseInt(n));
         rangeValues = this.range(start, end);
       } else {
         rangeValues = [parseInt(range)];
@@ -101,16 +100,16 @@ export class CronParser {
     }
 
     // Handle ranges (1-5, 9-17)
-    if (field.includes('-')) {
+    if (field.includes("-")) {
       result.isRange = true;
-      const [start, end] = field.split('-').map(n => parseInt(n));
+      const [start, end] = field.split("-").map((n) => parseInt(n));
       result.values = this.range(start, end);
       return result;
     }
 
     // Handle lists (1,3,5)
-    if (field.includes(',')) {
-      result.values = field.split(',').map(n => parseInt(n.trim()));
+    if (field.includes(",")) {
+      result.values = field.split(",").map((n) => parseInt(n.trim()));
       return result;
     }
 
@@ -140,7 +139,7 @@ export class CronParser {
     candidate.setMinutes(candidate.getMinutes() + 1);
 
     // Limit search to prevent infinite loops (max 2 years ahead)
-    const maxDate = new Date(fromDate.getTime() + (2 * 365 * 24 * 60 * 60 * 1000));
+    const maxDate = new Date(fromDate.getTime() + 2 * 365 * 24 * 60 * 60 * 1000);
 
     while (candidate <= maxDate) {
       if (this.isValidTime(candidate, fields)) {
@@ -196,14 +195,14 @@ export class CronParser {
       } else if (fields.minute.values.length === 1) {
         desc += `minute ${fields.minute.values[0]} `;
       } else {
-        desc += `minutes ${fields.minute.values.join(', ')} `;
+        desc += `minutes ${fields.minute.values.join(", ")} `;
       }
 
       if (!fields.hour.isWildcard) {
         if (fields.hour.values.length === 1) {
           desc += `of hour ${fields.hour.values[0]} `;
         } else {
-          desc += `of hours ${fields.hour.values.join(', ')} `;
+          desc += `of hours ${fields.hour.values.join(", ")} `;
         }
       }
 
