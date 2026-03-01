@@ -173,6 +173,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
           <ClaudiaChat
             bridge={bridge}
             gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
+            key={`${activeWorkspace.id}-${activeSessionId}`}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400">
