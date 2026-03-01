@@ -129,6 +129,26 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
     }
   }, [activeSessionId, activeWorkspace]);
 
+  // Watch for prop changes (when router updates URL without re-mounting)
+  useEffect(() => {
+    // If sessionId prop changes and differs from current state, update state
+    if (sessionId && sessionId !== activeSessionId) {
+      setActiveSessionId(sessionId);
+    }
+  }, [sessionId, activeSessionId]);
+
+  // Watch for workspace prop changes
+  useEffect(() => {
+    if (workspaceId && workspaces.length > 0) {
+      const targetWorkspace = workspaces.find((ws) => ws.id === workspaceId);
+      if (targetWorkspace && targetWorkspace.id !== activeWorkspace?.id) {
+        setActiveWorkspace(targetWorkspace);
+        activeWorkspaceRef.current = targetWorkspace;
+        sendRequest("session.list_sessions", { cwd: targetWorkspace.cwd });
+      }
+    }
+  }, [workspaceId, workspaces, activeWorkspace, sendRequest]);
+
   const handleNewWorkspace = useCallback(() => {
     // TODO: show create workspace modal
   }, []);
