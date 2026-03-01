@@ -211,14 +211,48 @@ export function getOrCreateWorkspace(
   cwd: string,
   name?: string,
 ): { workspace: Workspace; created: boolean } {
-  const existing = getWorkspaceByCwd(cwd);
+  // Expand ~ to home directory
+  let expandedCwd = cwd;
+  if (cwd.startsWith("~")) {
+    expandedCwd = join(homedir(), cwd.slice(1));
+  }
+
+  const existing = getWorkspaceByCwd(expandedCwd);
   if (existing) {
     return { workspace: existing, created: false };
   }
 
+  // Create directory tree if it doesn't exist
+  if (!existsSync(expandedCwd)) {
+    try {
+      mkdirSync(expandedCwd, { recursive: true });
+      log.info("Created workspace directory", { cwd: expandedCwd });
+    } catch (error) {
+      log.error("Failed to create workspace directory", {
+        cwd: expandedCwd,
+        error: String(error),
+      });
+      throw new Error(`Failed to create directory: ${expandedCwd}`);
+    }
+  }
+
+  // Verify it's a directory
+  try {
+    const stats = statSync(expandedCwd);
+    if (!stats.isDirectory()) {
+      throw new Error(`Path exists but is not a directory: ${expandedCwd}`);
+    }
+  } catch (error) {
+    log.error("Failed to verify workspace directory", {
+      cwd: expandedCwd,
+      error: String(error),
+    });
+    throw error;
+  }
+
   // Derive name from last path segment if not provided
-  const derivedName = name || basename(cwd);
-  const workspace = createWorkspace({ name: derivedName, cwd });
+  const derivedName = name || basename(expandedCwd);
+  const workspace = createWorkspace({ name: derivedName, cwd: expandedCwd });
   return { workspace, created: true };
 }
 

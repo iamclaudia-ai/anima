@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ClaudiaChat, NavigationDrawer, navigate, useGatewayClient } from "@claudia/ui";
+import {
+  ClaudiaChat,
+  NavigationDrawer,
+  CreateWorkspaceModal,
+  navigate,
+  useGatewayClient,
+} from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
 import { bridge, GATEWAY_URL } from "../app";
 import {
@@ -31,6 +37,8 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const { call, isConnected } = useGatewayClient(GATEWAY_URL);
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -176,49 +184,139 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   }, [workspaceId, workspaces, activeWorkspace, callGateway]);
 
   const handleNewWorkspace = useCallback(() => {
-    // TODO: show create workspace modal
+    setShowCreateWorkspaceModal(true);
   }, []);
 
-  return (
-    <div className="flex h-screen w-screen overflow-x-hidden">
-      <NavigationDrawer
-        workspaces={workspaces}
-        sessions={sessions}
-        activeWorkspace={activeWorkspace}
-        activeSessionId={activeSessionId}
-        isConnected={isConnected}
-        onWorkspaceSelect={handleWorkspaceSelect}
-        onSessionSelect={handleSessionSelect}
-        onNewSession={handleNewSession}
-        onNewWorkspace={handleNewWorkspace}
-      />
+  const handleGetDirectories = useCallback(
+    async (path: string): Promise<{ path: string; directories: string[] }> => {
+      const result = await callGateway<{ path: string; directories: string[] }>(
+        "session.get_directories",
+        { path },
+      );
+      return result || { path, directories: [] };
+    },
+    [callGateway],
+  );
 
-      {/* Main content area */}
-      <div className="flex-1 bg-white min-w-0">
-        {activeSessionId && activeWorkspace ? (
-          <ClaudiaChat
-            bridge={bridge}
-            gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
-            key={`${activeWorkspace.id}-${activeSessionId}`}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-4">
-            <p className="text-gray-400">
-              {activeWorkspace
-                ? "No sessions yet for this workspace"
-                : "Select a workspace to get started"}
-            </p>
-            {activeWorkspace && (
-              <button
-                onClick={handleNewSession}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Create new session
-              </button>
-            )}
-          </div>
-        )}
+  const handleCreateWorkspace = useCallback(
+    async (cwd: string, name?: string) => {
+      setIsCreatingWorkspace(true);
+      try {
+        // Create workspace (will create directory if it doesn't exist)
+        const wsResult = await callGateway<{ workspace: WorkspaceInfo; created: boolean }>(
+          "session.get_or_create_workspace",
+          { cwd, name },
+        );
+        if (!wsResult?.workspace) {
+          setIsCreatingWorkspace(false);
+          return;
+        }
+
+        const newWorkspace = wsResult.workspace;
+
+        // Check if workspace already has sessions
+        const existingSessions = await loadSessionsForWorkspace(callGateway, newWorkspace.cwd);
+
+        let sessionIdToUse: string;
+
+        if (existingSessions.length > 0) {
+          // Workspace already has sessions - use the most recent one
+          sessionIdToUse = existingSessions[0].sessionId;
+        } else {
+          // No existing sessions - create the first one
+          const sessionResult = await callGateway<{ sessionId: string }>("session.create_session", {
+            cwd: newWorkspace.cwd,
+          });
+
+          if (!sessionResult?.sessionId) {
+            setIsCreatingWorkspace(false);
+            return;
+          }
+          sessionIdToUse = sessionResult.sessionId;
+        }
+
+        // Refresh workspaces list
+        const workspacesResult = await callGateway<{ workspaces: WorkspaceInfo[] }>(
+          "session.list_workspaces",
+        );
+        if (workspacesResult?.workspaces) {
+          setWorkspaces(workspacesResult.workspaces);
+        }
+
+        // Navigate to the workspace/session
+        setActiveWorkspace(newWorkspace);
+        activeWorkspaceRef.current = newWorkspace;
+        setActiveSessionId(sessionIdToUse);
+        navigate(`/workspace/${newWorkspace.id}/session/${sessionIdToUse}`);
+
+        // Load/refresh sessions for this workspace
+        setSessions(
+          existingSessions.length > 0
+            ? existingSessions
+            : await loadSessionsForWorkspace(callGateway, newWorkspace.cwd),
+        );
+
+        // Close modal
+        setShowCreateWorkspaceModal(false);
+      } catch (error) {
+        console.error("Failed to create workspace:", error);
+      } finally {
+        setIsCreatingWorkspace(false);
+      }
+    },
+    [callGateway],
+  );
+
+  return (
+    <>
+      <div className="flex h-screen w-screen overflow-x-hidden">
+        <NavigationDrawer
+          workspaces={workspaces}
+          sessions={sessions}
+          activeWorkspace={activeWorkspace}
+          activeSessionId={activeSessionId}
+          isConnected={isConnected}
+          onWorkspaceSelect={handleWorkspaceSelect}
+          onSessionSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
+          onNewWorkspace={handleNewWorkspace}
+        />
+
+        {/* Main content area */}
+        <div className="flex-1 bg-white min-w-0">
+          {activeSessionId && activeWorkspace ? (
+            <ClaudiaChat
+              bridge={bridge}
+              gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
+              key={`${activeWorkspace.id}-${activeSessionId}`}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-4">
+              <p className="text-gray-400">
+                {activeWorkspace
+                  ? "No sessions yet for this workspace"
+                  : "Select a workspace to get started"}
+              </p>
+              {activeWorkspace && (
+                <button
+                  onClick={handleNewSession}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Create new session
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      <CreateWorkspaceModal
+        isOpen={showCreateWorkspaceModal}
+        onClose={() => setShowCreateWorkspaceModal(false)}
+        onSubmit={handleCreateWorkspace}
+        onGetDirectories={handleGetDirectories}
+        isCreating={isCreatingWorkspace}
+      />
+    </>
   );
 }

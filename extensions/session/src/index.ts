@@ -59,6 +59,41 @@ interface SessionIndexEntry {
 }
 
 /**
+ * Get list of child directories from a given path.
+ * Expands ~ to home directory.
+ * Returns directory names sorted alphabetically.
+ */
+function getDirectories(path: string): string[] {
+  try {
+    // Expand ~ to home directory
+    const expandedPath = path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
+
+    if (!existsSync(expandedPath)) {
+      return [];
+    }
+
+    const stat = statSync(expandedPath);
+    if (!stat.isDirectory()) {
+      return [];
+    }
+
+    // Read directory entries
+    const entries = readdirSync(expandedPath, { withFileTypes: true });
+
+    // Filter to directories only, exclude hidden directories (starting with .)
+    const directories = entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => entry.name)
+      .sort();
+
+    return directories;
+  } catch (error) {
+    log.warn("Failed to read directories", { path, error: String(error) });
+    return [];
+  }
+}
+
+/**
  * Resolve the Claude Code project directory for a given CWD.
  * Claude Code encodes paths by replacing / with - (dash).
  */
@@ -430,6 +465,13 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }),
     },
     {
+      name: "session.get_directories",
+      description: "List child directories from a given path (for directory browsing)",
+      inputSchema: z.object({
+        path: z.string().optional().default("~").describe("Path to list directories from"),
+      }),
+    },
+    {
       name: "session.health_check",
       description: "Health status of session extension",
       inputSchema: z.object({}),
@@ -772,6 +814,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const cwd = params.cwd as string;
         const deleted = deleteWorkspace(cwd);
         return { deleted };
+      }
+
+      case "session.get_directories": {
+        const path = (params.path as string | undefined) || "~";
+        const directories = getDirectories(path);
+        return { path, directories };
       }
 
       case "session.health_check": {

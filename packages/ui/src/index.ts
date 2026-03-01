@@ -49,3 +49,4 @@ export { CopyButton } from "./components/CopyButton";
 export { ClaudiaThinking } from "./components/ClaudiaThinking";
 export { ErrorBoundary } from "./components/ErrorBoundary";
 export { NavigationDrawer } from "./components/NavigationDrawer";
+export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
