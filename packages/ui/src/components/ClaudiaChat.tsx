@@ -314,6 +314,15 @@ function ChatInner({
 
         <StatusBar hookState={gateway.hookState} />
 
+        {/* Auto-scroll indicator (debug) */}
+        <div
+          className={`fixed bottom-4 left-4 z-50 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg ${
+            gateway.isAtBottom ? "bg-green-500 text-white" : "bg-orange-500 text-white"
+          }`}
+        >
+          Auto-scroll: {gateway.isAtBottom ? "ON" : "OFF"}
+        </div>
+
         <InputArea
           input={input}
           onInputChange={handleInputChange}

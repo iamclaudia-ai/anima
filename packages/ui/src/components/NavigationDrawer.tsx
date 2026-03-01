@@ -129,9 +129,9 @@ export function NavigationDrawer({
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <>
       {/* Left sidebar - Workspace icons */}
-      <div className="w-20 bg-gray-800 flex flex-col items-center py-4 gap-3">
+      <div className="w-20 bg-gray-800 flex flex-col items-center py-4 gap-3 flex-shrink-0">
         {/* Workspace icons */}
         <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
           {workspaces.map((workspace) => (
@@ -156,7 +156,7 @@ export function NavigationDrawer({
 
       {/* Middle panel - Session list */}
       <div
-        className={`bg-white border-r border-gray-200 flex flex-col transition-all duration-200 ${
+        className={`bg-white border-r border-gray-200 flex flex-col transition-all duration-200 flex-shrink-0 ${
           isPanelCollapsed ? "w-0" : "w-64"
         }`}
       >
@@ -215,7 +215,7 @@ export function NavigationDrawer({
       {/* Collapse/Expand button */}
       <button
         onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-        className="absolute left-80 top-4 z-10 w-6 h-6 bg-white border border-gray-300 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-900 hover:border-gray-400 transition-all shadow-sm"
+        className="fixed top-4 z-10 w-6 h-6 bg-white border border-gray-300 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-900 hover:border-gray-400 transition-all shadow-sm"
         style={{ left: isPanelCollapsed ? "80px" : "336px" }}
         title={isPanelCollapsed ? "Show sessions" : "Hide sessions"}
       >
@@ -225,6 +225,6 @@ export function NavigationDrawer({
           <ChevronLeft className="w-4 h-4" />
         )}
       </button>
-    </div>
+    </>
   );
 }

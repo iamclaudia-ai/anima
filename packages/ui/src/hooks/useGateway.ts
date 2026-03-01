@@ -86,6 +86,8 @@ export interface UseGatewayReturn {
   hasMore: boolean;
   workspace: WorkspaceInfo | null;
   sessions: SessionInfo[];
+  /** Whether user is scrolled to bottom (for auto-scroll indicator) */
+  isAtBottom: boolean;
   sendPrompt(text: string, attachments: Attachment[], tags?: string[]): void;
   sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
   sendInterrupt(): void;
@@ -144,6 +146,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
   const toolTickIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const toolSimTickMsRef = useRef(toolSimulationIntervalMs);
   const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
+  const [isAtBottom, setIsAtBottom] = useState(true); // Expose for UI indicator
 
   useEffect(() => {
     isQueryingRef.current = isQuerying;
@@ -166,15 +169,41 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     const container = messagesContainerRef.current;
     if (!container) return;
 
-    const handleScroll = () => {
+    const updateScrollPosition = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       // Consider "at bottom" if within 100px of bottom (accounts for rounding and smooth scroll)
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-      isAtBottomRef.current = isAtBottom;
+      const atBottom = scrollHeight - scrollTop - clientHeight < 100;
+      isAtBottomRef.current = atBottom;
+      setIsAtBottom(atBottom);
     };
 
+    // Detect user-initiated scroll interactions (wheel, touch, keyboard)
+    // When user manually scrolls during streaming, disable auto-scroll immediately
+    const handleUserScroll = (e: Event) => {
+      // User is manually scrolling - disable auto-scroll immediately
+      isAtBottomRef.current = false;
+      setIsAtBottom(false);
+      // After user scroll completes, check actual position
+      requestAnimationFrame(updateScrollPosition);
+    };
+
+    const handleScroll = () => {
+      // Natural scroll position updates (not during user interaction)
+      updateScrollPosition();
+    };
+
+    // Listen for user scroll interactions
+    container.addEventListener("wheel", handleUserScroll, { passive: true });
+    container.addEventListener("touchstart", handleUserScroll, { passive: true });
+    container.addEventListener("keydown", handleUserScroll);
     container.addEventListener("scroll", handleScroll);
-    return () => container.removeEventListener("scroll", handleScroll);
+
+    return () => {
+      container.removeEventListener("wheel", handleUserScroll);
+      container.removeEventListener("touchstart", handleUserScroll);
+      container.removeEventListener("keydown", handleUserScroll);
+      container.removeEventListener("scroll", handleScroll);
+    };
   }, []);
 
   // Auto-scroll to bottom (instant for history load, smooth for streaming)
@@ -1029,6 +1058,7 @@ export function useGateway(gatewayUrl: string, options: UseGatewayOptions = {}):
     hasMore,
     workspace,
     sessions,
+    isAtBottom,
     sendPrompt,
     sendToolResult,
     sendInterrupt,

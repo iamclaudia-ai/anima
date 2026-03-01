@@ -154,7 +154,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   }, []);
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen w-screen overflow-x-hidden">
       <NavigationDrawer
         workspaces={workspaces}
         sessions={sessions}
@@ -168,7 +168,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
       />
 
       {/* Main content area */}
-      <div className="flex-1 bg-white">
+      <div className="flex-1 bg-white min-w-0">
         {activeSessionId && activeWorkspace ? (
           <ClaudiaChat
             bridge={bridge}
