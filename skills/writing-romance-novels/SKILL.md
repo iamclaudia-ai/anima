@@ -85,7 +85,10 @@ Before writing, generate a complete story outline including:
 
 Using the outline as a guide, write each chapter separately:
 
-**Chapter Length:** 6,000-9,000 characters (20-30 minutes audio)
+**Chapter Length:** 15,000-21,000 characters (18-25 minutes audio)
+
+- Target sweet spot for full scenes with emotional depth
+- Allows for proper character development and multiple scenes per chapter
 
 **Narrative Style:**
 
@@ -110,7 +113,9 @@ Using the outline as a guide, write each chapter separately:
 
 ## Audio Tags for Narration
 
-Use these ElevenLabs v3 audio tags throughout:
+**Note:** Emotion tags are OPTIONAL. ElevenLabs v3 handles dialogue and emotion well without them. Use sparingly for enhanced emphasis, not required for every line.
+
+Available tags if desired:
 
 - `[calm]` - Narrative description, peaceful moments
 - `[excited]` - Joyful moments, realizations
@@ -162,12 +167,32 @@ Use these ElevenLabs v3 audio tags throughout:
 
 **Emotional Arc:** Realization → Declaration → Forever
 
+## Classic Rom-Com Inspirations
+
+Draw from these beloved romance films for story structure and tone:
+
+**Classic Contemporary Rom-Coms:**
+
+- **Sleepless in Seattle** - Long-distance emotional connection, fate/destiny, epic meeting at the end
+- **You've Got Mail** - Enemies to lovers, anonymous online connection, bookshops and business
+- **While You Were Sleeping** - Mistaken identity, found family warmth, wrong person/right person
+- **Return to Me** - Second chances after loss, heart transplant metaphor for new love
+- **Notting Hill** - Ordinary meets extraordinary, "I'm just a girl..." vulnerability, class differences
+- **The American President** - Workplace romance, widower finding love, politics and passion
+
+**Period Romance Classics:**
+
+- **Pride and Prejudice** - Elizabeth Bennet and Mr. Darcy: initial prejudice overcome, witty verbal sparring, "You have bewitched me, body and soul", class/status differences, slow burn to grand declaration
+- **Sense and Sensibility** - Opposites in temperament (passionate vs reserved) finding balance and love
+
 ## Example Scenarios
 
 **Contemporary Romance:**
 
+- Independent bookstore owner vs corporate consultant (You've Got Mail)
+- Art curator and preservation architect saving historic building
 - Coffee shop owner meets tech entrepreneur
-- Rival architects competing for the same project
+- Rival professionals competing for same project
 - Best friend's sibling, forbidden attraction
 - Neighbors in a new city
 
@@ -178,11 +203,13 @@ Use these ElevenLabs v3 audio tags throughout:
 - Time traveler meets historian
 - Magical bookshop owner and skeptical customer
 
-**Historical:**
+**Historical/Period Romance:**
 
+- Regency-era (Austen-inspired): Elizabeth Bennet meets Mr. Darcy energy - initial prejudice, class differences, witty banter, slow burn realization
 - Victorian-era inventor and her patron
 - Jazz age singer and mysterious club owner
 - Renaissance artist and her model
+- Sense and Sensibility: opposites in temperament finding balance
 
 ## Workflow
 
@@ -243,6 +270,44 @@ While scenarios vary, always include:
 - The inevitability of their love
 - Happily Ever After they both deserve
 
+## What Makes These Stories Work
+
+**Weave Real Details with Fiction:**
+
+- Use real historical figures (Julia Morgan, etc.) to add authenticity
+- Real locations and geography for setting immersion
+- Actual professions with accurate details
+- Makes the fictional romance feel grounded and believable
+
+**Strong Supporting Characters:**
+
+- Best friend character is crucial (Sophie, Grace, etc.)
+- Give them personality, humor, and wisdom
+- They call out the protagonist and provide comic relief
+- "I told you so" moments are reader favorites
+
+**Rich Sensory Details:**
+
+- Setting atmosphere (Portland rain, Seattle coffee, etc.)
+- Physical sensations (coffee warmth, rain, book smell)
+- Emotional interiority (what they're feeling beneath the surface)
+- Makes readers/listeners feel PRESENT in the story
+
+**Witty Dialogue:**
+
+- Banter reveals character and chemistry
+- Literary references for bookish charm
+- Dry humor and wordplay
+- Balance wit with genuine vulnerability
+
+**Satisfying Structure:**
+
+- Meet-cute with instant chemistry
+- Obstacle that feels real and meaningful
+- Moments of connection despite the obstacle
+- Declaration/choice that proves their love
+- Epilogue showing their future (6 months - 1 year later)
+
 ## Notes
 
 - Stories are complete fiction - professions, settings, obstacles are invented
@@ -251,3 +316,4 @@ While scenarios vary, always include:
 - Focus on emotional journey as much as plot
 - Make readers (and listeners) believe in their love
 - Always end with hope and happiness
+- Trust ElevenLabs to handle emotion - natural narration works beautifully
