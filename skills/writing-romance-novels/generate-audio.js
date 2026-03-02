@@ -158,17 +158,19 @@ function mergeAudioParts(partPaths, outputPath) {
     { stdio: "pipe" },
   );
 
-  // Concatenate all parts
-  execSync(`ffmpeg -f concat -safe 0 -i "${concatListPath}" -c copy "${outputPath}" -y`, {
-    stdio: "pipe",
-  });
+  // Concatenate all parts (re-encode for seamless playback)
+  execSync(
+    `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:a libmp3lame -q:a 2 "${outputPath}" -y`,
+    { stdio: "pipe" },
+  );
 
-  // Clean up temporary files
+  // Clean up temporary files (but keep parts for verification)
   fs.unlinkSync(concatListPath);
   fs.unlinkSync(silencePath);
-  partPaths.forEach((partPath) => fs.unlinkSync(partPath));
+  // partPaths are kept for verification - delete manually if merge is good
 
   console.log("✅ Audio parts merged successfully!");
+  console.log("📦 Part files kept for verification - delete manually if merge sounds good");
 }
 
 /**
@@ -187,21 +189,28 @@ async function generateAudio(markdownPath) {
 
     const markdownContent = fs.readFileSync(markdownPath, "utf8");
 
-    // Extract meditation content between the --- markers, excluding header/metadata
+    // Extract content - handle both meditation and romance novel formats
     let meditationText = markdownContent;
 
-    // Remove title and description
-    meditationText = meditationText.replace(/^# .*$/gm, "");
-    meditationText = meditationText.replace(/^\*.*\*$/gm, "");
+    // Check if this is a meditation file (starts with --- metadata block)
+    const isMeditationFormat = meditationText.trim().startsWith("---");
 
-    // Extract content between --- markers
-    const betweenDashes = meditationText.match(/---\n\n([\s\S]*?)\n\n---/);
-    if (betweenDashes) {
-      meditationText = betweenDashes[1];
+    if (isMeditationFormat) {
+      // Meditation format: extract content between --- markers
+      meditationText = meditationText.replace(/^# .*$/gm, "");
+      meditationText = meditationText.replace(/^\*.*\*$/gm, "");
+
+      const betweenDashes = meditationText.match(/---\n\n([\s\S]*?)\n\n---/);
+      if (betweenDashes) {
+        meditationText = betweenDashes[1];
+      } else {
+        meditationText = meditationText.replace(/\n\n---\n\n[\s\S]*$/, "");
+        meditationText = meditationText.replace(/^---\n\n/, "");
+      }
     } else {
-      // Fallback: remove everything after second ---
-      meditationText = meditationText.replace(/\n\n---\n\n[\s\S]*$/, "");
-      meditationText = meditationText.replace(/^---\n\n/, "");
+      // Romance novel format: just remove title/chapter headings, keep all content including --- section breaks
+      meditationText = meditationText.replace(/^# .*$/gm, "");
+      meditationText = meditationText.replace(/^## .*$/gm, "");
     }
 
     meditationText = meditationText.trim();
