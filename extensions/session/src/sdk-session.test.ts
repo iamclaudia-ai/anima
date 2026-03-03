@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import { rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createSDKSession, resumeSDKSession, SDKSession } from "./sdk-session";
@@ -144,6 +144,108 @@ describe("SDKSession", () => {
     const turnStop = sseEvents.find((e) => e.type === "turn_stop");
     expect(turnStop?.stop_reason).toBe("end_turn");
     expect(procEvents).toContain("ended");
+  });
+
+  it("builds string systemPrompt from CLAUDE.md files in precedence order", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-claude-md`;
+    createdSessionIds.push(sessionId);
+
+    const root = join(homedir(), `.claudia-sdk-test-${Date.now()}`);
+    const parentDir = join(root, "parent");
+    const projectDir = join(parentDir, "project");
+    const cwd = join(projectDir, "app");
+    const globalClaudePath = join(homedir(), ".claude", "CLAUDE.md");
+    const rootClaudePath = join(root, "CLAUDE.md");
+    const projectClaudePath = join(projectDir, "CLAUDE.md");
+
+    const globalOriginal = existsSync(globalClaudePath)
+      ? readFileSync(globalClaudePath, "utf-8")
+      : null;
+
+    let capturedOptions: Record<string, unknown> | undefined;
+    try {
+      mkdirSync(cwd, { recursive: true });
+      mkdirSync(join(homedir(), ".claude"), { recursive: true });
+
+      writeFileSync(globalClaudePath, "GLOBAL_INSTRUCTIONS");
+      writeFileSync(rootClaudePath, "PARENT_INSTRUCTIONS");
+      writeFileSync(projectClaudePath, "PROJECT_INSTRUCTIONS");
+
+      const session = new SDKSession(
+        sessionId,
+        { cwd, systemPrompt: "CUSTOM_PROMPT_INSTRUCTIONS" },
+        false,
+        {
+          queryFactory: ((args: { options: Record<string, unknown> }) => {
+            capturedOptions = args.options;
+            return fakeQuery as unknown;
+          }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+        },
+      );
+
+      await session.start();
+      await session.prompt("hello");
+
+      const systemPrompt = (capturedOptions?.systemPrompt as string | undefined) || "";
+
+      const idxGlobal = systemPrompt.indexOf("GLOBAL_INSTRUCTIONS");
+      const idxParent = systemPrompt.indexOf("PARENT_INSTRUCTIONS");
+      const idxProject = systemPrompt.indexOf("PROJECT_INSTRUCTIONS");
+      const idxCustom = systemPrompt.indexOf("CUSTOM_PROMPT_INSTRUCTIONS");
+
+      expect(idxGlobal).toBeGreaterThanOrEqual(0);
+      expect(idxParent).toBeGreaterThanOrEqual(0);
+      expect(idxProject).toBeGreaterThanOrEqual(0);
+      expect(idxCustom).toBeGreaterThanOrEqual(0);
+      expect(idxCustom).toBeLessThan(idxGlobal);
+      expect(idxGlobal).toBeLessThan(idxParent);
+      expect(idxParent).toBeLessThan(idxProject);
+
+      await session.close();
+    } finally {
+      if (globalOriginal === null) {
+        rmSync(globalClaudePath, { force: true });
+      } else {
+        writeFileSync(globalClaudePath, globalOriginal);
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("omits systemPrompt when no CLAUDE.md files and no custom prompt exist", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-preset-only`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+    const globalClaudePath = join(homedir(), ".claude", "CLAUDE.md");
+    const globalOriginal = existsSync(globalClaudePath)
+      ? readFileSync(globalClaudePath, "utf-8")
+      : null;
+
+    try {
+      rmSync(globalClaudePath, { force: true });
+
+      const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+        queryFactory: ((args: { options: Record<string, unknown> }) => {
+          capturedOptions = args.options;
+          return fakeQuery as unknown;
+        }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      });
+
+      await session.start();
+      await session.prompt("hello");
+
+      expect(capturedOptions?.systemPrompt).toBeUndefined();
+
+      await session.close();
+    } finally {
+      if (globalOriginal === null) {
+        rmSync(globalClaudePath, { force: true });
+      } else {
+        writeFileSync(globalClaudePath, globalOriginal);
+      }
+    }
   });
 
   it("interrupt emits synthetic stop events for open messages/blocks", async () => {

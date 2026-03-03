@@ -17,9 +17,16 @@
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  appendFileSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { createLogger, loadConfig } from "@claudia/shared";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -82,6 +89,16 @@ const THINKING_TOKENS: Record<ThinkingEffort, number> = {
   high: 16000,
   max: 32000,
 };
+
+const CLAUDE_MD_NAME = "CLAUDE.md";
+
+function normalizePathForTraversal(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 // ── MessageChannel ───────────────────────────────────────────
 
@@ -444,6 +461,8 @@ export class SDKSession extends EventEmitter {
    * Build SDK query options from session configuration.
    */
   private buildQueryOptions(): Record<string, unknown> {
+    const combinedSystemPrompt = this.buildCombinedSystemPrompt();
+
     return {
       // Session identity — SDK handles resume via `resume` option
       ...(this.isFirstPrompt ? { sessionId: this.id } : { resume: this.id }),
@@ -452,8 +471,8 @@ export class SDKSession extends EventEmitter {
       cwd: this.cwd,
       model: this.model,
 
-      // System prompt (first prompt only)
-      ...(this.systemPrompt ? { systemPrompt: this.systemPrompt } : {}),
+      // Plain system prompt string: CLAUDE.md chain + custom prompt.
+      ...(combinedSystemPrompt ? { systemPrompt: combinedSystemPrompt } : {}),
 
       // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum
       disallowedTools: DISALLOWED_TOOLS,
@@ -487,6 +506,92 @@ export class SDKSession extends EventEmitter {
         CLAUDIA_SESSION_ID: this.id,
       },
     };
+  }
+
+  private buildCombinedSystemPrompt(): string | undefined {
+    const parts: string[] = [];
+
+    const customPrompt = this.systemPrompt?.trim();
+    if (customPrompt) {
+      parts.push(
+        ["<claudia_custom_system_prompt>", customPrompt, "</claudia_custom_system_prompt>"].join(
+          "\n",
+        ),
+      );
+    }
+
+    const claudeMdBlocks = this.readClaudeMdBlocks();
+    if (claudeMdBlocks.length > 0) {
+      parts.push(claudeMdBlocks.join("\n\n"));
+    }
+
+    return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
+
+  private readClaudeMdBlocks(): string[] {
+    const files = this.findClaudeMdFilesInOrder();
+    const blocks: string[] = [];
+    for (const filePath of files) {
+      try {
+        const content = readFileSync(filePath, "utf-8").trim();
+        if (!content) continue;
+        blocks.push([`<claude_md path="${filePath}">`, content, "</claude_md>"].join("\n"));
+      } catch (error) {
+        this.logger.warn("Failed to read CLAUDE.md", { path: filePath, error: String(error) });
+      }
+    }
+    return blocks;
+  }
+
+  private findClaudeMdFilesInOrder(): string[] {
+    const workspaceDir = normalizePathForTraversal(this.cwd);
+    const homeDir = normalizePathForTraversal(homedir());
+    const homePrefix = `${homeDir}/`;
+    const localMatches: string[] = [];
+    const visited = new Set<string>();
+
+    let dir = workspaceDir;
+    while (true) {
+      if (visited.has(dir)) break;
+      visited.add(dir);
+
+      const candidate = join(dir, CLAUDE_MD_NAME);
+      if (existsSync(candidate)) {
+        try {
+          if (statSync(candidate).isFile()) {
+            localMatches.push(candidate);
+          }
+        } catch {
+          // Ignore stat errors for individual files.
+        }
+      }
+
+      if (dir === homeDir) break;
+
+      const parent = dirname(dir);
+      if (parent === dir) break;
+
+      // When inside HOME, stop traversal after reaching HOME.
+      if (dir.startsWith(homePrefix) && !(parent === homeDir || parent.startsWith(homePrefix))) {
+        break;
+      }
+
+      dir = parent;
+    }
+
+    const orderedLocal = localMatches.reverse();
+    const globalClaudeMd = join(homeDir, ".claude", CLAUDE_MD_NAME);
+    if (existsSync(globalClaudeMd)) {
+      try {
+        if (statSync(globalClaudeMd).isFile()) {
+          return [globalClaudeMd, ...orderedLocal];
+        }
+      } catch {
+        // Ignore stat errors for global file.
+      }
+    }
+
+    return orderedLocal;
   }
 
   /**
