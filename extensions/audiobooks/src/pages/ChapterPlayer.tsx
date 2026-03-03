@@ -41,7 +41,8 @@ export function ChapterPlayer() {
       }
     }
     loadChapter();
-  }, [bookId, chapterNum, call]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId, chapterNum]);
 
   function restorePosition() {
     const audio = audioRef.current;

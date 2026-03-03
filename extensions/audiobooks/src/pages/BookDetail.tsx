@@ -34,19 +34,19 @@ export function BookDetail() {
   const { call } = useGatewayClient(WS_URL);
 
   useEffect(() => {
-    loadBook();
-  }, [bookId]);
-
-  async function loadBook() {
-    try {
-      const result = (await call("audiobooks.get_book", { bookId })) as Audiobook;
-      setBook(result);
-    } catch (error) {
-      console.error("Failed to load book:", error);
-    } finally {
-      setLoading(false);
+    async function loadBook() {
+      try {
+        const result = (await call("audiobooks.get_book", { bookId })) as Audiobook;
+        setBook(result);
+      } catch (error) {
+        console.error("Failed to load book:", error);
+      } finally {
+        setLoading(false);
+      }
     }
-  }
+    loadBook();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId]);
 
   if (loading) {
     return (
