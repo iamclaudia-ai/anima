@@ -26,39 +26,46 @@ export function ChapterPlayer() {
   const saveIntervalRef = useRef<number | null>(null);
   const { call } = useGatewayClient(WS_URL);
 
-  const getPositionKey = () => `audiobook-position-${bookId}-${chapterNum}`;
-
   useEffect(() => {
-    loadChapter();
-  }, [bookId, chapterNum]);
-
-  useEffect(() => {
-    // Load saved position when audio is ready
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handleLoadedMetadata = () => {
-      const savedPosition = localStorage.getItem(getPositionKey());
-      if (savedPosition) {
-        const position = Number.parseFloat(savedPosition);
-        if (position > 0 && position < audio.duration) {
-          audio.currentTime = position;
-          console.log(`[ChapterPlayer] Restored position: ${position}s`);
-        }
+    async function loadChapter() {
+      try {
+        const result = (await call("audiobooks.get_chapter", {
+          bookId,
+          chapterNum,
+        })) as Chapter;
+        setChapter(result);
+      } catch (error) {
+        console.error("Failed to load chapter:", error);
+      } finally {
+        setLoading(false);
       }
-    };
+    }
+    loadChapter();
+  }, [bookId, chapterNum, call]);
 
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-  }, [bookId, chapterNum]);
+  function restorePosition() {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+
+    const positionKey = `audiobook-position-${bookId}-${chapterNum}`;
+    const savedPosition = localStorage.getItem(positionKey);
+    if (savedPosition) {
+      const position = Number.parseFloat(savedPosition);
+      if (position > 0 && position < audio.duration) {
+        audio.currentTime = position;
+      }
+    }
+  }
 
   useEffect(() => {
     // Save position every 3 seconds while playing
+    const positionKey = `audiobook-position-${bookId}-${chapterNum}`;
+
     if (isPlaying) {
       saveIntervalRef.current = window.setInterval(() => {
         if (audioRef.current) {
           const position = audioRef.current.currentTime;
-          localStorage.setItem(getPositionKey(), position.toString());
+          localStorage.setItem(positionKey, position.toString());
         }
       }, 3000);
     } else {
@@ -75,24 +82,11 @@ export function ChapterPlayer() {
     };
   }, [isPlaying, bookId, chapterNum]);
 
-  async function loadChapter() {
-    try {
-      const result = (await call("audiobooks.get_chapter", {
-        bookId,
-        chapterNum,
-      })) as Chapter;
-      setChapter(result);
-    } catch (error) {
-      console.error("Failed to load chapter:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function savePosition() {
     if (audioRef.current) {
       const position = audioRef.current.currentTime;
-      localStorage.setItem(getPositionKey(), position.toString());
+      const positionKey = `audiobook-position-${bookId}-${chapterNum}`;
+      localStorage.setItem(positionKey, position.toString());
     }
   }
 
@@ -206,6 +200,7 @@ export function ChapterPlayer() {
             width: "100%",
             marginBottom: "0.5rem",
           }}
+          onLoadedMetadata={restorePosition}
           onPlay={() => setIsPlaying(true)}
           onPause={() => {
             setIsPlaying(false);
@@ -214,7 +209,8 @@ export function ChapterPlayer() {
           onEnded={() => {
             setIsPlaying(false);
             // Clear saved position when chapter completes
-            localStorage.removeItem(getPositionKey());
+            const positionKey = `audiobook-position-${bookId}-${chapterNum}`;
+            localStorage.removeItem(positionKey);
           }}
           onSeeking={savePosition}
         />

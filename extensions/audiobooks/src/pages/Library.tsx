@@ -29,19 +29,18 @@ export function Library() {
   const { call } = useGatewayClient(WS_URL);
 
   useEffect(() => {
-    loadBooks();
-  }, []);
-
-  async function loadBooks() {
-    try {
-      const result = (await call("audiobooks.get_books", {})) as Audiobook[];
-      setBooks(result);
-    } catch (error) {
-      console.error("Failed to load audiobooks:", error);
-    } finally {
-      setLoading(false);
+    async function loadBooks() {
+      try {
+        const result = (await call("audiobooks.get_books", {})) as Audiobook[];
+        setBooks(result);
+      } catch (error) {
+        console.error("[Library] Failed to load audiobooks:", error);
+      } finally {
+        setLoading(false);
+      }
     }
-  }
+    loadBooks();
+  }, [call]);
 
   if (loading) {
     return (
