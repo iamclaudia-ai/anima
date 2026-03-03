@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@claudia/ext-audiobooks": "workspace:*",
     "@claudia/ext-chat": "workspace:*",
     "@claudia/ext-control": "workspace:*",
     "@claudia/ext-imessage": "workspace:*",

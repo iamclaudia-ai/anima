@@ -623,6 +623,51 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response("Not found", { status: 404 });
     },
 
+    // Static file serving for extensions (audiobooks, etc.)
+    "/audiobooks/static/*": (req: globalThis.Request) => {
+      const url = new URL(req.url);
+      const relativePath = url.pathname.slice("/audiobooks/static/".length);
+
+      // Security: prevent directory traversal
+      if (!relativePath || relativePath.includes("..")) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+
+      // Resolve base path (~/romance-novels)
+      const basePath = join(homedir(), "romance-novels");
+      const filePath = join(basePath, relativePath);
+
+      // Ensure the resolved path is still within basePath
+      if (!filePath.startsWith(basePath)) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+
+      // Determine content type from extension
+      const ext = filePath.split(".").pop()?.toLowerCase();
+      const contentType =
+        {
+          mp3: "audio/mpeg",
+          png: "image/png",
+          jpg: "image/jpeg",
+          jpeg: "image/jpeg",
+          md: "text/markdown; charset=utf-8",
+          json: "application/json",
+        }[ext || ""] || "application/octet-stream";
+
+      const file = Bun.file(filePath);
+
+      // Check if file exists by checking size (Bun's exists check)
+      return file.size > 0
+        ? new globalThis.Response(file, {
+            headers: {
+              "Content-Type": contentType,
+              "Accept-Ranges": "bytes", // Support range requests for audio seeking
+              "Cache-Control": "public, max-age=31536000", // Cache for 1 year
+            },
+          })
+        : new globalThis.Response("Not found", { status: 404 });
+    },
+
     // SPA fallback — serves the web UI for all other paths
     "/*": index,
   },

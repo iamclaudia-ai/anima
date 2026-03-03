@@ -4,6 +4,7 @@ import "@claudia/ui/styles";
 
 import { chatRoutes } from "@claudia/ext-chat/routes";
 import { controlRoutes } from "@claudia/ext-control/routes";
+import { audiobooksRoutes } from "@claudia/ext-audiobooks/routes";
 
 if (window.location.hash.startsWith("#/")) {
   const path = window.location.hash.slice(1);
@@ -29,7 +30,7 @@ if (import.meta.env.DEV) {
   document.head.appendChild(script);
 }
 
-const allRoutes = [...controlRoutes, ...chatRoutes];
+const allRoutes = [...controlRoutes, ...chatRoutes, ...audiobooksRoutes];
 
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>

@@ -13,7 +13,9 @@ import type { ComponentType, ReactNode } from "react";
 export interface Route {
   path: string;
   // biome-ignore lint: Page components have varying prop signatures from route params
-  component: ComponentType<any>;
+  component?: ComponentType<any>;
+  /** Base directory for static file serving (e.g., "~/romance-novels") */
+  static?: string;
   label?: string;
   icon?: string;
 }
@@ -29,9 +31,10 @@ interface RouterState {
 /** Match "/workspace/:workspaceId" against "/workspace/ws_abc" → { workspaceId: "ws_abc" } */
 export function matchPath(pattern: string, pathname: string): Record<string, string> | null {
   const paramNames: string[] = [];
-  const regexStr = pattern.replace(/:([^/]+)/g, (_, name) => {
+  // Support :param* for wildcard (matches rest of path including /)
+  const regexStr = pattern.replace(/:([^/]+)(\*)?/g, (_, name, wildcard) => {
     paramNames.push(name);
-    return "([^/]+)";
+    return wildcard ? "(.+)" : "([^/]+)";
   });
   const match = new RegExp(`^${regexStr}$`).exec(pathname);
   if (!match) return null;
@@ -75,13 +78,15 @@ export function Router({ routes, fallback }: { routes: Route[]; fallback?: React
 
   const nav = useCallback((path: string) => navigate(path), []);
 
-  // First match wins
+  // First match wins (skip static routes - they're handled server-side)
   for (const route of routes) {
+    if (!route.component) continue; // Skip static file routes
     const params = matchPath(route.path, pathname);
     if (params !== null) {
+      const Component = route.component;
       return (
         <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
-          <route.component {...params} />
+          <Component {...params} />
         </RouterContext.Provider>
       );
     }
