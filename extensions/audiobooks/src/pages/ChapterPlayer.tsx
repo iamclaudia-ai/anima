@@ -2,7 +2,7 @@
  * ChapterPlayer — Audio player with transcript
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useRouter, useGatewayClient } from "@claudia/ui";
 import ReactMarkdown from "react-markdown";
 
@@ -17,8 +17,11 @@ interface Chapter {
 
 export function ChapterPlayer() {
   const { params } = useRouter();
-  const bookId = params.bookId as string;
-  const chapterNum = Number.parseInt(params.chapterNum as string);
+  const bookId = useMemo(() => params.bookId as string, [params.bookId]);
+  const chapterNum = useMemo(
+    () => Number.parseInt(params.chapterNum as string) || 1,
+    [params.chapterNum],
+  );
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);

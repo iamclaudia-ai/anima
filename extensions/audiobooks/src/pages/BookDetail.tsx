@@ -2,7 +2,7 @@
  * BookDetail — Chapter list for an audiobook
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useRouter, useGatewayClient } from "@claudia/ui";
 
 const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
@@ -28,7 +28,7 @@ interface Audiobook {
 
 export function BookDetail() {
   const { params } = useRouter();
-  const bookId = params.bookId as string;
+  const bookId = useMemo(() => params.bookId as string, [params.bookId]);
   const [book, setBook] = useState<Audiobook | null>(null);
   const [loading, setLoading] = useState(true);
   const { call } = useGatewayClient(WS_URL);
