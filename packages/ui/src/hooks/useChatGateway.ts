@@ -201,6 +201,19 @@ export function useChatGateway(
     // Detect user-initiated scroll interactions (wheel, touch, keyboard)
     // When user manually scrolls during streaming, disable auto-scroll immediately
     const handleUserScroll = (e: Event) => {
+      // Ignore key events that originate from editable controls or modifier shortcuts
+      // so native text editing shortcuts (Cmd/Ctrl + C/V/X/A/Z) are not disturbed.
+      if (e.type === "keydown" && e instanceof KeyboardEvent) {
+        const target = e.target as HTMLElement | null;
+        const isEditableTarget =
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target?.isContentEditable;
+        if (isEditableTarget || e.metaKey || e.ctrlKey || e.altKey) {
+          return;
+        }
+      }
+
       // User is manually scrolling - disable auto-scroll immediately
       isAtBottomRef.current = false;
       setIsAtBottom(false);

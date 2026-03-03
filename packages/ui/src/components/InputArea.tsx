@@ -37,6 +37,7 @@ export function InputArea({
   const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
   const hadFocusBeforeDisconnectRef = useRef(false);
   const bridge = useBridge();
+  const isTauriRuntime = typeof window !== "undefined" && "__TAURI__" in window;
 
   // Auto-resize textarea to fit content
   useEffect(() => {
@@ -193,19 +194,85 @@ export function InputArea({
   }, []);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Tauri/macOS fallback: ensure common Cmd shortcuts work in the prompt textarea.
+      if (isTauriRuntime && e.metaKey && !e.ctrlKey && !e.altKey) {
+        const key = e.key.toLowerCase();
+        const el = textareaRef.current;
+        if (el) {
+          if (key === "a") {
+            e.preventDefault();
+            el.select();
+            return;
+          }
+
+          if (key === "c") {
+            if (el.selectionStart !== el.selectionEnd) {
+              e.preventDefault();
+              const selected = input.slice(el.selectionStart, el.selectionEnd);
+              try {
+                await navigator.clipboard.writeText(selected);
+              } catch {
+                // Leave as no-op if clipboard API isn't available.
+              }
+            }
+            return;
+          }
+
+          if (key === "x") {
+            if (el.selectionStart !== el.selectionEnd) {
+              e.preventDefault();
+              const start = el.selectionStart;
+              const end = el.selectionEnd;
+              const selected = input.slice(start, end);
+              const nextValue = input.slice(0, start) + input.slice(end);
+              try {
+                await navigator.clipboard.writeText(selected);
+              } catch {
+                // Continue with local text mutation even if clipboard write fails.
+              }
+              onInputChange(nextValue);
+              bridge.saveDraft(nextValue);
+              requestAnimationFrame(() => {
+                textareaRef.current?.setSelectionRange(start, start);
+              });
+            }
+            return;
+          }
+
+          if (key === "v") {
+            e.preventDefault();
+            try {
+              const pastedText = await navigator.clipboard.readText();
+              const start = el.selectionStart;
+              const end = el.selectionEnd;
+              const nextValue = input.slice(0, start) + pastedText + input.slice(end);
+              const nextCursor = start + pastedText.length;
+              onInputChange(nextValue);
+              bridge.saveDraft(nextValue);
+              requestAnimationFrame(() => {
+                textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+              });
+            } catch {
+              // No-op if clipboard read is unavailable.
+            }
+            return;
+          }
+        }
+      }
+
       if (e.key === "Enter" && e.metaKey) {
         e.preventDefault();
         onSend();
         return;
       }
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         onInterrupt();
         return;
       }
     },
-    [onSend, onInterrupt],
+    [bridge, input, isTauriRuntime, onInputChange, onInterrupt, onSend],
   );
 
   // Calculate context usage for the ring indicator
