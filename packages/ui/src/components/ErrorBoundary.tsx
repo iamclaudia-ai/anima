@@ -54,12 +54,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     window.__claudiaBeacon?.reportError("react", error.message, stack);
 
     // Stop heartbeat — app is in error state
-    window.__claudiaBeacon?.stopHeartbeat();
+    window.__claudiaBeacon?.stopHeartbeat?.();
   }
 
   reset = (): void => {
     this.setState({ error: null });
-    window.__claudiaBeacon?.restartHeartbeat();
+    window.__claudiaBeacon?.restartHeartbeat?.();
   };
 
   render(): ReactNode {

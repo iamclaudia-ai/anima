@@ -81,11 +81,36 @@
           };
         }
 
-        // Start polling immediately, then every 10s
-        // First check after 3s (give React time to mount)
-        setTimeout(function () {
+        // Heartbeat management
+        var heartbeatInterval = null;
+        var initialTimeout = null;
+
+        function startHeartbeat() {
+          if (heartbeatInterval) return; // Already running
+          heartbeatInterval = setInterval(checkAndReport, POLL_INTERVAL);
+        }
+
+        function stopHeartbeat() {
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+          }
+          if (initialTimeout) {
+            clearTimeout(initialTimeout);
+            initialTimeout = null;
+          }
+        }
+
+        function restartHeartbeat() {
+          stopHeartbeat();
+          checkAndReport(); // Immediate check
+          startHeartbeat();
+        }
+
+        // Start polling after 3s (give React time to mount), then every 10s
+        initialTimeout = setTimeout(function () {
           checkAndReport();
-          setInterval(checkAndReport, POLL_INTERVAL);
+          startHeartbeat();
         }, 3000);
 
         // Also catch JS errors and report immediately (best-effort, may not fire if HMR intercepts)
@@ -134,6 +159,8 @@
 
         // Expose for React ErrorBoundary to report caught render errors
         window.__claudiaBeacon = {
+          stopHeartbeat: stopHeartbeat,
+          restartHeartbeat: restartHeartbeat,
           reportError: function (type, message, stack) {
             try {
               var xhr = new XMLHttpRequest();
