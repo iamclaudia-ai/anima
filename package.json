@@ -33,6 +33,7 @@
     "docs:api:check": "bun run docs:api && (git diff --quiet -- docs/API-REFERENCE.md && git diff --cached --quiet -- docs/API-REFERENCE.md || (echo \"[prepush] docs/API-REFERENCE.md changed after generation. Commit the regenerated file.\"; exit 1))"
   },
   "dependencies": {
+    "@google/genai": "1.43.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sharp": "0.34.5"
