@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Link, useRouter, useGatewayClient } from "@claudia/ui";
+import ReactMarkdown from "react-markdown";
 
 const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 
@@ -180,19 +181,59 @@ export function ChapterPlayer() {
               overflowY: "auto",
             }}
           >
-            <div
-              style={{
-                whiteSpace: "pre-wrap",
-                fontFamily: "Georgia, serif",
-                fontSize: "1.0625rem",
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => (
+                  <h1 style={{ fontSize: "1.875rem", fontWeight: "600", marginBottom: "1rem" }}>
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2
+                    style={{
+                      fontSize: "1.5rem",
+                      fontWeight: "600",
+                      marginTop: "1.5rem",
+                      marginBottom: "0.75rem",
+                    }}
+                  >
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3
+                    style={{
+                      fontSize: "1.25rem",
+                      fontWeight: "600",
+                      marginTop: "1.25rem",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    {children}
+                  </h3>
+                ),
+                p: ({ children }) => (
+                  <p
+                    style={{
+                      fontFamily: "Georgia, serif",
+                      fontSize: "1.0625rem",
+                      marginBottom: "1rem",
+                    }}
+                  >
+                    {children}
+                  </p>
+                ),
+                em: ({ children }) => <em style={{ fontStyle: "italic" }}>{children}</em>,
+                strong: ({ children }) => <strong style={{ fontWeight: "600" }}>{children}</strong>,
+                hr: () => (
+                  <hr
+                    style={{ margin: "2rem 0", border: "none", borderTop: "1px solid #e5e7eb" }}
+                  />
+                ),
               }}
-              // biome-ignore lint: dangerouslySetInnerHTML is intentional for markdown rendering
-              dangerouslySetInnerHTML={{
-                __html: chapter.transcript
-                  .replace(/\n\n/g, "</p><p>")
-                  .replace(/^(.+)$/, "<p>$1</p>"),
-              }}
-            />
+            >
+              {chapter.transcript}
+            </ReactMarkdown>
           </div>
         </div>
       )}
