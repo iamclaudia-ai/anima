@@ -23,11 +23,57 @@ export function ChapterPlayer() {
   const [loading, setLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const saveIntervalRef = useRef<number | null>(null);
   const { call } = useGatewayClient(WS_URL);
+
+  const getPositionKey = () => `audiobook-position-${bookId}-${chapterNum}`;
 
   useEffect(() => {
     loadChapter();
   }, [bookId, chapterNum]);
+
+  useEffect(() => {
+    // Load saved position when audio is ready
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleLoadedMetadata = () => {
+      const savedPosition = localStorage.getItem(getPositionKey());
+      if (savedPosition) {
+        const position = Number.parseFloat(savedPosition);
+        if (position > 0 && position < audio.duration) {
+          audio.currentTime = position;
+          console.log(`[ChapterPlayer] Restored position: ${position}s`);
+        }
+      }
+    };
+
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+  }, [bookId, chapterNum]);
+
+  useEffect(() => {
+    // Save position every 3 seconds while playing
+    if (isPlaying) {
+      saveIntervalRef.current = window.setInterval(() => {
+        if (audioRef.current) {
+          const position = audioRef.current.currentTime;
+          localStorage.setItem(getPositionKey(), position.toString());
+        }
+      }, 3000);
+    } else {
+      if (saveIntervalRef.current) {
+        clearInterval(saveIntervalRef.current);
+        saveIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (saveIntervalRef.current) {
+        clearInterval(saveIntervalRef.current);
+      }
+    };
+  }, [isPlaying, bookId, chapterNum]);
 
   async function loadChapter() {
     try {
@@ -40,6 +86,13 @@ export function ChapterPlayer() {
       console.error("Failed to load chapter:", error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function savePosition() {
+    if (audioRef.current) {
+      const position = audioRef.current.currentTime;
+      localStorage.setItem(getPositionKey(), position.toString());
     }
   }
 
@@ -154,8 +207,16 @@ export function ChapterPlayer() {
             marginBottom: "0.5rem",
           }}
           onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
+          onPause={() => {
+            setIsPlaying(false);
+            savePosition();
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+            // Clear saved position when chapter completes
+            localStorage.removeItem(getPositionKey());
+          }}
+          onSeeking={savePosition}
         />
 
         <p style={{ fontSize: "0.75rem", opacity: 0.7, textAlign: "center" }}>
