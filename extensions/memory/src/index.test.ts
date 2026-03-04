@@ -83,17 +83,26 @@ describe("memory health lock status", () => {
 
   it("reports degraded status when singleton lock is held by another process", async () => {
     const ext = createMemoryExtension({ watch: false, watchPath: join(tempDir, "logs") });
-    acquireMemoryExtensionLock(999_999, 60_000);
+    const blocker = Bun.spawn(["sleep", "30"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
 
-    await ext.start(createTestContext());
+    try {
+      acquireMemoryExtensionLock(blocker.pid, 60_000);
 
-    const health = (await ext.handleMethod("memory.health_check", {})) as {
-      status: string;
-      metrics: Array<{ label: string; value: string }>;
-    };
+      await ext.start(createTestContext());
 
-    expect(health.status).toBe("degraded");
-    const lockMetric = health.metrics.find((m) => m.label === "Singleton Lock");
-    expect(lockMetric?.value).toBe("contended");
+      const health = (await ext.handleMethod("memory.health_check", {})) as {
+        status: string;
+        metrics: Array<{ label: string; value: string }>;
+      };
+
+      expect(health.status).toBe("degraded");
+      const lockMetric = health.metrics.find((m) => m.label === "Singleton Lock");
+      expect(lockMetric?.value).toBe("contended");
+    } finally {
+      blocker.kill();
+    }
   });
 });

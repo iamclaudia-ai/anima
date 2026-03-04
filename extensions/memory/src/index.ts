@@ -139,6 +139,20 @@ function waitForState(
   });
 }
 
+function toPersistableSnapshot(snapshot: SnapshotFrom<typeof memoryExtensionMachine>) {
+  return {
+    value: snapshot.value,
+    status: snapshot.status,
+    context: {
+      processId: snapshot.context.processId,
+      startedAt: snapshot.context.startedAt,
+      lastHeartbeat: snapshot.context.lastHeartbeat,
+      basePath: snapshot.context.basePath,
+      config: snapshot.context.config,
+    },
+  };
+}
+
 // ============================================================================
 // Memory Extension
 // ============================================================================
@@ -277,42 +291,10 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
       }
 
       try {
-        // Restore previous state from DB if exists
-        const savedSnapshot = getDb()
-          .query(`SELECT state_json FROM memory_state_machines WHERE machine_id = 'extension'`)
-          .get() as { state_json: string } | null;
-        const restoredSnapshot = savedSnapshot ? JSON.parse(savedSnapshot.state_json) : undefined;
-
-        // Hydrate persisted snapshot with runtime-only fields/functions that are not
-        // serializable (or can become stale across restarts).
-        if (restoredSnapshot && typeof restoredSnapshot === "object") {
-          const snapshot = restoredSnapshot as {
-            context?: {
-              processId?: number;
-              startedAt?: string | null;
-              lastHeartbeat?: string | null;
-              config?: Required<MemoryConfig>;
-              basePath?: string;
-              watcher?: MemoryWatcher | null;
-              ctx?: ExtensionContext | null;
-              fileLog?: (level: string, msg: string) => void;
-            };
-          };
-          if (snapshot.context) {
-            snapshot.context.processId = process.pid;
-            snapshot.context.startedAt = null;
-            snapshot.context.lastHeartbeat = null;
-            snapshot.context.config = cfg;
-            snapshot.context.basePath = basePath;
-            snapshot.context.watcher = null;
-            snapshot.context.ctx = ctx;
-            snapshot.context.fileLog = fileLog;
-          }
-        }
-
         // Create XState actor
         extensionActor = createActor(memoryExtensionMachine, {
-          snapshot: restoredSnapshot,
+          // Do not restore machine snapshots; restoring transient states (e.g. scanning)
+          // can leave actors stranded across process boundaries.
           input: {
             processId: process.pid,
             startedAt: null,
@@ -334,7 +316,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
                  (machine_id, state_json, process_id, updated_at)
                  VALUES ('extension', ?, ?, datetime('now'))`,
               )
-              .run(JSON.stringify(snapshot), process.pid);
+              .run(JSON.stringify(toPersistableSnapshot(snapshot)), process.pid);
           } catch (error) {
             fileLog("ERROR", `Failed to persist state: ${error}`);
           }

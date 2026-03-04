@@ -44,12 +44,8 @@ export class MemoryWatcher {
         stabilityThreshold: 1000,
         pollInterval: 200,
       },
-      // Only watch .jsonl files
-      ignored: (path: string) => {
-        // Allow directories (so we can recurse)
-        if (!path.includes(".")) return false;
-        return !path.endsWith(".jsonl");
-      },
+      // Only ingest .jsonl files, but never ignore directories (including hidden dirs like ~/.claude).
+      ignored: shouldIgnorePath,
     });
 
     this.watcher.on("ready", () => {
@@ -117,4 +113,21 @@ export class MemoryWatcher {
 
     this.processing = false;
   }
+}
+
+/**
+ * Chokidar ignore predicate:
+ * - never ignore directories (we need recursion to find nested JSONL files)
+ * - ignore non-JSONL files only when we can confidently identify a regular file
+ */
+export function shouldIgnorePath(
+  path: string,
+  stats?: { isFile(): boolean; isDirectory(): boolean },
+) {
+  if (stats?.isDirectory()) return false;
+  if (stats?.isFile()) return !path.endsWith(".jsonl");
+
+  // If chokidar has not stat'ed the path yet, keep it to avoid
+  // accidentally excluding hidden/directories with dots in their names.
+  return false;
 }

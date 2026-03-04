@@ -76,11 +76,11 @@ describe("memory singleton lock", () => {
   });
 
   it("rejects a second process when lock is fresh", () => {
-    expect(acquireMemoryExtensionLock(1111, 60_000).acquired).toBe(true);
+    expect(acquireMemoryExtensionLock(process.pid, 60_000).acquired).toBe(true);
 
     const result = acquireMemoryExtensionLock(2222, 60_000);
     expect(result.acquired).toBe(false);
-    expect(result.ownerPid).toBe(1111);
+    expect(result.ownerPid).toBe(process.pid);
   });
 
   it("steals lock when heartbeat is stale", () => {
@@ -100,13 +100,13 @@ describe("memory singleton lock", () => {
   });
 
   it("renews and releases only for current owner", () => {
-    expect(acquireMemoryExtensionLock(1111, 60_000).acquired).toBe(true);
+    expect(acquireMemoryExtensionLock(process.pid, 60_000).acquired).toBe(true);
 
     expect(renewMemoryExtensionLock(2222)).toBe(false);
-    expect(renewMemoryExtensionLock(1111)).toBe(true);
+    expect(renewMemoryExtensionLock(process.pid)).toBe(true);
 
     expect(releaseMemoryExtensionLock(2222)).toBe(false);
-    expect(releaseMemoryExtensionLock(1111)).toBe(true);
+    expect(releaseMemoryExtensionLock(process.pid)).toBe(true);
     expect(getMemoryExtensionLockStatus(60_000)).toBeNull();
   });
 });

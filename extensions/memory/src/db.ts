@@ -654,6 +654,20 @@ function parseSqliteUtc(ts: string): number {
   return Date.parse(ts.replace(" ", "T") + "Z");
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    // Signal 0 checks process existence without sending a signal.
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    // E.g. EPERM means the process exists but is not signalable.
+    return true;
+  }
+}
+
 export interface MemoryExtensionLockStatus {
   lockId: string;
   ownerPid: number;
@@ -732,7 +746,7 @@ export function acquireMemoryExtensionLock(
     }
 
     const ageMs = Date.now() - parseSqliteUtc(existing.lastHeartbeat);
-    const stale = ageMs > staleMs;
+    const stale = ageMs > staleMs || !isProcessAlive(existing.ownerPid);
 
     if (existing.ownerPid === pid) {
       d.query(
