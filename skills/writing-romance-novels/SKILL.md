@@ -211,6 +211,57 @@ Draw from these beloved romance films for story structure and tone:
 - Renaissance artist and her model
 - Sense and Sensibility: opposites in temperament finding balance
 
+## Book metdata for use in audiobooks extensions
+
+### Example:
+
+```json
+{
+  "id": "2026-03-01-a-most-vexing-match",
+  "title": "A Most Vexing Match",
+  "subtitle": "A Regency Romance",
+  "author": "Claudia",
+  "description": "Miss Claudia Weston writes brilliant novels under the male pseudonym C.E. Worth—novels that the insufferable critic M. Ashford has just savaged in print. When she meets the handsome Earl of Hartwell at a London ball and engages in spirited debate about literature, she has no idea he IS her harshest critic. As intellectual combat becomes passionate attraction, can she trust him with her greatest secret? A tale of Pride and Prejudice, ink-stained fingers, and bewitching love in Regency England.",
+  "coverImage": "cover.png",
+  "genre": "Historical Romance",
+  "tags": [
+    "Regency",
+    "Pride & Prejudice Vibes",
+    "Secret Identity",
+    "Enemies to Lovers",
+    "Literary Romance"
+  ],
+  "chapters": [
+    {
+      "number": 1,
+      "title": "Of Pride and Prejudice",
+      "audioFile": "chapter-1.mp3",
+      "transcriptFile": "chapter-1.md"
+    },
+    {
+      "number": 2,
+      "title": "The Truth in Letters",
+      "audioFile": "chapter-2.mp3",
+      "transcriptFile": "chapter-2.md"
+    },
+    {
+      "number": 3,
+      "title": "Bewitched, Body and Soul",
+      "audioFile": "chapter-3.mp3",
+      "transcriptFile": "chapter-3.md"
+    }
+  ],
+  "createdDate": "2026-03-02"
+}
+```
+
+## Available Scripts
+
+When executing a script, `cd` to the skill folder first
+
+- **`scripts/generate-audio.js`** — generate MP3 audio from chapter markdown using ElevenLabs
+- **`scripts/generate-cover.js`** — generate cover art using Gemini Nano Banana Pro
+
 ## Workflow
 
 1. **Get user input** - Scenario preference or "surprise me"
@@ -223,12 +274,14 @@ Draw from these beloved romance films for story structure and tone:
 3. **Create outline** - Characters, setting, 3-chapter plot structure
 4. **Share outline** - Let user review and request changes
 5. **Write Chapter 1** - Introduction and meeting
-6. **Generate audio** - `node generate-audio.js chapter-1.md`
+6. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-1.md`
 7. **Write Chapter 2** - Connection and development
-8. **Generate audio** - `node generate-audio.js chapter-2.md`
+8. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-2.md`
 9. **Write Chapter 3** - Love and resolution
-10. **Generate audio** - `node generate-audio.js chapter-3.md`
-11. **Provide paths** - All markdown and MP3 locations
+10. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-3.md`
+11. **Generate cover** - `node scripts/generate-cover.js <path/to/novel>/cover.md`
+12. **Generate metadata** - create the metadata.json file in the novel folder using example as guide
+13. **Provide paths** - All markdown and MP3 locations
 
 ## Random Occupation Ideas
 

@@ -17,6 +17,8 @@ Use this skill when creating new skills to ensure they are discoverable and usef
 skills/
 └── skill-name/           # lowercase-with-hyphens, matches name in frontmatter
     └── SKILL.md          # The skill definition
+    └── scripts/          # any executable scripts or tools go in this folder
+        └── my-script.ts  # actual script
 ```
 
 ## Frontmatter Format
@@ -78,6 +80,7 @@ Test against multiple phrasings:
 After the frontmatter, include:
 
 - **When to Use** section with bullet points
+- **Available Scripts** list scripts and their uses (always include instruction to cd to skill directory)
 - **Instructions** for how to accomplish the task
 - **Examples** of commands or workflows
 - **Notes** for edge cases or important details
@@ -100,11 +103,17 @@ Use this skill when the user wants to [goal].
 - [Scenario 2]
 - [Scenario 3]
 
+## Available scripts
+
+When executing a script, `cd` to the skill folder first
+
+- **`scripts/my-script.ts`** — description of script
+
 ## Instructions
 
 1. [Step 1]
 2. [Step 2]
-3. [Step 3]
+3. [Step 3] execute script `node scripts/my-script.ts args`
 
 ## Examples
 

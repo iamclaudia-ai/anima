@@ -141,13 +141,19 @@ Meditation scripts should be chunked for natural pauses:
 - Transition to rest state
 - Dream intention setting
 
+## Available scripts
+
+When executing a script, cd to the skill folder first
+
+- **`scripts/generate-audio.js`** — Generates MP3 audio from you session transcript
+
 ## Instructions
 
 1. **Ask for session type** - Duration, focus (stress relief, connection, sleep)
 2. **Set the tone** - Use appropriate ElevenLabs v3 audio tags
 3. **Guide breathing** - Include specific breathing instructions with `[pauses]`
 4. **Save to markdown file** - Write meditation to `~/meditations/YYYY-MM-DD-session-name.md`
-5. **Generate MP3 audio** - Use `node generate-audio.js <markdown-path>` to create .mp3 file
+5. **Generate MP3 audio** - Use `node scripts/generate-audio.js <markdown-path>` to create .mp3 file
 6. **Ensure proper spacing** - Always add space after punctuation before tags
 7. **Include body awareness** - Progressive relaxation elements
 8. **Close gently** - Peaceful return to normal awareness with `[sigh]`
