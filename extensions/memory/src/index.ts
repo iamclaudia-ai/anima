@@ -41,6 +41,10 @@ import {
   queueConversations,
   getQueuedCount,
   getActiveWorkItems,
+  acquireMemoryExtensionLock,
+  renewMemoryExtensionLock,
+  releaseMemoryExtensionLock,
+  getMemoryExtensionLockStatus,
 } from "./db";
 import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
 import { MemoryWatcher } from "./watcher";
@@ -99,6 +103,8 @@ const DEFAULT_CONFIG: Required<MemoryConfig> = {
   autoProcess: false,
 };
 
+const LOCK_STALE_MS = 3 * 60 * 1000;
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -149,6 +155,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
   let watcher: MemoryWatcher | null = null;
   let worker: LibbyWorker | null = null;
   let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
+  let isLockOwner = false;
+  let lockState: "held" | "contended" | "released" = "released";
+  let unsubscribeHeartbeat: (() => void) | null = null;
 
   return {
     id: "memory",
@@ -245,75 +254,175 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
         return;
       }
 
-      // Restore previous state from DB if exists
-      const savedSnapshot = getDb()
-        .query(`SELECT state_json FROM memory_state_machines WHERE machine_id = 'extension'`)
-        .get() as { state_json: string } | null;
+      const lockResult = acquireMemoryExtensionLock(process.pid, LOCK_STALE_MS);
+      isLockOwner = lockResult.acquired;
+      lockState = lockResult.acquired ? "held" : "contended";
 
-      // Create XState actor
-      extensionActor = createActor(memoryExtensionMachine, {
-        snapshot: savedSnapshot ? JSON.parse(savedSnapshot.state_json) : undefined,
-        input: {
-          processId: process.pid,
-          startedAt: null,
-          lastHeartbeat: null,
-          config: cfg,
-          basePath,
-          watcher: null,
-          ctx,
-          fileLog,
-        },
-      });
+      if (!lockResult.acquired) {
+        ctx.log.warn(
+          `[memory] Another memory extension instance holds the singleton lock (owner pid=${lockResult.ownerPid}, heartbeatAge=${Math.round(lockResult.ageMs / 1000)}s). This instance will stay passive.`,
+        );
+        fileLog(
+          "WARN",
+          `[memory] Singleton lock contended; owner pid=${lockResult.ownerPid}, heartbeatAge=${Math.round(lockResult.ageMs / 1000)}s`,
+        );
+        return;
+      }
 
-      // Subscribe to state changes and persist to DB
-      extensionActor.subscribe((snapshot) => {
-        try {
-          getDb()
-            .query(
-              `INSERT OR REPLACE INTO memory_state_machines
-               (machine_id, state_json, process_id, updated_at)
-               VALUES ('extension', ?, ?, datetime('now'))`,
-            )
-            .run(JSON.stringify(snapshot), process.pid);
-        } catch (error) {
-          fileLog("ERROR", `Failed to persist state: ${error}`);
+      if (lockResult.stolen && lockResult.previousOwnerPid) {
+        fileLog(
+          "WARN",
+          `[memory] Stole stale singleton lock from pid=${lockResult.previousOwnerPid} (age=${Math.round(lockResult.ageMs / 1000)}s)`,
+        );
+      }
+
+      try {
+        // Restore previous state from DB if exists
+        const savedSnapshot = getDb()
+          .query(`SELECT state_json FROM memory_state_machines WHERE machine_id = 'extension'`)
+          .get() as { state_json: string } | null;
+        const restoredSnapshot = savedSnapshot ? JSON.parse(savedSnapshot.state_json) : undefined;
+
+        // Hydrate persisted snapshot with runtime-only fields/functions that are not
+        // serializable (or can become stale across restarts).
+        if (restoredSnapshot && typeof restoredSnapshot === "object") {
+          const snapshot = restoredSnapshot as {
+            context?: {
+              processId?: number;
+              startedAt?: string | null;
+              lastHeartbeat?: string | null;
+              config?: Required<MemoryConfig>;
+              basePath?: string;
+              watcher?: MemoryWatcher | null;
+              ctx?: ExtensionContext | null;
+              fileLog?: (level: string, msg: string) => void;
+            };
+          };
+          if (snapshot.context) {
+            snapshot.context.processId = process.pid;
+            snapshot.context.startedAt = null;
+            snapshot.context.lastHeartbeat = null;
+            snapshot.context.config = cfg;
+            snapshot.context.basePath = basePath;
+            snapshot.context.watcher = null;
+            snapshot.context.ctx = ctx;
+            snapshot.context.fileLog = fileLog;
+          }
         }
 
-        // Update local watcher reference
-        watcher = snapshot.context.watcher;
-      });
+        // Create XState actor
+        extensionActor = createActor(memoryExtensionMachine, {
+          snapshot: restoredSnapshot,
+          input: {
+            processId: process.pid,
+            startedAt: null,
+            lastHeartbeat: null,
+            config: cfg,
+            basePath,
+            watcher: null,
+            ctx,
+            fileLog,
+          },
+        });
 
-      // Start the state machine
-      extensionActor.start();
-      extensionActor.send({ type: "START" });
+        // Subscribe to state changes and persist to DB
+        extensionActor.subscribe((snapshot) => {
+          try {
+            getDb()
+              .query(
+                `INSERT OR REPLACE INTO memory_state_machines
+                 (machine_id, state_json, process_id, updated_at)
+                 VALUES ('extension', ?, ?, datetime('now'))`,
+              )
+              .run(JSON.stringify(snapshot), process.pid);
+          } catch (error) {
+            fileLog("ERROR", `Failed to persist state: ${error}`);
+          }
 
-      // Wait for 'running' state
-      await waitForState(extensionActor, "running");
+          // Update local watcher reference
+          watcher = snapshot.context.watcher;
+        });
 
-      // Subscribe to gateway heartbeat and forward to state machine
-      ctx.on("gateway.heartbeat", () => {
-        extensionActor?.send({ type: "HEARTBEAT" });
-      });
+        // Start the state machine
+        extensionActor.start();
+        extensionActor.send({ type: "START" });
 
-      // Start Libby's background worker
-      const libbyConfig: LibbyConfig = {
-        model: cfg.model,
-        timezone: cfg.timezone,
-        minConversationMessages: cfg.minConversationMessages,
-      };
-      worker = new LibbyWorker(libbyConfig, ctx, fileLog);
-      worker.start();
+        // Subscribe to gateway heartbeat and forward to state machine
+        unsubscribeHeartbeat = ctx.on("gateway.heartbeat", () => {
+          if (!isLockOwner) return;
 
-      // Check if there are already queued conversations from crash recovery
-      const queuedCount = getQueuedCount();
-      if (queuedCount > 0) {
-        fileLog("INFO", `Found ${queuedCount} queued conversations from previous run`);
-        worker.wake();
+          const renewed = renewMemoryExtensionLock(process.pid);
+          if (!renewed) {
+            isLockOwner = false;
+            lockState = "contended";
+            fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
+            const stopPromise = worker?.stop();
+            if (stopPromise) void stopPromise.catch(() => {});
+            worker = null;
+            extensionActor?.send({ type: "STOP" });
+            return;
+          }
+
+          extensionActor?.send({ type: "HEARTBEAT" });
+        });
+
+        // Do not block extension registration on startup scan/watcher initialization.
+        // Register immediately, then start Libby's worker once the state machine reaches "running".
+        const actor = extensionActor;
+        const startWorkerWhenRunning = () => {
+          if (!ctx || worker) return;
+          if (actor.getSnapshot().value !== "running") return;
+          try {
+            const libbyConfig: LibbyConfig = {
+              model: cfg.model,
+              timezone: cfg.timezone,
+              minConversationMessages: cfg.minConversationMessages,
+            };
+            worker = new LibbyWorker(libbyConfig, ctx, fileLog);
+            worker.start();
+
+            // Check if there are already queued conversations from crash recovery
+            const queuedCount = getQueuedCount();
+            if (queuedCount > 0) {
+              fileLog("INFO", `Found ${queuedCount} queued conversations from previous run`);
+              worker.wake();
+            }
+          } catch (error) {
+            fileLog(
+              "ERROR",
+              `Failed to start Libby worker: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        };
+
+        // Fast path for already-running snapshots and slow path for async transition completion.
+        startWorkerWhenRunning();
+        const runningSubscription = actor.subscribe((snapshot) => {
+          if (snapshot.value !== "running") return;
+          runningSubscription.unsubscribe();
+          startWorkerWhenRunning();
+        });
+      } catch (error) {
+        fileLog(
+          "ERROR",
+          `[memory] Startup failed after lock acquire: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        if (isLockOwner) {
+          releaseMemoryExtensionLock(process.pid);
+        }
+        isLockOwner = false;
+        lockState = "released";
+        throw error;
       }
     },
 
     async stop() {
       ctx?.log.info("[memory] Stopping memory extension...");
+
+      if (unsubscribeHeartbeat) {
+        unsubscribeHeartbeat();
+        unsubscribeHeartbeat = null;
+      }
 
       // Stop Libby worker first
       if (worker) {
@@ -332,6 +441,12 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
       // Watcher is stopped by the state machine, just clear reference
       watcher = null;
 
+      if (isLockOwner) {
+        releaseMemoryExtensionLock(process.pid);
+      }
+      isLockOwner = false;
+      lockState = "released";
+
       closeDb();
       ctx = null;
     },
@@ -342,6 +457,13 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           const stats = getStats();
           const s = stats.conversationsByStatus;
           const workItems = getActiveWorkItems();
+          const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
+          const actorState = extensionActor?.getSnapshot().value ?? "stopped";
+          const lockHeldByMe = singletonLock?.ownerPid === process.pid;
+          const lockLabel = singletonLock ? (lockHeldByMe ? "held" : "contended") : lockState;
+          const lockAgeSec = singletonLock
+            ? Math.max(0, Math.round(singletonLock.ageMs / 1000))
+            : 0;
 
           const items: HealthItem[] = workItems.map((conv) => {
             const meta = conv.metadata
@@ -389,9 +511,19 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
 
           const response: HealthCheckResponse = {
             ok: true,
-            status: "healthy",
+            status: lockHeldByMe ? "healthy" : "degraded",
             label: "Memory (Transcript Ingestion + Libby)",
             metrics: [
+              { label: "Singleton Lock", value: lockLabel },
+              {
+                label: "Lock Owner PID",
+                value: singletonLock ? String(singletonLock.ownerPid) : "none",
+              },
+              {
+                label: "Lock Age",
+                value: singletonLock ? `${lockAgeSec}s` : "n/a",
+              },
+              { label: "Actor State", value: actorState },
               { label: "Files Tracked", value: String(stats.fileCount) },
               { label: "Entries", value: String(stats.entryCount) },
               { label: "Queued", value: String(s.queued || 0) },
@@ -626,13 +758,21 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
     health() {
       try {
         const stats = getStats();
+        const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
         return {
-          ok: true,
+          ok: singletonLock?.ownerPid === process.pid,
           details: {
             fileCount: stats.fileCount,
             entryCount: stats.entryCount,
             conversations: stats.conversationsByStatus,
             watchPath: cfg.watchPath,
+            singletonLock: {
+              state: lockState,
+              ownerPid: singletonLock?.ownerPid ?? null,
+              heldByCurrentProcess: singletonLock?.ownerPid === process.pid,
+              heartbeatAgeMs: singletonLock?.ageMs ?? null,
+              stale: singletonLock?.stale ?? null,
+            },
           },
         };
       } catch {

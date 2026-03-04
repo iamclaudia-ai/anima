@@ -10,14 +10,15 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DB_PATH = join(homedir(), ".claudia", "claudia.db");
+const DEFAULT_DB_PATH = join(homedir(), ".claudia", "claudia.db");
+let dbPath = DEFAULT_DB_PATH;
 
 let db: Database | null = null;
 
 export function getDb(): Database {
   if (db) return db;
 
-  db = new Database(DB_PATH);
+  db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
@@ -30,6 +31,15 @@ export function closeDb(): void {
     db.close();
     db = null;
   }
+}
+
+/**
+ * Test helper to redirect the SQLite file path.
+ * Resets the active connection when changed.
+ */
+export function setDbPathForTests(path: string | null): void {
+  closeDb();
+  dbPath = path ?? DEFAULT_DB_PATH;
 }
 
 // ============================================================================
@@ -617,6 +627,177 @@ export function getQueuedCount(): number {
       .query("SELECT count(*) AS n FROM memory_conversations WHERE status = 'queued'")
       .get() as { n: number }
   ).n;
+}
+
+// ============================================================================
+// Extension Singleton Lock
+// ============================================================================
+
+const MEMORY_EXTENSION_LOCK_ID = "memory-extension";
+
+function ensureMemoryExtensionLockTable(): void {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS memory_extension_locks (
+      lock_id TEXT PRIMARY KEY,
+      owner_pid INTEGER NOT NULL,
+      acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_extension_locks_updated
+    ON memory_extension_locks(updated_at);
+  `);
+}
+
+function parseSqliteUtc(ts: string): number {
+  // sqlite datetime('now') yields "YYYY-MM-DD HH:MM:SS" in UTC.
+  return Date.parse(ts.replace(" ", "T") + "Z");
+}
+
+export interface MemoryExtensionLockStatus {
+  lockId: string;
+  ownerPid: number;
+  acquiredAt: string;
+  lastHeartbeat: string;
+  updatedAt: string;
+  ageMs: number;
+  stale: boolean;
+}
+
+export interface AcquireMemoryExtensionLockResult {
+  acquired: boolean;
+  stolen: boolean;
+  ownerPid: number;
+  previousOwnerPid?: number;
+  ageMs: number;
+}
+
+export function getMemoryExtensionLockStatus(staleMs: number): MemoryExtensionLockStatus | null {
+  ensureMemoryExtensionLockTable();
+
+  const row = getDb()
+    .query(
+      `SELECT
+        lock_id AS lockId,
+        owner_pid AS ownerPid,
+        acquired_at AS acquiredAt,
+        last_heartbeat AS lastHeartbeat,
+        updated_at AS updatedAt
+      FROM memory_extension_locks
+      WHERE lock_id = ?`,
+    )
+    .get(MEMORY_EXTENSION_LOCK_ID) as {
+    lockId: string;
+    ownerPid: number;
+    acquiredAt: string;
+    lastHeartbeat: string;
+    updatedAt: string;
+  } | null;
+
+  if (!row) return null;
+
+  const ageMs = Date.now() - parseSqliteUtc(row.lastHeartbeat);
+  return {
+    ...row,
+    ageMs,
+    stale: ageMs > staleMs,
+  };
+}
+
+export function acquireMemoryExtensionLock(
+  pid: number,
+  staleMs: number,
+): AcquireMemoryExtensionLockResult {
+  ensureMemoryExtensionLockTable();
+  const d = getDb();
+
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const existing = d
+      .query(
+        `SELECT owner_pid AS ownerPid, last_heartbeat AS lastHeartbeat
+         FROM memory_extension_locks
+         WHERE lock_id = ?`,
+      )
+      .get(MEMORY_EXTENSION_LOCK_ID) as { ownerPid: number; lastHeartbeat: string } | null;
+
+    if (!existing) {
+      d.query(
+        `INSERT INTO memory_extension_locks
+          (lock_id, owner_pid, acquired_at, last_heartbeat, updated_at)
+         VALUES (?, ?, datetime('now'), datetime('now'), datetime('now'))`,
+      ).run(MEMORY_EXTENSION_LOCK_ID, pid);
+      d.exec("COMMIT");
+      return { acquired: true, stolen: false, ownerPid: pid, ageMs: 0 };
+    }
+
+    const ageMs = Date.now() - parseSqliteUtc(existing.lastHeartbeat);
+    const stale = ageMs > staleMs;
+
+    if (existing.ownerPid === pid) {
+      d.query(
+        `UPDATE memory_extension_locks
+         SET last_heartbeat = datetime('now'),
+             updated_at = datetime('now')
+         WHERE lock_id = ?`,
+      ).run(MEMORY_EXTENSION_LOCK_ID);
+      d.exec("COMMIT");
+      return { acquired: true, stolen: false, ownerPid: pid, ageMs: 0 };
+    }
+
+    if (stale) {
+      d.query(
+        `UPDATE memory_extension_locks
+         SET owner_pid = ?,
+             acquired_at = datetime('now'),
+             last_heartbeat = datetime('now'),
+             updated_at = datetime('now')
+         WHERE lock_id = ?`,
+      ).run(pid, MEMORY_EXTENSION_LOCK_ID);
+      d.exec("COMMIT");
+      return {
+        acquired: true,
+        stolen: true,
+        ownerPid: pid,
+        previousOwnerPid: existing.ownerPid,
+        ageMs,
+      };
+    }
+
+    d.exec("COMMIT");
+    return {
+      acquired: false,
+      stolen: false,
+      ownerPid: existing.ownerPid,
+      ageMs,
+    };
+  } catch (error) {
+    d.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function renewMemoryExtensionLock(pid: number): boolean {
+  ensureMemoryExtensionLockTable();
+
+  const result = getDb()
+    .query(
+      `UPDATE memory_extension_locks
+       SET last_heartbeat = datetime('now'),
+           updated_at = datetime('now')
+       WHERE lock_id = ? AND owner_pid = ?`,
+    )
+    .run(MEMORY_EXTENSION_LOCK_ID, pid);
+  return result.changes > 0;
+}
+
+export function releaseMemoryExtensionLock(pid: number): boolean {
+  ensureMemoryExtensionLockTable();
+
+  const result = getDb()
+    .query(`DELETE FROM memory_extension_locks WHERE lock_id = ? AND owner_pid = ?`)
+    .run(MEMORY_EXTENSION_LOCK_ID, pid);
+  return result.changes > 0;
 }
 
 // ============================================================================

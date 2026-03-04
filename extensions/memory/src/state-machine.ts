@@ -69,22 +69,7 @@ export const memoryExtensionMachine = setup({
     input: {} as MemoryExtensionContext,
   },
   guards: {
-    noRecentRunningInstance: () => {
-      const state = getDb()
-        .query(
-          `SELECT process_id, last_heartbeat,
-                 (julianday('now') - julianday(updated_at)) * 1440 as minutes_since_update
-           FROM memory_state_machines
-           WHERE machine_id = 'extension'`,
-        )
-        .get() as { process_id: number; minutes_since_update: number } | null;
-
-      // Allow start if:
-      // - No previous state, OR
-      // - Last update > 5 min ago (stale), OR
-      // - Different process (previous crashed)
-      return !state || state.minutes_since_update > 5 || state.process_id !== process.pid;
-    },
+    noRecentRunningInstance: () => true,
   },
   actions: {
     recordStartTime: assign({
@@ -197,6 +182,25 @@ export const memoryExtensionMachine = setup({
       watcher.start();
       context.watcher = watcher;
       context.ctx?.log.info(`File watcher started on ${context.basePath}`);
+
+      // Close the scan→watcher gap: run one incremental catch-up pass after
+      // watcher startup so writes that landed between startup scan completion
+      // and watcher readiness are picked up.
+      const catchUpResult = ingestDirectory(
+        context.basePath,
+        context.config.conversationGapMinutes,
+      );
+      if (catchUpResult.entriesInserted > 0 || catchUpResult.filesProcessed > 0) {
+        context.fileLog(
+          "INFO",
+          `Watcher catch-up complete: ${catchUpResult.filesProcessed} files, ${catchUpResult.entriesInserted} new entries`,
+        );
+      }
+      if (catchUpResult.errors.length > 0) {
+        for (const err of catchUpResult.errors) {
+          context.fileLog("ERROR", `Watcher catch-up error: ${err}`);
+        }
+      }
     }),
   },
 }).createMachine({
