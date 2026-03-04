@@ -320,7 +320,7 @@ function ChatInner({
             gateway.isAtBottom ? "bg-green-500 text-white" : "bg-orange-500 text-white"
           }`}
         >
-          Auto-scroll: {gateway.isAtBottom ? "ON" : "OFF"}
+          {gateway.isAtBottom ? "ON" : "OFF"}
         </div>
 
         <InputArea

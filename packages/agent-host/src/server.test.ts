@@ -175,6 +175,7 @@ describe("agent-host server", () => {
       thinking: false,
       effort: "medium",
       systemPrompt: null,
+      skills: { paths: [] },
       imageProcessing: {
         enabled: true,
         maxWidth: 1600,

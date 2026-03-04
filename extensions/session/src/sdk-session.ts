@@ -39,6 +39,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ThinkingEffort, ImageProcessingConfig } from "@claudia/shared";
 import { processContent } from "./image-processor";
+import { formatSkillsForPrompt, loadSkills } from "./skills";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -192,6 +193,7 @@ export class SDKSession extends EventEmitter {
   private effort?: ThinkingEffort;
   private isFirstPrompt: boolean;
   private imageProcessingConfig: ImageProcessingConfig;
+  private skillsPaths: string[];
 
   // Timestamps for health reporting
   private createdAt = Date.now();
@@ -227,6 +229,7 @@ export class SDKSession extends EventEmitter {
     // Load image processing config from global settings
     const globalConfig = loadConfig();
     this.imageProcessingConfig = globalConfig.session.imageProcessing;
+    this.skillsPaths = globalConfig.session.skills.paths || [];
 
     // Set up log directory
     const logDir = join(homedir(), ".claudia", "sessions", this.id);
@@ -474,6 +477,9 @@ export class SDKSession extends EventEmitter {
       // Plain system prompt string: CLAUDE.md chain + custom prompt.
       ...(combinedSystemPrompt ? { systemPrompt: combinedSystemPrompt } : {}),
 
+      // Load filesystem settings so SDK can discover project/user Skills natively.
+      settingSources: ["user", "project"],
+
       // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum
       disallowedTools: DISALLOWED_TOOLS,
 
@@ -525,7 +531,24 @@ export class SDKSession extends EventEmitter {
       parts.push(claudeMdBlocks.join("\n\n"));
     }
 
+    // Skills are now loaded natively by the SDK via `settingSources`.
+    // Keeping this path commented for quick rollback if needed.
+    // const skillsPrompt = this.buildSkillsPrompt();
+    // if (skillsPrompt) {
+    //   parts.push(skillsPrompt);
+    // }
+
     return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
+
+  private buildSkillsPrompt(): string {
+    try {
+      const skills = loadSkills({ cwd: this.cwd, additionalPaths: this.skillsPaths });
+      return formatSkillsForPrompt(skills);
+    } catch (error) {
+      this.logger.warn("Failed to load skills", { cwd: this.cwd, error: String(error) });
+      return "";
+    }
   }
 
   private readClaudeMdBlocks(): string[] {

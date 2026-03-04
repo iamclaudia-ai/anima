@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { createSDKSession, resumeSDKSession, SDKSession } from "./sdk-session";
 
 type QueryMsg = Record<string, unknown>;
@@ -146,7 +146,7 @@ describe("SDKSession", () => {
     expect(procEvents).toContain("ended");
   });
 
-  it("builds string systemPrompt from CLAUDE.md files in precedence order", async () => {
+  it("builds string systemPrompt from CLAUDE.md files and configures SDK setting sources", async () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-claude-md`;
     createdSessionIds.push(sessionId);
@@ -158,6 +158,10 @@ describe("SDKSession", () => {
     const globalClaudePath = join(homedir(), ".claude", "CLAUDE.md");
     const rootClaudePath = join(root, "CLAUDE.md");
     const projectClaudePath = join(projectDir, "CLAUDE.md");
+    const globalSkillsDir = join(homedir(), ".claudia", "skills");
+    const globalSkillPath = join(globalSkillsDir, `sdk-global-skill-${Date.now()}.md`);
+    const globalHiddenSkillPath = join(globalSkillsDir, `sdk-hidden-skill-${Date.now()}.md`);
+    const projectSkillPath = join(projectDir, ".claudia", "skills", "project-helper", "SKILL.md");
 
     const globalOriginal = existsSync(globalClaudePath)
       ? readFileSync(globalClaudePath, "utf-8")
@@ -167,10 +171,46 @@ describe("SDKSession", () => {
     try {
       mkdirSync(cwd, { recursive: true });
       mkdirSync(join(homedir(), ".claude"), { recursive: true });
+      mkdirSync(globalSkillsDir, { recursive: true });
+      mkdirSync(join(projectDir, ".claudia", "skills", "project-helper"), { recursive: true });
 
       writeFileSync(globalClaudePath, "GLOBAL_INSTRUCTIONS");
       writeFileSync(rootClaudePath, "PARENT_INSTRUCTIONS");
       writeFileSync(projectClaudePath, "PROJECT_INSTRUCTIONS");
+      writeFileSync(
+        globalSkillPath,
+        [
+          "---",
+          "name: sdk-global-skill",
+          "description: Global helper instructions for SDK tests.",
+          "---",
+          "",
+          "# Global Skill",
+        ].join("\n"),
+      );
+      writeFileSync(
+        globalHiddenSkillPath,
+        [
+          "---",
+          "name: sdk-hidden-skill",
+          "description: Hidden helper instructions for SDK tests.",
+          "disable-model-invocation: true",
+          "---",
+          "",
+          "# Hidden Skill",
+        ].join("\n"),
+      );
+      writeFileSync(
+        projectSkillPath,
+        [
+          "---",
+          "name: project-helper",
+          "description: Project helper instructions for SDK tests.",
+          "---",
+          "",
+          "# Project Skill",
+        ].join("\n"),
+      );
 
       const session = new SDKSession(
         sessionId,
@@ -201,6 +241,7 @@ describe("SDKSession", () => {
       expect(idxCustom).toBeLessThan(idxGlobal);
       expect(idxGlobal).toBeLessThan(idxParent);
       expect(idxParent).toBeLessThan(idxProject);
+      expect(capturedOptions?.settingSources).toEqual(["user", "project"]);
 
       await session.close();
     } finally {
@@ -209,24 +250,26 @@ describe("SDKSession", () => {
       } else {
         writeFileSync(globalClaudePath, globalOriginal);
       }
+      rmSync(globalSkillPath, { force: true });
+      rmSync(globalHiddenSkillPath, { force: true });
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("omits systemPrompt when no CLAUDE.md files and no custom prompt exist", async () => {
+  it("still omits skills block from systemPrompt when no discovered skills exist", async () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-preset-only`;
     createdSessionIds.push(sessionId);
     let capturedOptions: Record<string, unknown> | undefined;
-    const globalClaudePath = join(homedir(), ".claude", "CLAUDE.md");
-    const globalOriginal = existsSync(globalClaudePath)
-      ? readFileSync(globalClaudePath, "utf-8")
-      : null;
+    const previousClaudiaHome = process.env.CLAUDIA_HOME;
+    const isolatedHome = join(tmpdir(), `claudia-sdk-home-${Date.now()}`);
+    const isolatedCwd = join(isolatedHome, "repo", "app");
 
     try {
-      rmSync(globalClaudePath, { force: true });
+      process.env.CLAUDIA_HOME = isolatedHome;
+      mkdirSync(isolatedCwd, { recursive: true });
 
-      const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+      const session = new SDKSession(sessionId, { cwd: isolatedCwd }, false, {
         queryFactory: ((args: { options: Record<string, unknown> }) => {
           capturedOptions = args.options;
           return fakeQuery as unknown;
@@ -236,15 +279,18 @@ describe("SDKSession", () => {
       await session.start();
       await session.prompt("hello");
 
-      expect(capturedOptions?.systemPrompt).toBeUndefined();
+      const systemPrompt = (capturedOptions?.systemPrompt as string | undefined) || "";
+      expect(systemPrompt).not.toContain("<available_skills>");
+      expect(capturedOptions?.settingSources).toEqual(["user", "project"]);
 
       await session.close();
     } finally {
-      if (globalOriginal === null) {
-        rmSync(globalClaudePath, { force: true });
+      if (previousClaudiaHome === undefined) {
+        delete process.env.CLAUDIA_HOME;
       } else {
-        writeFileSync(globalClaudePath, globalOriginal);
+        process.env.CLAUDIA_HOME = previousClaudiaHome;
       }
+      rmSync(isolatedHome, { recursive: true, force: true });
     }
   });
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   ClaudiaChat,
   NavigationDrawer,
@@ -7,7 +7,7 @@ import {
   useGatewayClient,
 } from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
-import { bridge, GATEWAY_URL } from "../app";
+import { createBridge, GATEWAY_URL } from "../app";
 import {
   createSessionForWorkspace,
   loadMainPageBootstrapData,
@@ -42,6 +42,14 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   const { call, isConnected } = useGatewayClient(GATEWAY_URL);
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+  const chatBridge = useMemo(
+    () =>
+      createBridge({
+        workspaceId: activeWorkspace?.id,
+        sessionId: activeSessionId || undefined,
+      }),
+    [activeWorkspace?.id, activeSessionId],
+  );
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -286,7 +294,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
         <div className="flex-1 bg-white min-w-0">
           {activeSessionId && activeWorkspace ? (
             <ClaudiaChat
-              bridge={bridge}
+              bridge={chatBridge}
               gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
               key={`${activeWorkspace.id}-${activeSessionId}`}
             />

@@ -7,6 +7,18 @@
     "host": "localhost"
   },
 
+  "session": {
+    // Additional skill probe paths (additive to defaults)
+    // Resolution:
+    // - "~" or "/" prefix: absolute path ("~" expands to home)
+    // - otherwise: relative to session cwd
+    "skills": {
+      "paths": []
+      // Example:
+      // "paths": ["~/.claudia/skills", "~/.claude/skills", ".claudia/skills", "../shared-skills"]
+    }
+  },
+
   "extensions": {
     // Session Extension — SDK engine, workspace CRUD, session lifecycle
     // hot: false disables HMR — session manages long-lived SDK processes

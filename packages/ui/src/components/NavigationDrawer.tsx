@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
@@ -126,7 +126,23 @@ export function NavigationDrawer({
   onNewSession,
   onNewWorkspace,
 }: NavigationDrawerProps) {
-  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
+  const SESSION_PANEL_COLLAPSED_KEY = "claudia:nav:sessionsCollapsed";
+
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SESSION_PANEL_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SESSION_PANEL_COLLAPSED_KEY, String(isPanelCollapsed));
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [isPanelCollapsed]);
 
   return (
     <>

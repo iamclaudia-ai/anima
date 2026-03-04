@@ -82,6 +82,7 @@ describe("config loader", () => {
       thinking: true,
       effort: "max",
       systemPrompt: "be brief",
+      skills: { paths: [] },
     });
     expect(config.extensions.voice).toEqual({
       enabled: true,
@@ -144,5 +145,26 @@ describe("config loader", () => {
     expect(isExtensionEnabled("a")).toBe(true);
     expect(isExtensionEnabled("b")).toBe(false);
     expect(getEnabledExtensions()).toEqual([["a", { enabled: true, config: { x: 1 } }]]);
+  });
+
+  it("loads additive session skill paths from config", () => {
+    const configPath = join(tempDir, "claudia.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        session: {
+          skills: {
+            paths: ["~/.claudia/skills", ".claudia/skills", "/tmp/custom-skills"],
+          },
+        },
+      }),
+    );
+
+    const config = loadConfig(configPath);
+    expect(config.session.skills.paths).toEqual([
+      "~/.claudia/skills",
+      ".claudia/skills",
+      "/tmp/custom-skills",
+    ]);
   });
 });

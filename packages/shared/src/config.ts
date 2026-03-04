@@ -48,6 +48,10 @@ export interface SessionConfig {
   thinking: boolean;
   effort: ThinkingEffort;
   systemPrompt: string | null;
+  /** Additional skill paths (additive to default probe paths) */
+  skills: {
+    paths: string[];
+  };
   /** Image processing settings */
   imageProcessing: ImageProcessingConfig;
 }
@@ -106,6 +110,9 @@ const DEFAULT_CONFIG: ClaudiaConfig = {
     thinking: false,
     effort: "medium",
     systemPrompt: null,
+    skills: {
+      paths: [],
+    },
     imageProcessing: {
       enabled: true,
       maxWidth: 1600,
@@ -245,6 +252,7 @@ function buildConfigFromEnv(): Partial<ClaudiaConfig> {
       thinking: process.env.CLAUDIA_THINKING === "true",
       effort: (process.env.CLAUDIA_THINKING_EFFORT || "medium") as ThinkingEffort,
       systemPrompt: process.env.CLAUDIA_SYSTEM_PROMPT || null,
+      skills: DEFAULT_CONFIG.session.skills,
       imageProcessing: DEFAULT_CONFIG.session.imageProcessing,
     },
     extensions: {},
