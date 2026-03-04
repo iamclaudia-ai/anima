@@ -92,7 +92,11 @@ export function recoverStuckFiles(
     );
 
     try {
-      const deleted = rollbackStuckFile(file.filePath, file.lastEntryTimestamp);
+      const deleted = rollbackStuckFile(
+        file.filePath,
+        file.lastCommittedEntryId,
+        file.lastEntryTimestamp,
+      );
       if (deleted > 0) {
         log?.("INFO", `Rolled back ${deleted} partial entries for ${file.filePath}`);
       }
@@ -174,29 +178,8 @@ export function ingestFile(
   const buffer = readFileSync(filePath);
   const content = buffer.toString("utf-8", offset, stats.size);
 
-  if (!content.trim()) {
-    markFileIdle({
-      filePath: fileKey,
-      lastProcessedOffset: stats.size,
-      lastEntryTimestamp: null,
-    });
-    return result;
-  }
-
-  // Parse JSONL lines
-  const parsed = parseLines(content, filePath);
-
-  if (parsed.length === 0) {
-    markFileIdle({
-      filePath: fileKey,
-      lastProcessedOffset: stats.size,
-      lastEntryTimestamp: null,
-    });
-    result.filesProcessed = 1;
-    return result;
-  }
-
-  // Convert to insert entries
+  // Parse JSONL lines and convert to insert entries
+  const parsed = content.trim() ? parseLines(content, filePath) : [];
   const insertEntries: InsertEntry[] = parsed.map((e) => ({
     sessionId: e.sessionId,
     sourceFile: fileKey,
@@ -207,24 +190,35 @@ export function ingestFile(
     cwd: e.cwd ?? null,
   }));
 
-  // Find max timestamp
-  let maxTimestamp: string | null = null;
-  for (const e of insertEntries) {
-    if (!maxTimestamp || e.timestamp > maxTimestamp) {
-      maxTimestamp = e.timestamp;
-    }
-  }
-
   const sessionId = sessionIdFromFilename(filePath);
 
   // Phase 2: Insert entries + rebuild conversations in a transaction
   const db = getDb();
+  let committedEntryId: number | null = existing?.lastCommittedEntryId ?? null;
+  let committedTimestamp: string | null = existing?.lastEntryTimestamp ?? null;
+
   const doInsert = db.transaction(() => {
     if (needsCleanup) {
       result.entriesDeleted = deleteEntriesForFile(fileKey);
     }
-    insertTranscriptEntriesRaw(insertEntries);
-    result.conversationsUpdated = rebuildConversationsForFile(fileKey, sessionId, gapMinutes);
+
+    if (insertEntries.length > 0) {
+      insertTranscriptEntriesRaw(insertEntries);
+    }
+
+    if (needsCleanup || insertEntries.length > 0) {
+      result.conversationsUpdated = rebuildConversationsForFile(fileKey, sessionId, gapMinutes);
+    }
+
+    const committed = db
+      .query(
+        `SELECT max(id) AS maxId, max(timestamp) AS maxTimestamp
+         FROM memory_transcript_entries
+         WHERE source_file = ?`,
+      )
+      .get(fileKey) as { maxId: number | null; maxTimestamp: string | null };
+    committedEntryId = committed.maxId;
+    committedTimestamp = committed.maxTimestamp;
   });
 
   doInsert();
@@ -233,7 +227,8 @@ export function ingestFile(
   markFileIdle({
     filePath: fileKey,
     lastProcessedOffset: stats.size,
-    lastEntryTimestamp: maxTimestamp,
+    lastCommittedEntryId: committedEntryId,
+    lastEntryTimestamp: committedTimestamp,
   });
 
   result.filesProcessed = 1;

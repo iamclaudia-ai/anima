@@ -101,6 +101,8 @@ describe("memory health lock status", () => {
       expect(health.status).toBe("degraded");
       const lockMetric = health.metrics.find((m) => m.label === "Singleton Lock");
       expect(lockMetric?.value).toBe("contended");
+      const watcherMetric = health.metrics.find((m) => m.label === "Last File Change");
+      expect(watcherMetric?.value).toBe("n/a");
     } finally {
       blocker.kill();
     }

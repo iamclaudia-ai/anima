@@ -17,6 +17,17 @@ export interface WatcherConfig {
   gapMinutes: number;
 }
 
+export interface WatcherDiagnostics {
+  ready: boolean;
+  lastChangedAt: string | null;
+  lastChangedFile: string | null;
+  lastIngestAt: string | null;
+  lastIngestFile: string | null;
+  lastIngestEntries: number;
+  lastErrorAt: string | null;
+  lastError: string | null;
+}
+
 export class MemoryWatcher {
   private watcher: FSWatcher | null = null;
   private config: WatcherConfig;
@@ -26,6 +37,16 @@ export class MemoryWatcher {
   // Queue to serialize file processing
   private queue: string[] = [];
   private processing = false;
+  private diagnostics: WatcherDiagnostics = {
+    ready: false,
+    lastChangedAt: null,
+    lastChangedFile: null,
+    lastIngestAt: null,
+    lastIngestFile: null,
+    lastIngestEntries: 0,
+    lastErrorAt: null,
+    lastError: null,
+  };
 
   constructor(config: WatcherConfig, log: (level: string, msg: string) => void) {
     this.config = config;
@@ -50,22 +71,28 @@ export class MemoryWatcher {
 
     this.watcher.on("ready", () => {
       this.ready = true;
+      this.diagnostics.ready = true;
       this.log("INFO", "File watcher ready");
     });
 
     this.watcher.on("add", (path) => {
       if (!this.ready) return;
       this.log("INFO", `New file detected: ${path}`);
+      this.recordChange(path);
       this.enqueue(path);
     });
 
     this.watcher.on("change", (path) => {
       this.log("INFO", `File changed: ${path}`);
+      this.recordChange(path);
       this.enqueue(path);
     });
 
     this.watcher.on("error", (error) => {
-      this.log("ERROR", `Watcher error: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      this.diagnostics.lastErrorAt = new Date().toISOString();
+      this.diagnostics.lastError = message;
+      this.log("ERROR", `Watcher error: ${message}`);
     });
   }
 
@@ -74,7 +101,12 @@ export class MemoryWatcher {
       await this.watcher.close();
       this.watcher = null;
       this.ready = false;
+      this.diagnostics.ready = false;
     }
+  }
+
+  getDiagnostics(): WatcherDiagnostics {
+    return { ...this.diagnostics };
   }
 
   private enqueue(filePath: string): void {
@@ -95,23 +127,33 @@ export class MemoryWatcher {
 
       try {
         const result = ingestFile(filePath, this.config.basePath, this.config.gapMinutes);
+        this.diagnostics.lastIngestAt = new Date().toISOString();
+        this.diagnostics.lastIngestFile = filePath;
+        this.diagnostics.lastIngestEntries = result.entriesInserted;
         if (result.entriesInserted > 0) {
           this.log("INFO", `Ingested ${result.entriesInserted} entries from ${filePath}`);
         }
         if (result.errors.length > 0) {
           for (const err of result.errors) {
+            this.diagnostics.lastErrorAt = new Date().toISOString();
+            this.diagnostics.lastError = err;
             this.log("ERROR", `Ingestion error: ${err}`);
           }
         }
       } catch (error) {
-        this.log(
-          "ERROR",
-          `Failed to process ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        this.diagnostics.lastErrorAt = new Date().toISOString();
+        this.diagnostics.lastError = message;
+        this.log("ERROR", `Failed to process ${filePath}: ${message}`);
       }
     }
 
     this.processing = false;
+  }
+
+  private recordChange(filePath: string): void {
+    this.diagnostics.lastChangedAt = new Date().toISOString();
+    this.diagnostics.lastChangedFile = filePath;
   }
 }
 

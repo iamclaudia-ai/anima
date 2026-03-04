@@ -53,6 +53,7 @@ export interface FileState {
   lastModified: number;
   fileSize: number;
   lastProcessedOffset: number;
+  lastCommittedEntryId: number | null;
   lastEntryTimestamp: string | null;
   createdAt: string;
   updatedAt: string;
@@ -68,6 +69,7 @@ export function getFileState(filePath: string): FileState | null {
         last_modified AS lastModified,
         file_size AS fileSize,
         last_processed_offset AS lastProcessedOffset,
+        last_committed_entry_id AS lastCommittedEntryId,
         last_entry_timestamp AS lastEntryTimestamp,
         created_at AS createdAt,
         updated_at AS updatedAt
@@ -109,6 +111,7 @@ export function markFileIngesting(state: {
 export function markFileIdle(state: {
   filePath: string;
   lastProcessedOffset: number;
+  lastCommittedEntryId: number | null;
   lastEntryTimestamp: string | null;
 }): void {
   getDb()
@@ -116,11 +119,17 @@ export function markFileIdle(state: {
       `UPDATE memory_file_states SET
         status = 'idle',
         last_processed_offset = ?,
+        last_committed_entry_id = COALESCE(?, last_committed_entry_id),
         last_entry_timestamp = COALESCE(?, last_entry_timestamp),
         updated_at = datetime('now')
       WHERE file_path = ?`,
     )
-    .run(state.lastProcessedOffset, state.lastEntryTimestamp, state.filePath);
+    .run(
+      state.lastProcessedOffset,
+      state.lastCommittedEntryId,
+      state.lastEntryTimestamp,
+      state.filePath,
+    );
 }
 
 // ============================================================================
@@ -137,6 +146,7 @@ export function getStuckFiles(): FileState[] {
         file_path AS filePath, source, status,
         last_modified AS lastModified, file_size AS fileSize,
         last_processed_offset AS lastProcessedOffset,
+        last_committed_entry_id AS lastCommittedEntryId,
         last_entry_timestamp AS lastEntryTimestamp,
         created_at AS createdAt, updated_at AS updatedAt
       FROM memory_file_states
@@ -150,12 +160,25 @@ export function getStuckFiles(): FileState[] {
  * (entries for this file with timestamp > last committed timestamp),
  * then reset status to idle.
  */
-export function rollbackStuckFile(filePath: string, lastEntryTimestamp: string | null): number {
+export function rollbackStuckFile(
+  filePath: string,
+  lastCommittedEntryId: number | null,
+  lastEntryTimestamp: string | null,
+): number {
   const d = getDb();
   let deleted = 0;
 
-  if (lastEntryTimestamp) {
-    // Delete entries that were part of the partial import
+  if (lastCommittedEntryId !== null) {
+    // Precise rollback boundary, safe even when many entries share timestamps.
+    const result = d
+      .query(
+        `DELETE FROM memory_transcript_entries
+        WHERE source_file = ? AND id > ?`,
+      )
+      .run(filePath, lastCommittedEntryId);
+    deleted = result.changes;
+  } else if (lastEntryTimestamp) {
+    // Legacy fallback if no committed id is available.
     const result = d
       .query(
         `DELETE FROM memory_transcript_entries

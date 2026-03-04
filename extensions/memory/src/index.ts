@@ -153,6 +153,20 @@ function toPersistableSnapshot(snapshot: SnapshotFrom<typeof memoryExtensionMach
   };
 }
 
+function formatElapsedSince(iso: string | null): string {
+  if (!iso) return "n/a";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "n/a";
+  if (diffMs < 60_000) return `${Math.round(diffMs / 1000)}s ago`;
+  if (diffMs < 3_600_000) return `${Math.round(diffMs / 60_000)}m ago`;
+  return `${Math.round(diffMs / 3_600_000)}h ago`;
+}
+
+function compactHomePath(path: string | null): string {
+  if (!path) return "n/a";
+  return path.replace(/^\/Users\/\w+/, "~");
+}
+
 // ============================================================================
 // Memory Extension
 // ============================================================================
@@ -446,6 +460,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           const lockAgeSec = singletonLock
             ? Math.max(0, Math.round(singletonLock.ageMs / 1000))
             : 0;
+          const watcherDiag = watcher?.getDiagnostics() ?? null;
 
           const items: HealthItem[] = workItems.map((conv) => {
             const meta = conv.metadata
@@ -506,6 +521,20 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
                 value: singletonLock ? `${lockAgeSec}s` : "n/a",
               },
               { label: "Actor State", value: actorState },
+              { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
+              {
+                label: "Last File Change",
+                value: formatElapsedSince(watcherDiag?.lastChangedAt ?? null),
+              },
+              {
+                label: "Last Ingest",
+                value: formatElapsedSince(watcherDiag?.lastIngestAt ?? null),
+              },
+              {
+                label: "Last Ingest File",
+                value: compactHomePath(watcherDiag?.lastIngestFile ?? null),
+              },
+              { label: "Last Error", value: watcherDiag?.lastError ?? "none" },
               { label: "Files Tracked", value: String(stats.fileCount) },
               { label: "Entries", value: String(stats.entryCount) },
               { label: "Queued", value: String(s.queued || 0) },
