@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useRef, useId, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -7,6 +7,7 @@ import remend from "remend";
 import { ChevronDown, ChevronUp, Copy, Check, Loader2 } from "lucide-react";
 import { useBridge } from "../bridge";
 import { getThinkingBadgeConfig, getThinkingLabel } from "./tools/toolConfig";
+import { useInlineExpansion } from "./InlineExpansionProvider";
 
 interface MessageContentProps {
   content: string;
@@ -82,7 +83,10 @@ export const MessageContent = memo(function MessageContent({
   type,
   isLoading,
 }: MessageContentProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [fallbackExpanded, setFallbackExpanded] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const inlineExpansion = useInlineExpansion();
+  const expansionId = useId();
 
   const markdown = remend(content);
 
@@ -115,12 +119,47 @@ export const MessageContent = memo(function MessageContent({
     const thinkingConfig = getThinkingBadgeConfig();
     const hasContent = content?.trim().length > 0;
     const label = getThinkingLabel(!isLoading);
+    const isExpanded = inlineExpansion ? inlineExpansion.isOpen(expansionId) : fallbackExpanded;
+    const expandedThinkingContent = (
+      <div
+        className="prose prose-sm max-w-none font-serif text-neutral-500 italic overflow-hidden break-words
+        prose-headings:font-bold prose-headings:text-neutral-500
+        prose-p:text-neutral-500 prose-p:leading-relaxed
+        prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
+        prose-strong:text-neutral-500 prose-strong:font-semibold
+        prose-pre:overflow-x-auto prose-pre:bg-gray-900 prose-pre:text-gray-100
+        prose-ul:list-disc prose-ul:pl-6
+        prose-ol:list-decimal prose-ol:pl-6
+        prose-li:text-neutral-500
+      "
+      >
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeHighlight, rehypeRaw]}
+          components={markdownComponents}
+        >
+          {markdown}
+        </ReactMarkdown>
+      </div>
+    );
 
     return (
       <div className="relative">
         <button
+          ref={buttonRef}
           type="button"
-          onClick={() => hasContent && setIsExpanded(!isExpanded)}
+          onClick={() => {
+            if (!hasContent) return;
+            if (inlineExpansion && buttonRef.current) {
+              inlineExpansion.toggle({
+                id: expansionId,
+                anchorEl: buttonRef.current,
+                content: expandedThinkingContent,
+              });
+              return;
+            }
+            setFallbackExpanded(!fallbackExpanded);
+          }}
           disabled={!hasContent}
           className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-left transition-colors ${thinkingConfig.colors.border} ${thinkingConfig.colors.bg} ${
             hasContent ? `cursor-pointer ${thinkingConfig.colors.hoverBg}` : "cursor-default"
@@ -151,28 +190,9 @@ export const MessageContent = memo(function MessageContent({
           </span>
         </button>
 
-        {isExpanded && hasContent && (
+        {!inlineExpansion && isExpanded && hasContent && (
           <div className="absolute left-0 top-full z-20 mt-1 w-[min(600px,80vw)] rounded-lg border border-neutral-200 bg-white p-3 shadow-lg">
-            <div
-              className="prose prose-sm max-w-none font-serif text-neutral-500 italic overflow-hidden break-words
-              prose-headings:font-bold prose-headings:text-neutral-500
-              prose-p:text-neutral-500 prose-p:leading-relaxed
-              prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline
-              prose-strong:text-neutral-500 prose-strong:font-semibold
-              prose-pre:overflow-x-auto prose-pre:bg-gray-900 prose-pre:text-gray-100
-              prose-ul:list-disc prose-ul:pl-6
-              prose-ol:list-decimal prose-ol:pl-6
-              prose-li:text-neutral-500
-            "
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight, rehypeRaw]}
-                components={markdownComponents}
-              >
-                {markdown}
-              </ReactMarkdown>
-            </div>
+            {expandedThinkingContent}
           </div>
         )}
       </div>

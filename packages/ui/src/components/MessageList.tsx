@@ -12,6 +12,7 @@ import { ToolCallBlock } from "./ToolCallBlock";
 import { CopyButton } from "./CopyButton";
 import CompactionBoundary from "./CompactionBoundary";
 import { FileText, FileImage, File, OctagonX } from "lucide-react";
+import { InlineExpansionProvider } from "./InlineExpansionProvider";
 
 function getFileIcon(mediaType: string) {
   if (mediaType.startsWith("image/")) return FileImage;
@@ -100,130 +101,132 @@ export function MessageList({
   const displayRows = buildDisplayRows(messages);
 
   return (
-    <main
-      ref={messagesContainerRef}
-      className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
-    >
-      {hasMore && (
-        <button
-          onClick={onLoadEarlier}
-          className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          Load {Math.min(50, remainingCount)} earlier messages
-          {totalMessages > 0 && (
-            <span className="ml-1 text-gray-400">
-              ({messages.length} of {totalMessages})
-            </span>
-          )}
-        </button>
-      )}
-      {displayRows.map((row, rowIdx) => {
-        // ── Compaction boundary ──
-        if (row.kind === "boundary") {
-          return (
-            <CompactionBoundary
-              key={`boundary-${rowIdx}`}
-              trigger={row.msg.compaction?.trigger || "auto"}
-              preTokens={row.msg.compaction?.pre_tokens || 0}
-              timestamp={row.msg.timestamp}
-            />
-          );
-        }
+    <InlineExpansionProvider containerRef={messagesContainerRef}>
+      <main
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
+      >
+        {hasMore && (
+          <button
+            onClick={onLoadEarlier}
+            className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Load {Math.min(50, remainingCount)} earlier messages
+            {totalMessages > 0 && (
+              <span className="ml-1 text-gray-400">
+                ({messages.length} of {totalMessages})
+              </span>
+            )}
+          </button>
+        )}
+        {displayRows.map((row, rowIdx) => {
+          // ── Compaction boundary ──
+          if (row.kind === "boundary") {
+            return (
+              <CompactionBoundary
+                key={`boundary-${rowIdx}`}
+                trigger={row.msg.compaction?.trigger || "auto"}
+                preTokens={row.msg.compaction?.pre_tokens || 0}
+                timestamp={row.msg.timestamp}
+              />
+            );
+          }
 
-        // ── Tool row: grouped badges in a single flex-wrap container ──
-        if (row.kind === "tool-row") {
-          // Only allow interaction on the very latest message
-          const isLatestRow = row.messages.some(({ msgIdx: mi }) => mi === messages.length - 1);
-          return (
-            <div key={`toolrow-${rowIdx}`} className="mr-12">
-              <div className="flex flex-wrap gap-2 my-1">
-                {row.messages.flatMap(({ msg, msgIdx }) =>
-                  msg.blocks.map((block, blockIdx) => {
-                    if (block.type === "thinking") {
-                      const isLast =
-                        msgIdx === messages.length - 1 && blockIdx === msg.blocks.length - 1;
-                      return (
-                        <MessageContent
-                          key={`${msgIdx}-${blockIdx}`}
-                          content={block.content}
-                          type="thinking"
-                          isLoading={isLast && isQuerying}
-                        />
-                      );
-                    }
-                    if (block.type === "tool_use") {
-                      const isInteractiveTool =
-                        block.name === "ExitPlanMode" || block.name === "EnterPlanMode";
-                      return (
-                        <ToolCallBlock
-                          key={block.id}
-                          name={block.name}
-                          input={block.input}
-                          result={block.result}
-                          isLoading={!block.result && isQuerying}
-                          toolUseId={block.id}
-                          onSendMessage={
-                            isLatestRow || isInteractiveTool ? onSendMessage : undefined
-                          }
-                          onSendToolResult={
-                            isLatestRow || isInteractiveTool ? onSendToolResult : undefined
-                          }
-                        />
-                      );
-                    }
-                    // Skip empty text blocks in tool rows
-                    return null;
-                  }),
-                )}
-              </div>
-            </div>
-          );
-        }
-
-        // ── Regular message ──
-        const { msg, msgIdx } = row;
-        return (
-          <div key={msgIdx} className={msg.role === "user" ? "ml-12" : "mr-12"}>
-            {/* Copy button + timestamp — only for messages with text content */}
-            {(() => {
-              const hasText = msg.blocks.some((b) => b.type === "text" && b.content?.trim());
-              if (!hasText) return null;
-              const rawContent = getMessageRawContent(msg.blocks);
-              const time = formatTimestamp(msg.timestamp);
-              const isUser = msg.role === "user";
-              return (
-                <div className={`flex items-center gap-2 mb-1 ${isUser ? "justify-end" : ""}`}>
-                  {isUser ? (
-                    <>
-                      {time && <span className="text-xs text-gray-400">{time}</span>}
-                      <CopyButton text={rawContent} />
-                    </>
-                  ) : (
-                    <>
-                      <CopyButton text={rawContent} />
-                      {time && <span className="text-xs text-gray-400">{time}</span>}
-                    </>
+          // ── Tool row: grouped badges in a single flex-wrap container ──
+          if (row.kind === "tool-row") {
+            // Only allow interaction on the very latest message
+            const isLatestRow = row.messages.some(({ msgIdx: mi }) => mi === messages.length - 1);
+            return (
+              <div key={`toolrow-${rowIdx}`} className="mr-12">
+                <div className="flex flex-wrap gap-2 my-1">
+                  {row.messages.flatMap(({ msg, msgIdx }) =>
+                    msg.blocks.map((block, blockIdx) => {
+                      if (block.type === "thinking") {
+                        const isLast =
+                          msgIdx === messages.length - 1 && blockIdx === msg.blocks.length - 1;
+                        return (
+                          <MessageContent
+                            key={`${msgIdx}-${blockIdx}`}
+                            content={block.content}
+                            type="thinking"
+                            isLoading={isLast && isQuerying}
+                          />
+                        );
+                      }
+                      if (block.type === "tool_use") {
+                        const isInteractiveTool =
+                          block.name === "ExitPlanMode" || block.name === "EnterPlanMode";
+                        return (
+                          <ToolCallBlock
+                            key={block.id}
+                            name={block.name}
+                            input={block.input}
+                            result={block.result}
+                            isLoading={!block.result && isQuerying}
+                            toolUseId={block.id}
+                            onSendMessage={
+                              isLatestRow || isInteractiveTool ? onSendMessage : undefined
+                            }
+                            onSendToolResult={
+                              isLatestRow || isInteractiveTool ? onSendToolResult : undefined
+                            }
+                          />
+                        );
+                      }
+                      // Skip empty text blocks in tool rows
+                      return null;
+                    }),
                   )}
                 </div>
-              );
-            })()}
-            {msg.role === "user" ? (
-              <UserMessage msg={msg} />
-            ) : (
-              <AssistantMessage
-                msg={msg}
-                msgIdx={msgIdx}
-                totalMessages={messages.length}
-                isQuerying={isQuerying}
-                onSendMessage={msgIdx === messages.length - 1 ? onSendMessage : undefined}
-                onSendToolResult={msgIdx === messages.length - 1 ? onSendToolResult : undefined}
-              />
-            )}
-          </div>
-        );
-      })}
-      <div ref={messagesEndRef} />
-    </main>
+              </div>
+            );
+          }
+
+          // ── Regular message ──
+          const { msg, msgIdx } = row;
+          return (
+            <div key={msgIdx} className={msg.role === "user" ? "ml-12" : "mr-12"}>
+              {/* Copy button + timestamp — only for messages with text content */}
+              {(() => {
+                const hasText = msg.blocks.some((b) => b.type === "text" && b.content?.trim());
+                if (!hasText) return null;
+                const rawContent = getMessageRawContent(msg.blocks);
+                const time = formatTimestamp(msg.timestamp);
+                const isUser = msg.role === "user";
+                return (
+                  <div className={`flex items-center gap-2 mb-1 ${isUser ? "justify-end" : ""}`}>
+                    {isUser ? (
+                      <>
+                        {time && <span className="text-xs text-gray-400">{time}</span>}
+                        <CopyButton text={rawContent} />
+                      </>
+                    ) : (
+                      <>
+                        <CopyButton text={rawContent} />
+                        {time && <span className="text-xs text-gray-400">{time}</span>}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+              {msg.role === "user" ? (
+                <UserMessage msg={msg} />
+              ) : (
+                <AssistantMessage
+                  msg={msg}
+                  msgIdx={msgIdx}
+                  totalMessages={messages.length}
+                  isQuerying={isQuerying}
+                  onSendMessage={msgIdx === messages.length - 1 ? onSendMessage : undefined}
+                  onSendToolResult={msgIdx === messages.length - 1 ? onSendToolResult : undefined}
+                />
+              )}
+            </div>
+          );
+        })}
+        <div ref={messagesEndRef} />
+      </main>
+    </InlineExpansionProvider>
   );
 }
 

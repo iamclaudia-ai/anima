@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useId, useState, useRef, useEffect, type ReactNode } from "react";
 import { getToolBadgeConfig } from "./toolConfig";
+import { useInlineExpansion } from "../InlineExpansionProvider";
 
 interface CollapsibleToolProps {
   collapsedContent: ReactNode;
@@ -17,13 +18,17 @@ export function CollapsibleTool({
   isLoading = false,
   toolName,
 }: CollapsibleToolProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [fallbackExpanded, setFallbackExpanded] = useState(defaultExpanded);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const inlineExpansion = useInlineExpansion();
+  const expansionId = useId();
   const hasExpandedContent = expandedContent !== null && expandedContent !== undefined;
+  const isExpanded = inlineExpansion ? inlineExpansion.isOpen(expansionId) : fallbackExpanded;
 
   // Close on click outside
   useEffect(() => {
+    if (inlineExpansion) return;
     if (!isExpanded) return;
     function handleClick(e: MouseEvent) {
       if (
@@ -32,12 +37,12 @@ export function CollapsibleTool({
         buttonRef.current &&
         !buttonRef.current.contains(e.target as Node)
       ) {
-        setIsExpanded(false);
+        setFallbackExpanded(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [isExpanded]);
+  }, [inlineExpansion, isExpanded]);
 
   // Get tool-specific colors for the container
   const config = toolName ? getToolBadgeConfig(toolName) : null;
@@ -51,7 +56,18 @@ export function CollapsibleTool({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => hasExpandedContent && setIsExpanded(!isExpanded)}
+        onClick={() => {
+          if (!hasExpandedContent) return;
+          if (inlineExpansion && buttonRef.current) {
+            inlineExpansion.toggle({
+              id: expansionId,
+              anchorEl: buttonRef.current,
+              content: <div className="space-y-1.5">{expandedContent}</div>,
+            });
+            return;
+          }
+          setFallbackExpanded(!fallbackExpanded);
+        }}
         disabled={!hasExpandedContent && !isLoading}
         aria-expanded={isExpanded}
         className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-left transition-colors ${containerBorder} ${containerBg} ${
@@ -71,7 +87,7 @@ export function CollapsibleTool({
           ) : null}
         </span>
       </button>
-      {isExpanded && hasExpandedContent && (
+      {!inlineExpansion && isExpanded && hasExpandedContent && (
         <div
           ref={popoverRef}
           className="absolute left-0 top-full z-20 mt-1 w-[min(600px,80vw)] rounded-lg border border-neutral-200 bg-white p-3 shadow-lg"
