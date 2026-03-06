@@ -68,6 +68,88 @@ export interface VoiceConfig {
   streaming?: boolean;
 }
 
+function normalizeLineForListDetection(line: string): string {
+  let normalized = line.trimStart();
+  normalized = normalized.replace(/^(?:>\s*)+/, "");
+
+  // Strip leading markdown decorators so patterns like "**1. item**" are
+  // evaluated as "1. item" for list detection.
+  while (true) {
+    const next = normalized.replace(/^(?:\*\*|__|\*|_|`|~~)+/, "").trimStart();
+    if (next === normalized) break;
+    normalized = next;
+  }
+
+  return normalized;
+}
+
+function isListLine(line: string): boolean {
+  const normalized = normalizeLineForListDetection(line);
+  return /^[\s]*[-*+•]\s+/.test(normalized) || /^[\s]*\d+\s*(?:[.)]|\\\.)\s+/.test(normalized);
+}
+
+function isFenceLine(line: string): boolean {
+  return /^(?:```|~~~)/.test(line.trimStart());
+}
+
+export class StreamingSpeechFilter {
+  private lineBuffer = "";
+  private inCodeFence = false;
+
+  feed(text: string): string {
+    this.lineBuffer += text;
+    return this.drainCompleteLines(false);
+  }
+
+  flush(): string {
+    return this.drainCompleteLines(true);
+  }
+
+  reset(): void {
+    this.lineBuffer = "";
+    this.inCodeFence = false;
+  }
+
+  private drainCompleteLines(forceRemainder: boolean): string {
+    const out: string[] = [];
+    let newlineIndex = this.lineBuffer.indexOf("\n");
+
+    while (newlineIndex !== -1) {
+      const rawLine = this.lineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+      this.lineBuffer = this.lineBuffer.slice(newlineIndex + 1);
+      const kept = this.processLine(rawLine);
+      if (kept !== null) out.push(`${kept}\n`);
+      newlineIndex = this.lineBuffer.indexOf("\n");
+    }
+
+    if (forceRemainder && this.lineBuffer.length > 0) {
+      const rawLine = this.lineBuffer.replace(/\r$/, "");
+      this.lineBuffer = "";
+      const kept = this.processLine(rawLine);
+      if (kept !== null) out.push(kept);
+    }
+
+    return out.join("\n");
+  }
+
+  private processLine(line: string): string | null {
+    if (isFenceLine(line)) {
+      this.inCodeFence = !this.inCodeFence;
+      return null;
+    }
+
+    if (this.inCodeFence) {
+      return null;
+    }
+
+    if (isListLine(line)) {
+      return null;
+    }
+
+    return line;
+  }
+}
+
 const DEFAULT_CONFIG: Required<VoiceConfig> = {
   apiKey: "",
   dictionaryId: "",
@@ -87,8 +169,11 @@ const DEFAULT_CONFIG: Required<VoiceConfig> = {
  * Clean text for speech (strip markdown, emojis, etc.)
  */
 export function cleanForSpeech(text: string): string {
+  const filter = new StreamingSpeechFilter();
+  const filtered = [filter.feed(text), filter.flush()].filter(Boolean).join("\n");
+
   return (
-    text
+    filtered
       // Remove code blocks entirely (including language specifiers)
       .replace(/```[\s\S]*?```/g, "")
       .replace(/~~~[\s\S]*?~~~/g, "")
@@ -118,7 +203,7 @@ export function cleanForSpeech(text: string): string {
         "",
       )
       // Remove entire list lines (bullets and numbered lists — typically technical)
-      .replace(/^[\s]*[-*•]\s+.*$/gm, "")
+      .replace(/^[\s]*[-*+•]\s+.*$/gm, "")
       .replace(/^[\s]*\d+\s*(?:[.)]|\\\.)\s+.*$/gm, "")
       // Remove URLs (often technical/not worth reading aloud)
       .replace(/https?:\/\/[^\s]+/g, "")
@@ -213,6 +298,7 @@ interface ConnectionVoiceState {
   textBuffer: string;
   currentAudioChunks: Buffer[];
   isSpeaking: boolean;
+  streamingFilter: StreamingSpeechFilter;
 }
 
 function createConnectionState(connectionId: string): ConnectionVoiceState {
@@ -232,6 +318,7 @@ function createConnectionState(connectionId: string): ConnectionVoiceState {
     textBuffer: "",
     currentAudioChunks: [],
     isSpeaking: false,
+    streamingFilter: new StreamingSpeechFilter(),
   };
 }
 
@@ -408,6 +495,17 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     // If a previous stream is active, flush its remaining text into the queue
     // but do NOT wait for drain or clear the queue — old sentences keep playing.
     if (cs.currentStreamId && cs.currentChunker) {
+      const trailingFiltered = cs.streamingFilter.flush();
+      if (trailingFiltered) {
+        const trailingSentences = cs.currentChunker.feed(trailingFiltered);
+        for (const sentence of trailingSentences) {
+          const cleaned = cleanForSpeech(sentence);
+          if (cleaned) {
+            enqueueSentence(cs, cleaned);
+          }
+        }
+      }
+
       const remaining = cs.currentChunker.flush();
       if (remaining) {
         const cleaned = cleanForSpeech(remaining);
@@ -432,6 +530,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     cs.currentSessionId = sessionId;
     cs.currentAudioChunks = [];
     cs.currentChunker = new SentenceChunker();
+    cs.streamingFilter.reset();
     // NOTE: sentenceQueue is NOT cleared — old sentences keep synthesizing
     cs.streamChunkIndex = 0;
     cs.streamGeneration++;
@@ -455,7 +554,10 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     if (!cs.currentChunker || !cs.currentStreamId) return;
 
     fileLog("INFO", `FEEDING TEXT [conn=${cs.connectionId}]: "${text}"`);
-    const sentences = cs.currentChunker.feed(text);
+    const filtered = cs.streamingFilter.feed(text);
+    if (!filtered) return;
+
+    const sentences = cs.currentChunker.feed(filtered);
     for (const sentence of sentences) {
       const cleaned = cleanForSpeech(sentence);
       if (cleaned) {
@@ -472,6 +574,19 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     const generation = cs.streamGeneration;
     const streamId = cs.currentStreamId;
     const sessionId = cs.currentSessionId;
+
+    // Flush any remaining line-filtered content into the chunker first.
+    const trailingFiltered = cs.streamingFilter.flush();
+    if (trailingFiltered) {
+      const trailingSentences = cs.currentChunker.feed(trailingFiltered);
+      for (const sentence of trailingSentences) {
+        const cleaned = cleanForSpeech(sentence);
+        if (cleaned) {
+          fileLog("INFO", `endStream: flushing trailing text: "${cleaned.substring(0, 80)}"`);
+          enqueueSentence(cs, cleaned);
+        }
+      }
+    }
 
     // Flush any remaining text in the chunker
     const remaining = cs.currentChunker.flush();
@@ -533,6 +648,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     cs.currentSessionId = null;
     cs.currentAudioChunks = [];
     cs.streamChunkIndex = 0;
+    cs.streamingFilter.reset();
 
     // Clean up connection state if fully idle
     if (!cs.processingQueue && cs.sentenceQueue.length === 0) {
@@ -568,6 +684,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
     cs.currentSessionId = null;
     cs.currentAudioChunks = [];
     cs.streamChunkIndex = 0;
+    cs.streamingFilter.reset();
 
     connections.delete(cs.connectionId);
     fileLog("INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
