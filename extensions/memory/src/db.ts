@@ -347,6 +347,21 @@ export function upsertConversation(conv: {
   lastMessageAt: string;
   entryCount: number;
 }): void {
+  // If this exact time range was already archived/skipped, do not recreate it.
+  // Rebuilds can run repeatedly as files grow; this prevents re-queuing old work.
+  const alreadyFinalized = getDb()
+    .query(
+      `SELECT id FROM memory_conversations
+      WHERE source_file = ?
+        AND first_message_at = ?
+        AND last_message_at = ?
+        AND status IN ('archived', 'skipped')
+      LIMIT 1`,
+    )
+    .get(conv.sourceFile, conv.firstMessageAt, conv.lastMessageAt) as { id: number } | null;
+
+  if (alreadyFinalized) return;
+
   // Match by source_file + first_message_at (unique within a file)
   const existing = getDb()
     .query(

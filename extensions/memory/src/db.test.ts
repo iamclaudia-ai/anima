@@ -10,6 +10,7 @@ import {
   releaseMemoryExtensionLock,
   renewMemoryExtensionLock,
   setDbPathForTests,
+  upsertConversation,
 } from "./db";
 
 function setupSchema(): void {
@@ -24,7 +25,7 @@ function setupSchema(): void {
       first_message_at TEXT,
       last_message_at TEXT,
       entry_count INTEGER,
-      status TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
       strategy TEXT,
       summary TEXT,
       processed_at TEXT,
@@ -108,5 +109,92 @@ describe("memory singleton lock", () => {
     expect(releaseMemoryExtensionLock(2222)).toBe(false);
     expect(releaseMemoryExtensionLock(process.pid)).toBe(true);
     expect(getMemoryExtensionLockStatus(60_000)).toBeNull();
+  });
+});
+
+describe("memory conversation upsert", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "claudia-memory-upsert-"));
+    setDbPathForTests(join(tempDir, "claudia.test.db"));
+    setupSchema();
+  });
+
+  afterEach(() => {
+    closeDb();
+    setDbPathForTests(null);
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("does not recreate conversations already archived for the same exact range", () => {
+    const db = getDb();
+    db.query(
+      `INSERT INTO memory_conversations
+        (session_id, source_file, first_message_at, last_message_at, entry_count, status)
+       VALUES (?, ?, ?, ?, ?, 'archived')`,
+    ).run("s1", "file-a.jsonl", "2026-03-01T10:00:00.000Z", "2026-03-01T10:30:00.000Z", 20);
+
+    upsertConversation({
+      sessionId: "s1",
+      sourceFile: "file-a.jsonl",
+      firstMessageAt: "2026-03-01T10:00:00.000Z",
+      lastMessageAt: "2026-03-01T10:30:00.000Z",
+      entryCount: 20,
+    });
+
+    const count = db
+      .query(
+        `SELECT count(*) as n
+         FROM memory_conversations
+         WHERE source_file = ? AND first_message_at = ? AND last_message_at = ?`,
+      )
+      .get("file-a.jsonl", "2026-03-01T10:00:00.000Z", "2026-03-01T10:30:00.000Z") as {
+      n: number;
+    };
+
+    expect(count.n).toBe(1);
+  });
+
+  it("creates a new active conversation when an archived one has a different end time", () => {
+    const db = getDb();
+    db.query(
+      `INSERT INTO memory_conversations
+        (session_id, source_file, first_message_at, last_message_at, entry_count, status)
+       VALUES (?, ?, ?, ?, ?, 'archived')`,
+    ).run("s1", "file-b.jsonl", "2026-03-01T10:00:00.000Z", "2026-03-01T10:30:00.000Z", 20);
+
+    upsertConversation({
+      sessionId: "s1",
+      sourceFile: "file-b.jsonl",
+      firstMessageAt: "2026-03-01T10:00:00.000Z",
+      lastMessageAt: "2026-03-01T10:45:00.000Z",
+      entryCount: 24,
+    });
+
+    const rows = db
+      .query(
+        `SELECT status, last_message_at AS lastMessageAt, entry_count AS entryCount
+         FROM memory_conversations
+         WHERE source_file = ? AND first_message_at = ?
+         ORDER BY id ASC`,
+      )
+      .all("file-b.jsonl", "2026-03-01T10:00:00.000Z") as Array<{
+      status: string;
+      lastMessageAt: string;
+      entryCount: number;
+    }>;
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      status: "archived",
+      lastMessageAt: "2026-03-01T10:30:00.000Z",
+      entryCount: 20,
+    });
+    expect(rows[1]).toMatchObject({
+      status: "active",
+      lastMessageAt: "2026-03-01T10:45:00.000Z",
+      entryCount: 24,
+    });
   });
 });
