@@ -86,7 +86,7 @@ const DEFAULT_CONFIG: Required<VoiceConfig> = {
 /**
  * Clean text for speech (strip markdown, emojis, etc.)
  */
-function cleanForSpeech(text: string): string {
+export function cleanForSpeech(text: string): string {
   return (
     text
       // Remove code blocks entirely (including language specifiers)
@@ -119,7 +119,7 @@ function cleanForSpeech(text: string): string {
       )
       // Remove entire list lines (bullets and numbered lists — typically technical)
       .replace(/^[\s]*[-*•]\s+.*$/gm, "")
-      .replace(/^[\s]*\d+[.)]\s+.*$/gm, "")
+      .replace(/^[\s]*\d+\s*(?:[.)]|\\\.)\s+.*$/gm, "")
       // Remove URLs (often technical/not worth reading aloud)
       .replace(/https?:\/\/[^\s]+/g, "")
       // Remove file paths and technical identifiers
