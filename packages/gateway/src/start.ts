@@ -16,13 +16,19 @@ import {
 } from "@claudia/shared";
 import { existsSync, watch } from "node:fs";
 import { join } from "node:path";
-
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import {
   ExtensionHostProcess,
   type ExtensionRegistration,
   type OnCallCallback,
 } from "./extension-host";
+import {
+  acquireExtensionProcessLock,
+  renewExtensionProcessLock,
+  releaseExtensionProcessLock,
+  DEFAULT_EXTENSION_LOCK_STALE_MS,
+} from "./db/extension-locks";
 
 const log = createLogger("Startup", join(homedir(), ".claudia", "logs", "gateway.log"));
 const ROOT_DIR = join(import.meta.dir, "..", "..", "..");
@@ -75,6 +81,9 @@ const startedExtensions = new Set<string>();
 const runningExtensions = new Map<string, ExtensionHostProcess>();
 // Track in-progress spawns to prevent concurrent spawns of same extension
 const spawningExtensions = new Map<string, Promise<void>>();
+const lockedExtensions = new Set<string>();
+const GATEWAY_INSTANCE_ID = randomUUID();
+const EXTENSION_LOCK_HEARTBEAT_MS = 15_000;
 
 function resolveExtensionEntrypoint(extensionId: string): string | null {
   const entryPath = join(ROOT_DIR, "extensions", extensionId, "src", "index.ts");
@@ -106,6 +115,9 @@ async function spawnOutOfProcessExtension(
 
   // Create spawn promise
   const spawnPromise = (async () => {
+    let lockHeld = false;
+    let spawnSucceeded = false;
+
     try {
       const moduleSpec = resolveExtensionEntrypoint(id);
       if (!moduleSpec) {
@@ -114,6 +126,34 @@ async function spawnOutOfProcessExtension(
           expected: `extensions/${id}/src/index.ts`,
         });
         return;
+      }
+
+      const lock = acquireExtensionProcessLock(
+        id,
+        process.pid,
+        GATEWAY_INSTANCE_ID,
+        "starting",
+        DEFAULT_EXTENSION_LOCK_STALE_MS,
+      );
+      if (!lock.acquired) {
+        log.warn("Extension singleton lock held by another gateway; skipping spawn", {
+          id,
+          ownerPid: lock.ownerPid,
+          ownerInstanceId: lock.ownerInstanceId,
+          ownerGeneration: lock.ownerGeneration ?? null,
+        });
+        return;
+      }
+      lockHeld = true;
+      lockedExtensions.add(id);
+
+      if (lock.stolen) {
+        log.warn("Stole stale extension singleton lock", {
+          id,
+          previousOwnerPid: lock.ownerPid,
+          previousOwnerInstanceId: lock.ownerInstanceId,
+          previousOwnerGeneration: lock.ownerGeneration ?? null,
+        });
       }
 
       log.info("Spawning out-of-process extension", { id, module: moduleSpec });
@@ -142,16 +182,25 @@ async function spawnOutOfProcessExtension(
         id,
         moduleSpec,
         config,
-        (type, payload, source, connectionId, tags) =>
-          handleExtensionEvent(type, payload, source || `extension:${id}`, connectionId, tags),
-        (registration: ExtensionRegistration) => {
+        (type, payload, source, connectionId, tags, generationToken) =>
+          handleExtensionEvent(type, payload, source || `extension:${id}`, connectionId, tags, {
+            extensionId: id,
+            generationToken,
+          }),
+        (registration: ExtensionRegistration, generationToken) => {
           // Allow config-level sourceRoutes to augment extension-declared routes.
           if (sourceRoutes?.length) {
             registration.sourceRoutes = Array.from(
               new Set([...(registration.sourceRoutes || []), ...sourceRoutes]),
             );
           }
-          extensions.registerRemote(registration, host);
+          extensions.registerRemote(registration, host, generationToken);
+          renewExtensionProcessLock(
+            id,
+            process.pid,
+            GATEWAY_INSTANCE_ID,
+            generationToken ?? host.getGenerationToken() ?? null,
+          );
         },
         onCall,
         hot,
@@ -165,7 +214,12 @@ async function spawnOutOfProcessExtension(
 
       startedExtensions.add(id);
       runningExtensions.set(id, host);
+      spawnSucceeded = true;
     } finally {
+      if (lockHeld && !spawnSucceeded) {
+        releaseExtensionProcessLock(id, process.pid, GATEWAY_INSTANCE_ID);
+        lockedExtensions.delete(id);
+      }
       spawningExtensions.delete(id);
     }
   })();
@@ -252,12 +306,46 @@ async function stopExtension(id: string): Promise<void> {
     await host.kill();
     runningExtensions.delete(id);
     startedExtensions.delete(id);
+    releaseExtensionProcessLock(id, process.pid, GATEWAY_INSTANCE_ID);
+    lockedExtensions.delete(id);
     // Unregister from gateway extension manager
     extensions.unregisterRemote(id);
     log.info("Extension stopped successfully", { id });
   } catch (error) {
     log.error("Failed to stop extension", { id, error: String(error) });
   }
+}
+
+function startExtensionLockHeartbeat(): NodeJS.Timeout {
+  log.info("Starting extension singleton lock heartbeat", {
+    intervalMs: EXTENSION_LOCK_HEARTBEAT_MS,
+  });
+
+  const timer = setInterval(async () => {
+    const toStop: string[] = [];
+
+    for (const [id, host] of runningExtensions) {
+      const generation = extensions.getGeneration(id) ?? host.getGenerationToken() ?? null;
+      const renewed = renewExtensionProcessLock(id, process.pid, GATEWAY_INSTANCE_ID, generation);
+      if (!renewed) {
+        log.error("Lost extension singleton lock; scheduling stop", { id, generation });
+        toStop.push(id);
+      }
+    }
+
+    for (const id of toStop) {
+      await stopExtension(id);
+    }
+  }, EXTENSION_LOCK_HEARTBEAT_MS);
+
+  return timer;
+}
+
+function releaseAllExtensionLocks(): void {
+  for (const id of lockedExtensions) {
+    releaseExtensionProcessLock(id, process.pid, GATEWAY_INSTANCE_ID);
+  }
+  lockedExtensions.clear();
 }
 
 /**
@@ -400,5 +488,11 @@ killOrphanExtensionHosts()
     if (heartbeatTimer) {
       log.info("Extension heartbeat system started");
     }
+
+    startExtensionLockHeartbeat();
   })
   .catch((err) => log.error("Extension startup failed", { error: String(err) }));
+
+process.on("SIGINT", releaseAllExtensionLocks);
+process.on("SIGTERM", releaseAllExtensionLocks);
+process.on("exit", releaseAllExtensionLocks);

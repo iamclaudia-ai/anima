@@ -21,12 +21,17 @@ export class ExtensionManager {
   private remoteHosts = new Map<string, ExtensionHostProcess>();
   private remoteRegistrations = new Map<string, ExtensionRegistration>();
   private remoteSourceRoutes = new Map<string, ExtensionHostProcess>();
+  private remoteGenerations = new Map<string, string | null>();
 
   /**
    * Register a remote (out-of-process) extension.
    * Called when an ExtensionHostProcess sends its registration message.
    */
-  registerRemote(registration: ExtensionRegistration, host: ExtensionHostProcess): void {
+  registerRemote(
+    registration: ExtensionRegistration,
+    host: ExtensionHostProcess,
+    generationToken?: string,
+  ): void {
     // Clean up old routes if re-registering (HMR reload)
     if (this.remoteRegistrations.has(registration.id)) {
       log.info("Re-registering extension (HMR)", { id: registration.id });
@@ -40,6 +45,12 @@ export class ExtensionManager {
 
     this.remoteHosts.set(registration.id, host);
     this.remoteRegistrations.set(registration.id, registration);
+    const hostGeneration =
+      typeof (host as { getGenerationToken?: () => string | null }).getGenerationToken ===
+      "function"
+        ? host.getGenerationToken()
+        : null;
+    this.remoteGenerations.set(registration.id, generationToken ?? hostGeneration ?? null);
 
     // Register source routes for remote extension
     for (const prefix of registration.sourceRoutes) {
@@ -54,6 +65,7 @@ export class ExtensionManager {
    */
   unregisterRemote(extensionId: string): void {
     this.remoteHosts.delete(extensionId);
+    this.remoteGenerations.delete(extensionId);
     const reg = this.remoteRegistrations.get(extensionId);
     if (reg) {
       this.remoteRegistrations.delete(extensionId);
@@ -89,6 +101,16 @@ export class ExtensionManager {
    */
   getHost(extensionId: string): ExtensionHostProcess | undefined {
     return this.remoteHosts.get(extensionId);
+  }
+
+  getGeneration(extensionId: string): string | null {
+    return this.remoteGenerations.get(extensionId) ?? null;
+  }
+
+  isCurrentGeneration(extensionId: string, generationToken?: string): boolean {
+    const current = this.remoteGenerations.get(extensionId) ?? null;
+    if (!current || !generationToken) return true;
+    return current === generationToken;
   }
 
   /**
@@ -239,7 +261,13 @@ export class ExtensionManager {
     const health: Record<string, { ok: boolean; details?: Record<string, unknown> }> = {};
     // Remote extensions — report running status (async health check is separate)
     for (const [id, host] of this.remoteHosts) {
-      health[id] = { ok: host.isRunning(), details: { remote: true } };
+      health[id] = {
+        ok: host.isRunning(),
+        details: {
+          remote: true,
+          generation: this.remoteGenerations.get(id) ?? null,
+        },
+      };
     }
     return health;
   }
@@ -265,6 +293,7 @@ export class ExtensionManager {
     }
     this.remoteHosts.clear();
     this.remoteRegistrations.clear();
+    this.remoteGenerations.clear();
     this.remoteSourceRoutes.clear();
     this.sourceRoutes.clear();
   }
@@ -278,6 +307,7 @@ export class ExtensionManager {
     }
     this.remoteHosts.clear();
     this.remoteRegistrations.clear();
+    this.remoteGenerations.clear();
     this.remoteSourceRoutes.clear();
     this.sourceRoutes.clear();
   }

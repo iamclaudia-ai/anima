@@ -22,6 +22,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ExtensionManager } from "./extensions";
 import { getDb, closeDb } from "./db/index";
+import { getExtensionProcessLocks } from "./db/extension-locks";
 import { homedir } from "node:os";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
@@ -149,6 +150,7 @@ function handleExtensionEvent(
   source: string,
   connectionId?: string,
   tags?: string[],
+  meta?: { extensionId?: string; generationToken?: string },
 ): void {
   const payloadObj =
     payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
@@ -169,7 +171,18 @@ function handleExtensionEvent(
   // Determine source extension ID for loop prevention
   const sourceExtId = source?.startsWith("extension:")
     ? source.slice("extension:".length)
-    : undefined;
+    : meta?.extensionId;
+
+  if (sourceExtId && !extensions.isCurrentGeneration(sourceExtId, meta?.generationToken)) {
+    log.warn("Dropping stale extension event", {
+      type,
+      source,
+      extensionId: sourceExtId,
+      generation: meta?.generationToken ?? null,
+      currentGeneration: extensions.getGeneration(sourceExtId),
+    });
+    return;
+  }
 
   // gateway.caller routing — send only to originating connection
   if (source === "gateway.caller" && connectionId) {
@@ -536,6 +549,7 @@ const server = Bun.serve<ClientState>({
           status: "ok",
           clients: clients.size,
           extensions: extensions.getHealth(),
+          extensionLocks: getExtensionProcessLocks(),
           sourceRoutes: extensions.getSourceRoutes(),
           client: getClientHealth(),
         }),

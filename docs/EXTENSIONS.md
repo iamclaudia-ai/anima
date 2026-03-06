@@ -488,6 +488,18 @@ Each extension is directly executable. The gateway:
 
 There is no generic host shim or dynamic import layer. The extension IS the process entry point. `runExtensionHost()` (from `@claudia/extension-host`) handles the stdio protocol, console redirection, event bus bridging, parent liveness detection, and HMR lifecycle.
 
+### Singleton Host Enforcement (Gateway-Wide)
+
+The gateway enforces one live process per extension ID using DB-backed singleton locks (`extension_process_locks`):
+
+- Lock is acquired before spawn.
+- Fresh lock owned by another gateway instance blocks spawn.
+- Stale locks are stolen automatically.
+- Running hosts renew lock heartbeats.
+- If heartbeat renewal fails, the gateway stops that extension host.
+
+This applies to all extensions (voice, memory, session, etc.) without per-extension code.
+
 ### NDJSON Protocol
 
 Communication happens over stdin/stdout with newline-delimited JSON:
@@ -529,6 +541,12 @@ When extension code changes:
 6. Gateway re-registers the extension (old registration is cleaned up automatically)
 
 The `runExtensionHost()` implementation tracks stdin binding across HMR cycles via `import.meta.hot.data` to avoid duplicate listeners.
+
+### Generation Tokens and Stale Event Filtering
+
+Each host spawn has a generation token. The gateway tracks the latest token per extension and drops events coming from older generations.
+
+This prevents duplicate fanout during restart/HMR races where an older lifecycle may still emit briefly.
 
 ### Manual Restart (gateway.restart_extension)
 

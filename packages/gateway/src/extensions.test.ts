@@ -242,7 +242,9 @@ describe("ExtensionManager", () => {
       }),
     );
 
-    expect(manager.getHealth()).toEqual({ voice: { ok: false, details: { remote: true } } });
+    expect(manager.getHealth()).toEqual({
+      voice: { ok: false, details: { remote: true, generation: null } },
+    });
     await manager.killRemoteHosts();
     expect(killed).toBe(1);
     expect(manager.getSourceRoutes()).toEqual({});
@@ -258,5 +260,18 @@ describe("ExtensionManager", () => {
     manager.forceKillRemoteHosts();
     expect(forceKilled).toBe(1);
     expect(manager.getSourceRoutes()).toEqual({});
+  });
+
+  it("tracks extension generation and detects stale generation tokens", () => {
+    const manager = new ExtensionManager();
+    manager.registerRemote(
+      createRemoteRegistration({ id: "voice", sourceRoutes: [] }),
+      createRemoteHostMock(),
+      "gen-a",
+    );
+
+    expect(manager.getGeneration("voice")).toBe("gen-a");
+    expect(manager.isCurrentGeneration("voice", "gen-a")).toBe(true);
+    expect(manager.isCurrentGeneration("voice", "gen-b")).toBe(false);
   });
 });

@@ -167,6 +167,18 @@ Communication between gateway and extension processes uses NDJSON over stdio (st
 
 Extensions are config-driven from `~/.claudia/claudia.json`. The gateway resolves `extensions/<id>/src/index.ts` and starts one `ExtensionHostProcess` per enabled extension.
 
+### Extension Process Singleton + Generations
+
+The gateway now enforces a singleton host process per extension ID across gateway instances using DB-backed locks (`extension_process_locks`).
+
+- Before spawn, `start.ts` acquires the extension lock.
+- If another gateway instance holds a fresh lock, spawn is skipped.
+- Stale locks are stolen automatically.
+- A heartbeat renews each lock while the host is running.
+- If lock renewal fails, the gateway stops that extension host.
+
+Each extension host spawn also gets a generation token. The gateway tracks the current generation for each extension and drops stale events from older generations to prevent duplicate fanout during HMR/restart races.
+
 ### Extension Interface
 
 ```typescript
@@ -252,6 +264,8 @@ interface HealthCheckResponse {
   items?: Array<{ id: string; label: string; status: string }>;
 }
 ```
+
+Gateway `/health` includes extension lock diagnostics (`extensionLocks`) so Mission Control can show lock ownership and stale/contended states.
 
 ## Session Extension
 

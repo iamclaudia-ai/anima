@@ -55,15 +55,27 @@ Deep-dive into the gateway's startup, message routing, and extension communicati
 4. **Bun.serve** -- HTTP + WebSocket on single port
 5. **start.ts** (async) -- Kill orphans, spawn extension hosts
 
+The `/health` payload includes extension running status plus `extensionLocks` (singleton lock owner/heartbeat state).
+
 ### Extension Host Spawn (start.ts)
 
 ```
 For each extension in config where enabled=true:
+  0. Acquire singleton lock in extension_process_locks
   1. Resolve entrypoint: extensions/<id>/src/index.ts
   2. Spawn: bun --hot (or bun run if hot:false) extensions/<id>/src/index.ts <config-json>
   3. Wait for "register" message on stdout (10s timeout)
   4. Call extensions.registerRemote(registration, host)
+  5. Renew lock heartbeat while host is running
 ```
+
+Lock semantics:
+
+- One lock row per `extension_id`
+- Fresh lock held by another gateway instance blocks spawn
+- Stale lock is stolen automatically
+- Lock is released on extension stop / gateway shutdown
+- If lock renewal fails, the gateway stops that extension host
 
 Each extension process runs directly with `bun --hot` (native HMR) by default. Extensions with `hot: false` in config use `bun run` instead and can be restarted via `gateway.restart_extension`. The extension imports `runExtensionHost()` from `packages/extension-host` which provides the NDJSON bridge:
 
@@ -252,6 +264,8 @@ Sends to all extension hosts via stdio. Extensions subscribe with `ctx.on("sessi
 
 **Key detail**: Session events are renamed from `stream.{sessionId}.{type}` to `session.{type}` for extensions -- they don't need to know the sessionId to subscribe.
 
+**Generation guard**: each host spawn has a generation token, and the gateway tracks the current token per extension. Events from stale generations are dropped before fanout, preventing duplicate behavior during HMR/restart races.
+
 ### 3. Connection-Scoped Broadcast (voice)
 
 ```typescript
@@ -345,6 +359,8 @@ Extensions run directly as `bun --hot extensions/<id>/src/index.ts <config>`. Ea
                      |  (overwrites previous)     |
                      |                            |
 ```
+
+On host spawn/restart, generation token changes. Registration updates the current generation, and stale-generation events from older host lifecycles are ignored by the gateway.
 
 ### Auto-Restart on Crash
 

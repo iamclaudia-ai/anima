@@ -68,6 +68,8 @@ export class ExtensionHostProcess {
   private static readonly MAX_IN_FLIGHT = 50;
   /** Monotonic counter to distinguish stale exit callbacks from current process */
   private spawnGeneration = 0;
+  /** Token for current process generation, used to drop stale events/responses */
+  private generationToken: string | null = null;
 
   constructor(
     private extensionId: string,
@@ -79,8 +81,9 @@ export class ExtensionHostProcess {
       source?: string,
       connectionId?: string,
       tags?: string[],
+      generationToken?: string,
     ) => void,
-    private onRegister: (registration: ExtensionRegistration) => void,
+    private onRegister: (registration: ExtensionRegistration, generationToken?: string) => void,
     private onCall?: OnCallCallback,
     private hot: boolean = true,
   ) {}
@@ -90,6 +93,9 @@ export class ExtensionHostProcess {
    */
   async spawn(): Promise<ExtensionRegistration> {
     const configJson = JSON.stringify(this.config);
+    this.registration = null;
+    const generationToken = randomUUID();
+    this.generationToken = generationToken;
 
     log.info("Spawning extension host", {
       extensionId: this.extensionId,
@@ -113,10 +119,10 @@ export class ExtensionHostProcess {
     this.stdoutBuffer = "";
 
     if (this.proc.stdout && typeof this.proc.stdout !== "number") {
-      this.readStdout(this.proc.stdout);
+      this.readStdout(this.proc.stdout, generationToken);
     }
     if (this.proc.stderr && typeof this.proc.stderr !== "number") {
-      this.readStderr(this.proc.stderr);
+      this.readStderr(this.proc.stderr, generationToken);
     }
 
     // Capture spawn generation so handleExit can ignore stale exits
@@ -195,6 +201,10 @@ export class ExtensionHostProcess {
    */
   getRegistration(): ExtensionRegistration | null {
     return this.registration;
+  }
+
+  getGenerationToken(): string | null {
+    return this.generationToken;
   }
 
   /**
@@ -319,7 +329,10 @@ export class ExtensionHostProcess {
     }
   }
 
-  private async readStdout(stdout: ReadableStream<Uint8Array>): Promise<void> {
+  private async readStdout(
+    stdout: ReadableStream<Uint8Array>,
+    generationToken: string,
+  ): Promise<void> {
     const reader = stdout.getReader();
     const decoder = new TextDecoder();
 
@@ -336,7 +349,7 @@ export class ExtensionHostProcess {
           this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
 
           if (line.length > 0) {
-            this.handleLine(line);
+            this.handleLine(line, generationToken);
           }
         }
       }
@@ -345,7 +358,10 @@ export class ExtensionHostProcess {
     }
   }
 
-  private async readStderr(stderr: ReadableStream<Uint8Array>): Promise<void> {
+  private async readStderr(
+    stderr: ReadableStream<Uint8Array>,
+    generationToken: string,
+  ): Promise<void> {
     const reader = stderr.getReader();
     const decoder = new TextDecoder();
 
@@ -363,7 +379,11 @@ export class ExtensionHostProcess {
     }
   }
 
-  private handleLine(line: string): void {
+  private handleLine(line: string, generationToken?: string): void {
+    if (generationToken && this.generationToken && this.generationToken !== generationToken) {
+      return;
+    }
+
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(line);
@@ -385,7 +405,7 @@ export class ExtensionHostProcess {
         name: this.registration.name,
         methods: this.registration.methods.map((m) => m.name),
       });
-      this.onRegister(this.registration);
+      this.onRegister(this.registration, generationToken);
       if (this.registrationResolve) {
         this.registrationResolve(this.registration);
         this.registrationResolve = null;
@@ -405,7 +425,7 @@ export class ExtensionHostProcess {
       }
     } else if (msgType === "call") {
       // Extension wants to call another extension via gateway hub
-      this.handleCall(msg);
+      this.handleCall(msg, generationToken);
     } else if (msgType === "event") {
       // Extension emitted an event — forward to gateway (with envelope metadata)
       this.onEvent(
@@ -414,6 +434,7 @@ export class ExtensionHostProcess {
         msg.source as string | undefined,
         msg.connectionId as string | undefined,
         msg.tags as string[] | undefined,
+        generationToken,
       );
     } else if (msgType === "error") {
       // Fatal error from host
@@ -427,7 +448,11 @@ export class ExtensionHostProcess {
   /**
    * Handle a ctx.call() from the extension → route through gateway hub → send call_res back.
    */
-  private async handleCall(msg: Record<string, unknown>): Promise<void> {
+  private async handleCall(msg: Record<string, unknown>, generationToken?: string): Promise<void> {
+    if (generationToken && this.generationToken && this.generationToken !== generationToken) {
+      return;
+    }
+
     const callId = msg.id as string;
     const method = msg.method as string;
     const params = (msg.params as Record<string, unknown>) || {};
