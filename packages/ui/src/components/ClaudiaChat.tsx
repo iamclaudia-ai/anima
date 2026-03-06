@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Transition } from "@headlessui/react";
 import { BridgeContext, useBridge } from "../bridge";
 import type { PlatformBridge } from "../bridge";
@@ -91,7 +91,14 @@ function ChatInner({
     });
   }, []);
 
-  const voiceTags = useMemo(() => (voiceEnabled ? ["voice.speak"] : undefined), [voiceEnabled]);
+  const voiceEnabledRef = useRef(voiceEnabled);
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+  }, [voiceEnabled]);
+
+  const getVoiceTags = useCallback(() => {
+    return voiceEnabledRef.current ? (["voice.speak"] as string[]) : undefined;
+  }, []);
   const shouldShowThinkingPanel = ENABLE_THINKING_TUNER
     ? thinkingVisible
     : gateway.isQuerying || gateway.isCompacting;
@@ -120,22 +127,22 @@ function ChatInner({
       setInput(text);
       // Auto-send after a tick so the input renders first
       setTimeout(() => {
-        gateway.sendPrompt(text, [], voiceTags);
+        gateway.sendPrompt(text, [], getVoiceTags());
         setInput("");
         bridge.saveDraft("");
       }, 0);
     });
-  }, [bridge, gateway]);
+  }, [bridge, gateway, getVoiceTags]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
 
-    gateway.sendPrompt(input, attachments, voiceTags);
+    gateway.sendPrompt(input, attachments, getVoiceTags());
     setInput("");
     setAttachments([]);
     bridge.saveDraft("");
-  }, [input, attachments, gateway, bridge, voiceTags]);
+  }, [input, attachments, gateway, bridge, getVoiceTags]);
 
   const handleInputChange = useCallback((value: string) => {
     setInput(value);
@@ -144,9 +151,9 @@ function ChatInner({
   /** For interactive tools (AskUserQuestion, ExitPlanMode) to send messages */
   const handleToolMessage = useCallback(
     (text: string) => {
-      gateway.sendPrompt(text, [], voiceTags);
+      gateway.sendPrompt(text, [], getVoiceTags());
     },
-    [gateway, voiceTags],
+    [gateway, getVoiceTags],
   );
 
   /** For interactive tools to send tool_result directly */

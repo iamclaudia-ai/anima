@@ -60,6 +60,8 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
   const isPlayingRef = useRef(false);
   const isStreamingRef = useRef(false);
   const playbackCursorRef = useRef(0);
+  const currentStreamIdRef = useRef<string | null>(null);
+  const streamGenerationRef = useRef(0);
 
   /** Ensure AudioContext is initialized and resumed */
   const ensureAudioContext = useCallback((): AudioContext => {
@@ -83,6 +85,19 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
   }, []);
 
   const chunkCounterRef = useRef(0);
+
+  const clearScheduledSources = useCallback(() => {
+    for (const source of activeSourcesRef.current) {
+      try {
+        source.stop();
+      } catch {
+        // no-op
+      }
+    }
+    activeSourcesRef.current.clear();
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+  }, []);
 
   const scheduleBuffer = useCallback(
     (buffer: AudioBuffer) => {
@@ -117,15 +132,9 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
   /** Stop playback and clear all scheduled sources */
   const stop = useCallback(() => {
-    for (const source of activeSourcesRef.current) {
-      try {
-        source.stop();
-      } catch {
-        // no-op
-      }
-    }
-    activeSourcesRef.current.clear();
-
+    clearScheduledSources();
+    currentStreamIdRef.current = null;
+    streamGenerationRef.current += 1;
     isPlayingRef.current = false;
     isStreamingRef.current = false;
     playbackCursorRef.current = 0;
@@ -133,7 +142,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     setIsStreaming(false);
 
     gateway.sendRequest("voice.stop");
-  }, [gateway]);
+  }, [clearScheduledSources, gateway]);
 
   // Subscribe to voice events
   useEffect(() => {
@@ -143,6 +152,15 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       if (event === "voice.stream_start") {
         const ctx = ensureAudioContext();
         const streamId = (data.streamId as string) || "?";
+        const prevStreamId = currentStreamIdRef.current;
+
+        if (prevStreamId !== streamId) {
+          clearScheduledSources();
+          streamGenerationRef.current += 1;
+          playbackCursorRef.current = ctx.currentTime + 0.02;
+        }
+
+        currentStreamIdRef.current = streamId;
 
         isStreamingRef.current = true;
         setIsStreaming(true);
@@ -157,9 +175,11 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       if (event === "voice.audio_chunk") {
         const audio = data.audio as string | undefined;
         const format = data.format as string | undefined;
+        const streamId = data.streamId as string | undefined;
         if (!audio) return;
-        // Play all audio chunks regardless of streamId — sentences from
-        // previous streams should continue playing seamlessly.
+        if (!streamId || streamId !== currentStreamIdRef.current) return;
+
+        const generation = streamGenerationRef.current;
 
         const ctx = ensureAudioContext();
         const arrayBuffer = base64ToArrayBuffer(audio);
@@ -168,6 +188,8 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
           void ctx
             .decodeAudioData(arrayBuffer.slice(0))
             .then((buffer) => {
+              if (generation !== streamGenerationRef.current) return;
+              if (streamId !== currentStreamIdRef.current) return;
               scheduleBuffer(buffer);
             })
             .catch((err) => {
@@ -182,21 +204,20 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
       if (event === "voice.stream_end") {
         const streamId = (data.streamId as string) || "?";
+        if (streamId !== currentStreamIdRef.current) return;
+
         console.log(
           `[Audio] STREAM_END id=${streamId} aborted=${data.aborted ?? false} activeSources=${activeSourcesRef.current.size}`,
         );
-        // Only mark streaming as done if this wasn't an intermediate stream_end
-        // (a new stream_start may have already fired). Check aborted flag for
-        // explicit stop requests.
         const aborted = data.aborted as boolean | undefined;
+        isStreamingRef.current = false;
+        setIsStreaming(false);
+        currentStreamIdRef.current = null;
+
         if (aborted) {
-          isStreamingRef.current = false;
-          if (!isPlayingRef.current && activeSourcesRef.current.size === 0) {
-            setIsStreaming(false);
-          }
+          streamGenerationRef.current += 1;
+          clearScheduledSources();
         }
-        // For non-aborted stream_end, let isStreaming stay true — it will
-        // clear naturally when the last AudioBufferSourceNode finishes.
         return;
       }
 
@@ -208,12 +229,17 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         const ctx = ensureAudioContext();
         const arrayBuffer = base64ToArrayBuffer(audioData);
 
+        currentStreamIdRef.current = null;
+        streamGenerationRef.current += 1;
+        clearScheduledSources();
         isStreamingRef.current = true;
         setIsStreaming(true);
+        const generation = streamGenerationRef.current;
 
         void ctx
           .decodeAudioData(arrayBuffer.slice(0))
           .then((buffer) => {
+            if (generation !== streamGenerationRef.current) return;
             scheduleBuffer(buffer);
           })
           .catch((err) => {
@@ -221,26 +247,38 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
           });
       }
     });
-  }, [gateway, ensureAudioContext, scheduleBuffer]);
+  }, [clearScheduledSources, gateway, ensureAudioContext, scheduleBuffer]);
+
+  // Resume AudioContext when tab becomes visible (browser suspends it when backgrounded)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === "visible" &&
+        audioContextRef.current?.state === "suspended"
+      ) {
+        void audioContextRef.current.resume().then(() => {
+          console.log("[Audio] AudioContext resumed after tab became visible");
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   // Cleanup AudioContext on unmount
   useEffect(() => {
     return () => {
-      for (const source of activeSourcesRef.current) {
-        try {
-          source.stop();
-        } catch {
-          // no-op
-        }
-      }
-      activeSourcesRef.current.clear();
+      clearScheduledSources();
 
       if (audioContextRef.current) {
         void audioContextRef.current.close();
         audioContextRef.current = null;
       }
     };
-  }, []);
+  }, [clearScheduledSources]);
 
   return { isPlaying, isStreaming, stop };
 }
