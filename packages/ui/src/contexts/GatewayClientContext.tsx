@@ -24,27 +24,27 @@ export function GatewayClientProvider({
   autoConnect = true,
 }: GatewayClientProviderProps) {
   const resolvedUrl = useMemo(() => resolveGatewayUrl(url), [url]);
-  const [client, setClient] = useState<GatewayClient | null>(null);
+  const client = useMemo(
+    () => createGatewayClient({ url: resolvedUrl, requestTimeoutMs }),
+    [resolvedUrl, requestTimeoutMs],
+  );
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const next = createGatewayClient({ url: resolvedUrl, requestTimeoutMs });
-    setClient(next);
-    const unsubscribeConnection = next.onConnection(setIsConnected);
+    const unsubscribeConnection = client.onConnection(setIsConnected);
 
     if (autoConnect) {
-      void next.connect().catch(() => {
+      void client.connect().catch(() => {
         setIsConnected(false);
       });
     }
 
     return () => {
       unsubscribeConnection();
-      next.disconnect();
-      setClient(null);
+      client.disconnect();
       setIsConnected(false);
     };
-  }, [resolvedUrl, requestTimeoutMs, autoConnect]);
+  }, [client, autoConnect]);
 
   const value = useMemo<GatewayClientContextValue>(
     () => ({ client, isConnected, resolvedUrl }),
