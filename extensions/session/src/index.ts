@@ -47,6 +47,18 @@ import {
 
 const log = createLogger("SessionExt", join(homedir(), ".claudia", "logs", "session.log"));
 
+interface AgentHostSessionInfo {
+  id: string;
+  cwd: string;
+  model: string;
+  isActive: boolean;
+  isProcessRunning: boolean;
+  createdAt: string;
+  lastActivity: string;
+  healthy: boolean;
+  stale: boolean;
+}
+
 // ── Session Discovery ────────────────────────────────────────
 
 interface SessionIndexEntry {
@@ -823,7 +835,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }
 
       case "session.health_check": {
-        return health();
+        return healthCheckDetailed();
       }
 
       default:
@@ -842,6 +854,64 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       metrics: [{ label: "Agent Host", value: agentHostConnected ? "connected" : "disconnected" }],
       actions: [],
       items: [],
+    };
+  }
+
+  async function healthCheckDetailed(): Promise<HealthCheckResponse> {
+    const agentHostConnected = agentClient.isConnected;
+    if (!agentHostConnected) {
+      return {
+        ok: false,
+        status: "degraded",
+        label: "Sessions",
+        metrics: [{ label: "Agent Host", value: "disconnected" }],
+        actions: [],
+        items: [],
+      };
+    }
+
+    let sessions: AgentHostSessionInfo[] = [];
+    try {
+      sessions = (await agentClient.list()) as AgentHostSessionInfo[];
+    } catch {
+      return {
+        ok: false,
+        status: "degraded",
+        label: "Sessions",
+        metrics: [
+          { label: "Agent Host", value: "connected" },
+          { label: "Sessions", value: "unavailable" },
+        ],
+        actions: [],
+        items: [],
+      };
+    }
+
+    const activeCount = sessions.filter((s) => s.isActive).length;
+    const runningCount = sessions.filter((s) => s.isProcessRunning).length;
+    const staleCount = sessions.filter((s) => s.stale).length;
+
+    return {
+      ok: true,
+      status: "healthy",
+      label: "Sessions",
+      metrics: [
+        { label: "Agent Host", value: "connected" },
+        { label: "Active Sessions", value: activeCount },
+        { label: "Running SDK", value: runningCount },
+        { label: "Stale", value: staleCount },
+      ],
+      actions: [],
+      items: sessions.map((session) => ({
+        id: session.id,
+        label: session.cwd || session.id,
+        status: !session.isActive ? "inactive" : session.stale ? "stale" : "healthy",
+        details: {
+          model: session.model || "unknown",
+          running: session.isProcessRunning ? "yes" : "no",
+          lastActivity: session.lastActivity || "n/a",
+        },
+      })),
     };
   }
 

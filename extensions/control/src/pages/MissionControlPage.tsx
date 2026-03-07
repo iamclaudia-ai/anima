@@ -24,6 +24,53 @@ interface ExtensionHealth {
   error?: string;
 }
 
+function normalizeHealthResponse(extension: ExtensionInfo, payload: unknown): HealthCheckResponse {
+  const raw = (payload ?? {}) as Record<string, unknown>;
+  const status = typeof raw.status === "string" ? raw.status : "error";
+  const label =
+    typeof raw.label === "string" && raw.label.trim().length > 0 ? raw.label : extension.name;
+
+  const metrics = Array.isArray(raw.metrics)
+    ? (raw.metrics as HealthCheckResponse["metrics"])
+    : buildFallbackMetrics(raw);
+  const actions = Array.isArray(raw.actions)
+    ? (raw.actions as HealthAction[])
+    : ([] as HealthAction[]);
+  const items = Array.isArray(raw.items) ? (raw.items as HealthItem[]) : ([] as HealthItem[]);
+  const ok = typeof raw.ok === "boolean" ? raw.ok : status !== "error";
+
+  return {
+    ok,
+    status,
+    label,
+    metrics,
+    actions,
+    items,
+  };
+}
+
+function buildFallbackMetrics(raw: Record<string, unknown>) {
+  const metrics: Array<{ label: string; value: string | number }> = [];
+
+  if (typeof raw.message === "string" && raw.message.trim().length > 0) {
+    metrics.push({ label: "Message", value: raw.message });
+  }
+
+  if (typeof raw.uptime === "number") {
+    metrics.push({ label: "Uptime", value: `${Math.round(raw.uptime)}s` });
+  }
+
+  if (raw.stats && typeof raw.stats === "object") {
+    for (const [key, value] of Object.entries(raw.stats as Record<string, unknown>)) {
+      if (typeof value === "string" || typeof value === "number") {
+        metrics.push({ label: key, value });
+      }
+    }
+  }
+
+  return metrics;
+}
+
 // ── Status Dot Component ─────────────────────────────────────
 
 function StatusDot({ status }: { status: string }) {
@@ -75,7 +122,9 @@ function HealthCard({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <StatusDot status={health.status} />
-          <h3 className="text-sm font-medium text-zinc-200">{health.label}</h3>
+          <h3 className="text-sm font-medium text-zinc-200">
+            {health.label || data.extension.name}
+          </h3>
           <span className="text-xs text-zinc-500 capitalize">{health.status}</span>
         </div>
         <div className="flex gap-2">
@@ -219,7 +268,8 @@ export function MissionControlPage() {
       const results = await Promise.allSettled(
         healthExtensions.map(async (ext: ExtensionInfo) => {
           const healthMethod = ext.methods.find((m: string) => m.endsWith(".health_check"))!;
-          const health = await request<HealthCheckResponse>(healthMethod);
+          const payload = await request<unknown>(healthMethod);
+          const health = normalizeHealthResponse(ext, payload);
           return { extension: ext, health } as ExtensionHealth;
         }),
       );

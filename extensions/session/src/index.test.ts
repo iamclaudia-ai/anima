@@ -393,14 +393,19 @@ describe("session extension", () => {
       ok: boolean;
       label: string;
       status: string;
-      metrics?: Array<{ label: string; value: string }>;
-      items?: Array<{ id: string }>;
+      metrics?: Array<{ label: string; value: string | number }>;
+      items?: Array<{ id: string; label: string; status: string }>;
     };
     expect(health.ok).toBe(true);
     expect(health.label).toBe("Sessions");
     expect(health.status).toBe("healthy");
     expect(health.metrics?.[0]).toEqual({ label: "Agent Host", value: "connected" });
-    expect(health.items).toEqual([]);
+    expect(health.items?.length).toBe(1);
+    expect(health.items?.[0]).toMatchObject({
+      id: sessionId,
+      label: "/repo/project",
+      status: "healthy",
+    });
 
     await ext.stop();
   });
