@@ -44,6 +44,18 @@ import {
   deleteWorkspace,
   closeDb,
 } from "./workspace";
+import {
+  closeSessionDb,
+  getStoredSession,
+  getWorkspaceActiveSession,
+  listTaskSessions,
+  listWorkspaceSessions,
+  setWorkspaceActiveSession,
+  touchSession,
+  upsertSession,
+  type RuntimeStatus,
+  type StoredSession,
+} from "./session-store";
 
 const log = createLogger("SessionExt", join(homedir(), ".claudia", "logs", "session.log"));
 
@@ -241,6 +253,12 @@ function discoverSessions(cwd: string): SessionIndexEntry[] {
   return sessions;
 }
 
+function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
+  if (type === "process_started") return "running";
+  if (type === "process_ended" || type === "turn_stop") return "idle";
+  return null;
+}
+
 // ── Request context tracking ─────────────────────────────────
 
 interface RequestContext {
@@ -288,6 +306,34 @@ function mergeTags(primary: string[] | null, current: string[] | null): string[]
 function normalizeTaskMode(input?: string): TaskMode {
   if (input === "review" || input === "test") return input;
   return "general";
+}
+
+function toTaskStatus(input: string | undefined): TaskStatus {
+  if (input === "completed" || input === "failed" || input === "interrupted") return input;
+  return "running";
+}
+
+function toSessionTaskFromStored(stored: StoredSession | null): SessionTask | null {
+  if (!stored || !stored.parentSessionId) return null;
+  const metadata = stored.metadata || {};
+  const mode =
+    stored.purpose === "review" || stored.purpose === "test" ? stored.purpose : "general";
+  return {
+    taskId: stored.id,
+    sessionId: stored.parentSessionId,
+    agent: stored.agent,
+    prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
+    mode,
+    status: toTaskStatus(stored.runtimeStatus),
+    startedAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    error: typeof metadata.error === "string" ? metadata.error : undefined,
+    outputFile: typeof metadata.outputFile === "string" ? metadata.outputFile : undefined,
+    context: {
+      connectionId: typeof metadata.connectionId === "string" ? metadata.connectionId : null,
+      tags: Array.isArray(metadata.tags) ? (metadata.tags as string[]) : null,
+    },
+  };
 }
 
 // ── Extension factory ────────────────────────────────────────
@@ -396,6 +442,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         Object.keys(emitOptions).length > 0 ? emitOptions : undefined,
       );
 
+      const runtimeStatus =
+        typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
+      if (runtimeStatus) {
+        touchSession(sessionId, runtimeStatus);
+      } else {
+        touchSession(sessionId);
+      }
+
       // Accumulate response text for non-streaming callers
       if (payload.type === "content_block_delta") {
         const delta = (payload as { delta?: { type?: string; text?: string } }).delta;
@@ -410,7 +464,39 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     const listener = (event: { taskId: string; eventName: string; [key: string]: unknown }) => {
       if (!ctx) return;
       const taskId = event.taskId;
-      const task = tasks.get(taskId);
+      let task = tasks.get(taskId);
+      if (!task) {
+        const stored = getStoredSession(taskId);
+        if (stored?.parentSessionId) {
+          const metadata = stored.metadata || {};
+          task = {
+            taskId: stored.id,
+            sessionId: stored.parentSessionId,
+            agent: stored.agent,
+            prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
+            mode:
+              stored.purpose === "review" || stored.purpose === "test" ? stored.purpose : "general",
+            status:
+              stored.runtimeStatus === "completed" ||
+              stored.runtimeStatus === "failed" ||
+              stored.runtimeStatus === "interrupted"
+                ? stored.runtimeStatus
+                : "running",
+            startedAt: stored.createdAt,
+            updatedAt: stored.updatedAt,
+            error: typeof metadata.error === "string" ? metadata.error : undefined,
+            outputFile: typeof metadata.outputFile === "string" ? metadata.outputFile : undefined,
+            context: {
+              connectionId:
+                typeof metadata.connectionId === "string"
+                  ? (metadata.connectionId as string)
+                  : null,
+              tags: Array.isArray(metadata.tags) ? (metadata.tags as string[]) : null,
+            },
+          };
+          tasks.set(taskId, task);
+        }
+      }
       if (!task) return;
 
       const hostEventType = String(event.type || "");
@@ -428,6 +514,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         task.outputFile = payload.outputFile;
       }
       task.updatedAt = new Date().toISOString();
+      const taskStored = getStoredSession(task.taskId);
+      const parentStored = getStoredSession(task.sessionId);
+      const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
+      if (workspaceId) {
+        upsertSession({
+          id: task.taskId,
+          workspaceId,
+          ccSessionId: task.taskId,
+          agent: task.agent,
+          purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
+          parentSessionId: task.sessionId,
+          runtimeStatus: task.status === "running" ? "running" : task.status,
+          metadata: {
+            prompt: task.prompt,
+            outputFile: task.outputFile,
+            error: task.error,
+            connectionId: task.context.connectionId,
+            tags: task.context.tags,
+          },
+        });
+      }
 
       const mappedType =
         hostEventType === "start" ||
@@ -507,7 +614,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     },
     {
       name: "session.list_sessions",
-      description: "List sessions for a workspace (reads sessions-index.json)",
+      description: "List sessions for a workspace (DB-backed metadata, filesystem-enriched)",
       inputSchema: z.object({
         cwd: z.string().describe("Workspace CWD"),
       }),
@@ -701,6 +808,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           thinking,
           effort,
         });
+        const workspaceResult = getOrCreateWorkspace(cwd);
         const result = await agentClient.createSession({
           cwd,
           agent,
@@ -709,6 +817,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           thinking,
           effort,
         });
+        upsertSession({
+          id: result.sessionId,
+          workspaceId: workspaceResult.workspace.id,
+          ccSessionId: result.sessionId,
+          agent,
+          purpose: "chat",
+          runtimeStatus: "idle",
+        });
+        setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
         log.info("Session created", { sessionId: sid(result.sessionId), cwd });
         return result;
       }
@@ -728,6 +845,22 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           source: source || "web",
           prompt: truncate(content),
         });
+
+        const existing = getStoredSession(sessionId);
+        if (!existing && cwd) {
+          const workspaceResult = getOrCreateWorkspace(cwd);
+          upsertSession({
+            id: sessionId,
+            workspaceId: workspaceResult.workspace.id,
+            ccSessionId: sessionId,
+            agent,
+            purpose: "chat",
+            runtimeStatus: "idle",
+          });
+          setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
+        } else if (existing) {
+          touchSession(sessionId);
+        }
 
         // Set up request context — capture envelope data now because the extension
         // host restores currentConnectionId/currentTags after this method returns,
@@ -831,13 +964,63 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         await agentClient.close(params.sessionId as string);
         requestContexts.delete(params.sessionId as string);
         primaryContexts.delete(params.sessionId as string);
+        const existing = getStoredSession(params.sessionId as string);
+        if (existing) {
+          upsertSession({
+            id: existing.id,
+            workspaceId: existing.workspaceId,
+            ccSessionId: existing.ccSessionId,
+            agent: existing.agent,
+            purpose: existing.purpose,
+            parentSessionId: existing.parentSessionId,
+            status: "archived",
+            runtimeStatus: existing.runtimeStatus,
+            title: existing.title,
+            summary: existing.summary,
+            metadata: existing.metadata,
+            previousSessionId: existing.previousSessionId,
+          });
+        }
         log.info("Session closed", { sessionId: sid(params.sessionId as string) });
         return { ok: true };
       }
 
       case "session.list_sessions": {
         const cwd = params.cwd as string;
-        const sessions = discoverSessions(cwd);
+        const workspaceResult = getOrCreateWorkspace(cwd);
+        const discovered = discoverSessions(cwd);
+        for (const entry of discovered) {
+          if (!entry.sessionId) continue;
+          upsertSession({
+            id: entry.sessionId,
+            workspaceId: workspaceResult.workspace.id,
+            ccSessionId: entry.sessionId,
+            agent: "claude",
+            purpose: "chat",
+            runtimeStatus: "idle",
+            metadata: {
+              messageCount: entry.messageCount,
+              firstPrompt: entry.firstPrompt,
+              gitBranch: entry.gitBranch,
+            },
+            lastActivity: entry.modified || entry.created,
+          });
+        }
+        let sessions: Array<{
+          sessionId: string;
+          created?: string;
+          modified?: string;
+          messageCount?: number;
+          firstPrompt?: string;
+          gitBranch?: string;
+        }>;
+        if (discovered.length > 0) {
+          sessions = discovered;
+        } else if (workspaceResult.created) {
+          sessions = [];
+        } else {
+          sessions = listWorkspaceSessions(workspaceResult.workspace.id);
+        }
         log.info("Listed sessions", { cwd, count: sessions.length });
         return {
           sessions: sessions.sort((a, b) => {
@@ -878,20 +1061,45 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const sessionId = params.sessionId as string;
         const cwd = params.cwd as string;
         const model = params.model as string | undefined;
+        const workspaceResult = getOrCreateWorkspace(cwd);
 
         log.info("Switching session", { sessionId: sid(sessionId), cwd, model });
         // Agent-host handles resume internally via prompt with cwd
         await agentClient.prompt(sessionId, "", cwd);
+        const existing = getStoredSession(sessionId);
+        upsertSession({
+          id: sessionId,
+          workspaceId: workspaceResult.workspace.id,
+          ccSessionId: existing?.ccSessionId || sessionId,
+          agent: existing?.agent || "claude",
+          purpose: existing?.purpose || "chat",
+          runtimeStatus: "idle",
+          metadata: existing?.metadata || null,
+          previousSessionId: existing?.previousSessionId ?? null,
+        });
+        setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
         return { sessionId };
       }
 
       case "session.reset_session": {
         const cwd = params.cwd as string;
+        const workspaceResult = getOrCreateWorkspace(cwd);
+        const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
         log.info("Resetting session", { cwd });
         const result = await agentClient.createSession({
           cwd,
           model: params.model as string | undefined,
         });
+        upsertSession({
+          id: result.sessionId,
+          workspaceId: workspaceResult.workspace.id,
+          ccSessionId: result.sessionId,
+          agent: "claude",
+          purpose: "chat",
+          runtimeStatus: "idle",
+          previousSessionId,
+        });
+        setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
         return result;
       }
 
@@ -959,6 +1167,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         })) as { taskId: string; outputFile?: string; status?: string; message?: string };
 
         const nowIso = new Date().toISOString();
+        const parentSession = getStoredSession(sessionId);
+        const workspaceId =
+          parentSession?.workspaceId || (cwd ? getOrCreateWorkspace(cwd).workspace.id : null);
+        if (!workspaceId) {
+          throw new Error(`Unable to resolve workspace for parent session ${sessionId}`);
+        }
         const task: SessionTask = {
           taskId: result.taskId,
           sessionId,
@@ -975,6 +1189,22 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           },
         };
         tasks.set(task.taskId, task);
+        upsertSession({
+          id: task.taskId,
+          workspaceId,
+          ccSessionId: task.taskId,
+          agent: task.agent,
+          purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
+          parentSessionId: task.sessionId,
+          runtimeStatus: "running",
+          metadata: {
+            prompt: task.prompt,
+            outputFile: task.outputFile,
+            connectionId: task.context.connectionId,
+            tags: task.context.tags,
+          },
+          lastActivity: nowIso,
+        });
 
         return {
           taskId: task.taskId,
@@ -991,11 +1221,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const result = (await agentClient.getTask(params.taskId as string)) as {
           task?: SessionTask | null;
         };
-        const task = (result?.task || null) as SessionTask | null;
-        if (task) {
-          tasks.set(task.taskId, task);
+        const hostTask = (result?.task || null) as SessionTask | null;
+        if (hostTask) {
+          tasks.set(hostTask.taskId, hostTask);
         }
-        return { task };
+        const storedTask = toSessionTaskFromStored(getStoredSession(params.taskId as string));
+        return { task: hostTask || storedTask || null };
       }
 
       case "session.list_tasks": {
@@ -1004,16 +1235,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           status: params.status as TaskStatus | undefined,
           agent: params.agent as string | undefined,
         })) as { tasks?: SessionTask[] };
-        const listed = result.tasks || [];
-        for (const task of listed) {
+        const hostTasks = result.tasks || [];
+        for (const task of hostTasks) {
           tasks.set(task.taskId, task);
         }
-        return { tasks: listed };
+        const stored = listTaskSessions({
+          parentSessionId: params.sessionId as string | undefined,
+          status: params.status as TaskStatus | undefined,
+          agent: params.agent as string | undefined,
+        })
+          .map((row) => toSessionTaskFromStored(row))
+          .filter((row): row is SessionTask => !!row);
+
+        const merged = new Map<string, SessionTask>();
+        for (const task of stored) merged.set(task.taskId, task);
+        for (const task of hostTasks) merged.set(task.taskId, task);
+        return { tasks: Array.from(merged.values()) };
       }
 
       case "session.interrupt_task": {
         const taskId = params.taskId as string;
-        const task = tasks.get(taskId);
+        const task = tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
         if (!task) {
           return { ok: false, error: "Task not found", taskId };
         }
@@ -1021,6 +1263,23 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         if (ok) {
           task.status = "interrupted";
           task.updatedAt = new Date().toISOString();
+          const stored = getStoredSession(taskId);
+          if (stored) {
+            upsertSession({
+              id: stored.id,
+              workspaceId: stored.workspaceId,
+              ccSessionId: stored.ccSessionId,
+              agent: stored.agent,
+              purpose: stored.purpose,
+              parentSessionId: stored.parentSessionId,
+              runtimeStatus: "interrupted",
+              status: stored.status,
+              title: stored.title,
+              summary: stored.summary,
+              metadata: { ...(stored.metadata || {}), interruptedAt: task.updatedAt },
+              previousSessionId: stored.previousSessionId,
+            });
+          }
         }
         return { ok, taskId };
       }
@@ -1194,6 +1453,28 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       wireTaskEventBridge();
       try {
         await agentClient.connect();
+        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
+        for (const session of activeSessions) {
+          if (!session.cwd) continue;
+          const workspaceResult = getOrCreateWorkspace(session.cwd);
+          const runtimeStatus: RuntimeStatus = session.isProcessRunning
+            ? session.stale
+              ? "stalled"
+              : "running"
+            : "idle";
+          upsertSession({
+            id: session.id,
+            workspaceId: workspaceResult.workspace.id,
+            ccSessionId: session.id,
+            agent: "claude",
+            purpose: "chat",
+            runtimeStatus,
+            lastActivity: session.lastActivity,
+          });
+          if (session.isActive) {
+            setWorkspaceActiveSession(workspaceResult.workspace.id, session.id);
+          }
+        }
         log.info("Session extension started 🚀", { url: agentHostConfig.url });
       } catch (error) {
         log.warn("Failed to connect to agent-host, will retry in background", {
@@ -1213,6 +1494,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       taskUnsubscribers.length = 0;
       tasks.clear();
       agentClient.disconnect();
+      closeSessionDb();
       closeDb();
       log.info("Session extension stopped");
     },
