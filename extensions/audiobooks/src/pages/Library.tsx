@@ -29,7 +29,7 @@ export function Library() {
   useEffect(() => {
     async function loadBooks() {
       try {
-        const result = (await call("audiobooks.get_books", {})) as Audiobook[];
+        const result = (await call("audiobooks.list_books", {})) as Audiobook[];
         setBooks(result);
       } catch (error) {
         console.error("[Library] Failed to load audiobooks:", error);

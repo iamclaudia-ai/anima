@@ -50,7 +50,7 @@ let config: { paths: string[] };
 /**
  * Scan configured paths for audiobook directories
  */
-async function discoverAudiobooks(): Promise<AudiobookMetadata[]> {
+async function listBooks(): Promise<AudiobookMetadata[]> {
   const books: AudiobookMetadata[] = [];
 
   for (const configPath of config.paths) {
@@ -98,7 +98,7 @@ async function discoverAudiobooks(): Promise<AudiobookMetadata[]> {
  * Get metadata for a specific audiobook
  */
 async function getBook(bookId: string): Promise<AudiobookMetadata | null> {
-  const books = await discoverAudiobooks();
+  const books = await listBooks();
   return books.find((b) => b.id === bookId) || null;
 }
 
@@ -152,8 +152,8 @@ export default function createAudiobooksExtension(): ClaudiaExtension {
     name: "Audiobooks",
     methods: [
       {
-        name: "audiobooks.get_books",
-        description: "Get all available audiobooks",
+        name: "audiobooks.list_books",
+        description: "List all available audiobooks",
         inputSchema: z.object({}),
       },
       {
@@ -181,7 +181,7 @@ export default function createAudiobooksExtension(): ClaudiaExtension {
       ctx.log.info("Audiobooks extension started", { paths: config.paths });
 
       // Discover books on startup
-      const books = await discoverAudiobooks();
+      const books = await listBooks();
       ctx.log.info(`Discovered ${books.length} audiobooks`);
     },
 
@@ -191,8 +191,8 @@ export default function createAudiobooksExtension(): ClaudiaExtension {
 
     async handleMethod(method, params) {
       switch (method) {
-        case "audiobooks.get_books":
-          return await discoverAudiobooks();
+        case "audiobooks.list_books":
+          return await listBooks();
 
         case "audiobooks.get_book": {
           const { bookId } = params as { bookId: string };
