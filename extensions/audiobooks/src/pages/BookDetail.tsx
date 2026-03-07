@@ -66,7 +66,7 @@ export function BookDetail() {
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: "900px", margin: "0 auto" }}>
+    <div style={{ padding: "1.5rem", maxWidth: "700px", margin: "0 auto" }}>
       {/* Back Button */}
       <Link
         to="/audiobooks"
@@ -80,26 +80,26 @@ export function BookDetail() {
         ← Back to Library
       </Link>
 
-      {/* Book Header */}
-      <div style={{ display: "flex", gap: "2rem", marginBottom: "2rem" }}>
-        {/* Cover */}
-        <div style={{ flexShrink: 0 }}>
+      {/* Book Header - Single Column */}
+      <div style={{ marginBottom: "2rem" }}>
+        {/* Cover - Centered */}
+        <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
           <img
             src={`/audiobooks/static/${book.id}/${book.coverImage}`}
             alt={book.title}
             style={{
-              width: "200px",
-              height: "300px",
-              objectFit: "cover",
-              borderRadius: "8px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+              width: "100%",
+              maxWidth: "280px",
+              height: "auto",
+              borderRadius: "12px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
             }}
           />
         </div>
 
-        {/* Book Info */}
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: "2rem", fontWeight: "600", marginBottom: "0.5rem" }}>
+        {/* Book Info - Full Width */}
+        <div>
+          <h1 style={{ fontSize: "1.875rem", fontWeight: "600", marginBottom: "0.5rem" }}>
             {book.title}
           </h1>
           {book.subtitle && (

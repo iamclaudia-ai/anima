@@ -40,6 +40,8 @@ interface AudiobookChapter {
   title: string;
   audioUrl: string;
   transcript: string;
+  coverImageUrl?: string;
+  bookTitle?: string;
 }
 
 let ctx: ExtensionContext;
@@ -139,6 +141,8 @@ async function getChapter(bookId: string, chapterNum: number): Promise<Audiobook
     title: chapterMeta.title,
     audioUrl: `/audiobooks/static/${bookId}/${chapterMeta.audioFile}`,
     transcript,
+    coverImageUrl: book.coverImage ? `/audiobooks/static/${bookId}/${book.coverImage}` : undefined,
+    bookTitle: book.title,
   };
 }
 
