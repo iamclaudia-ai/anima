@@ -521,7 +521,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         upsertSession({
           id: task.taskId,
           workspaceId,
-          ccSessionId: task.taskId,
+          providerSessionId: task.taskId,
           agent: task.agent,
           purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
           parentSessionId: task.sessionId,
@@ -820,7 +820,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         upsertSession({
           id: result.sessionId,
           workspaceId: workspaceResult.workspace.id,
-          ccSessionId: result.sessionId,
+          providerSessionId: result.sessionId,
           agent,
           purpose: "chat",
           runtimeStatus: "idle",
@@ -852,7 +852,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           upsertSession({
             id: sessionId,
             workspaceId: workspaceResult.workspace.id,
-            ccSessionId: sessionId,
+            providerSessionId: sessionId,
             agent,
             purpose: "chat",
             runtimeStatus: "idle",
@@ -969,7 +969,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           upsertSession({
             id: existing.id,
             workspaceId: existing.workspaceId,
-            ccSessionId: existing.ccSessionId,
+            providerSessionId: existing.providerSessionId,
             agent: existing.agent,
             purpose: existing.purpose,
             parentSessionId: existing.parentSessionId,
@@ -994,7 +994,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           upsertSession({
             id: entry.sessionId,
             workspaceId: workspaceResult.workspace.id,
-            ccSessionId: entry.sessionId,
+            providerSessionId: entry.sessionId,
             agent: "claude",
             purpose: "chat",
             runtimeStatus: "idle",
@@ -1070,7 +1070,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         upsertSession({
           id: sessionId,
           workspaceId: workspaceResult.workspace.id,
-          ccSessionId: existing?.ccSessionId || sessionId,
+          providerSessionId: existing?.providerSessionId || sessionId,
           agent: existing?.agent || "claude",
           purpose: existing?.purpose || "chat",
           runtimeStatus: "idle",
@@ -1093,7 +1093,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         upsertSession({
           id: result.sessionId,
           workspaceId: workspaceResult.workspace.id,
-          ccSessionId: result.sessionId,
+          providerSessionId: result.sessionId,
           agent: "claude",
           purpose: "chat",
           runtimeStatus: "idle",
@@ -1192,7 +1192,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         upsertSession({
           id: task.taskId,
           workspaceId,
-          ccSessionId: task.taskId,
+          providerSessionId: task.taskId,
           agent: task.agent,
           purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
           parentSessionId: task.sessionId,
@@ -1268,7 +1268,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             upsertSession({
               id: stored.id,
               workspaceId: stored.workspaceId,
-              ccSessionId: stored.ccSessionId,
+              providerSessionId: stored.providerSessionId,
               agent: stored.agent,
               purpose: stored.purpose,
               parentSessionId: stored.parentSessionId,
@@ -1465,7 +1465,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           upsertSession({
             id: session.id,
             workspaceId: workspaceResult.workspace.id,
-            ccSessionId: session.id,
+            providerSessionId: session.id,
             agent: "claude",
             purpose: "chat",
             runtimeStatus,

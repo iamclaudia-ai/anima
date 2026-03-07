@@ -38,7 +38,7 @@ describe("session store", () => {
     upsertSession({
       id: "ses_parent",
       workspaceId: "ws_1",
-      ccSessionId: "ses_parent",
+      providerSessionId: "ses_parent",
       agent: "claude",
       purpose: "chat",
       runtimeStatus: "idle",
@@ -49,7 +49,7 @@ describe("session store", () => {
     upsertSession({
       id: "task_1",
       workspaceId: "ws_1",
-      ccSessionId: "task_1",
+      providerSessionId: "task_1",
       agent: "codex",
       purpose: "review",
       parentSessionId: "ses_parent",

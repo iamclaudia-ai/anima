@@ -12,7 +12,7 @@ export type SessionPurpose = "chat" | "task" | "review" | "test";
 interface SessionRow {
   id: string;
   workspace_id: string;
-  cc_session_id: string;
+  provider_session_id: string;
   agent: string | null;
   purpose: string | null;
   parent_session_id: string | null;
@@ -30,7 +30,7 @@ interface SessionRow {
 export interface StoredSession {
   id: string;
   workspaceId: string;
-  ccSessionId: string;
+  providerSessionId: string;
   agent: string;
   purpose: SessionPurpose;
   parentSessionId: string | null;
@@ -82,7 +82,7 @@ function toStoredSession(row: SessionRow): StoredSession {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
-    ccSessionId: row.cc_session_id,
+    providerSessionId: row.provider_session_id,
     agent: row.agent || "claude",
     purpose,
     parentSessionId: row.parent_session_id,
@@ -114,7 +114,7 @@ function ensureSessionTable(currentDb: Database): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id                  TEXT PRIMARY KEY,
       workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
-      cc_session_id       TEXT NOT NULL,
+      provider_session_id TEXT NOT NULL,
       agent               TEXT NOT NULL DEFAULT 'claude',
       purpose             TEXT NOT NULL DEFAULT 'chat',
       parent_session_id   TEXT REFERENCES sessions(id),
@@ -142,6 +142,7 @@ function ensureSessionTable(currentDb: Database): void {
   };
 
   // Backfill for legacy schemas from early migrations.
+  addColumn("provider_session_id", "provider_session_id TEXT");
   addColumn("agent", "agent TEXT NOT NULL DEFAULT 'claude'");
   addColumn("purpose", "purpose TEXT NOT NULL DEFAULT 'chat'");
   addColumn("parent_session_id", "parent_session_id TEXT REFERENCES sessions(id)");
@@ -152,9 +153,10 @@ function ensureSessionTable(currentDb: Database): void {
   addColumn("metadata_json", "metadata_json TEXT");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
 
+  currentDb.exec("UPDATE sessions SET provider_session_id = COALESCE(provider_session_id, id)");
   currentDb.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_cc ON sessions(cc_session_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_provider_session ON sessions(provider_session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_workspace_purpose ON sessions(workspace_id, purpose);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC);
@@ -187,7 +189,7 @@ export function closeSessionDb(): void {
 export function upsertSession(params: {
   id: string;
   workspaceId: string;
-  ccSessionId?: string;
+  providerSessionId?: string;
   agent?: string;
   purpose?: SessionPurpose;
   parentSessionId?: string | null;
@@ -200,7 +202,7 @@ export function upsertSession(params: {
   lastActivity?: string;
 }): void {
   const now = new Date().toISOString();
-  const ccSessionId = params.ccSessionId || params.id;
+  const providerSessionId = params.providerSessionId || params.id;
   const metadataJson =
     params.metadata === undefined ? null : params.metadata ? JSON.stringify(params.metadata) : null;
   const dbConn = getDb();
@@ -221,13 +223,13 @@ export function upsertSession(params: {
   dbConn
     .query(
       `INSERT INTO sessions (
-        id, workspace_id, cc_session_id, agent, purpose, parent_session_id,
+        id, workspace_id, provider_session_id, agent, purpose, parent_session_id,
         status, runtime_status, title, summary, metadata_json, previous_session_id,
         last_activity, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         workspace_id = excluded.workspace_id,
-        cc_session_id = excluded.cc_session_id,
+        provider_session_id = excluded.provider_session_id,
         agent = excluded.agent,
         purpose = excluded.purpose,
         parent_session_id = excluded.parent_session_id,
@@ -243,7 +245,7 @@ export function upsertSession(params: {
     .run(
       params.id,
       params.workspaceId,
-      ccSessionId,
+      providerSessionId,
       params.agent || "claude",
       params.purpose || "chat",
       params.parentSessionId ?? null,
@@ -293,7 +295,7 @@ export function updateSessionRuntime(
   upsertSession({
     id,
     workspaceId: existing.workspaceId,
-    ccSessionId: existing.ccSessionId,
+    providerSessionId: existing.providerSessionId,
     agent: existing.agent,
     purpose: existing.purpose,
     parentSessionId: existing.parentSessionId ?? null,
