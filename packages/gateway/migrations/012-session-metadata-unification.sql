@@ -1,6 +1,20 @@
 -- Up
 PRAGMA foreign_keys = OFF;
 
+-- Some existing installs have migration history with no legacy sessions table.
+-- Create a compatible empty legacy table so the copy step remains safe/idempotent.
+CREATE TABLE IF NOT EXISTS sessions (
+  id                  TEXT PRIMARY KEY,
+  workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
+  cc_session_id       TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+  title               TEXT,
+  summary             TEXT,
+  previous_session_id TEXT REFERENCES sessions(id),
+  last_activity       TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS sessions_new (
   id                  TEXT PRIMARY KEY,
   workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
