@@ -761,6 +761,12 @@ export function useChatGateway(
           );
 
           // If we don't have a session yet, auto-select the most recent one
+          // In route-scoped mode, the caller controls session selection.
+          // Never auto-select from list_sessions there.
+          if (optionsRef.current.sessionId) {
+            return;
+          }
+
           if (sessionList.length > 0 && !sessionIdRef.current) {
             const mostRecent = sessionList[0]; // already sorted by modified desc
             setSessionId(mostRecent.sessionId);
@@ -810,6 +816,10 @@ export function useChatGateway(
 
       // ── session.get_info ──
       if (method === "session.get_info") {
+        // In route-scoped mode, ignore global active-session info from other workspaces.
+        if (optionsRef.current.sessionId) {
+          return;
+        }
         if (payload.sessionId) {
           setSessionId(payload.sessionId as string);
           subscribeToSession(payload.sessionId as string);
@@ -847,6 +857,10 @@ export function useChatGateway(
       // Extract the eventType (everything after "session.{sessionId}.")
       const parts = eventName.split(".");
       if (parts[0] === "session" && parts.length >= 3) {
+        const eventSessionId = parts[1] || null;
+        if (!eventSessionId || eventSessionId !== sessionIdRef.current) {
+          return;
+        }
         const eventType = parts.slice(2).join(".");
         handleStreamEvent(eventType, (payload ?? {}) as Record<string, unknown>);
       }
@@ -899,11 +913,6 @@ export function useChatGateway(
     }
 
     console.log("Connected to Claudia Gateway");
-
-    // Fetch session info on connect
-    // Streaming events are subscribed per-session via subscribeToSession()
-    // when we learn the sessionId from create/switch/info
-    sendRequest("session.get_info");
 
     // Subscribe to voice and hook events (global, not session-scoped)
     sendRequest("gateway.subscribe", { events: [...GLOBAL_EVENT_SUBSCRIPTIONS] });
@@ -1058,6 +1067,12 @@ export function useChatGateway(
   const createNewSession = useCallback(
     (_title?: string) => {
       if (!workspace?.cwd) return;
+      if (subscribedSessionRef.current) {
+        sendRequest("gateway.unsubscribe", {
+          events: [`session.${subscribedSessionRef.current}.*`],
+        });
+        subscribedSessionRef.current = null;
+      }
       sendRequest("session.create_session", { cwd: workspace.cwd });
     },
     [sendRequest, workspace?.cwd],

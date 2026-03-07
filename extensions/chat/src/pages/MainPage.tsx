@@ -14,6 +14,35 @@ import {
   loadSessionsForWorkspace,
 } from "./helpers/main-page-gateway";
 
+function mergeSessionsPreferLocal(
+  remote: SessionInfo[],
+  local: SessionInfo[],
+  preferredSessionId?: string,
+): SessionInfo[] {
+  const merged = new Map<string, SessionInfo>();
+  for (const session of remote) merged.set(session.sessionId, session);
+  for (const session of local) {
+    if (!merged.has(session.sessionId)) merged.set(session.sessionId, session);
+  }
+
+  const list = Array.from(merged.values());
+  list.sort((a, b) => {
+    const aTime = a.modified || a.created || "";
+    const bTime = b.modified || b.created || "";
+    return bTime.localeCompare(aTime);
+  });
+
+  if (preferredSessionId) {
+    const idx = list.findIndex((s) => s.sessionId === preferredSessionId);
+    if (idx > 0) {
+      const [preferred] = list.splice(idx, 1);
+      if (preferred) list.unshift(preferred);
+    }
+  }
+
+  return list;
+}
+
 // Get latest session ID for a workspace from localStorage
 function getLatestSessionId(workspaceId: string): string | null {
   try {
@@ -126,10 +155,18 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
         const nextSessionId = payload;
         if (!nextSessionId) return;
         setActiveSessionId(nextSessionId);
+        const optimisticSession: SessionInfo = {
+          sessionId: nextSessionId,
+          created: new Date().toISOString(),
+          modified: new Date().toISOString(),
+        };
+        setSessions((prev) =>
+          mergeSessionsPreferLocal([], [optimisticSession, ...prev], nextSessionId),
+        );
         if (!activeWorkspaceRef.current) return;
         return loadSessionsForWorkspace(callGateway, activeWorkspaceRef.current.cwd).then(
           (sessionsPayload) => {
-            setSessions(sessionsPayload);
+            setSessions((prev) => mergeSessionsPreferLocal(sessionsPayload, prev, nextSessionId));
           },
         );
       })
@@ -138,7 +175,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   // Save active session to localStorage as "latest" for this workspace
   useEffect(() => {
-    if (activeSessionId && activeWorkspace && sessionId !== "latest") {
+    if (activeSessionId && activeWorkspace) {
       setLatestSessionId(activeWorkspace.id, activeSessionId);
     }
   }, [activeSessionId, activeWorkspace, sessionId]);
@@ -154,8 +191,11 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   useEffect(() => {
     // Handle "latest" session ID - resolve from localStorage or most recent session
     if (sessionId === "latest" && workspaceId) {
+      // Keep current selection stable; only resolve "latest" when no active session is set yet.
+      if (activeSessionId) return;
+
       const latestSessionId = getLatestSessionId(workspaceId);
-      if (latestSessionId && latestSessionId !== activeSessionId) {
+      if (latestSessionId) {
         // Use stored latest session
         setActiveSessionId(latestSessionId);
       } else if (!latestSessionId && sessions.length > 0) {
@@ -261,7 +301,19 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
         setSessions(
           existingSessions.length > 0
             ? existingSessions
-            : await loadSessionsForWorkspace(callGateway, newWorkspace.cwd),
+            : mergeSessionsPreferLocal(
+                await loadSessionsForWorkspace(callGateway, newWorkspace.cwd),
+                sessionIdToUse
+                  ? [
+                      {
+                        sessionId: sessionIdToUse,
+                        created: new Date().toISOString(),
+                        modified: new Date().toISOString(),
+                      },
+                    ]
+                  : [],
+                sessionIdToUse,
+              ),
         );
 
         // Close modal
