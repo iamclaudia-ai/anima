@@ -38,8 +38,11 @@ createRoot(document.getElementById("root")!).render(
   </ErrorBoundary>,
 );
 
-// Register service worker for PWA functionality
-if ("serviceWorker" in navigator) {
+// Register service worker for PWA functionality.
+// Skip SW in dev to avoid reload loops during active local rebuilds.
+if ("serviceWorker" in navigator && !import.meta.env.DEV) {
+  let reloadedForUpdate = false;
+
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/service-worker.js")
@@ -60,9 +63,8 @@ if ("serviceWorker" in navigator) {
           if (newWorker) {
             newWorker.addEventListener("statechange", () => {
               if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-                // New version available
-                console.log("New version available! Reloading...");
-                window.location.reload();
+                // New version available: let controllerchange own the single reload.
+                console.log("New version available! Waiting for activation...");
               }
             });
           }
@@ -75,6 +77,8 @@ if ("serviceWorker" in navigator) {
 
   // Listen for controller change (new service worker activated)
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadedForUpdate) return;
+    reloadedForUpdate = true;
     window.location.reload();
   });
 }
