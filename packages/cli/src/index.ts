@@ -12,7 +12,68 @@
 
 import { createGatewayClient } from "@claudia/shared";
 
-const GATEWAY_URL = process.env.CLAUDIA_GATEWAY_URL || "ws://localhost:30086/ws";
+const DEFAULT_GATEWAY_URL = "ws://localhost:30086/ws";
+let gatewayUrl = process.env.CLAUDIA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
+
+function normalizeGatewayUrl(value: string): string {
+  const input = value.trim();
+  if (!input) return DEFAULT_GATEWAY_URL;
+
+  if (input.startsWith("ws://") || input.startsWith("wss://")) {
+    return input;
+  }
+
+  if (input.startsWith("http://") || input.startsWith("https://")) {
+    const parsed = new URL(input);
+    parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    if (!parsed.pathname || parsed.pathname === "/") parsed.pathname = "/ws";
+    return parsed.toString();
+  }
+
+  return `ws://${input.replace(/\/+$/, "")}/ws`;
+}
+
+function extractGlobalConnectionArgs(rawArgs: string[]): {
+  args: string[];
+  resolvedGatewayUrl: string;
+} {
+  const args: string[] = [];
+  let hostOverride: string | undefined;
+  let urlOverride: string | undefined;
+
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const token = rawArgs[i] ?? "";
+
+    if (token === "--host") {
+      const next = rawArgs[i + 1];
+      if (!next) throw new Error("Missing value for --host");
+      hostOverride = next;
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("--host=")) {
+      hostOverride = token.slice("--host=".length);
+      continue;
+    }
+
+    if (token === "--gateway-url") {
+      const next = rawArgs[i + 1];
+      if (!next) throw new Error("Missing value for --gateway-url");
+      urlOverride = next;
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("--gateway-url=")) {
+      urlOverride = token.slice("--gateway-url=".length);
+      continue;
+    }
+
+    args.push(token);
+  }
+
+  const resolvedGatewayUrl = normalizeGatewayUrl(urlOverride || hostOverride || gatewayUrl);
+  return { args, resolvedGatewayUrl };
+}
 
 export interface JsonSchema {
   $ref?: string;
@@ -449,6 +510,8 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
   console.log("  claudia <namespace> <action> --examples      Show usage examples");
   console.log("  claudia <namespace> --help                   List namespace methods");
   console.log("  claudia methods [namespace]                  List all available methods");
+  console.log("  (global) --host <host[:port]>                Override gateway host for this call");
+  console.log("  (global) --gateway-url <ws(s)://.../ws>      Override full gateway URL");
 
   console.log("\nNamespaces:\n");
   for (const ns of getNamespaces(methods)) {
@@ -463,7 +526,7 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
 }
 
 async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
-  const client = createGatewayClient({ url: GATEWAY_URL });
+  const client = createGatewayClient({ url: gatewayUrl });
   try {
     const payload = (await client.call("gateway.list_methods", {})) as {
       methods?: MethodCatalogEntry[];
@@ -475,7 +538,7 @@ async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
 }
 
 async function invokeMethod(method: string, params: Record<string, unknown>): Promise<void> {
-  const client = createGatewayClient({ url: GATEWAY_URL });
+  const client = createGatewayClient({ url: gatewayUrl });
   const streamPrompt = method === "session.send_prompt";
   let stopStreamResolve: (() => void) | null = null;
   const stopStream = new Promise<void>((resolve) => {
@@ -520,7 +583,7 @@ async function invokeMethod(method: string, params: Record<string, unknown>): Pr
 }
 
 async function speak(text: string): Promise<void> {
-  const client = createGatewayClient({ url: GATEWAY_URL });
+  const client = createGatewayClient({ url: gatewayUrl });
   let playbackQueue = Promise.resolve();
   let finishResolve: (() => void) | null = null;
   let finishReject: ((error: Error) => void) | null = null;
@@ -584,7 +647,7 @@ async function promptCompat(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const client = createGatewayClient({ url: GATEWAY_URL });
+  const client = createGatewayClient({ url: gatewayUrl });
   let responseText = "";
   let isComplete = false;
   let sessionRecordId: string | null = null;
@@ -915,7 +978,9 @@ async function watchdogCommand(args: string[]): Promise<void> {
 // ── Main ─────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const parsed = extractGlobalConnectionArgs(process.argv.slice(2));
+  gatewayUrl = parsed.resolvedGatewayUrl;
+  const args = parsed.args;
 
   if (args[0] === "speak") {
     const text = args.slice(1).join(" ");

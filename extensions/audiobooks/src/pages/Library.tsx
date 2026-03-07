@@ -5,8 +5,6 @@
 import { useState, useEffect } from "react";
 import { Link, useGatewayClient } from "@claudia/ui";
 
-const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
-
 interface Audiobook {
   id: string;
   title: string;
@@ -26,7 +24,7 @@ interface Audiobook {
 export function Library() {
   const [books, setBooks] = useState<Audiobook[]>([]);
   const [loading, setLoading] = useState(true);
-  const { call } = useGatewayClient(WS_URL);
+  const { call } = useGatewayClient();
 
   useEffect(() => {
     async function loadBooks() {

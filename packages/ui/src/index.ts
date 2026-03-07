@@ -7,6 +7,8 @@ export type { PlatformBridge } from "./bridge";
 
 // Contexts
 export { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
+export { GatewayClientProvider, useGatewayClientContext } from "./contexts/GatewayClientContext";
+export type { GatewayClientProviderProps } from "./contexts/GatewayClientContext";
 
 // Types
 export type {

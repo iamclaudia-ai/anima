@@ -18,6 +18,7 @@ function generateId(): string {
 const MIN_TOOL_SIM_TICK_MS = 30;
 const MAX_TOOL_SIM_TICK_MS = 2000;
 const DEFAULT_TOOL_SIM_TICK_MS = 100;
+const GLOBAL_EVENT_SUBSCRIPTIONS = ["voice.*", "hook.*"] as const;
 
 // Re-export workspace/session types for consumers
 export interface WorkspaceInfo {
@@ -905,7 +906,7 @@ export function useChatGateway(
     sendRequest("session.get_info");
 
     // Subscribe to voice and hook events (global, not session-scoped)
-    sendRequest("gateway.subscribe", { events: ["voice.*", "hook.*"] });
+    sendRequest("gateway.subscribe", { events: [...GLOBAL_EVENT_SUBSCRIPTIONS] });
 
     const opts = optionsRef.current;
 
@@ -929,6 +930,19 @@ export function useChatGateway(
       sendRequest("session.get_info");
     }
   }, [isConnected, sendRequest, subscribeToSession]);
+
+  useEffect(() => {
+    return () => {
+      const events: string[] = [...GLOBAL_EVENT_SUBSCRIPTIONS];
+      if (subscribedSessionRef.current) {
+        events.push(`session.${subscribedSessionRef.current}.*`);
+        subscribedSessionRef.current = null;
+      }
+      void call("gateway.unsubscribe", { events }).catch(() => {
+        // Ignore cleanup unsubscribe failures during route transitions/shutdown.
+      });
+    };
+  }, [call]);
 
   useEffect(() => {
     return () => {

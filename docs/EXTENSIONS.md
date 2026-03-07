@@ -707,6 +707,31 @@ const allRoutes = [...controlRoutes, ...chatRoutes, ...myFeatureRoutes];
 - Other extensions use `/{extension-name}` paths
 - Pages are React components using `@claudia/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`)
 
+### Gateway URL Defaults (Web Extensions)
+
+For extension web pages, `useGatewayClient()` now accepts an optional URL:
+
+```tsx
+const { call, isConnected } = useGatewayClient();
+```
+
+When omitted, it connects to the same host serving the page and selects protocol automatically:
+
+- `https://...` page → `wss://<host>/ws`
+- `http://...` page → `ws://<host>/ws`
+
+You can still pass an explicit URL when needed. `http://`/`https://` inputs are normalized to `ws://`/`wss://` internally.
+
+### Shared Gateway Socket (Per Tab)
+
+The gateway web app wraps routes in `GatewayClientProvider`, which maintains a single shared WebSocket per browser tab.
+
+- `useGatewayClient()` reuses this shared connection by default
+- Client-side route navigation between extensions/pages does not force reconnects
+- Full page reload/new tab creates a new socket (expected)
+
+Chat still manages session scope explicitly (`session.<id>.*`) and unsubscribes on session switch/unmount.
+
 ---
 
 ## Existing Extensions

@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { Router, ErrorBoundary } from "@claudia/ui";
+import { Router, ErrorBoundary, GatewayClientProvider } from "@claudia/ui";
 import "@claudia/ui/styles";
 
 import { chatRoutes } from "@claudia/ext-chat/routes";
@@ -34,7 +34,9 @@ const allRoutes = [...controlRoutes, ...chatRoutes, ...audiobooksRoutes];
 
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    <Router routes={allRoutes} />
+    <GatewayClientProvider>
+      <Router routes={allRoutes} />
+    </GatewayClientProvider>
   </ErrorBoundary>,
 );
 

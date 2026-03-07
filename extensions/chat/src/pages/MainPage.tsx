@@ -7,7 +7,7 @@ import {
   useGatewayClient,
 } from "@claudia/ui";
 import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
-import { createBridge, GATEWAY_URL } from "../app";
+import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
   loadMainPageBootstrapData,
@@ -39,7 +39,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
-  const { call, isConnected } = useGatewayClient(GATEWAY_URL);
+  const { call, isConnected } = useGatewayClient();
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const chatBridge = useMemo(
