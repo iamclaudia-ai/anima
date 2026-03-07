@@ -11,14 +11,17 @@ export async function getStatus(): Promise<Record<string, unknown>> {
 
   for (const [id, service] of Object.entries(services)) {
     const processAlive = isProcessAlive(service);
-    const healthy = processAlive ? await checkHealth(service) : false;
+    const health = processAlive ? await checkHealth(service) : { healthy: false, reason: "dead" };
+    const healthy = health.healthy;
     status[id] = {
       name: service.name,
       pid: service.proc?.pid ?? null,
       processAlive,
       healthy,
+      healthReason: health.reason ?? null,
       consecutiveFailures: service.consecutiveFailures,
       lastRestart: service.lastRestart ? new Date(service.lastRestart).toISOString() : null,
+      lastHealthReason: service.lastHealthReason ?? null,
       history: service.history.slice(-HEALTH_HISTORY_SIZE),
     };
   }

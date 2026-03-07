@@ -723,7 +723,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
   if (!sub || sub === "--help") {
     console.log("\nwatchdog commands:\n");
     console.log("  claudia watchdog status                  Show service health");
-    console.log("  claudia watchdog restart <service>       Restart gateway or runtime");
+    console.log("  claudia watchdog restart <service> [--force]  Restart gateway or runtime");
     console.log("  claudia watchdog logs                    List available log files");
     console.log("  claudia watchdog logs <file> [lines]     Tail a log file");
     console.log("  claudia watchdog install                 Install as launchd service");
@@ -738,23 +738,31 @@ async function watchdogCommand(args: string[]): Promise<void> {
         string,
         {
           name: string;
-          tmuxAlive: boolean;
+          processAlive: boolean;
           healthy: boolean;
           consecutiveFailures: number;
           lastRestart: string | null;
+          healthReason?: string | null;
         }
       >;
       console.log();
       for (const [id, s] of Object.entries(data)) {
+        if (typeof s.processAlive !== "boolean") {
+          const healthy = (s as { healthy?: boolean }).healthy === true;
+          const dot = healthy ? "\x1b[32m●\x1b[0m" : "\x1b[33m●\x1b[0m";
+          console.log(`  ${dot} ${s.name || id} ${healthy ? "healthy" : "unhealthy"}`);
+          continue;
+        }
         const dot = s.healthy
           ? "\x1b[32m●\x1b[0m"
-          : s.tmuxAlive
+          : s.processAlive
             ? "\x1b[33m●\x1b[0m"
             : "\x1b[31m●\x1b[0m";
-        const status = s.healthy ? "healthy" : s.tmuxAlive ? "unhealthy" : "down";
+        const status = s.healthy ? "healthy" : s.processAlive ? "unhealthy" : "down";
         const restart = s.lastRestart ? new Date(s.lastRestart).toLocaleTimeString() : "never";
+        const reason = s.healthy ? "" : `  reason: ${s.healthReason || "n/a"}`;
         console.log(
-          `  ${dot} ${s.name.padEnd(10)} ${status.padEnd(12)} failures: ${s.consecutiveFailures}  last restart: ${restart}`,
+          `  ${dot} ${s.name.padEnd(10)} ${status.padEnd(12)} failures: ${s.consecutiveFailures}  last restart: ${restart}${reason}`,
         );
       }
       console.log();
@@ -768,12 +776,14 @@ async function watchdogCommand(args: string[]): Promise<void> {
 
   if (sub === "restart") {
     const service = args[1];
+    const force = args.includes("--force");
     if (!service) {
-      console.error("Usage: claudia watchdog restart <gateway|runtime>");
+      console.error("Usage: claudia watchdog restart <gateway|runtime> [--force]");
       process.exit(1);
     }
     try {
-      const res = await fetch(`${WATCHDOG_URL}/restart/${service}`, {
+      const suffix = force ? "?force=1" : "";
+      const res = await fetch(`${WATCHDOG_URL}/restart/${service}${suffix}`, {
         method: "POST",
         signal: AbortSignal.timeout(10000),
       });

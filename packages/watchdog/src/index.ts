@@ -71,7 +71,10 @@ const server = Bun.serve({
       if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
       const url = new URL(req.url);
       const serviceId = url.pathname.split("/restart/")[1];
-      const result = await restartService(serviceId);
+      const force = ["1", "true", "yes"].includes(
+        (url.searchParams.get("force") || "").toLowerCase(),
+      );
+      const result = await restartService(serviceId, { force });
       return Response.json(result, { status: result.ok ? 200 : 400 });
     },
 

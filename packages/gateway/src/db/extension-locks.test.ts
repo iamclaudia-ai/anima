@@ -85,6 +85,27 @@ describe("extension process locks", () => {
     });
   });
 
+  it("can force-take an existing lock with staleMs=0", () => {
+    expect(acquireExtensionProcessLock("voice", 1001, "gw-a", "gen-1", 120_000, db).acquired).toBe(
+      true,
+    );
+
+    const stolen = acquireExtensionProcessLock("voice", 2002, "gw-b", "gen-2", 0, db);
+    expect(stolen.acquired).toBe(true);
+    expect(stolen.stolen).toBe(true);
+    expect(stolen.ownerPid).toBe(1001);
+    expect(stolen.ownerInstanceId).toBe("gw-a");
+
+    const locks = getExtensionProcessLocks(120_000, db);
+    expect(locks[0]).toMatchObject({
+      extensionId: "voice",
+      ownerPid: 2002,
+      ownerInstanceId: "gw-b",
+      ownerGeneration: "gen-2",
+      stale: false,
+    });
+  });
+
   it("renews and releases only for owner", () => {
     expect(acquireExtensionProcessLock("memory", 1234, "gw-a", "g1", 120_000, db).acquired).toBe(
       true,

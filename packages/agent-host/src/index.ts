@@ -19,6 +19,8 @@
 import { createLogger, loadConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import { SessionHost } from "./session-host";
 import { loadState, saveState } from "./state";
 import { restorePersistedSessions } from "./restore";
@@ -29,6 +31,42 @@ const log = createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent
 // ── Configuration ────────────────────────────────────────────
 
 const PORT = 30087;
+const FORCE_STARTUP = process.argv.includes("--force");
+
+function forceClearGatewayLocks(): void {
+  if (!FORCE_STARTUP) return;
+
+  const dbPath = join(homedir(), ".claudia", "claudia.db");
+  if (!existsSync(dbPath)) {
+    log.warn("Force startup requested, but gateway DB does not exist yet", { dbPath });
+    return;
+  }
+
+  const db = new Database(dbPath);
+  const clear = (tableName: string): number => {
+    const exists = db
+      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+      .get(tableName);
+    if (!exists) return 0;
+    const result = db.query(`DELETE FROM ${tableName}`).run();
+    return result.changes;
+  };
+
+  try {
+    const cleared = {
+      extensionProcessLocks: clear("extension_process_locks"),
+      memoryExtensionLocks: clear("memory_extension_locks"),
+      memoryFileLocks: clear("memory_file_locks"),
+    };
+    log.warn("Force startup requested; cleared gateway lock tables", cleared);
+  } catch (error) {
+    log.error("Failed to clear gateway lock tables during force startup", {
+      error: String(error),
+    });
+  } finally {
+    db.close();
+  }
+}
 
 function parseMs(value: string | undefined, fallbackMs: number): number {
   if (!value) return fallbackMs;
@@ -38,6 +76,8 @@ function parseMs(value: string | undefined, fallbackMs: number): number {
 
 const IDLE_REAP_INTERVAL_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_REAP_INTERVAL_MS, 60000);
 const IDLE_STALE_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_STALE_MS, 600000);
+
+forceClearGatewayLocks();
 
 // ── State ────────────────────────────────────────────────────
 

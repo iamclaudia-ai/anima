@@ -185,7 +185,7 @@ describe("cli main integration", () => {
     const result = runCli(["watchdog", "restart"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString("utf-8")).toContain(
-      "Usage: claudia watchdog restart <gateway|runtime>",
+      "Usage: claudia watchdog restart <gateway|runtime> [--force]",
     );
   });
 

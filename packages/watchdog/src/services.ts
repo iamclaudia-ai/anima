@@ -22,6 +22,7 @@ export interface HealthSnapshot {
   timestamp: number;
   processAlive: boolean;
   healthy: boolean;
+  reason?: string;
 }
 
 export interface ManagedService {
@@ -35,6 +36,7 @@ export interface ManagedService {
   consecutiveFailures: number;
   history: HealthSnapshot[];
   proc: Subprocess | null;
+  lastHealthReason?: string | null;
 }
 
 function gatewayCommand(): string[] {
@@ -127,7 +129,23 @@ async function drainToLog(
   }
 }
 
-export async function startService(service: ManagedService): Promise<void> {
+export interface StartServiceOptions {
+  force?: boolean;
+}
+
+function commandForStart(service: ManagedService, force = false): string[] {
+  if (!force || service.command.includes("--force")) {
+    return service.command;
+  }
+  return [...service.command, "--force"];
+}
+
+export async function startService(
+  service: ManagedService,
+  options: StartServiceOptions = {},
+): Promise<void> {
+  const force = options.force === true;
+
   // Kill existing process if still alive
   if (service.proc && service.proc.exitCode === null) {
     log("INFO", `Stopping ${service.name} (PID ${service.proc.pid})...`);
@@ -148,10 +166,11 @@ export async function startService(service: ManagedService): Promise<void> {
   if (!existsSync(LOGS_DIR)) mkdirSync(LOGS_DIR, { recursive: true });
 
   const logPath = join(LOGS_DIR, `${service.id}.log`);
+  const command = commandForStart(service, force);
 
   // Spawn as direct child process. Use pipes + explicit drains to avoid
   // Bun.file stdio redirection issues that can cause runaway CPU.
-  service.proc = Bun.spawn(service.command, {
+  service.proc = Bun.spawn(command, {
     cwd: PROJECT_DIR,
     stdout: "pipe",
     stderr: "pipe",
@@ -164,7 +183,8 @@ export async function startService(service: ManagedService): Promise<void> {
 
   service.lastRestart = Date.now();
   service.consecutiveFailures = 0;
-  log("INFO", `Started ${service.name} (PID ${service.proc.pid})`);
+  service.lastHealthReason = null;
+  log("INFO", `Started ${service.name} (PID ${service.proc.pid})${force ? " [force]" : ""}`);
 
   // Monitor for unexpected exit
   service.proc.exited.then((code) => {
@@ -172,23 +192,56 @@ export async function startService(service: ManagedService): Promise<void> {
   });
 }
 
-export async function restartService(id: string): Promise<{ ok: boolean; message: string }> {
-  const service = services[id];
+export interface RestartServiceOptions {
+  force?: boolean;
+}
+
+function normalizeServiceId(id: string): string {
+  if (id === "runtime") return "agent-host";
+  return id;
+}
+
+export async function restartService(
+  id: string,
+  options: RestartServiceOptions = {},
+): Promise<{ ok: boolean; message: string }> {
+  const serviceId = normalizeServiceId(id);
+  const service = services[serviceId];
   if (!service) {
     return { ok: false, message: `Unknown service: ${id}` };
   }
+  const force = options.force === true;
 
-  log("INFO", `Restarting ${service.name}...`);
-  await startService(service);
+  log("INFO", `Restarting ${service.name}${force ? " [force]" : ""}...`);
+  await startService(service, { force });
   return { ok: true, message: `${service.name} restarted (PID ${service.proc?.pid})` };
 }
 
-export async function checkHealth(service: ManagedService): Promise<boolean> {
+export interface HealthCheckResult {
+  healthy: boolean;
+  reason?: string;
+}
+
+export async function checkHealth(service: ManagedService): Promise<HealthCheckResult> {
   try {
     const res = await fetch(service.healthUrl, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    if (!res.ok) {
+      return { healthy: false, reason: `http_${res.status}` };
+    }
+
+    if (service.id !== "gateway") {
+      return { healthy: true };
+    }
+
+    const body = (await res.json()) as { extensions?: Record<string, unknown> };
+    const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
+    if (extensionCount === 0) {
+      return { healthy: false, reason: "zero_extensions" };
+    }
+
+    return { healthy: true };
   } catch {
-    return false;
+    return { healthy: false, reason: "unreachable" };
   }
 }
 
@@ -197,10 +250,18 @@ export async function checkHealth(service: ManagedService): Promise<boolean> {
 export async function monitorServices(): Promise<void> {
   for (const [_id, service] of Object.entries(services)) {
     const processAlive = isProcessAlive(service);
-    const healthy = processAlive ? await checkHealth(service) : false;
+    const health = processAlive ? await checkHealth(service) : { healthy: false, reason: "dead" };
+    const healthy = health.healthy;
+    const reason = health.reason ?? null;
+    service.lastHealthReason = reason;
 
     // Record snapshot
-    service.history.push({ timestamp: Date.now(), processAlive, healthy });
+    service.history.push({
+      timestamp: Date.now(),
+      processAlive,
+      healthy,
+      reason: reason ?? undefined,
+    });
     if (service.history.length > HEALTH_HISTORY_SIZE) {
       service.history = service.history.slice(-HEALTH_HISTORY_SIZE);
     }
@@ -223,9 +284,10 @@ export async function monitorServices(): Promise<void> {
 
         log(
           "WARN",
-          `${service.name} unhealthy for ${service.consecutiveFailures} checks — restarting...`,
+          `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
         );
-        await startService(service);
+        const useForce = reason === "zero_extensions";
+        await startService(service, { force: useForce });
         service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
       }
     } else {

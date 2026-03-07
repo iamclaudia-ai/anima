@@ -29,6 +29,7 @@ import {
   releaseExtensionProcessLock,
   DEFAULT_EXTENSION_LOCK_STALE_MS,
 } from "./db/extension-locks";
+import { getDb } from "./db";
 
 const log = createLogger("Startup", join(homedir(), ".claudia", "logs", "gateway.log"));
 const ROOT_DIR = join(import.meta.dir, "..", "..", "..");
@@ -84,6 +85,17 @@ const spawningExtensions = new Map<string, Promise<void>>();
 const lockedExtensions = new Set<string>();
 const GATEWAY_INSTANCE_ID = randomUUID();
 const EXTENSION_LOCK_HEARTBEAT_MS = 15_000;
+const FORCE_STARTUP = process.argv.includes("--force");
+
+function isPidAlive(pid: number | undefined): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function resolveExtensionEntrypoint(extensionId: string): string | null {
   const entryPath = join(ROOT_DIR, "extensions", extensionId, "src", "index.ts");
@@ -91,6 +103,33 @@ function resolveExtensionEntrypoint(extensionId: string): string | null {
     return null;
   }
   return entryPath;
+}
+
+function clearLockTable(tableName: string): number {
+  const db = getDb();
+  try {
+    const exists = db
+      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+      .get(tableName);
+    if (!exists) return 0;
+    const result = db.query(`DELETE FROM ${tableName}`).run();
+    return result.changes;
+  } catch (error) {
+    log.warn("Failed to clear lock table", { tableName, error: String(error) });
+    return 0;
+  }
+}
+
+function forceClearStartupLocks(): void {
+  if (!FORCE_STARTUP) return;
+
+  const cleared = {
+    extensionProcessLocks: clearLockTable("extension_process_locks"),
+    memoryExtensionLocks: clearLockTable("memory_extension_locks"),
+    memoryFileLocks: clearLockTable("memory_file_locks"),
+  };
+
+  log.warn("Force startup requested; cleared lock tables", cleared);
 }
 
 async function spawnOutOfProcessExtension(
@@ -128,13 +167,23 @@ async function spawnOutOfProcessExtension(
         return;
       }
 
-      const lock = acquireExtensionProcessLock(
+      let lock = acquireExtensionProcessLock(
         id,
         process.pid,
         GATEWAY_INSTANCE_ID,
         "starting",
         DEFAULT_EXTENSION_LOCK_STALE_MS,
       );
+      if (!lock.acquired && !isPidAlive(lock.ownerPid)) {
+        log.warn("Detected dead extension lock owner; forcing lock takeover", {
+          id,
+          previousOwnerPid: lock.ownerPid,
+          previousOwnerInstanceId: lock.ownerInstanceId,
+          previousOwnerGeneration: lock.ownerGeneration ?? null,
+        });
+        lock = acquireExtensionProcessLock(id, process.pid, GATEWAY_INSTANCE_ID, "starting", 0);
+      }
+
       if (!lock.acquired) {
         log.warn("Extension singleton lock held by another gateway; skipping spawn", {
           id,
@@ -474,6 +523,8 @@ function startConfigWatcher(): void {
     log.error("Failed to start config file watcher", { error: String(error) });
   }
 }
+
+forceClearStartupLocks();
 
 killOrphanExtensionHosts()
   .then(async () => {

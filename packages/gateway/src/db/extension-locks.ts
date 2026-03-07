@@ -76,7 +76,7 @@ export function acquireExtensionProcessLock(
     return { acquired: true, alreadyOwned: true };
   }
 
-  if (existing.updatedAt < now - staleMs) {
+  if (existing.updatedAt <= now - staleMs) {
     const stolen = db
       .query(
         `UPDATE extension_process_locks
