@@ -90,6 +90,12 @@ export interface MemoryConfig {
   processBatchSize?: number;
   /** Auto-process ready conversations on poll timer (default: false) */
   autoProcess?: boolean;
+  /**
+   * File exclusion patterns for ingestion.
+   * Absolute patterns (`/` or `~`) match absolute watched file paths.
+   * Relative patterns match the computed file key under watchPath.
+   */
+  exclude?: string[];
 }
 
 const DEFAULT_CONFIG: Required<MemoryConfig> = {
@@ -101,6 +107,7 @@ const DEFAULT_CONFIG: Required<MemoryConfig> = {
   model: "claude-sonnet-4-6",
   processBatchSize: 10,
   autoProcess: false,
+  exclude: [],
 };
 
 const LOCK_STALE_MS = 3 * 60 * 1000;
@@ -569,6 +576,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             );
             const result = ingestFile(expanded, fileBasePath, cfg.conversationGapMinutes, {
               forceReimport: reimport,
+              exclude: cfg.exclude,
             });
             ctx?.emit("memory.ingested", result);
             return result;
@@ -579,6 +587,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             fileLog("INFO", `Manual ingest: dir=${expanded}, reimport=${!!reimport}`);
             const result = ingestDirectory(expanded, cfg.conversationGapMinutes, {
               forceReimport: reimport,
+              exclude: cfg.exclude,
             });
             ctx?.emit("memory.ingested", result);
             return result;

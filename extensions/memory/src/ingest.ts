@@ -20,6 +20,7 @@
 
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+import { homedir } from "node:os";
 import {
   getDb,
   getFileState,
@@ -40,6 +41,11 @@ export interface IngestResult {
   entriesDeleted: number;
   conversationsUpdated: number;
   errors: string[];
+}
+
+export interface IngestOptions {
+  forceReimport?: boolean;
+  exclude?: string[];
 }
 
 function emptyResult(): IngestResult {
@@ -65,6 +71,51 @@ function detectSource(filePath: string): string {
  */
 export function toFileKey(absolutePath: string, basePath: string): string {
   return relative(basePath, absolutePath);
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function expandHome(path: string): string {
+  return path.replace(/^~/, homedir());
+}
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  if (path === prefix) return true;
+  const withSlash = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  return path.startsWith(withSlash);
+}
+
+/**
+ * Determine whether a file should be excluded from ingestion.
+ *
+ * Exclusion pattern rules:
+ * - Absolute patterns (`/` or `~`) match absolute watched file paths.
+ * - Relative patterns match the computed file key (relative to watchPath).
+ */
+export function shouldExcludeFile(filePath: string, basePath: string, exclude: string[]): boolean {
+  if (exclude.length === 0) return false;
+
+  const absPath = normalizePath(filePath);
+  const fileKey = normalizePath(toFileKey(filePath, basePath));
+
+  for (const rawPattern of exclude) {
+    const pattern = rawPattern.trim();
+    if (!pattern) continue;
+
+    const normalizedPattern = normalizePath(pattern);
+
+    if (normalizedPattern.startsWith("/") || normalizedPattern.startsWith("~")) {
+      const expanded = normalizePath(expandHome(normalizedPattern));
+      if (pathMatchesPrefix(absPath, expanded)) return true;
+      continue;
+    }
+
+    if (pathMatchesPrefix(fileKey, normalizedPattern)) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -130,12 +181,16 @@ export function ingestFile(
   filePath: string,
   basePath: string,
   gapMinutes: number,
-  options: { forceReimport?: boolean } = {},
+  options: IngestOptions = {},
 ): IngestResult {
   const result = emptyResult();
 
   if (!existsSync(filePath)) {
     result.errors.push(`File not found: ${filePath}`);
+    return result;
+  }
+
+  if (shouldExcludeFile(filePath, basePath, options.exclude || [])) {
     return result;
   }
 
@@ -244,7 +299,7 @@ export function ingestFile(
 export function ingestDirectory(
   dirPath: string,
   gapMinutes: number,
-  options: { forceReimport?: boolean } = {},
+  options: IngestOptions = {},
 ): IngestResult {
   const result = emptyResult();
 

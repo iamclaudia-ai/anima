@@ -142,7 +142,13 @@ export const memoryExtensionMachine = setup({
         }
 
         context.fileLog("INFO", `Startup scan: ${context.basePath}`);
-        const scanResult = ingestDirectory(context.basePath, context.config.conversationGapMinutes);
+        const scanResult = ingestDirectory(
+          context.basePath,
+          context.config.conversationGapMinutes,
+          {
+            exclude: context.config.exclude,
+          },
+        );
 
         if (scanResult.filesProcessed > 0 || scanResult.entriesInserted > 0) {
           context.fileLog(
@@ -175,6 +181,7 @@ export const memoryExtensionMachine = setup({
         {
           basePath: context.basePath,
           gapMinutes: context.config.conversationGapMinutes,
+          exclude: context.config.exclude,
         },
         context.fileLog,
       );
@@ -189,6 +196,7 @@ export const memoryExtensionMachine = setup({
       const catchUpResult = ingestDirectory(
         context.basePath,
         context.config.conversationGapMinutes,
+        { exclude: context.config.exclude },
       );
       if (catchUpResult.entriesInserted > 0 || catchUpResult.filesProcessed > 0) {
         context.fileLog(

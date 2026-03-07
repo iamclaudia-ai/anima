@@ -15,6 +15,7 @@ export interface WatcherConfig {
   /** Absolute path to the directory to watch */
   basePath: string;
   gapMinutes: number;
+  exclude: string[];
 }
 
 export interface WatcherDiagnostics {
@@ -126,7 +127,9 @@ export class MemoryWatcher {
       if (!filePath) continue;
 
       try {
-        const result = ingestFile(filePath, this.config.basePath, this.config.gapMinutes);
+        const result = ingestFile(filePath, this.config.basePath, this.config.gapMinutes, {
+          exclude: this.config.exclude,
+        });
         this.diagnostics.lastIngestAt = new Date().toISOString();
         this.diagnostics.lastIngestFile = filePath;
         this.diagnostics.lastIngestEntries = result.entriesInserted;
