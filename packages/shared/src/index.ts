@@ -9,3 +9,4 @@ export * from "./typeid";
 export * from "./logger";
 export * from "./events";
 export * from "./gateway-client";
+export * from "./agent-host-protocol";

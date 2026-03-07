@@ -35,6 +35,8 @@ const log = createLogger("SessionHost", join(homedir(), ".claudia", "logs", "age
 export interface SessionCreateParams {
   /** Working directory */
   cwd: string;
+  /** Agent/provider key (default: claude) */
+  agent?: string;
   /** Model to use */
   model?: string;
   /** System prompt */
@@ -50,6 +52,8 @@ export interface SessionResumeParams {
   sessionId: string;
   /** Working directory */
   cwd: string;
+  /** Agent/provider key (default: claude) */
+  agent?: string;
   /** Model to use */
   model?: string;
   /** Last observed activity timestamp (ISO) for restore hydration */
@@ -112,6 +116,10 @@ export class SessionHost extends EventEmitter {
    * Create a new Claude session.
    */
   async create(params: SessionCreateParams): Promise<{ sessionId: string }> {
+    if (params.agent && params.agent !== "claude") {
+      throw new Error(`Unsupported session agent: ${params.agent}`);
+    }
+
     const options: CreateSessionOptions = {
       cwd: params.cwd,
       model: params.model ?? this.defaults.model,
@@ -167,7 +175,16 @@ export class SessionHost extends EventEmitter {
    * Send a prompt to a session.
    * If the session isn't running, auto-resumes it first (lazy start).
    */
-  async prompt(sessionId: string, content: string | unknown[], cwd?: string): Promise<void> {
+  async prompt(
+    sessionId: string,
+    content: string | unknown[],
+    cwd?: string,
+    agent?: string,
+  ): Promise<void> {
+    if (agent && agent !== "claude") {
+      throw new Error(`Unsupported session agent: ${agent}`);
+    }
+
     let session = this.sessions.get(sessionId);
 
     if (!session || !session.isActive) {

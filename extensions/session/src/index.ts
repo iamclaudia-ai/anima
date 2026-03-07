@@ -250,6 +250,26 @@ interface RequestContext {
   responseText: string;
 }
 
+type TaskStatus = "running" | "completed" | "failed" | "interrupted";
+type TaskMode = "general" | "review" | "test";
+
+interface SessionTask {
+  taskId: string;
+  sessionId: string;
+  agent: string;
+  prompt: string;
+  mode: TaskMode;
+  status: TaskStatus;
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+  outputFile?: string;
+  context: {
+    connectionId: string | null;
+    tags: string[] | null;
+  };
+}
+
 /**
  * Merge tags from a primary (streaming) context and the current transient context.
  * The primary context's tags are authoritative — e.g., voice.speak from the web UI
@@ -263,6 +283,17 @@ function mergeTags(primary: string[] | null, current: string[] | null): string[]
   // Deduplicate
   const merged = new Set([...primary, ...current]);
   return Array.from(merged);
+}
+
+function normalizeTaskMode(input?: string): TaskMode {
+  if (input === "review" || input === "test") return input;
+  return "general";
+}
+
+function mapTaskModeToCodexMethod(mode: TaskMode): "codex.task" | "codex.review" | "codex.test" {
+  if (mode === "review") return "codex.review";
+  if (mode === "test") return "codex.test";
+  return "codex.task";
 }
 
 // ── Extension factory ────────────────────────────────────────
@@ -300,6 +331,35 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   // When emitting events, tags are merged from both so voice.speak persists across tool calls.
   const requestContexts = new Map<string, RequestContext>();
   const primaryContexts = new Map<string, RequestContext>();
+  const tasks = new Map<string, SessionTask>();
+  const taskUnsubscribers: Array<() => void> = [];
+
+  const StartTaskSchema = z.object({
+    sessionId: z.string().describe("Parent session UUID"),
+    agent: z.string().describe("Target agent/provider (currently codex supported)"),
+    prompt: z.string().min(1).describe("Task prompt"),
+    mode: z.enum(["general", "review", "test"]).optional().default("general"),
+    cwd: z.string().optional().describe("Working directory override"),
+    model: z.string().optional().describe("Model override"),
+    effort: z.string().optional().describe("Effort/reasoning override"),
+    sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+    files: z.array(z.string()).optional().describe("Optional file list for review mode"),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  });
+
+  const GetTaskSchema = z.object({
+    taskId: z.string().describe("Task ID"),
+  });
+
+  const ListTasksSchema = z.object({
+    sessionId: z.string().optional().describe("Filter by session ID"),
+    status: z.enum(["running", "completed", "failed", "interrupted"]).optional(),
+    agent: z.string().optional().describe("Filter by agent/provider"),
+  });
+
+  const InterruptTaskSchema = z.object({
+    taskId: z.string().describe("Task ID"),
+  });
 
   // Wire agent-host events → ctx.emit
   agentClient.on(
@@ -352,14 +412,76 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     },
   );
 
+  function wireTaskEventBridge(): void {
+    if (!ctx) return;
+
+    const unsub = ctx.on("codex.*", (event) => {
+      const eventName = event.type || "";
+      const match = /^codex\.([^.]+)\.(.+)$/.exec(eventName);
+      if (!match) return;
+
+      const [, taskId, codexEventType] = match;
+      const task = tasks.get(taskId);
+      if (!task) return;
+
+      const payload = (event.payload || {}) as Record<string, unknown>;
+      const nowIso = new Date().toISOString();
+
+      if (codexEventType === "turn_stop") {
+        const interrupted = payload.interrupted === true;
+        task.status = interrupted ? "interrupted" : "completed";
+      } else if (codexEventType === "error") {
+        task.status = "failed";
+        task.error = String(payload.error || "Task failed");
+      } else if (task.status === "running") {
+        task.status = "running";
+      }
+
+      if (typeof payload.outputFile === "string") {
+        task.outputFile = payload.outputFile;
+      }
+      task.updatedAt = nowIso;
+
+      const emitOptions: { source?: string; connectionId?: string; tags?: string[] } = {
+        source: "gateway.caller",
+      };
+      if (task.context.connectionId) emitOptions.connectionId = task.context.connectionId;
+      if (task.context.tags) emitOptions.tags = task.context.tags;
+
+      const mappedType = (() => {
+        if (codexEventType === "turn_start") return "start";
+        if (codexEventType === "turn_stop") return "stop";
+        if (codexEventType === "error") return "error";
+        if (codexEventType === "message_delta") return "delta";
+        return "item";
+      })();
+
+      ctx.emit(
+        `session.task.${taskId}.${mappedType}`,
+        {
+          taskId,
+          sessionId: task.sessionId,
+          agent: task.agent,
+          status: task.status,
+          codexEventType,
+          payload,
+        },
+        emitOptions,
+      );
+    });
+
+    taskUnsubscribers.push(unsub);
+  }
+
   // ── Method Definitions ─────────────────────────────────────
 
   const methods: ExtensionMethodDefinition[] = [
     {
       name: "session.create_session",
-      description: "Create a new Claude session for a workspace CWD",
+      description: "Create a new agent session for a workspace CWD",
       inputSchema: z.object({
         cwd: z.string().describe("Working directory"),
+        agent: z.string().optional().describe("Agent/provider (default: claude)"),
         model: z.string().optional().describe("Model to use"),
         systemPrompt: z.string().optional().describe("System prompt"),
         thinking: z.boolean().optional().describe("Enable thinking"),
@@ -368,11 +490,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     },
     {
       name: "session.send_prompt",
-      description: "Send a prompt to a session (streaming or await completion)",
+      description: "Send a prompt to a session (provider-aware, streaming or await completion)",
       inputSchema: z.object({
         sessionId: z.string().describe("Session UUID"),
         content: z.union([z.string(), z.array(z.unknown())]).describe("Prompt content"),
         cwd: z.string().optional().describe("CWD for auto-resume"),
+        agent: z.string().optional().describe("Agent/provider (default: claude)"),
         streaming: z.boolean().optional().default(true).describe("Stream events or await result"),
         source: z.string().optional().describe("Source for routing (e.g. imessage/+1555...)"),
       }),
@@ -464,6 +587,26 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }),
     },
     {
+      name: "session.start_task",
+      description: "Start a delegated task using a specific agent/provider",
+      inputSchema: StartTaskSchema,
+    },
+    {
+      name: "session.get_task",
+      description: "Get delegated task status by task ID",
+      inputSchema: GetTaskSchema,
+    },
+    {
+      name: "session.list_tasks",
+      description: "List delegated tasks with optional filters",
+      inputSchema: ListTasksSchema,
+    },
+    {
+      name: "session.interrupt_task",
+      description: "Interrupt a delegated task by task ID",
+      inputSchema: InterruptTaskSchema,
+    },
+    {
       name: "session.list_workspaces",
       description: "List all workspaces",
       inputSchema: z.object({}),
@@ -552,6 +695,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     switch (method) {
       case "session.create_session": {
         const cwd = params.cwd as string;
+        const agent = (params.agent as string | undefined) || "claude";
         const model = (params.model as string | undefined) || sessionConfig.model;
         const thinking = (params.thinking as boolean | undefined) ?? sessionConfig.thinking;
         const effort =
@@ -560,6 +704,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           (params.systemPrompt as string | undefined) || sessionConfig.systemPrompt || undefined;
 
         log.info("Creating session", {
+          agent,
           cwd,
           model,
           thinking,
@@ -567,6 +712,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         });
         const result = await agentClient.createSession({
           cwd,
+          agent,
           model,
           systemPrompt,
           thinking,
@@ -580,10 +726,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const sessionId = params.sessionId as string;
         const content = params.content as string | unknown[];
         const cwd = params.cwd as string | undefined;
+        const agent = (params.agent as string | undefined) || "claude";
         const streaming = params.streaming !== false;
         const source = params.source as string | undefined;
 
         log.info("Sending prompt", {
+          agent,
           sessionId: sid(sessionId),
           streaming,
           source: source || "web",
@@ -621,7 +769,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         if (streaming) {
           // Fire and forget — events stream back via ctx.emit
           const promptStart = Date.now();
-          await agentClient.prompt(sessionId, content, cwd);
+          await agentClient.prompt(sessionId, content, cwd, agent);
 
           // Log turn completion when we see turn_stop
           const turnListener = (event: { sessionId: string; type?: string }) => {
@@ -674,7 +822,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           };
 
           agentClient.on("session.event", onEvent);
-          agentClient.prompt(sessionId, content, cwd).catch((err) => {
+          agentClient.prompt(sessionId, content, cwd, agent).catch((err) => {
             cleanup();
             reject(err);
           });
@@ -795,6 +943,114 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         return { ok };
       }
 
+      case "session.start_task": {
+        const sessionId = params.sessionId as string;
+        const agent = params.agent as string;
+        const prompt = params.prompt as string;
+        const mode = normalizeTaskMode(params.mode as string | undefined);
+        const cwd = params.cwd as string | undefined;
+        const model = params.model as string | undefined;
+        const effort = params.effort as string | undefined;
+        const sandbox = params.sandbox as "read-only" | "workspace-write" | "danger-full-access";
+        const files = params.files as string[] | undefined;
+
+        if (agent !== "codex") {
+          throw new Error(
+            `Unsupported task agent: ${agent}. Currently supported: codex (host-backed providers pending migration).`,
+          );
+        }
+
+        const codexMethod = mapTaskModeToCodexMethod(mode);
+        const codexParams: Record<string, unknown> = {
+          sessionId,
+          prompt,
+          cwd,
+          model,
+          effort,
+          sandbox,
+        };
+        if (mode === "review" && files?.length) {
+          codexParams.files = files;
+        }
+
+        const result = (await ctx.call(codexMethod, codexParams)) as {
+          taskId: string;
+          outputFile?: string;
+          status?: string;
+          message?: string;
+        };
+
+        const nowIso = new Date().toISOString();
+        const task: SessionTask = {
+          taskId: result.taskId,
+          sessionId,
+          agent,
+          prompt,
+          mode,
+          status: "running",
+          startedAt: nowIso,
+          updatedAt: nowIso,
+          outputFile: result.outputFile,
+          context: {
+            connectionId: ctx.connectionId,
+            tags: ctx.tags,
+          },
+        };
+        tasks.set(task.taskId, task);
+
+        return {
+          taskId: task.taskId,
+          sessionId: task.sessionId,
+          agent: task.agent,
+          mode: task.mode,
+          status: task.status,
+          outputFile: task.outputFile,
+          message: result.message || `Started ${agent} task`,
+        };
+      }
+
+      case "session.get_task": {
+        const task = tasks.get(params.taskId as string);
+        return { task: task || null };
+      }
+
+      case "session.list_tasks": {
+        const sessionId = params.sessionId as string | undefined;
+        const status = params.status as TaskStatus | undefined;
+        const agent = params.agent as string | undefined;
+        const all = Array.from(tasks.values());
+        const filtered = all.filter((task) => {
+          if (sessionId && task.sessionId !== sessionId) return false;
+          if (status && task.status !== status) return false;
+          if (agent && task.agent !== agent) return false;
+          return true;
+        });
+        filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        return { tasks: filtered };
+      }
+
+      case "session.interrupt_task": {
+        const taskId = params.taskId as string;
+        const task = tasks.get(taskId);
+        if (!task) {
+          return { ok: false, error: "Task not found", taskId };
+        }
+        if (task.agent !== "codex") {
+          return { ok: false, error: `Interrupt unsupported for agent ${task.agent}`, taskId };
+        }
+
+        const interruptResult = (await ctx.call("codex.interrupt", {})) as {
+          ok?: boolean;
+          message?: string;
+        };
+        const ok = interruptResult.ok !== false;
+        if (ok) {
+          task.status = "interrupted";
+          task.updatedAt = new Date().toISOString();
+        }
+        return { ok, taskId, message: interruptResult.message };
+      }
+
       case "session.send_notification": {
         const sessionId = params.sessionId as string;
         const text = params.text as string;
@@ -812,7 +1068,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         // primaryContexts is NOT modified — voice tags persist through notifications
 
         const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-        await agentClient.prompt(sessionId, wrapped);
+        await agentClient.prompt(sessionId, wrapped, undefined, "claude");
 
         return { ok: true, sessionId };
       }
@@ -956,11 +1212,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     id: "session",
     name: "Session Manager",
     methods,
-    events: ["stream.*"],
+    events: ["stream.*", "session.task.*"],
     sourceRoutes: [],
 
     async start(extCtx: ExtensionContext): Promise<void> {
       ctx = extCtx;
+      wireTaskEventBridge();
       try {
         await agentClient.connect();
         log.info("Session extension started 🚀", { url: agentHostConfig.url });
@@ -972,6 +1229,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     },
 
     async stop(): Promise<void> {
+      for (const unsub of taskUnsubscribers) {
+        try {
+          unsub();
+        } catch {
+          // ignore cleanup failures
+        }
+      }
+      taskUnsubscribers.length = 0;
+      tasks.clear();
       agentClient.disconnect();
       closeDb();
       log.info("Session extension stopped");

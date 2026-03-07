@@ -1,4 +1,9 @@
 import { createLogger, loadConfig } from "@claudia/shared";
+import type {
+  AgentHostClientMessage as ClientMessage,
+  AgentHostResponseMessage as ResponseMessage,
+  AgentHostSessionEventMessage as SessionEventMessage,
+} from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -11,7 +16,6 @@ import {
 import { loadState, saveState, type PersistedState } from "./state";
 import { restorePersistedSessions } from "./restore";
 import type { BufferedEvent } from "./event-buffer";
-import type { ClientMessage, ResponseMessage, SessionEventMessage } from "./protocol";
 import type { ThinkingEffort } from "@claudia/shared";
 
 export interface SessionHostLike {
@@ -19,7 +23,12 @@ export interface SessionHostLike {
   setDefaults: (defaults: SessionDefaults) => void;
   create: (params: SessionCreateParams) => Promise<{ sessionId: string }>;
   resume: (params: SessionResumeParams) => Promise<{ sessionId: string }>;
-  prompt: (sessionId: string, content: string | unknown[], cwd?: string) => Promise<void> | void;
+  prompt: (
+    sessionId: string,
+    content: string | unknown[],
+    cwd?: string,
+    agent?: string,
+  ) => Promise<void> | void;
   interrupt: (sessionId: string) => boolean;
   close: (sessionId: string) => Promise<void>;
   setPermissionMode: (sessionId: string, mode: string) => boolean;
@@ -185,6 +194,7 @@ export async function createAgentHostServer(
           const result = await sessionHost.create(
             msg.params as {
               cwd: string;
+              agent?: string;
               model?: string;
               systemPrompt?: string;
               thinking?: boolean;
@@ -226,7 +236,7 @@ export async function createAgentHostServer(
             client.subscribedSessions.add(msg.sessionId);
           }
 
-          await sessionHost.prompt(msg.sessionId, msg.content, msg.cwd);
+          await sessionHost.prompt(msg.sessionId, msg.content, msg.cwd, msg.agent);
           sendResponse(ws, {
             type: "res",
             requestId: msg.requestId,

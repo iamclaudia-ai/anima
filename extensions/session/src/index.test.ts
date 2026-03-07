@@ -219,7 +219,7 @@ describe("session extension", () => {
 
     expect(result).toEqual({ status: "streaming", sessionId });
     expect(promptSpy).toHaveBeenCalledTimes(1);
-    expect(promptSpy).toHaveBeenCalledWith(sessionId, "ping", undefined);
+    expect(promptSpy).toHaveBeenCalledWith(sessionId, "ping", undefined, "claude");
 
     await ext.stop();
   });
@@ -305,6 +305,7 @@ describe("session extension", () => {
     });
 
     expect(createSpy).toHaveBeenCalledWith({
+      agent: "claude",
       cwd: "/repo/project",
       model: "claude-opus",
       systemPrompt: "You are strict",
@@ -329,12 +330,97 @@ describe("session extension", () => {
     });
 
     expect(createSpy).toHaveBeenCalledWith({
+      agent: "claude",
       cwd: "/repo/project",
       model: "claude-opus-4-6",
       systemPrompt: undefined,
       thinking: true,
       effort: "high",
     });
+
+    await ext.stop();
+  });
+
+  it("starts codex-backed tasks via session.start_task and remaps events", async () => {
+    let codexEventHandler:
+      | ((event: { type: string; payload: unknown; timestamp: number }) => void)
+      | undefined;
+    const emitted: Array<{
+      eventName: string;
+      payload: Record<string, unknown>;
+      options?: Record<string, unknown>;
+    }> = [];
+
+    const ext = createSessionExtension();
+    await ext.start(
+      createTestContext({
+        connectionId: "conn-task-1",
+        tags: ["voice.speak"],
+        on: (pattern, handler) => {
+          if (pattern === "codex.*") {
+            codexEventHandler = handler as (event: {
+              type: string;
+              payload: unknown;
+              timestamp: number;
+            }) => void;
+          }
+          return () => {};
+        },
+        call: async (method, params) => {
+          if (method === "codex.task") {
+            return {
+              taskId: "ctask_123",
+              status: "running",
+              outputFile: "/tmp/ctask_123.md",
+              message: "started",
+            };
+          }
+          throw new Error(`Unexpected method call in test: ${method} ${JSON.stringify(params)}`);
+        },
+        emit: (eventName, payload, options) => {
+          emitted.push({
+            eventName,
+            payload: payload as Record<string, unknown>,
+            options: options as Record<string, unknown> | undefined,
+          });
+        },
+      }),
+    );
+
+    const started = (await ext.handleMethod("session.start_task", {
+      sessionId,
+      agent: "codex",
+      prompt: "review this",
+      mode: "general",
+    })) as Record<string, unknown>;
+
+    expect(started.taskId).toBe("ctask_123");
+    expect(started.status).toBe("running");
+
+    codexEventHandler?.({
+      type: "codex.ctask_123.message_delta",
+      payload: { text: "delta" },
+      timestamp: Date.now(),
+    });
+
+    const mapped = emitted.find((e) => e.eventName === "session.task.ctask_123.delta");
+    expect(mapped).toBeDefined();
+    expect(mapped?.options).toEqual({
+      source: "gateway.caller",
+      connectionId: "conn-task-1",
+      tags: ["voice.speak"],
+    });
+    expect(mapped?.payload).toMatchObject({
+      taskId: "ctask_123",
+      sessionId,
+      agent: "codex",
+      status: "running",
+    });
+
+    const listed = (await ext.handleMethod("session.list_tasks", {})) as {
+      tasks: Array<{ taskId: string }>;
+    };
+    expect(listed.tasks.map((t) => t.taskId)).toContain("ctask_123");
 
     await ext.stop();
   });

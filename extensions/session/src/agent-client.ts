@@ -15,13 +15,13 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@claudia/shared";
+import type {
+  AgentHostClientMessage as ClientMessage,
+  AgentHostResponseMessage as ResponseMessage,
+  AgentHostSessionEventMessage as SessionEventMessage,
+} from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type {
-  ClientMessage,
-  ResponseMessage,
-  SessionEventMessage,
-} from "../../../packages/agent-host/src/protocol";
 
 const log = createLogger("AgentClient", join(homedir(), ".claudia", "logs", "session.log"));
 
@@ -168,6 +168,7 @@ export class AgentHostClient extends EventEmitter {
     systemPrompt?: string;
     thinking?: boolean;
     effort?: string;
+    agent?: string;
   }): Promise<{ sessionId: string }> {
     const result = await this.sendRequest({
       type: "session.create",
@@ -180,13 +181,19 @@ export class AgentHostClient extends EventEmitter {
   /**
    * Send a prompt to a session.
    */
-  async prompt(sessionId: string, content: string | unknown[], cwd?: string): Promise<void> {
+  async prompt(
+    sessionId: string,
+    content: string | unknown[],
+    cwd?: string,
+    agent?: string,
+  ): Promise<void> {
     await this.sendRequest({
       type: "session.prompt",
       requestId: "",
       sessionId,
       content,
       cwd,
+      agent,
     });
   }
 
