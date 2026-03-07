@@ -12,6 +12,8 @@ export interface AuthMessage {
   extensionId: string; // "session" or "codex"
   /** Sessions to subscribe to and replay events for (reconnect scenario) */
   resumeSessions?: Array<{ sessionId: string; lastSeq: number }>;
+  /** Tasks to subscribe to and replay events for (reconnect scenario) */
+  resumeTasks?: Array<{ taskId: string; lastSeq: number }>;
 }
 
 /** Create a new SDK session */
@@ -76,6 +78,47 @@ export interface ListSessionsMessage {
   requestId: string;
 }
 
+/** Start a delegated task on a target agent/provider */
+export interface TaskStartMessage {
+  type: "task.start";
+  requestId: string;
+  params: {
+    sessionId: string;
+    agent: string;
+    prompt: string;
+    mode?: string;
+    cwd?: string;
+    model?: string;
+    effort?: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    files?: string[];
+    metadata?: Record<string, unknown>;
+  };
+}
+
+/** Get a delegated task by ID */
+export interface TaskGetMessage {
+  type: "task.get";
+  requestId: string;
+  taskId: string;
+}
+
+/** List delegated tasks with optional filters */
+export interface TaskListMessage {
+  type: "task.list";
+  requestId: string;
+  sessionId?: string;
+  status?: string;
+  agent?: string;
+}
+
+/** Interrupt a delegated task by ID */
+export interface TaskInterruptMessage {
+  type: "task.interrupt";
+  requestId: string;
+  taskId: string;
+}
+
 /** Union of all client-to-server messages */
 export type AgentHostClientMessage =
   | AuthMessage
@@ -85,7 +128,11 @@ export type AgentHostClientMessage =
   | CloseMessage
   | SetPermissionModeMessage
   | SendToolResultMessage
-  | ListSessionsMessage;
+  | ListSessionsMessage
+  | TaskStartMessage
+  | TaskGetMessage
+  | TaskListMessage
+  | TaskInterruptMessage;
 
 // ── Server → Client Messages ─────────────────────────────────
 
@@ -110,5 +157,20 @@ export interface AgentHostSessionEventMessage {
   seq: number;
 }
 
+/** Streaming event from a delegated task */
+export interface AgentHostTaskEventMessage {
+  type: "task.event";
+  taskId: string;
+  event: {
+    type: string;
+    [key: string]: unknown;
+  };
+  /** Monotonic sequence number within the task, for gap detection on reconnect */
+  seq: number;
+}
+
 /** Union of all server-to-client messages */
-export type AgentHostServerMessage = AgentHostResponseMessage | AgentHostSessionEventMessage;
+export type AgentHostServerMessage =
+  | AgentHostResponseMessage
+  | AgentHostSessionEventMessage
+  | AgentHostTaskEventMessage;

@@ -1,8 +1,10 @@
 import { createLogger, loadConfig } from "@claudia/shared";
 import type {
+  ClaudiaConfig,
   AgentHostClientMessage as ClientMessage,
   AgentHostResponseMessage as ResponseMessage,
   AgentHostSessionEventMessage as SessionEventMessage,
+  AgentHostTaskEventMessage as TaskEventMessage,
 } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -17,6 +19,7 @@ import { loadState, saveState, type PersistedState } from "./state";
 import { restorePersistedSessions } from "./restore";
 import type { BufferedEvent } from "./event-buffer";
 import type { ThinkingEffort } from "@claudia/shared";
+import { TaskHost, type TaskRecord } from "./task-host";
 
 export interface SessionHostLike {
   on: (eventName: "session.event", listener: (msg: SessionEventMessage) => void) => unknown;
@@ -42,6 +45,27 @@ export interface SessionHostLike {
   getSessionRecords: () => SessionRecord[];
   getEventsAfter: (sessionId: string, lastSeq: number) => BufferedEvent[];
   closeAll: () => Promise<void>;
+  reapIdleRunningSessions?: (idleMs: number, nowMs?: number) => Promise<string[]>;
+}
+
+export interface TaskHostLike {
+  on: (eventName: "task.event", listener: (msg: TaskEventMessage) => void) => unknown;
+  start: (params: {
+    sessionId: string;
+    agent: string;
+    prompt: string;
+    mode?: string;
+    cwd?: string;
+    model?: string;
+    effort?: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    files?: string[];
+    metadata?: Record<string, unknown>;
+  }) => Promise<{ taskId: string; status: string; outputFile?: string; message: string }>;
+  get: (taskId: string) => TaskRecord | null;
+  list: (filters?: { sessionId?: string; status?: string; agent?: string }) => TaskRecord[];
+  interrupt: (taskId: string) => boolean;
+  getEventsAfter: (taskId: string, lastSeq: number) => BufferedEvent[];
 }
 
 export interface AgentHostServerOptions {
@@ -52,14 +76,17 @@ export interface AgentHostServerOptions {
   saveState?: typeof saveState;
   logger?: ReturnType<typeof createLogger>;
   stateSaveIntervalMs?: number | null;
+  taskHost?: TaskHostLike;
 }
 
 export interface AgentHostServerContext {
   server: ReturnType<typeof Bun.serve>;
   sessionHost: SessionHostLike;
+  taskHost: TaskHostLike;
   clients: Map<unknown, WSClient>;
   handleMessage: (ws: unknown, raw: string) => Promise<void>;
   broadcastSessionEvent: (msg: SessionEventMessage) => void;
+  broadcastTaskEvent: (msg: TaskEventMessage) => void;
   stop: (signal?: string) => Promise<void>;
   port: number;
 }
@@ -68,6 +95,7 @@ interface WSClient {
   ws: unknown; // Bun's ServerWebSocket type
   extensionId: string;
   subscribedSessions: Set<string>;
+  subscribedTasks: Set<string>;
 }
 
 export async function createAgentHostServer(
@@ -82,10 +110,12 @@ export async function createAgentHostServer(
   const loadStateFn = options.loadState ?? loadState;
   const saveStateFn = options.saveState ?? saveState;
   const stateSaveIntervalMs = options.stateSaveIntervalMs ?? 30_000;
+  let loadedConfig: ClaudiaConfig | null = null;
 
   // Load config for session defaults
   try {
     const config = loadConfigFn();
+    loadedConfig = config;
     sessionHost.setDefaults({
       model: config.session?.model,
       thinking: config.session?.thinking,
@@ -99,6 +129,25 @@ export async function createAgentHostServer(
   } catch (error) {
     log.warn("Failed to load config, using defaults", { error: String(error) });
   }
+
+  const taskHost =
+    options.taskHost ??
+    new TaskHost({
+      codex:
+        (loadedConfig?.extensions?.codex?.config as
+          | {
+              apiKey?: string;
+              cliPath?: string;
+              model?: string;
+              effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+              sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+              autoApprove?: boolean;
+              personality?: string;
+              cwd?: string;
+              preambles?: { task?: string; review?: string; test?: string };
+            }
+          | undefined) ?? undefined,
+    });
 
   // Load persisted session registry (for crash recovery)
   const persistedState = loadStateFn();
@@ -129,6 +178,22 @@ export async function createAgentHostServer(
     }
   }
 
+  function broadcastTaskEvent(msg: TaskEventMessage): void {
+    const data = JSON.stringify(msg);
+    for (const [, client] of clients) {
+      if (client.subscribedTasks.has(msg.taskId)) {
+        try {
+          (client.ws as { send(data: string): void }).send(data);
+        } catch (error) {
+          log.warn("Failed to send task event to client", {
+            extensionId: client.extensionId,
+            error: String(error),
+          });
+        }
+      }
+    }
+  }
+
   /**
    * Send a response to a specific WebSocket client.
    */
@@ -143,6 +208,9 @@ export async function createAgentHostServer(
   // ── Wire SessionHost events → WebSocket broadcast ──────────
   sessionHost.on("session.event", (msg: SessionEventMessage) => {
     broadcastSessionEvent(msg);
+  });
+  taskHost.on("task.event", (msg: TaskEventMessage) => {
+    broadcastTaskEvent(msg);
   });
 
   // ── Message Handler ────────────────────────────────────────
@@ -161,6 +229,7 @@ export async function createAgentHostServer(
           ws,
           extensionId: msg.extensionId,
           subscribedSessions: new Set(),
+          subscribedTasks: new Set(),
         };
         clients.set(ws, client);
         log.info("Client authenticated", { extensionId: msg.extensionId });
@@ -179,6 +248,21 @@ export async function createAgentHostServer(
               const replayMsg: SessionEventMessage = {
                 type: "session.event",
                 sessionId,
+                event: buffered.event as { type: string; [key: string]: unknown },
+                seq: buffered.seq,
+              };
+              sendResponse(ws, replayMsg as unknown as ResponseMessage);
+            }
+          }
+        }
+        if (msg.resumeTasks) {
+          for (const { taskId, lastSeq } of msg.resumeTasks) {
+            client.subscribedTasks.add(taskId);
+            const missed = taskHost.getEventsAfter(taskId, lastSeq);
+            for (const buffered of missed) {
+              const replayMsg: TaskEventMessage = {
+                type: "task.event",
+                taskId,
                 event: buffered.event as { type: string; [key: string]: unknown },
                 seq: buffered.seq,
               };
@@ -292,6 +376,77 @@ export async function createAgentHostServer(
         break;
       }
 
+      case "task.start": {
+        try {
+          const result = await taskHost.start(msg.params);
+          const client = clients.get(ws);
+          if (client) {
+            client.subscribedTasks.add(result.taskId);
+          }
+          sendResponse(ws, {
+            type: "res",
+            requestId: msg.requestId,
+            ok: true,
+            payload: result,
+          });
+        } catch (error) {
+          sendResponse(ws, {
+            type: "res",
+            requestId: msg.requestId,
+            ok: false,
+            error: String(error),
+          });
+        }
+        break;
+      }
+
+      case "task.get": {
+        const task = taskHost.get(msg.taskId);
+        const client = clients.get(ws);
+        if (client && task) {
+          client.subscribedTasks.add(task.taskId);
+        }
+        sendResponse(ws, {
+          type: "res",
+          requestId: msg.requestId,
+          ok: true,
+          payload: { task },
+        });
+        break;
+      }
+
+      case "task.list": {
+        const tasks = taskHost.list({
+          sessionId: msg.sessionId,
+          status: msg.status,
+          agent: msg.agent,
+        });
+        const client = clients.get(ws);
+        if (client) {
+          for (const task of tasks) {
+            client.subscribedTasks.add(task.taskId);
+          }
+        }
+        sendResponse(ws, {
+          type: "res",
+          requestId: msg.requestId,
+          ok: true,
+          payload: { tasks },
+        });
+        break;
+      }
+
+      case "task.interrupt": {
+        const ok = taskHost.interrupt(msg.taskId);
+        sendResponse(ws, {
+          type: "res",
+          requestId: msg.requestId,
+          ok,
+          ...(ok ? {} : { error: "Task not found or not running" }),
+        });
+        break;
+      }
+
       case "session.set_permission_mode": {
         const ok = sessionHost.setPermissionMode(msg.sessionId, msg.mode);
         sendResponse(ws, {
@@ -345,10 +500,12 @@ export async function createAgentHostServer(
 
       if (url.pathname === "/health") {
         const sessions = sessionHost.list();
+        const tasks = taskHost.list();
         return Response.json({
           ok: true,
           uptime: process.uptime(),
           sessions: sessions.length,
+          tasks: tasks.length,
           clients: clients.size,
         });
       }
@@ -415,9 +572,11 @@ export async function createAgentHostServer(
   return {
     server,
     sessionHost,
+    taskHost,
     clients,
     handleMessage,
     broadcastSessionEvent,
+    broadcastTaskEvent,
     stop,
     port,
   };

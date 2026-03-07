@@ -290,12 +290,6 @@ function normalizeTaskMode(input?: string): TaskMode {
   return "general";
 }
 
-function mapTaskModeToCodexMethod(mode: TaskMode): "codex.task" | "codex.review" | "codex.test" {
-  if (mode === "review") return "codex.review";
-  if (mode === "test") return "codex.test";
-  return "codex.task";
-}
-
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
@@ -413,48 +407,42 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   );
 
   function wireTaskEventBridge(): void {
-    if (!ctx) return;
-
-    const unsub = ctx.on("codex.*", (event) => {
-      const eventName = event.type || "";
-      const match = /^codex\.([^.]+)\.(.+)$/.exec(eventName);
-      if (!match) return;
-
-      const [, taskId, codexEventType] = match;
+    const listener = (event: { taskId: string; eventName: string; [key: string]: unknown }) => {
+      if (!ctx) return;
+      const taskId = event.taskId;
       const task = tasks.get(taskId);
       if (!task) return;
 
-      const payload = (event.payload || {}) as Record<string, unknown>;
-      const nowIso = new Date().toISOString();
+      const hostEventType = String(event.type || "");
+      const payload = { ...event } as Record<string, unknown>;
+      delete payload.taskId;
+      delete payload.eventName;
 
-      if (codexEventType === "turn_stop") {
-        const interrupted = payload.interrupted === true;
-        task.status = interrupted ? "interrupted" : "completed";
-      } else if (codexEventType === "error") {
+      if (hostEventType === "stop") {
+        task.status = payload.status === "interrupted" ? "interrupted" : "completed";
+      } else if (hostEventType === "error") {
         task.status = "failed";
         task.error = String(payload.error || "Task failed");
-      } else if (task.status === "running") {
-        task.status = "running";
       }
-
       if (typeof payload.outputFile === "string") {
         task.outputFile = payload.outputFile;
       }
-      task.updatedAt = nowIso;
+      task.updatedAt = new Date().toISOString();
+
+      const mappedType =
+        hostEventType === "start" ||
+        hostEventType === "delta" ||
+        hostEventType === "item" ||
+        hostEventType === "stop" ||
+        hostEventType === "error"
+          ? hostEventType
+          : "item";
 
       const emitOptions: { source?: string; connectionId?: string; tags?: string[] } = {
         source: "gateway.caller",
       };
       if (task.context.connectionId) emitOptions.connectionId = task.context.connectionId;
       if (task.context.tags) emitOptions.tags = task.context.tags;
-
-      const mappedType = (() => {
-        if (codexEventType === "turn_start") return "start";
-        if (codexEventType === "turn_stop") return "stop";
-        if (codexEventType === "error") return "error";
-        if (codexEventType === "message_delta") return "delta";
-        return "item";
-      })();
 
       ctx.emit(
         `session.task.${taskId}.${mappedType}`,
@@ -463,14 +451,17 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           sessionId: task.sessionId,
           agent: task.agent,
           status: task.status,
-          codexEventType,
+          hostEventType,
           payload,
         },
         emitOptions,
       );
-    });
+    };
 
-    taskUnsubscribers.push(unsub);
+    agentClient.on("task.event", listener);
+    taskUnsubscribers.push(() => {
+      agentClient.removeListener("task.event", listener);
+    });
   }
 
   // ── Method Definitions ─────────────────────────────────────
@@ -954,31 +945,18 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const sandbox = params.sandbox as "read-only" | "workspace-write" | "danger-full-access";
         const files = params.files as string[] | undefined;
 
-        if (agent !== "codex") {
-          throw new Error(
-            `Unsupported task agent: ${agent}. Currently supported: codex (host-backed providers pending migration).`,
-          );
-        }
-
-        const codexMethod = mapTaskModeToCodexMethod(mode);
-        const codexParams: Record<string, unknown> = {
+        const result = (await agentClient.startTask({
           sessionId,
+          agent,
           prompt,
+          mode,
           cwd,
           model,
           effort,
           sandbox,
-        };
-        if (mode === "review" && files?.length) {
-          codexParams.files = files;
-        }
-
-        const result = (await ctx.call(codexMethod, codexParams)) as {
-          taskId: string;
-          outputFile?: string;
-          status?: string;
-          message?: string;
-        };
+          files,
+          metadata: params.metadata as Record<string, unknown> | undefined,
+        })) as { taskId: string; outputFile?: string; status?: string; message?: string };
 
         const nowIso = new Date().toISOString();
         const task: SessionTask = {
@@ -1010,23 +988,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }
 
       case "session.get_task": {
-        const task = tasks.get(params.taskId as string);
-        return { task: task || null };
+        const result = (await agentClient.getTask(params.taskId as string)) as {
+          task?: SessionTask | null;
+        };
+        const task = (result?.task || null) as SessionTask | null;
+        if (task) {
+          tasks.set(task.taskId, task);
+        }
+        return { task };
       }
 
       case "session.list_tasks": {
-        const sessionId = params.sessionId as string | undefined;
-        const status = params.status as TaskStatus | undefined;
-        const agent = params.agent as string | undefined;
-        const all = Array.from(tasks.values());
-        const filtered = all.filter((task) => {
-          if (sessionId && task.sessionId !== sessionId) return false;
-          if (status && task.status !== status) return false;
-          if (agent && task.agent !== agent) return false;
-          return true;
-        });
-        filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-        return { tasks: filtered };
+        const result = (await agentClient.listTasks({
+          sessionId: params.sessionId as string | undefined,
+          status: params.status as TaskStatus | undefined,
+          agent: params.agent as string | undefined,
+        })) as { tasks?: SessionTask[] };
+        const listed = result.tasks || [];
+        for (const task of listed) {
+          tasks.set(task.taskId, task);
+        }
+        return { tasks: listed };
       }
 
       case "session.interrupt_task": {
@@ -1035,20 +1017,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         if (!task) {
           return { ok: false, error: "Task not found", taskId };
         }
-        if (task.agent !== "codex") {
-          return { ok: false, error: `Interrupt unsupported for agent ${task.agent}`, taskId };
-        }
-
-        const interruptResult = (await ctx.call("codex.interrupt", {})) as {
-          ok?: boolean;
-          message?: string;
-        };
-        const ok = interruptResult.ok !== false;
+        const ok = await agentClient.interruptTask(taskId);
         if (ok) {
           task.status = "interrupted";
           task.updatedAt = new Date().toISOString();
         }
-        return { ok, taskId, message: interruptResult.message };
+        return { ok, taskId };
       }
 
       case "session.send_notification": {

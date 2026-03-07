@@ -37,6 +37,10 @@ describe("session extension", () => {
   let listSpy: ReturnType<typeof spyOn>;
   let setPermissionModeSpy: ReturnType<typeof spyOn>;
   let sendToolResultSpy: ReturnType<typeof spyOn>;
+  let startTaskSpy: ReturnType<typeof spyOn>;
+  let getTaskSpy: ReturnType<typeof spyOn>;
+  let listTasksSpy: ReturnType<typeof spyOn>;
+  let interruptTaskSpy: ReturnType<typeof spyOn>;
   let listWorkspacesSpy: ReturnType<typeof spyOn>;
   let getWorkspaceSpy: ReturnType<typeof spyOn>;
   let getOrCreateWorkspaceSpy: ReturnType<typeof spyOn>;
@@ -81,6 +85,42 @@ describe("session extension", () => {
       true,
     );
     sendToolResultSpy = spyOn(AgentHostClient.prototype, "sendToolResult").mockResolvedValue(true);
+    startTaskSpy = spyOn(AgentHostClient.prototype, "startTask").mockImplementation(
+      function (this: AgentHostClient) {
+        setTimeout(() => {
+          this.emit("task.event", {
+            taskId: "ctask_123",
+            eventName: "task.ctask_123.delta",
+            type: "delta",
+            text: "delta",
+          });
+        }, 0);
+        return Promise.resolve({
+          taskId: "ctask_123",
+          status: "running",
+          outputFile: "/tmp/ctask_123.md",
+          message: "started",
+        });
+      },
+    );
+    getTaskSpy = spyOn(AgentHostClient.prototype, "getTask").mockResolvedValue({
+      task: null,
+    });
+    listTasksSpy = spyOn(AgentHostClient.prototype, "listTasks").mockResolvedValue({
+      tasks: [
+        {
+          taskId: "ctask_123",
+          sessionId,
+          agent: "codex",
+          prompt: "review this",
+          mode: "general",
+          status: "running",
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    interruptTaskSpy = spyOn(AgentHostClient.prototype, "interruptTask").mockResolvedValue(true);
     listWorkspacesSpy = spyOn(workspace, "listWorkspaces").mockReturnValue([
       {
         id: "ws-1",
@@ -150,6 +190,10 @@ describe("session extension", () => {
     listSpy.mockRestore();
     setPermissionModeSpy.mockRestore();
     sendToolResultSpy.mockRestore();
+    startTaskSpy.mockRestore();
+    getTaskSpy.mockRestore();
+    listTasksSpy.mockRestore();
+    interruptTaskSpy.mockRestore();
     listWorkspacesSpy.mockRestore();
     getWorkspaceSpy.mockRestore();
     getOrCreateWorkspaceSpy.mockRestore();
@@ -342,9 +386,6 @@ describe("session extension", () => {
   });
 
   it("starts codex-backed tasks via session.start_task and remaps events", async () => {
-    let codexEventHandler:
-      | ((event: { type: string; payload: unknown; timestamp: number }) => void)
-      | undefined;
     const emitted: Array<{
       eventName: string;
       payload: Record<string, unknown>;
@@ -356,27 +397,6 @@ describe("session extension", () => {
       createTestContext({
         connectionId: "conn-task-1",
         tags: ["voice.speak"],
-        on: (pattern, handler) => {
-          if (pattern === "codex.*") {
-            codexEventHandler = handler as (event: {
-              type: string;
-              payload: unknown;
-              timestamp: number;
-            }) => void;
-          }
-          return () => {};
-        },
-        call: async (method, params) => {
-          if (method === "codex.task") {
-            return {
-              taskId: "ctask_123",
-              status: "running",
-              outputFile: "/tmp/ctask_123.md",
-              message: "started",
-            };
-          }
-          throw new Error(`Unexpected method call in test: ${method} ${JSON.stringify(params)}`);
-        },
         emit: (eventName, payload, options) => {
           emitted.push({
             eventName,
@@ -396,12 +416,7 @@ describe("session extension", () => {
 
     expect(started.taskId).toBe("ctask_123");
     expect(started.status).toBe("running");
-
-    codexEventHandler?.({
-      type: "codex.ctask_123.message_delta",
-      payload: { text: "delta" },
-      timestamp: Date.now(),
-    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const mapped = emitted.find((e) => e.eventName === "session.task.ctask_123.delta");
     expect(mapped).toBeDefined();
