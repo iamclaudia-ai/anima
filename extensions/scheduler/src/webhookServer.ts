@@ -16,12 +16,14 @@ export class WebhookServer {
   private db: Database;
   private log: any;
   private port: number;
+  private automationSessionId: string | null;
 
   constructor(ctx: any, db: Database, log: any, port: number = 30088) {
     this.ctx = ctx;
     this.db = db;
     this.log = log;
     this.port = port;
+    this.automationSessionId = process.env.CLAUDIA_SCHEDULER_SESSION_ID || null;
   }
 
   async start() {
@@ -360,12 +362,26 @@ export class WebhookServer {
       commits: payload.commits?.length,
     });
 
-    // Trigger code review if configured
+    if (!this.automationSessionId) {
+      this.log.warn("Skipping main-branch review: CLAUDIA_SCHEDULER_SESSION_ID not configured");
+      return;
+    }
+
+    // Trigger delegated code review task via session API
     try {
-      await this.ctx.call("codex.auto_review", {
-        repository: payload.repository.name,
-        ref: payload.ref,
-        commits: payload.commits,
+      const commitLines = (payload.commits || [])
+        .slice(-10)
+        .map((commit: any) => `- ${commit.id?.slice(0, 8) || "unknown"} ${commit.message || ""}`)
+        .join("\n");
+
+      await this.ctx.call("session.start_task", {
+        sessionId: this.automationSessionId,
+        agent: "codex",
+        mode: "review",
+        prompt:
+          `Review recent main branch push for ${payload.repository?.name || "repository"}.\n` +
+          `Ref: ${payload.ref || "unknown"}\n\n` +
+          `Commits:\n${commitLines || "- none provided"}`,
       });
     } catch (error) {
       this.log.error("Auto-review failed", { error: String(error) });
@@ -378,18 +394,21 @@ export class WebhookServer {
       title: payload.pull_request.title,
     });
 
-    try {
-      const review = await this.ctx.call("codex.review", {
-        prUrl: payload.pull_request.html_url,
-        prNumber: payload.number,
-      });
+    if (!this.automationSessionId) {
+      this.log.warn("Skipping PR review: CLAUDIA_SCHEDULER_SESSION_ID not configured");
+      return;
+    }
 
-      if (review.severity === "high") {
-        await this.ctx.call("session.notify", {
-          message: `🚨 Critical issues found in PR #${payload.number}: ${payload.pull_request.title}`,
-          metadata: { pr: payload.number, review },
-        });
-      }
+    try {
+      await this.ctx.call("session.start_task", {
+        sessionId: this.automationSessionId,
+        agent: "codex",
+        mode: "review",
+        prompt:
+          `Review PR #${payload.number}: ${payload.pull_request?.title || ""}\n` +
+          `URL: ${payload.pull_request?.html_url || "unknown"}\n\n` +
+          `Focus on correctness, regressions, and risky changes.`,
+      });
     } catch (error) {
       this.log.error("PR review failed", { error: String(error) });
     }

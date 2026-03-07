@@ -133,20 +133,7 @@ export async function createAgentHostServer(
   const taskHost =
     options.taskHost ??
     new TaskHost({
-      codex:
-        (loadedConfig?.extensions?.codex?.config as
-          | {
-              apiKey?: string;
-              cliPath?: string;
-              model?: string;
-              effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
-              sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
-              autoApprove?: boolean;
-              personality?: string;
-              cwd?: string;
-              preambles?: { task?: string; review?: string; test?: string };
-            }
-          | undefined) ?? undefined,
+      codex: loadedConfig?.agentHost?.codex,
     });
 
   // Load persisted session registry (for crash recovery)

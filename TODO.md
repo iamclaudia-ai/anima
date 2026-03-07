@@ -88,10 +88,10 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
   - [ ] Gateway extension for context injection (before prompts)
   - [ ] Vector search with Qdrant
 - [ ] **Browser Extension** - DOMINATRIX integration
-- [ ] **Codex Extension** - Add configurable preambles for command types
-  - Add `preambles` config section to codex extension config
+- [ ] **Codex Task Agent** - Add configurable preambles for command types
+  - Add `preambles` config section to `agentHost.codex` config
   - Define standard preambles for `review`, `test`, and `task` commands
-  - Update `extensions/codex/src/index.ts` to prepend appropriate preamble based on command type
+  - Update `packages/agent-host/src/task-host.ts` to prepend appropriate preamble based on command type
   - This ensures consistent prompt structure without Claudia having to remember every time
   - Preambles should be configurable in `~/.claudia/claudia.json` (not hardcoded)
 

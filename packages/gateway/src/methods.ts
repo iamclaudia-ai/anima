@@ -43,7 +43,7 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
     method: "gateway.restart_extension",
     description: "Restart an extension host process (manual HMR for non-hot extensions)",
     inputSchema: z.object({
-      extension: z.string().describe("Extension ID to restart (e.g. session, codex, voice)"),
+      extension: z.string().describe("Extension ID to restart (e.g. session, memory, voice)"),
     }),
   },
 ];

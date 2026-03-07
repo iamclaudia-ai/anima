@@ -235,7 +235,6 @@ RPC metadata: `traceId`, `depth` (max 8), `deadlineMs`. Per-extension rate limit
 | Mission Control | `control`  | System dashboard, health checks                          |
 | Hooks           | `hooks`    | Lightweight event-driven scripts                         |
 | Memory          | `memory`   | Transcript ingestion + Libby processing                  |
-| Codex           | `codex`    | OpenAI Codex sub-agent (Cody) for delegated tasks        |
 
 ### Client-Side Extensions (Routes)
 
@@ -471,7 +470,6 @@ extensions/
   control/src/          # System dashboard, health checks
   hooks/src/            # Event-driven scripts
   memory/src/           # Transcript ingestion + Libby processing
-  codex/src/            # OpenAI Codex sub-agent (review, test, task delegation)
 
 clients/
   ios/                  # Native Swift voice mode app

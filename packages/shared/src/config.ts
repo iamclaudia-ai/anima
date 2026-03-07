@@ -73,6 +73,18 @@ export interface AgentHostConfig {
   url: string;
   /** Agent-host HTTP port (for watchdog health checks) */
   port: number;
+  /** Task-agent configuration (currently Codex-backed) */
+  codex?: {
+    apiKey?: string;
+    cliPath?: string;
+    model?: string;
+    effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    autoApprove?: boolean;
+    personality?: string;
+    cwd?: string;
+    preambles?: { task?: string; review?: string; test?: string };
+  };
 }
 
 export interface FederationPeer {

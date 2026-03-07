@@ -109,6 +109,7 @@ export class TaskHost extends EventEmitter {
     if (!apiKey) throw new Error("Codex API key missing for task agent");
     const candidates = [
       join(process.cwd(), "node_modules", "@openai", "codex-sdk"),
+      join(process.cwd(), "node_modules", ".bun", "node_modules", "@openai", "codex-sdk"),
       join(process.cwd(), "extensions", "codex", "node_modules", "@openai", "codex-sdk"),
     ];
 

@@ -110,22 +110,6 @@
       }
     },
 
-    // Codex Extension — OpenAI Codex sub-agent ("Cody")
-    // Delegates code review, test writing, and general tasks to Codex
-    // Requires: npm i -g @openai/codex
-    "codex": {
-      "enabled": false,
-      "config": {
-        "apiKey": "${OPENAI_API_KEY}",
-        "model": "gpt-5.2-codex",
-        "sandboxMode": "workspace-write",
-        "cwd": "~/Projects",
-        "personality": "You are Cody, a meticulous sub-agent working for Claudia.",
-        "effort": "medium",
-        "autoApprove": true
-      }
-    },
-
     // Slack Extension (example)
     "slack": {
       "enabled": false,
@@ -141,7 +125,17 @@
   // Session extension connects to agent-host via WebSocket for process isolation
   "agentHost": {
     "url": "ws://localhost:30087/ws",
-    "port": 30087
+    "port": 30087,
+    // Codex task-agent settings for delegated session.start_task(agent="codex")
+    "codex": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "model": "gpt-5.2-codex",
+      "sandboxMode": "workspace-write",
+      "cwd": "~/Projects",
+      "personality": "You are Cody, a meticulous sub-agent working for Claudia.",
+      "effort": "medium",
+      "autoApprove": true
+    }
   },
 
   "federation": {

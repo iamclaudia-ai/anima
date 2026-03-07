@@ -330,7 +330,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
   const StartTaskSchema = z.object({
     sessionId: z.string().describe("Parent session UUID"),
-    agent: z.string().describe("Target agent/provider (currently codex supported)"),
+    agent: z.string().describe("Target delegated agent/provider (currently codex supported)"),
     prompt: z.string().min(1).describe("Task prompt"),
     mode: z.enum(["general", "review", "test"]).optional().default("general"),
     cwd: z.string().optional().describe("Working directory override"),
@@ -558,7 +558,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       name: "session.send_notification",
       description:
         "Inject a notification into a session as a user message wrapped in <user_notification> tags. " +
-        "Used by extensions (e.g. codex) to notify the session when async work completes.",
+        "Used by async task agents/extensions to notify the session when background work completes.",
       inputSchema: z.object({
         sessionId: z.string().describe("Session UUID to notify"),
         text: z

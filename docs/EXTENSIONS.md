@@ -744,7 +744,6 @@ Chat still manages session scope explicitly (`session.<id>.*`) and unsubscribes 
 | Mission Control | `control`    | `@claudia/ext-control`    | `/control`, `/logs`                               | --            |
 | Hooks           | `hooks`      | `@claudia/ext-hooks`      | --                                                | --            |
 | DOMINATRIX      | `dominatrix` | `@claudia/ext-dominatrix` | --                                                | --            |
-| Codex           | `codex`      | `@claudia/ext-codex`      | --                                                | --            |
 
 All extensions run out-of-process. There is no in-process mode.
 
