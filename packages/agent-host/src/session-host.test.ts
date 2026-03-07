@@ -115,4 +115,28 @@ describe("SessionHost", () => {
 
     expect(host.list().map((s) => (s as { id: string }).id)).toEqual(["s-fresh"]);
   });
+
+  it("persists only sessions with running SDK processes", async () => {
+    const running = new FakeSession("s-running");
+    running.isProcessRunning = true;
+
+    const idle = new FakeSession("s-idle");
+    idle.isProcessRunning = false;
+
+    let createCalls = 0;
+    const host = new SessionHost({
+      create: () => {
+        createCalls += 1;
+        return (createCalls === 1
+          ? running
+          : idle) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+      },
+    });
+
+    await host.create({ cwd: "/repo" });
+    await host.create({ cwd: "/repo" });
+
+    const records = host.getSessionRecords();
+    expect(records.map((r) => r.id)).toEqual(["s-running"]);
+  });
 });

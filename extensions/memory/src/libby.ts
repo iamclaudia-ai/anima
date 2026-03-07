@@ -108,7 +108,10 @@ class LibbySession {
     await this.ctx.call("session.get_or_create_workspace", { cwd: LIBBY_CWD });
 
     // Create a session
-    const result = (await this.ctx.call("session.create_session", { cwd: LIBBY_CWD })) as {
+    const result = (await this.ctx.call("session.create_session", {
+      cwd: LIBBY_CWD,
+      model: this.model,
+    })) as {
       sessionId: string;
     };
     this._sessionId = result.sessionId;

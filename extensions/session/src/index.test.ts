@@ -316,6 +316,29 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("uses extension config model defaults when params do not override", async () => {
+    const ext = createSessionExtension({
+      model: "claude-opus-4-6",
+      thinking: true,
+      effort: "high",
+    });
+    await ext.start(createTestContext());
+
+    await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    });
+
+    expect(createSpy).toHaveBeenCalledWith({
+      cwd: "/repo/project",
+      model: "claude-opus-4-6",
+      systemPrompt: undefined,
+      thinking: true,
+      effort: "high",
+    });
+
+    await ext.stop();
+  });
+
   it("switches and resets sessions through manager methods", async () => {
     createSpy.mockResolvedValueOnce({ sessionId: "reset-session-1" });
 
@@ -406,6 +429,9 @@ describe("session extension", () => {
       label: "/repo/project",
       status: "healthy",
     });
+    expect(
+      (health.items?.[0] as { details?: Record<string, string> }).details?.lastActivityAgo,
+    ).toMatch(/ago$/);
 
     await ext.stop();
   });

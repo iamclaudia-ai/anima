@@ -272,7 +272,21 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
   // Load global configuration (claudia.json + defaults)
   const globalConfig = loadConfig();
-  const sessionConfig = globalConfig.session;
+  const sessionConfig: SessionConfig = {
+    ...globalConfig.session,
+    model: (config.model as string | undefined) || globalConfig.session.model,
+    thinking:
+      (config.thinking as boolean | undefined) === undefined
+        ? globalConfig.session.thinking
+        : (config.thinking as boolean),
+    effort:
+      (config.effort as "low" | "medium" | "high" | "max" | undefined) ||
+      globalConfig.session.effort,
+    systemPrompt:
+      (config.systemPrompt as string | null | undefined) === undefined
+        ? globalConfig.session.systemPrompt
+        : ((config.systemPrompt as string | null) ?? null),
+  };
   const agentHostConfig = globalConfig.agentHost;
 
   // Connect to agent-host via WebSocket for SDK process isolation.
@@ -857,6 +871,18 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     };
   }
 
+  function formatElapsed(ms: number): string {
+    if (!Number.isFinite(ms) || ms < 0) return "n/a";
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    return `${day}d ago`;
+  }
+
   async function healthCheckDetailed(): Promise<HealthCheckResponse> {
     const agentHostConnected = agentClient.isConnected;
     if (!agentHostConnected) {
@@ -887,9 +913,17 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       };
     }
 
-    const activeCount = sessions.filter((s) => s.isActive).length;
-    const runningCount = sessions.filter((s) => s.isProcessRunning).length;
-    const staleCount = sessions.filter((s) => s.stale).length;
+    const visibleSessions = sessions.filter((s) => s.isProcessRunning);
+    const activeCount = visibleSessions.filter((s) => s.isActive).length;
+    const runningCount = visibleSessions.length;
+    const staleCount = visibleSessions.filter((s) => s.stale).length;
+    const sortedSessions = [...visibleSessions].sort((a, b) => {
+      const aTs = Date.parse(a.lastActivity || "");
+      const bTs = Date.parse(b.lastActivity || "");
+      const safeA = Number.isFinite(aTs) ? aTs : 0;
+      const safeB = Number.isFinite(bTs) ? bTs : 0;
+      return safeB - safeA;
+    });
 
     return {
       ok: true,
@@ -902,7 +936,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         { label: "Stale", value: staleCount },
       ],
       actions: [],
-      items: sessions.map((session) => ({
+      items: sortedSessions.map((session) => ({
         id: session.id,
         label: session.cwd || session.id,
         status: !session.isActive ? "inactive" : session.stale ? "stale" : "healthy",
@@ -910,6 +944,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           model: session.model || "unknown",
           running: session.isProcessRunning ? "yes" : "no",
           lastActivity: session.lastActivity || "n/a",
+          lastActivityAgo: formatElapsed(Date.now() - Date.parse(session.lastActivity)),
         },
       })),
     };

@@ -393,9 +393,8 @@ log.info(`Agent Host server listening on port ${PORT}`);
 const STATE_SAVE_INTERVAL = 30_000; // 30 seconds
 const stateSaveTimer = setInterval(() => {
   const records = sessionHost.getSessionRecords();
-  if (records.length > 0) {
-    saveState(records);
-  }
+  // Persist even when empty so stale non-running sessions are pruned from disk.
+  saveState(records);
 }, STATE_SAVE_INTERVAL);
 
 let idleReapRunning = false;

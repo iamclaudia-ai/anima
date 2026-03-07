@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SessionHost } from "./session-host";
@@ -8,6 +8,7 @@ import { restorePersistedSessions } from "./restore";
 
 class FakeSession extends EventEmitter {
   public isActive = true;
+  public isProcessRunning = true;
 
   constructor(
     public id: string,
@@ -39,6 +40,10 @@ class FakeSession extends EventEmitter {
       id: this.id,
       cwd: this.cwd,
       model: this.model,
+      isActive: this.isActive,
+      isProcessRunning: this.isProcessRunning,
+      healthy: true,
+      stale: false,
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
     };
@@ -117,6 +122,60 @@ describe("restorePersistedSessions", () => {
     expect(prompted).toEqual([sessionId]);
 
     restore();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("hydrates lastActivity from transcript mtime when persisted value is missing", async () => {
+    const home = mkdtempSync(join(tmpdir(), "claudia-agent-host-home-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+
+    const cwd = "/repo/project";
+    const sessionId = "s-mtime";
+    const encodedCwd = cwd.replace(/\//g, "-");
+    const projectDir = join(home, ".claude", "projects", encodedCwd);
+    mkdirSync(projectDir, { recursive: true });
+    const sessionPath = join(projectDir, `${sessionId}.jsonl`);
+    writeFileSync(sessionPath, '{"type":"noop"}\n');
+    const mtime = new Date("2026-03-01T12:34:56.000Z");
+    utimesSync(sessionPath, mtime, mtime);
+
+    const resumeCalls: Array<{ lastActivity?: string }> = [];
+    await restorePersistedSessions(
+      {
+        resume: async (params: {
+          sessionId: string;
+          cwd: string;
+          model?: string;
+          lastActivity?: string;
+        }) => {
+          resumeCalls.push({ lastActivity: params.lastActivity });
+          return { sessionId: params.sessionId };
+        },
+      },
+      {
+        updatedAt: new Date().toISOString(),
+        sessions: [
+          {
+            id: sessionId,
+            cwd,
+            model: "sonnet",
+            createdAt: new Date().toISOString(),
+            lastActivity: "",
+          },
+        ],
+      },
+      { info: () => {}, warn: () => {} },
+    );
+
+    expect(resumeCalls).toHaveLength(1);
+    expect(resumeCalls[0]?.lastActivity).toBe(mtime.toISOString());
+
+    if (previousHome) {
+      process.env.HOME = previousHome;
+    } else {
+      delete process.env.HOME;
+    }
     rmSync(home, { recursive: true, force: true });
   });
 });

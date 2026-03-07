@@ -52,6 +52,8 @@ export interface SessionResumeParams {
   cwd: string;
   /** Model to use */
   model?: string;
+  /** Last observed activity timestamp (ISO) for restore hydration */
+  lastActivity?: string;
   /** Enable adaptive thinking */
   thinking?: boolean;
   /** Thinking effort level */
@@ -143,6 +145,7 @@ export class SessionHost extends EventEmitter {
     const options: ResumeSessionOptions = {
       cwd: params.cwd,
       model: params.model ?? this.defaults.model,
+      lastActivity: params.lastActivity,
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
     };
@@ -253,16 +256,16 @@ export class SessionHost extends EventEmitter {
    * Get active session IDs (for persistence).
    */
   getSessionRecords(): SessionRecord[] {
-    return Array.from(this.sessions.values()).map((s) => {
-      const info = s.getInfo();
-      return {
+    return Array.from(this.sessions.values())
+      .map((s) => s.getInfo())
+      .filter((info) => info.isProcessRunning)
+      .map((info) => ({
         id: info.id,
         cwd: info.cwd,
         model: info.model,
         createdAt: info.createdAt,
         lastActivity: info.lastActivity,
-      };
-    });
+      }));
   }
 
   /**

@@ -67,6 +67,8 @@ export interface ResumeSessionOptions {
   cwd: string;
   /** Model to use */
   model?: string;
+  /** Last observed activity timestamp (ISO) for restore hydration */
+  lastActivity?: string;
   /** Enable adaptive thinking */
   thinking?: boolean;
   /** Thinking effort level */
@@ -230,6 +232,14 @@ export class SDKSession extends EventEmitter {
     const globalConfig = loadConfig();
     this.imageProcessingConfig = globalConfig.session.imageProcessing;
     this.skillsPaths = globalConfig.session.skills.paths || [];
+
+    const resumeActivity =
+      "lastActivity" in options && typeof options.lastActivity === "string"
+        ? Date.parse(options.lastActivity)
+        : NaN;
+    if (Number.isFinite(resumeActivity) && resumeActivity > 0) {
+      this.lastActivityTime = resumeActivity;
+    }
 
     // Set up log directory
     const logDir = join(homedir(), ".claudia", "sessions", this.id);
