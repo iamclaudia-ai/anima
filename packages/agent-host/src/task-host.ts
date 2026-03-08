@@ -25,10 +25,25 @@ export interface TaskStartParams {
   metadata?: Record<string, unknown>;
 }
 
+export interface TaskGitState {
+  isRepo: boolean;
+  dirty: boolean;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  branch?: string;
+  worktreeExists?: boolean;
+  mergedToParent?: boolean;
+}
+
 export interface TaskRecord {
   taskId: string;
   sessionId: string;
   agent: string;
+  cwd: string;
+  worktreePath?: string;
+  parentRepoPath?: string;
+  continuedFromTaskId?: string;
   mode: TaskMode;
   prompt: string;
   status: TaskStatus;
@@ -37,6 +52,7 @@ export interface TaskRecord {
   outputFile?: string;
   error?: string;
   resultText?: string;
+  git?: TaskGitState;
 }
 
 interface ActiveTask extends TaskRecord {
@@ -77,6 +93,18 @@ function decodeOutput(data: Uint8Array | null | undefined): string {
   return new TextDecoder().decode(data).trim();
 }
 
+function runGit(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
+  const proc = Bun.spawnSync(["git", "-C", cwd, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    ok: proc.exitCode === 0,
+    stdout: decodeOutput(proc.stdout),
+    stderr: decodeOutput(proc.stderr),
+  };
+}
+
 function summarizeItem(item: any): Record<string, unknown> {
   const base: Record<string, unknown> = { type: item.type, id: item.id };
   if (item.type === "agent_message") base.text = item.text;
@@ -111,60 +139,121 @@ export class TaskHost extends EventEmitter {
   }
 
   private resolveGitRoot(cwd: string): string | null {
-    const proc = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    if (proc.exitCode !== 0) return null;
-    const root = decodeOutput(proc.stdout);
+    const out = runGit(cwd, ["rev-parse", "--show-toplevel"]);
+    if (!out.ok) return null;
+    const root = out.stdout;
     return root || null;
   }
 
-  private resolveTaskWorkingDirectory(taskId: string, params: TaskStartParams): string {
+  private resolveTaskWorkingDirectory(
+    taskId: string,
+    params: TaskStartParams,
+  ): {
+    cwd: string;
+    worktreePath?: string;
+    parentRepoPath?: string;
+    continuedFromTaskId?: string;
+  } {
     const baseCwd = params.cwd || this.cfg.codex?.cwd || process.cwd();
     const continueTaskId = params.continue?.trim();
+    const parentRepoPath = this.resolveGitRoot(baseCwd) || undefined;
 
     if (continueTaskId) {
       const continuePath = join("/tmp", "worktrees", continueTaskId);
       if (existsSync(continuePath)) {
         log.info("Reusing task worktree", { taskId, continueTaskId, path: continuePath });
-        return continuePath;
+        return {
+          cwd: continuePath,
+          worktreePath: continuePath,
+          parentRepoPath,
+          continuedFromTaskId: continueTaskId,
+        };
       }
       log.info("Requested continue task worktree not found; using base cwd", {
         taskId,
         continueTaskId,
         baseCwd,
       });
-      return baseCwd;
+      return { cwd: baseCwd, parentRepoPath, continuedFromTaskId: continueTaskId };
     }
 
     if (!params.worktree) {
-      return baseCwd;
+      return { cwd: baseCwd, parentRepoPath };
     }
 
-    const gitRoot = this.resolveGitRoot(baseCwd);
-    if (!gitRoot) {
+    if (!parentRepoPath) {
       throw new Error(`Cannot create worktree: ${baseCwd} is not inside a git repository`);
     }
 
     const worktreePath = join("/tmp", "worktrees", taskId);
     ensureDir(dirname(worktreePath));
     if (!existsSync(worktreePath)) {
-      const add = Bun.spawnSync(
-        ["git", "-C", gitRoot, "worktree", "add", "--detach", worktreePath, "HEAD"],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
-      if (add.exitCode !== 0) {
-        const stderr = decodeOutput(add.stderr);
+      const add = runGit(parentRepoPath, ["worktree", "add", "--detach", worktreePath, "HEAD"]);
+      if (!add.ok) {
+        const stderr = add.stderr;
         throw new Error(`Failed to create worktree ${worktreePath}: ${stderr || "unknown error"}`);
       }
-      log.info("Created task worktree", { taskId, gitRoot, worktreePath });
+      log.info("Created task worktree", { taskId, gitRoot: parentRepoPath, worktreePath });
     }
 
-    return worktreePath;
+    return { cwd: worktreePath, worktreePath, parentRepoPath };
+  }
+
+  private getGitState(record: TaskRecord): TaskGitState | undefined {
+    const status = runGit(record.cwd, ["status", "--porcelain=v1"]);
+    if (!status.ok) return undefined;
+
+    let staged = 0;
+    let unstaged = 0;
+    let untracked = 0;
+    const lines = status.stdout ? status.stdout.split("\n").filter(Boolean) : [];
+    for (const line of lines) {
+      if (line.startsWith("??")) {
+        untracked += 1;
+        continue;
+      }
+      const x = line[0] || " ";
+      const y = line[1] || " ";
+      if (x !== " ") staged += 1;
+      if (y !== " ") unstaged += 1;
+    }
+
+    const branchOut = runGit(record.cwd, ["branch", "--show-current"]);
+    const branch = branchOut.ok ? branchOut.stdout || undefined : undefined;
+    const dirty = staged > 0 || unstaged > 0 || untracked > 0;
+    const state: TaskGitState = {
+      isRepo: true,
+      dirty,
+      staged,
+      unstaged,
+      untracked,
+      branch,
+      ...(record.worktreePath ? { worktreeExists: existsSync(record.worktreePath) } : {}),
+    };
+
+    if (record.worktreePath && record.parentRepoPath) {
+      const taskHead = runGit(record.cwd, ["rev-parse", "HEAD"]);
+      const parentHead = runGit(record.parentRepoPath, ["rev-parse", "HEAD"]);
+      if (taskHead.ok && parentHead.ok && taskHead.stdout && parentHead.stdout) {
+        const merged = runGit(record.parentRepoPath, [
+          "merge-base",
+          "--is-ancestor",
+          taskHead.stdout,
+          parentHead.stdout,
+        ]);
+        state.mergedToParent = merged.ok;
+      }
+    }
+
+    return state;
+  }
+
+  private hydrateRecord(record: TaskRecord): TaskRecord {
+    const git = this.getGitState(record);
+    return {
+      ...record,
+      ...(git ? { git } : {}),
+    };
   }
 
   private async ensureCodex(): Promise<any> {
@@ -236,7 +325,9 @@ export class TaskHost extends EventEmitter {
   }
 
   get(taskId: string): TaskRecord | null {
-    return this.records.get(taskId) || null;
+    const record = this.records.get(taskId);
+    if (!record) return null;
+    return this.hydrateRecord(record);
   }
 
   list(filters?: { sessionId?: string; status?: string; agent?: string }): TaskRecord[] {
@@ -248,6 +339,7 @@ export class TaskHost extends EventEmitter {
         if (filters?.agent && t.agent !== filters.agent) return false;
         return true;
       })
+      .map((record) => this.hydrateRecord(record))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -263,6 +355,10 @@ export class TaskHost extends EventEmitter {
     status: TaskStatus;
     outputFile?: string;
     message: string;
+    cwd?: string;
+    worktreePath?: string;
+    parentRepoPath?: string;
+    continuedFromTaskId?: string;
   }> {
     if (params.agent !== "codex") {
       throw new Error(`Unsupported task agent: ${params.agent}`);
@@ -274,10 +370,15 @@ export class TaskHost extends EventEmitter {
     const now = new Date().toISOString();
     const outputFile = this.initOutput(taskId, mode, prompt);
 
+    const runtime = this.resolveTaskWorkingDirectory(taskId, params);
     const record: TaskRecord = {
       taskId,
       sessionId: params.sessionId,
       agent: params.agent,
+      cwd: runtime.cwd,
+      worktreePath: runtime.worktreePath,
+      parentRepoPath: runtime.parentRepoPath,
+      continuedFromTaskId: runtime.continuedFromTaskId,
       mode,
       prompt,
       status: "running",
@@ -302,13 +403,16 @@ export class TaskHost extends EventEmitter {
       sessionId: params.sessionId,
       agent: params.agent,
       mode,
+      cwd: record.cwd,
+      worktreePath: record.worktreePath,
+      parentRepoPath: record.parentRepoPath,
+      continuedFromTaskId: record.continuedFromTaskId,
       outputFile,
     });
 
     const sdk = await this.ensureCodex();
-    const workingDirectory = this.resolveTaskWorkingDirectory(taskId, params);
     const threadOptions = {
-      workingDirectory,
+      workingDirectory: runtime.cwd,
       skipGitRepoCheck: true,
       model: params.model || this.cfg.codex?.model,
       sandboxMode: params.sandbox || this.cfg.codex?.sandboxMode || "workspace-write",
@@ -328,7 +432,16 @@ export class TaskHost extends EventEmitter {
 
     void this.runTaskStream(thread, active, fullPrompt);
 
-    return { taskId, status: "running", outputFile, message: "Task started" };
+    return {
+      taskId,
+      status: "running",
+      outputFile,
+      message: "Task started",
+      cwd: runtime.cwd,
+      ...(runtime.worktreePath ? { worktreePath: runtime.worktreePath } : {}),
+      ...(runtime.parentRepoPath ? { parentRepoPath: runtime.parentRepoPath } : {}),
+      ...(runtime.continuedFromTaskId ? { continuedFromTaskId: runtime.continuedFromTaskId } : {}),
+    };
   }
 
   private async runTaskStream(thread: any, task: ActiveTask, prompt: string): Promise<void> {
@@ -349,6 +462,11 @@ export class TaskHost extends EventEmitter {
           type: "stop",
           taskId: task.taskId,
           status: task.status,
+          cwd: task.cwd,
+          worktreePath: task.worktreePath,
+          parentRepoPath: task.parentRepoPath,
+          continuedFromTaskId: task.continuedFromTaskId,
+          git: this.getGitState(task),
           result: task.resultText || "",
           items: task.items.map(summarizeItem),
           outputFile: task.outputFile,
@@ -367,6 +485,11 @@ export class TaskHost extends EventEmitter {
         type: isAbort ? "stop" : "error",
         taskId: task.taskId,
         status: task.status,
+        cwd: task.cwd,
+        worktreePath: task.worktreePath,
+        parentRepoPath: task.parentRepoPath,
+        continuedFromTaskId: task.continuedFromTaskId,
+        git: this.getGitState(task),
         error: task.error,
         result: task.resultText || "",
         outputFile: task.outputFile,
@@ -415,6 +538,11 @@ export class TaskHost extends EventEmitter {
       this.emitTaskEvent(task.taskId, {
         type: "error",
         taskId: task.taskId,
+        cwd: task.cwd,
+        worktreePath: task.worktreePath,
+        parentRepoPath: task.parentRepoPath,
+        continuedFromTaskId: task.continuedFromTaskId,
+        git: this.getGitState(task),
         error,
         outputFile: task.outputFile,
       });

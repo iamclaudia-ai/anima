@@ -190,13 +190,23 @@ class FakeTaskHost extends EventEmitter implements TaskHostLike {
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     files?: string[];
     metadata?: Record<string, unknown>;
-  }): Promise<{ taskId: string; status: string; outputFile?: string; message: string }> {
+  }): Promise<{
+    taskId: string;
+    status: string;
+    outputFile?: string;
+    message: string;
+    cwd?: string;
+    worktreePath?: string;
+    parentRepoPath?: string;
+    continuedFromTaskId?: string;
+  }> {
     const taskId = `t${this.nextId++}`;
     const now = new Date().toISOString();
     this.tasks.set(taskId, {
       taskId,
       sessionId: params.sessionId,
       agent: params.agent,
+      cwd: params.cwd || "/repo",
       mode: (params.mode as "general" | "review" | "test") || "general",
       status: "running",
       prompt: params.prompt,

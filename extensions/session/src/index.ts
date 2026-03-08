@@ -281,6 +281,11 @@ interface SessionTask {
   taskId: string;
   sessionId: string;
   agent: string;
+  cwd?: string;
+  worktreePath?: string;
+  parentRepoPath?: string;
+  continuedFromTaskId?: string;
+  git?: Record<string, unknown>;
   prompt: string;
   mode: TaskMode;
   status: TaskStatus;
@@ -328,6 +333,16 @@ function toSessionTaskFromStored(stored: StoredSession | null): SessionTask | nu
     taskId: stored.id,
     sessionId: stored.parentSessionId,
     agent: stored.agent,
+    cwd: typeof metadata.cwd === "string" ? metadata.cwd : undefined,
+    worktreePath: typeof metadata.worktreePath === "string" ? metadata.worktreePath : undefined,
+    parentRepoPath:
+      typeof metadata.parentRepoPath === "string" ? metadata.parentRepoPath : undefined,
+    continuedFromTaskId:
+      typeof metadata.continuedFromTaskId === "string" ? metadata.continuedFromTaskId : undefined,
+    git:
+      metadata.git && typeof metadata.git === "object" && !Array.isArray(metadata.git)
+        ? (metadata.git as Record<string, unknown>)
+        : undefined,
     prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
     mode,
     status: toTaskStatus(stored.runtimeStatus),
@@ -497,6 +512,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             taskId: stored.id,
             sessionId: stored.parentSessionId,
             agent: stored.agent,
+            cwd: typeof metadata.cwd === "string" ? metadata.cwd : undefined,
+            worktreePath:
+              typeof metadata.worktreePath === "string" ? metadata.worktreePath : undefined,
+            parentRepoPath:
+              typeof metadata.parentRepoPath === "string" ? metadata.parentRepoPath : undefined,
+            continuedFromTaskId:
+              typeof metadata.continuedFromTaskId === "string"
+                ? metadata.continuedFromTaskId
+                : undefined,
+            git:
+              metadata.git && typeof metadata.git === "object" && !Array.isArray(metadata.git)
+                ? (metadata.git as Record<string, unknown>)
+                : undefined,
             prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
             mode:
               stored.purpose === "review" || stored.purpose === "test" ? stored.purpose : "general",
@@ -537,6 +565,21 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       if (typeof payload.outputFile === "string") {
         task.outputFile = payload.outputFile;
       }
+      if (typeof payload.cwd === "string") {
+        task.cwd = payload.cwd;
+      }
+      if (typeof payload.worktreePath === "string") {
+        task.worktreePath = payload.worktreePath;
+      }
+      if (typeof payload.parentRepoPath === "string") {
+        task.parentRepoPath = payload.parentRepoPath;
+      }
+      if (typeof payload.continuedFromTaskId === "string") {
+        task.continuedFromTaskId = payload.continuedFromTaskId;
+      }
+      if (payload.git && typeof payload.git === "object" && !Array.isArray(payload.git)) {
+        task.git = payload.git as Record<string, unknown>;
+      }
       task.updatedAt = new Date().toISOString();
       const taskStored = getStoredSession(task.taskId);
       const parentStored = getStoredSession(task.sessionId);
@@ -553,6 +596,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           runtimeStatus: task.status === "running" ? "running" : task.status,
           metadata: {
             prompt: task.prompt,
+            cwd: task.cwd,
+            worktreePath: task.worktreePath,
+            parentRepoPath: task.parentRepoPath,
+            continuedFromTaskId: task.continuedFromTaskId,
+            git: task.git,
             outputFile: task.outputFile,
             error: task.error,
             connectionId: task.context.connectionId,
@@ -1248,7 +1296,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           sandbox,
           files,
           metadata: params.metadata as Record<string, unknown> | undefined,
-        })) as { taskId: string; outputFile?: string; status?: string; message?: string };
+        })) as {
+          taskId: string;
+          outputFile?: string;
+          status?: string;
+          message?: string;
+          cwd?: string;
+          worktreePath?: string;
+          parentRepoPath?: string;
+          continuedFromTaskId?: string;
+        };
 
         const nowIso = new Date().toISOString();
         const workspaceId =
@@ -1261,6 +1318,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           taskId: result.taskId,
           sessionId,
           agent,
+          cwd: result.cwd || effectiveCwd,
+          worktreePath: result.worktreePath,
+          parentRepoPath: result.parentRepoPath,
+          continuedFromTaskId: result.continuedFromTaskId,
           prompt,
           mode,
           status: "running",
@@ -1284,6 +1345,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           runtimeStatus: "running",
           metadata: {
             prompt: task.prompt,
+            cwd: task.cwd,
+            worktreePath: task.worktreePath,
+            parentRepoPath: task.parentRepoPath,
+            continuedFromTaskId: task.continuedFromTaskId,
             outputFile: task.outputFile,
             connectionId: task.context.connectionId,
             tags: task.context.tags,
@@ -1297,6 +1362,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           agent: task.agent,
           mode: task.mode,
           status: task.status,
+          cwd: task.cwd,
+          worktreePath: task.worktreePath,
+          parentRepoPath: task.parentRepoPath,
+          continuedFromTaskId: task.continuedFromTaskId,
           outputFile: task.outputFile,
           message: result.message || `Started ${agent} task`,
         };
@@ -1323,6 +1392,33 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const hostTasks = result.tasks || [];
         for (const task of hostTasks) {
           tasks.set(task.taskId, task);
+          const taskStored = getStoredSession(task.taskId);
+          const parentStored = getStoredSession(task.sessionId);
+          const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
+          if (workspaceId) {
+            upsertSession({
+              id: task.taskId,
+              workspaceId,
+              providerSessionId: task.taskId,
+              model: taskStored?.model || parentStored?.model || sessionConfig.model,
+              agent: task.agent,
+              purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
+              parentSessionId: task.sessionId,
+              runtimeStatus: task.status === "running" ? "running" : task.status,
+              metadata: {
+                prompt: task.prompt,
+                cwd: task.cwd,
+                worktreePath: task.worktreePath,
+                parentRepoPath: task.parentRepoPath,
+                continuedFromTaskId: task.continuedFromTaskId,
+                git: task.git,
+                outputFile: task.outputFile,
+                error: task.error,
+                connectionId: task.context?.connectionId || null,
+                tags: task.context?.tags || null,
+              },
+            });
+          }
         }
         const stored = listTaskSessions({
           parentSessionId: params.sessionId as string | undefined,

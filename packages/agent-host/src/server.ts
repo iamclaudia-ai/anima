@@ -64,7 +64,16 @@ export interface TaskHostLike {
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     files?: string[];
     metadata?: Record<string, unknown>;
-  }) => Promise<{ taskId: string; status: string; outputFile?: string; message: string }>;
+  }) => Promise<{
+    taskId: string;
+    status: string;
+    outputFile?: string;
+    message: string;
+    cwd?: string;
+    worktreePath?: string;
+    parentRepoPath?: string;
+    continuedFromTaskId?: string;
+  }>;
   get: (taskId: string) => TaskRecord | null;
   list: (filters?: { sessionId?: string; status?: string; agent?: string }) => TaskRecord[];
   interrupt: (taskId: string) => boolean;

@@ -256,13 +256,31 @@ export class AgentHostClient extends EventEmitter {
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     files?: string[];
     metadata?: Record<string, unknown>;
-  }): Promise<{ taskId: string; status: string; outputFile?: string; message: string }> {
+  }): Promise<{
+    taskId: string;
+    status: string;
+    outputFile?: string;
+    message: string;
+    cwd?: string;
+    worktreePath?: string;
+    parentRepoPath?: string;
+    continuedFromTaskId?: string;
+  }> {
     const result = await this.sendRequest({
       type: "task.start",
       requestId: "",
       params,
     });
-    return result as { taskId: string; status: string; outputFile?: string; message: string };
+    return result as {
+      taskId: string;
+      status: string;
+      outputFile?: string;
+      message: string;
+      cwd?: string;
+      worktreePath?: string;
+      parentRepoPath?: string;
+      continuedFromTaskId?: string;
+    };
   }
 
   async getTask(taskId: string): Promise<unknown> {
