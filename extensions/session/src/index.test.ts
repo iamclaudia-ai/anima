@@ -433,6 +433,12 @@ describe("session extension", () => {
 
     expect(started.taskId).toBe("ctask_123");
     expect(started.status).toBe("running");
+    expect(startTaskSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId,
+        cwd: "/repo/project",
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const mapped = emitted.find((e) => e.eventName === "session.task.ctask_123.delta");

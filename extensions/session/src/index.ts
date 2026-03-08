@@ -1212,13 +1212,25 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const effort = params.effort as string | undefined;
         const sandbox = params.sandbox as "read-only" | "workspace-write" | "danger-full-access";
         const files = params.files as string[] | undefined;
+        const parentSession = getStoredSession(sessionId);
+
+        // If task cwd is omitted, inherit from parent session context.
+        let effectiveCwd = cwd;
+        if (!effectiveCwd && parentSession?.workspaceId) {
+          const workspace = getWorkspace(parentSession.workspaceId);
+          effectiveCwd = workspace?.cwd;
+        }
+        if (!effectiveCwd) {
+          const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
+          effectiveCwd = activeSessions.find((s) => s.id === sessionId)?.cwd;
+        }
 
         const result = (await agentClient.startTask({
           sessionId,
           agent,
           prompt,
           mode,
-          cwd,
+          cwd: effectiveCwd,
           model,
           effort,
           sandbox,
@@ -1227,9 +1239,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         })) as { taskId: string; outputFile?: string; status?: string; message?: string };
 
         const nowIso = new Date().toISOString();
-        const parentSession = getStoredSession(sessionId);
         const workspaceId =
-          parentSession?.workspaceId || (cwd ? getOrCreateWorkspace(cwd).workspace.id : null);
+          parentSession?.workspaceId ||
+          (effectiveCwd ? getOrCreateWorkspace(effectiveCwd).workspace.id : null);
         if (!workspaceId) {
           throw new Error(`Unable to resolve workspace for parent session ${sessionId}`);
         }
