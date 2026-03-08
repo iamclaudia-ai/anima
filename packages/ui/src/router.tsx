@@ -49,6 +49,7 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
 
 /** Navigate without full page reload */
 export function navigate(path: string): void {
+  if (window.location.pathname === path) return;
   window.history.pushState(null, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }

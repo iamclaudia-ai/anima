@@ -1,21 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { retry } from "./retry";
 
-type SetTimeoutType = typeof globalThis.setTimeout;
-
 function mockSetTimeout(): { delays: number[]; restore: () => void } {
   const delays: number[] = [];
   const originalSetTimeout = globalThis.setTimeout;
 
-  const replacement: SetTimeoutType = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+  globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
     delays.push(timeout ?? 0);
     if (typeof handler === "function") {
       handler(...args);
     }
-    return 0 as unknown as ReturnType<SetTimeoutType>;
-  }) as SetTimeoutType;
-
-  globalThis.setTimeout = replacement;
+    return 0 as unknown as ReturnType<typeof originalSetTimeout>;
+  }) as unknown as typeof globalThis.setTimeout;
 
   return {
     delays,
@@ -66,10 +62,13 @@ describe("retry", () => {
     let attempts = 0;
 
     await expect(
-      retry(async () => {
-        attempts += 1;
-        throw error;
-      }, { maxAttempts: 3 }),
+      retry(
+        async () => {
+          attempts += 1;
+          throw error;
+        },
+        { maxAttempts: 3 },
+      ),
     ).rejects.toBe(error);
 
     expect(attempts).toBe(3);
@@ -79,10 +78,13 @@ describe("retry", () => {
     let attempts = 0;
 
     await expect(
-      retry(async () => {
-        attempts += 1;
-        throw new Error("fail");
-      }, { maxAttempts: 2 }),
+      retry(
+        async () => {
+          attempts += 1;
+          throw new Error("fail");
+        },
+        { maxAttempts: 2 },
+      ),
     ).rejects.toThrow("fail");
 
     expect(attempts).toBe(2);

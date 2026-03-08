@@ -150,11 +150,13 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   const handleNewSession = useCallback(() => {
     if (!activeWorkspaceRef.current) return;
-    void createSessionForWorkspace(callGateway, activeWorkspaceRef.current.cwd)
+    const workspace = activeWorkspaceRef.current;
+    void createSessionForWorkspace(callGateway, workspace.cwd)
       .then((payload) => {
         const nextSessionId = payload;
         if (!nextSessionId) return;
         setActiveSessionId(nextSessionId);
+        navigate(`/workspace/${workspace.id}/session/${nextSessionId}`);
         const optimisticSession: SessionInfo = {
           sessionId: nextSessionId,
           created: new Date().toISOString(),
@@ -163,12 +165,9 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
         setSessions((prev) =>
           mergeSessionsPreferLocal([], [optimisticSession, ...prev], nextSessionId),
         );
-        if (!activeWorkspaceRef.current) return;
-        return loadSessionsForWorkspace(callGateway, activeWorkspaceRef.current.cwd).then(
-          (sessionsPayload) => {
-            setSessions((prev) => mergeSessionsPreferLocal(sessionsPayload, prev, nextSessionId));
-          },
-        );
+        return loadSessionsForWorkspace(callGateway, workspace.cwd).then((sessionsPayload) => {
+          setSessions((prev) => mergeSessionsPreferLocal(sessionsPayload, prev, nextSessionId));
+        });
       })
       .catch(() => undefined);
   }, [callGateway]);
@@ -180,10 +179,14 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
     }
   }, [activeSessionId, activeWorkspace, sessionId]);
 
-  // Update URL when new session is created
+  // Sync URL after bootstrap resolves (uses replaceState to avoid pushState limits)
   useEffect(() => {
     if (activeSessionId && activeWorkspace) {
-      navigate(`/workspace/${activeWorkspace.id}/session/${activeSessionId}`);
+      const target = `/workspace/${activeWorkspace.id}/session/${activeSessionId}`;
+      if (window.location.pathname !== target) {
+        window.history.replaceState(null, "", target);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      }
     }
   }, [activeSessionId, activeWorkspace]);
 

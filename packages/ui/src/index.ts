@@ -37,6 +37,7 @@ export type {
   UseChatGatewayReturn,
   WorkspaceInfo,
   SessionInfo,
+  TaskInfo,
 } from "./hooks/useChatGateway";
 export type { UseGatewayClientOptions, UseGatewayClientReturn } from "./hooks/useGatewayClient";
 
@@ -49,6 +50,7 @@ export { ToolCallBlock } from "./components/ToolCallBlock";
 export { InputArea } from "./components/InputArea";
 export { CopyButton } from "./components/CopyButton";
 export { ClaudiaThinking } from "./components/ClaudiaThinking";
+export { TaskActivityStrip } from "./components/TaskActivityStrip";
 export { ErrorBoundary } from "./components/ErrorBoundary";
 export { NavigationDrawer } from "./components/NavigationDrawer";
 export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";

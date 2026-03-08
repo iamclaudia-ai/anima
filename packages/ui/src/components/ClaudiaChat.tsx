@@ -14,6 +14,7 @@ import { InputArea } from "./InputArea";
 import { ClaudiaThinking } from "./ClaudiaThinking";
 import { StatusBar } from "./StatusBar";
 import CompactionIndicator from "./CompactionIndicator";
+import { TaskActivityStrip } from "./TaskActivityStrip";
 
 const ENABLE_THINKING_TUNER = false;
 
@@ -329,6 +330,8 @@ function ChatInner({
         >
           {gateway.isAtBottom ? "ON" : "OFF"}
         </div>
+
+        <TaskActivityStrip tasks={gateway.tasks} />
 
         <InputArea
           input={input}

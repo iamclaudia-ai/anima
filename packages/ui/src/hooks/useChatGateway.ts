@@ -39,6 +39,21 @@ export interface SessionInfo {
   gitBranch?: string;
 }
 
+export interface TaskInfo {
+  taskId: string;
+  sessionId: string;
+  agent: string;
+  mode: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  prompt?: string;
+  cwd?: string;
+  outputFile?: string;
+  error?: string;
+  startedAt?: string;
+  updatedAt?: string;
+  previewText?: string;
+}
+
 // ─── Options ─────────────────────────────────────────────────
 
 export interface UseChatGatewayOptions {
@@ -87,6 +102,7 @@ export interface UseChatGatewayReturn {
   hasMore: boolean;
   workspace: WorkspaceInfo | null;
   sessions: SessionInfo[];
+  tasks: TaskInfo[];
   /** Whether user is scrolled to bottom (for auto-scroll indicator) */
   isAtBottom: boolean;
   sendPrompt(text: string, attachments: Attachment[], tags?: string[]): void;
@@ -130,6 +146,7 @@ export function useChatGateway(
   const [hasMore, setHasMore] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [hookState, setHookState] = useState<Record<string, unknown>>({});
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +177,46 @@ export function useChatGateway(
       cache_read_input_tokens: usageData.cache_read_input_tokens || 0,
       output_tokens: usageData.output_tokens || 0,
     };
+  }, []);
+
+  const normalizeTask = useCallback((raw: Record<string, unknown>): TaskInfo | null => {
+    const taskId = typeof raw.taskId === "string" ? raw.taskId : null;
+    const taskSessionId = typeof raw.sessionId === "string" ? raw.sessionId : null;
+    if (!taskId || !taskSessionId) return null;
+
+    const statusRaw = typeof raw.status === "string" ? raw.status : "running";
+    const status: TaskInfo["status"] =
+      statusRaw === "completed" ||
+      statusRaw === "failed" ||
+      statusRaw === "interrupted" ||
+      statusRaw === "running"
+        ? statusRaw
+        : "running";
+
+    return {
+      taskId,
+      sessionId: taskSessionId,
+      agent: typeof raw.agent === "string" ? raw.agent : "codex",
+      mode: typeof raw.mode === "string" ? raw.mode : "general",
+      status,
+      prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
+      cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
+      outputFile: typeof raw.outputFile === "string" ? raw.outputFile : undefined,
+      error: typeof raw.error === "string" ? raw.error : undefined,
+      startedAt: typeof raw.startedAt === "string" ? raw.startedAt : undefined,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+      previewText: typeof raw.previewText === "string" ? raw.previewText : undefined,
+    };
+  }, []);
+
+  const sortTasks = useCallback((items: TaskInfo[]): TaskInfo[] => {
+    return [...items].sort((a, b) => {
+      if (a.status === "running" && b.status !== "running") return -1;
+      if (a.status !== "running" && b.status === "running") return 1;
+      const aTime = Date.parse(a.updatedAt || a.startedAt || "") || 0;
+      const bTime = Date.parse(b.updatedAt || b.startedAt || "") || 0;
+      return bTime - aTime;
+    });
   }, []);
 
   const applyUsage = useCallback(
@@ -772,6 +829,7 @@ export function useChatGateway(
             setSessionId(mostRecent.sessionId);
             subscribeToSession(mostRecent.sessionId);
             sendRequest("session.get_history", { sessionId: mostRecent.sessionId, limit: 50 });
+            sendRequest("session.list_tasks", { sessionId: mostRecent.sessionId });
           }
         }
       }
@@ -783,11 +841,13 @@ export function useChatGateway(
           setSessionId(newSessionId);
           subscribeToSession(newSessionId);
           setMessages(() => []);
+          setTasks(() => []);
           setUsage(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
           console.log(`[Session] Created: ${newSessionId}`);
+          sendRequest("session.list_tasks", { sessionId: newSessionId });
           // Refresh session list
           if (workspaceRef.current?.cwd) {
             sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
@@ -802,12 +862,14 @@ export function useChatGateway(
           setSessionId(switchedSessionId);
           subscribeToSession(switchedSessionId);
           setMessages(() => []);
+          setTasks(() => []);
           setUsage(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
           console.log(`[Session] Switched to: ${switchedSessionId}`);
           sendRequest("session.get_history", { sessionId: switchedSessionId, limit: 50 });
+          sendRequest("session.list_tasks", { sessionId: switchedSessionId });
           if (workspaceRef.current?.cwd) {
             sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
           }
@@ -821,8 +883,10 @@ export function useChatGateway(
           return;
         }
         if (payload.sessionId) {
-          setSessionId(payload.sessionId as string);
-          subscribeToSession(payload.sessionId as string);
+          const infoSessionId = payload.sessionId as string;
+          setSessionId(infoSessionId);
+          subscribeToSession(infoSessionId);
+          sendRequest("session.list_tasks", { sessionId: infoSessionId });
         }
         if (payload.workspaceId && payload.workspaceName) {
           setWorkspace((prev) =>
@@ -836,8 +900,27 @@ export function useChatGateway(
           );
         }
       }
+
+      // ── session.list_tasks ──
+      if (method === "session.list_tasks") {
+        const taskList = Array.isArray(payload.tasks)
+          ? payload.tasks
+              .map((item) =>
+                item && typeof item === "object"
+                  ? normalizeTask(item as Record<string, unknown>)
+                  : null,
+              )
+              .filter((item): item is TaskInfo => Boolean(item))
+          : [];
+        const currentSessionId = sessionIdRef.current;
+        setTasks(() =>
+          sortTasks(
+            taskList.filter((task) => !currentSessionId || task.sessionId === currentSessionId),
+          ),
+        );
+      }
     },
-    [normalizeUsage, sendRequest, setMessages, subscribeToSession],
+    [normalizeTask, normalizeUsage, sendRequest, setMessages, sortTasks, subscribeToSession],
   );
 
   const handleGatewayEvent = useCallback(
@@ -856,6 +939,71 @@ export function useChatGateway(
       // Streaming events: "session.{sessionId}.{eventType}"
       // Extract the eventType (everything after "session.{sessionId}.")
       const parts = eventName.split(".");
+
+      // Task events: "session.task.{taskId}.{eventType}"
+      if (parts[0] === "session" && parts[1] === "task" && parts.length >= 4) {
+        const taskEventType = parts[3];
+        const eventPayload = (payload ?? {}) as Record<string, unknown>;
+        const taskSessionId =
+          typeof eventPayload.sessionId === "string" ? (eventPayload.sessionId as string) : null;
+        const currentSessionId = sessionIdRef.current;
+        if (!taskSessionId || !currentSessionId || taskSessionId !== currentSessionId) {
+          return;
+        }
+
+        const taskId = typeof eventPayload.taskId === "string" ? eventPayload.taskId : parts[2];
+        const nestedPayload =
+          eventPayload.payload && typeof eventPayload.payload === "object"
+            ? (eventPayload.payload as Record<string, unknown>)
+            : {};
+        const updateAt = new Date().toISOString();
+
+        setTasks((prev) => {
+          const next = [...prev];
+          const idx = next.findIndex((task) => task.taskId === taskId);
+          const base: TaskInfo =
+            idx >= 0
+              ? next[idx]
+              : {
+                  taskId,
+                  sessionId: taskSessionId,
+                  agent: typeof eventPayload.agent === "string" ? eventPayload.agent : "codex",
+                  mode: "general",
+                  status: "running",
+                };
+
+          const merged: TaskInfo = {
+            ...base,
+            sessionId: taskSessionId,
+            agent: typeof eventPayload.agent === "string" ? eventPayload.agent : base.agent,
+            status:
+              eventPayload.status === "running" ||
+              eventPayload.status === "completed" ||
+              eventPayload.status === "failed" ||
+              eventPayload.status === "interrupted"
+                ? (eventPayload.status as TaskInfo["status"])
+                : base.status,
+            mode: typeof nestedPayload.mode === "string" ? nestedPayload.mode : base.mode,
+            outputFile:
+              typeof nestedPayload.outputFile === "string"
+                ? nestedPayload.outputFile
+                : base.outputFile,
+            error: typeof nestedPayload.error === "string" ? nestedPayload.error : base.error,
+            updatedAt: updateAt,
+          };
+
+          if (taskEventType === "delta" && typeof nestedPayload.text === "string") {
+            const appended = `${merged.previewText || ""}${nestedPayload.text}`;
+            merged.previewText = appended.length > 280 ? appended.slice(-280) : appended;
+          }
+
+          if (idx >= 0) next[idx] = merged;
+          else next.push(merged);
+          return sortTasks(next);
+        });
+        return;
+      }
+
       if (parts[0] === "session" && parts.length >= 3) {
         const eventSessionId = parts[1] || null;
         if (!eventSessionId || eventSessionId !== sessionIdRef.current) {
@@ -880,7 +1028,7 @@ export function useChatGateway(
         }
       }
     },
-    [client, handleStreamEvent],
+    [client, handleStreamEvent, sortTasks],
   );
 
   useEffect(() => {
@@ -925,6 +1073,7 @@ export function useChatGateway(
       setSessionId(opts.sessionId);
       subscribeToSession(opts.sessionId);
       sendRequest("session.get_history", { sessionId: opts.sessionId, limit: 50 });
+      sendRequest("session.list_tasks", { sessionId: opts.sessionId });
       // Look up workspace for CWD context (needed for send-prompt auto-resume)
       if (opts.workspaceId) {
         sendRequest("session.get_workspace", { id: opts.workspaceId });
@@ -1073,6 +1222,7 @@ export function useChatGateway(
         });
         subscribedSessionRef.current = null;
       }
+      setTasks(() => []);
       sendRequest("session.create_session", { cwd: workspace.cwd });
     },
     [sendRequest, workspace?.cwd],
@@ -1108,6 +1258,7 @@ export function useChatGateway(
     hasMore,
     workspace,
     sessions,
+    tasks,
     isAtBottom,
     sendPrompt,
     sendToolResult,
