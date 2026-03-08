@@ -46,15 +46,17 @@ Every feature — including the web chat UI — is an extension with routes and 
 
 Server extension loading is config-driven from `~/.claudia/claudia.json` and always out-of-process (one child process per enabled extension). Each extension calls `runExtensionHost(factory)` from `@claudia/extension-host` — making it directly executable with `bun --hot` for native HMR.
 
-| Extension  | Location               | Server methods                                        | Web pages                                         |
-| ---------- | ---------------------- | ----------------------------------------------------- | ------------------------------------------------- |
-| `session`  | `extensions/session/`  | `session.create_session`, `session.send_prompt`, etc. | —                                                 |
-| `chat`     | `extensions/chat/`     | —                                                     | `/`, `/workspace/:workspaceId/session/:sessionId` |
-| `voice`    | `extensions/voice/`    | `voice.speak`, `voice.stop`                           | —                                                 |
-| `imessage` | `extensions/imessage/` | `imessage.send`, `imessage.chats`                     | —                                                 |
-| `hooks`    | `extensions/hooks/`    | `hooks.health_check`                                  | —                                                 |
-| `memory`   | `extensions/memory/`   | `memory.health_check`                                 | —                                                 |
-| `control`  | `extensions/control/`  | `control.health_check`                                | `/control`                                        |
+| Extension  | Location               | Server methods                                                              | Web pages                                         |
+| ---------- | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------- |
+| `session`  | `extensions/session/`  | `session.create_session`, `session.send_prompt`, `session.start_task`, etc. | —                                                 |
+| `chat`     | `extensions/chat/`     | —                                                                           | `/`, `/workspace/:workspaceId/session/:sessionId` |
+| `voice`    | `extensions/voice/`    | `voice.speak`, `voice.stop`                                                 | —                                                 |
+| `imessage` | `extensions/imessage/` | `imessage.send`, `imessage.chats`                                           | —                                                 |
+| `hooks`    | `extensions/hooks/`    | `hooks.health_check`                                                        | —                                                 |
+| `memory`   | `extensions/memory/`   | `memory.health_check`                                                       | —                                                 |
+| `control`  | `extensions/control/`  | `control.health_check`                                                      | `/control`                                        |
+
+**Note**: Task delegation (code review, tests, etc.) routes through `session.start_task({ agent: "codex", ... })` — agent-host owns all SDK runtimes (Claude sessions, Codex tasks, future Gemini)
 
 ## Tech Stack
 
@@ -120,15 +122,16 @@ Key files:
 
 ### Session Extension (`extensions/session`)
 
-Manages all Claude session lifecycle via the Agent SDK:
+Thin RPC client to agent-host for session and task management:
 
-- **SDK Engine**: Uses `@anthropic-ai/claude-agent-sdk` `query()` function — async generator of `SDKMessage` types
+- **Agent-host RPC**: WebSocket client (`AgentHostClient`) that translates session/task operations into agent-host protocol messages
+- **Provider-aware routing**: Routes prompts and tasks by `agent` parameter (`claude`, `codex`, future `gemini`)
 - **Workspace CRUD**: SQLite (WAL mode) for workspace registry
 - **Session Discovery**: Filesystem — reads `~/.claude/projects/{encoded-cwd}/sessions-index.json`, resolves paths via `resolveSessionPath(cwd)`
 - **History**: Parses JSONL session files from Claude Code
-- **Inter-extension RPC**: Other extensions call `ctx.call("session.send_prompt", ...)` etc.
+- **Request context tracking**: Manages `connectionId` and tags (e.g., `voice.speak`) with primary/transient context merging
 
-Key methods: `session.create_session`, `session.send_prompt`, `session.get_history`, `session.list_sessions`, `session.close_session`, `session.health_check`, etc.
+Key methods: `session.create_session`, `session.send_prompt`, `session.start_task`, `session.get_task`, `session.list_tasks`, `session.interrupt_task`, `session.get_history`, `session.list_sessions`, `session.close_session`, `session.health_check`, etc.
 
 ### CLI (`packages/cli`)
 
@@ -199,6 +202,8 @@ extensions/<name>/src/
 **Gateway methods**: `gateway.list_methods`, `gateway.list_extensions`, `gateway.subscribe`, `gateway.unsubscribe`
 
 **Session methods**: `session.create_session`, `session.send_prompt`, `session.get_history`, `session.switch_session`, `session.list_sessions`, `session.interrupt_session`, `session.close_session`, `session.reset_session`, `session.get_info`, `session.set_permission_mode`, `session.send_tool_result`
+
+**Task methods**: `session.start_task`, `session.get_task`, `session.list_tasks`, `session.interrupt_task` — provider-agnostic task delegation (codex code review, tests, etc.)
 
 **Workspace methods**: `session.list_workspaces`, `session.get_workspace`, `session.get_or_create_workspace`
 

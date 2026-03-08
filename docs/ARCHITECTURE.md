@@ -106,6 +106,51 @@ Events flow through two channels:
 | `src/db/`               | SQLite (migrations only, data owned by extensions)    |
 | `src/web/`              | SPA shell (index.html + route collector)              |
 
+## Agent Host (port 30087)
+
+The agent-host is a dedicated runtime server that owns all SDK processes and long-lived agent state. It runs as a sibling service to the gateway (both supervised by watchdog) and communicates with extensions via WebSocket.
+
+### Purpose
+
+Process isolation — SDK sessions and tasks survive gateway/extension restarts. If the gateway restarts (code changes, crashes), Claude sessions and Codex tasks keep running uninterrupted in agent-host.
+
+### Architecture
+
+```
+Agent Host (port 30087)
+├── SessionHost — manages Claude SDK sessions
+│   ├── SDK runtime (query() from @anthropic-ai/claude-agent-sdk)
+│   ├── Event buffers with sequence numbers (replay on reconnect)
+│   ├── Session registry (persisted to ~/.claudia/agent-host-state.json)
+│   └── Idle session reaper (closes stale sessions to reclaim resources)
+├── TaskHost — manages delegated tasks (codex, future gemini)
+│   ├── Codex SDK runtime (@openai/codex-sdk)
+│   ├── Task registry with status tracking
+│   ├── Event buffers with sequence numbers
+│   └── Per-agent drivers (CodexDriver, future GeminiDriver)
+└── WebSocket Server — RPC protocol for extensions
+    ├── /ws → session/task operations
+    └── /health → status + active sessions/tasks
+```
+
+### Key Features
+
+- **Multi-provider routing**: `agent` parameter determines which driver handles the request
+- **Event replay**: Sequence numbers enable gap-free reconnection after network drops
+- **Crash recovery**: Persisted session registry auto-resumes on startup
+- **Resource management**: Idle reaper closes stale SDK processes after 10min inactivity
+- **Unified protocol**: `@claudia/shared/agent-host-protocol` — shared types between host and extensions
+
+### Key Files
+
+| File                  | Purpose                                       |
+| --------------------- | --------------------------------------------- |
+| `src/index.ts`        | Server entrypoint, idle reaper, lock clearing |
+| `src/server.ts`       | WebSocket server, message routing             |
+| `src/session-host.ts` | Claude SDK session management                 |
+| `src/task-host.ts`    | Task runtime (codex driver)                   |
+| `src/event-buffer.ts` | Ring buffer with sequence numbers for replay  |
+
 ## WebSocket Protocol
 
 All client communication uses a single protocol:
@@ -226,15 +271,15 @@ RPC metadata: `traceId`, `depth` (max 8), `deadlineMs`. Per-extension rate limit
 
 ### Extensions
 
-| Extension       | ID         | What It Does                                             |
-| --------------- | ---------- | -------------------------------------------------------- |
-| Session         | `session`  | SDK engine (Agent SDK query()), workspace CRUD, history  |
-| Chat            | `chat`     | Web pages: /, /workspace/:workspaceId/session/:sessionId |
-| Voice           | `voice`    | Cartesia Sonic 3.0 TTS, streaming audio                  |
-| iMessage        | `imessage` | iMessage bridge, auto-reply                              |
-| Mission Control | `control`  | System dashboard, health checks                          |
-| Hooks           | `hooks`    | Lightweight event-driven scripts                         |
-| Memory          | `memory`   | Transcript ingestion + Libby processing                  |
+| Extension       | ID         | What It Does                                                                           |
+| --------------- | ---------- | -------------------------------------------------------------------------------------- |
+| Session         | `session`  | Thin RPC client to agent-host, workspace CRUD, history parsing, provider-aware routing |
+| Chat            | `chat`     | Web pages: /, /workspace/:workspaceId/session/:sessionId                               |
+| Voice           | `voice`    | Cartesia Sonic 3.0 TTS, streaming audio                                                |
+| iMessage        | `imessage` | iMessage bridge, auto-reply                                                            |
+| Mission Control | `control`  | System dashboard, health checks                                                        |
+| Hooks           | `hooks`    | Lightweight event-driven scripts                                                       |
+| Memory          | `memory`   | Transcript ingestion + Libby processing                                                |
 
 ### Client-Side Extensions (Routes)
 
@@ -268,37 +313,40 @@ Gateway `/health` includes extension lock diagnostics (`extensionLocks`) so Miss
 
 ## Session Extension
 
-The session extension owns all Claude interaction and workspace management. It is the most complex extension.
+The session extension is a thin RPC client to agent-host that manages workspace/session CRUD, history parsing, and provider-aware routing.
 
-### SDK Engine
+### Agent-Host RPC Client
 
-Uses `@anthropic-ai/claude-agent-sdk` `query()` function — an async generator that yields `SDKMessage` types.
+The session extension uses `AgentHostClient` — a WebSocket client that connects to agent-host (port 30087):
 
-Multi-turn conversations use a push-based `MessageChannel` (async iterable) that stays open for the session lifetime:
+- **Auto-reconnect** with exponential backoff (1s → 10s max)
+- **Event replay** on reconnection via sequence numbers (gap-free streaming)
+- **RPC methods**: `createSession()`, `prompt()`, `interrupt()`, `close()`, `startTask()`, `getTask()`, etc.
+- **Event handlers**: `session.event` and `task.event` translate agent-host events to gateway events
+
+All SDK runtime (Claude `query()`, Codex tasks) lives in agent-host — the session extension just routes requests and events.
+
+### Provider-Aware Routing
+
+Session methods accept an optional `agent` parameter for provider routing:
 
 ```typescript
-const channel = new MessageChannel();
-const q = query({ prompt: channel, options: { ... } });
+// Claude session (default)
+await session.send_prompt({ sessionId, content, agent: "claude" });
 
-// Each prompt pushes into the channel
-channel.push({ role: "user", content: "Hello" });
-
-// query yields messages as they stream back
-for await (const msg of q) {
-  routeMessage(msg);
-}
+// Codex task delegation
+await session.start_task({ sessionId, agent: "codex", prompt, mode: "review" });
 ```
 
-### SDK Message Routing
+Agent-host owns the provider drivers and routes by agent type. Session extension is provider-agnostic.
 
-| SDK Message Type | Action                                                    |
-| ---------------- | --------------------------------------------------------- |
-| `stream_event`   | Unwrap inner `event`, emit as SSE                         |
-| `assistant`      | Log only                                                  |
-| `user`           | Extract `tool_result` blocks, emit `request_tool_results` |
-| `result`         | Emit `turn_stop` with usage/cost                          |
-| `system`         | Handle compaction events                                  |
-| `tool_progress`  | Emit tool_progress                                        |
+### Request Context Tracking
+
+The session extension manages request contexts for connectionId and tags:
+
+- **Primary contexts**: Long-lived streaming contexts (e.g., voice tags persist through tool calls)
+- **Transient contexts**: Per-request contexts that clear after response
+- **Tag merging**: Combines primary + transient tags so capabilities like voice survive CLI notifications
 
 ### Workspace Registry
 
