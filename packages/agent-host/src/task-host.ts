@@ -31,6 +31,7 @@ export interface TaskGitState {
   staged: number;
   unstaged: number;
   untracked: number;
+  branchName?: string;
   branch?: string;
   worktreeExists?: boolean;
   mergedToParent?: boolean;
@@ -219,7 +220,7 @@ export class TaskHost extends EventEmitter {
     }
 
     const branchOut = runGit(record.cwd, ["branch", "--show-current"]);
-    const branch = branchOut.ok ? branchOut.stdout || undefined : undefined;
+    const branchName = branchOut.ok ? branchOut.stdout || undefined : undefined;
     const dirty = staged > 0 || unstaged > 0 || untracked > 0;
     const state: TaskGitState = {
       isRepo: true,
@@ -227,7 +228,8 @@ export class TaskHost extends EventEmitter {
       staged,
       unstaged,
       untracked,
-      branch,
+      branchName,
+      branch: branchName,
       ...(record.worktreePath ? { worktreeExists: existsSync(record.worktreePath) } : {}),
     };
 
