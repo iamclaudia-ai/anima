@@ -4,7 +4,7 @@ import {
   type GatewayCallOptions,
   type GatewayClient,
   type GatewayClientOptions,
-} from "@claudia/shared";
+} from "@claudia/shared/gateway-client";
 import { useGatewayClientContext } from "../contexts/GatewayClientContext";
 import { resolveGatewayUrl } from "./gateway-url";
 

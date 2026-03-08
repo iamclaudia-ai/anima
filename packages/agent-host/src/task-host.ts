@@ -235,17 +235,58 @@ export class TaskHost extends EventEmitter {
       const taskHead = runGit(record.cwd, ["rev-parse", "HEAD"]);
       const parentHead = runGit(record.parentRepoPath, ["rev-parse", "HEAD"]);
       if (taskHead.ok && parentHead.ok && taskHead.stdout && parentHead.stdout) {
+        // First check: exact ancestry (works for git merge)
         const merged = runGit(record.parentRepoPath, [
           "merge-base",
           "--is-ancestor",
           taskHead.stdout,
           parentHead.stdout,
         ]);
-        state.mergedToParent = merged.ok;
+        if (merged.ok) {
+          state.mergedToParent = true;
+        } else {
+          // Fallback: patch-id comparison (detects cherry-picks)
+          state.mergedToParent = this.isPatchInParent(record);
+        }
       }
     }
 
     return state;
+  }
+
+  /**
+   * Check if the worktree HEAD's patch has been cherry-picked into the parent repo.
+   * Compares git patch-ids which are content-based, ignoring commit SHA differences.
+   */
+  private isPatchInParent(record: TaskRecord): boolean {
+    if (!record.cwd || !record.parentRepoPath) return false;
+
+    // Get the worktree HEAD's patch-id
+    const taskShow = runGit(record.cwd, ["show", "HEAD"]);
+    if (!taskShow.ok || !taskShow.stdout) return false;
+
+    const taskPatchId = Bun.spawnSync(["git", "patch-id", "--stable"], {
+      stdin: Buffer.from(taskShow.stdout),
+    });
+    const taskPid = taskPatchId.stdout?.toString().trim().split(/\s+/)[0];
+    if (!taskPid) return false;
+
+    // Check recent parent commits (last 50) for a matching patch-id
+    const parentLog = runGit(record.parentRepoPath, ["log", "--format=%H", "-50"]);
+    if (!parentLog.ok || !parentLog.stdout) return false;
+
+    for (const sha of parentLog.stdout.split("\n").filter(Boolean)) {
+      const parentShow = runGit(record.parentRepoPath, ["show", sha]);
+      if (!parentShow.ok || !parentShow.stdout) continue;
+
+      const parentPatchId = Bun.spawnSync(["git", "patch-id", "--stable"], {
+        stdin: Buffer.from(parentShow.stdout),
+      });
+      const parentPid = parentPatchId.stdout?.toString().trim().split(/\s+/)[0];
+      if (parentPid === taskPid) return true;
+    }
+
+    return false;
   }
 
   private hydrateRecord(record: TaskRecord): TaskRecord {
