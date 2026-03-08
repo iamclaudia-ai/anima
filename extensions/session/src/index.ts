@@ -299,6 +299,73 @@ interface SessionTask {
   };
 }
 
+function getTaskGitInfo(
+  cwd?: string,
+  parentRepoPath?: string,
+  worktreePath?: string,
+): Record<string, unknown> | undefined {
+  if (!cwd) return undefined;
+  const runGit = (repoCwd: string, args: string[]): { ok: boolean; out: string } => {
+    const proc = Bun.spawnSync(["git", "-C", repoCwd, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const out =
+      proc.stdout && proc.stdout instanceof Uint8Array ? new TextDecoder().decode(proc.stdout) : "";
+    return { ok: proc.exitCode === 0, out: out.trim() };
+  };
+
+  const status = runGit(cwd, ["status", "--porcelain=v1"]);
+  if (!status.ok) return undefined;
+
+  let staged = 0;
+  let unstaged = 0;
+  let untracked = 0;
+  const lines = status.out ? status.out.split("\n").filter(Boolean) : [];
+  for (const line of lines) {
+    if (line.startsWith("??")) {
+      untracked += 1;
+      continue;
+    }
+    const x = line[0] || " ";
+    const y = line[1] || " ";
+    if (x !== " ") staged += 1;
+    if (y !== " ") unstaged += 1;
+  }
+
+  const branchOut = runGit(cwd, ["branch", "--show-current"]);
+  const branchName = branchOut.ok && branchOut.out ? branchOut.out : undefined;
+  const git: Record<string, unknown> = {
+    isRepo: true,
+    dirty: staged > 0 || unstaged > 0 || untracked > 0,
+    staged,
+    unstaged,
+    untracked,
+    branchName,
+    branch: branchName,
+  };
+
+  if (worktreePath) {
+    git.worktreeExists = existsSync(worktreePath);
+  }
+
+  if (worktreePath && parentRepoPath) {
+    const taskHead = runGit(cwd, ["rev-parse", "HEAD"]);
+    const parentHead = runGit(parentRepoPath, ["rev-parse", "HEAD"]);
+    if (taskHead.ok && parentHead.ok && taskHead.out && parentHead.out) {
+      const merged = runGit(parentRepoPath, [
+        "merge-base",
+        "--is-ancestor",
+        taskHead.out,
+        parentHead.out,
+      ]);
+      git.mergedToParent = merged.ok;
+    }
+  }
+
+  return git;
+}
+
 /**
  * Merge tags from a primary (streaming) context and the current transient context.
  * The primary context's tags are authoritative — e.g., voice.speak from the web UI
@@ -403,6 +470,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   const requestContexts = new Map<string, RequestContext>();
   const primaryContexts = new Map<string, RequestContext>();
   const tasks = new Map<string, SessionTask>();
+  const taskNotificationsSent = new Set<string>();
   const taskUnsubscribers: Array<() => void> = [];
 
   const StartTaskSchema = z.object({
@@ -439,6 +507,73 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   const InterruptTaskSchema = z.object({
     taskId: z.string().describe("Task ID"),
   });
+
+  async function sendSessionNotification(
+    sessionId: string,
+    text: string,
+    options?: { connectionId?: string | null; tags?: string[] | null },
+  ): Promise<void> {
+    const notifCtx: RequestContext = {
+      connectionId: options?.connectionId ?? null,
+      tags: options?.tags ?? null,
+      responseText: "",
+    };
+    requestContexts.set(sessionId, notifCtx);
+
+    const wrapped = `<user_notification>\n${text}\n</user_notification>`;
+    const stored = getStoredSession(sessionId);
+    await agentClient.prompt(
+      sessionId,
+      wrapped,
+      undefined,
+      stored?.model || sessionConfig.model,
+      stored?.agent || "claude",
+    );
+  }
+
+  async function notifyTaskCompletion(task: SessionTask): Promise<void> {
+    if (task.status === "running") return;
+    if (taskNotificationsSent.has(task.taskId)) return;
+    taskNotificationsSent.add(task.taskId);
+
+    const elapsedSecs = Math.max(
+      0,
+      Math.round((Date.parse(task.updatedAt) - Date.parse(task.startedAt)) / 1000),
+    );
+    const agentLabel =
+      task.agent.length > 0 ? `${task.agent[0].toUpperCase()}${task.agent.slice(1)}` : "Agent";
+
+    let content: string;
+    if (task.status === "completed") {
+      content =
+        `${agentLabel} completed ${task.mode} task ${task.taskId} (${elapsedSecs}s).` +
+        `${task.outputFile ? ` Output: ${task.outputFile}` : ""}`;
+    } else if (task.status === "interrupted") {
+      content =
+        `${agentLabel} ${task.mode} task ${task.taskId} was interrupted (${elapsedSecs}s).` +
+        `${task.outputFile ? ` Partial output: ${task.outputFile}` : ""}`;
+    } else {
+      content =
+        `${agentLabel} failed ${task.mode} task ${task.taskId} (${elapsedSecs}s): ${task.error || "unknown error"}.` +
+        `${task.outputFile ? ` Partial output: ${task.outputFile}` : ""}`;
+    }
+
+    try {
+      await sendSessionNotification(task.sessionId, content, task.context);
+      log.info("Sent task completion notification", {
+        taskId: task.taskId,
+        sessionId: sid(task.sessionId),
+        status: task.status,
+      });
+    } catch (error) {
+      log.warn("Failed task completion notification", {
+        taskId: task.taskId,
+        sessionId: sid(task.sessionId),
+        status: task.status,
+        error: String(error),
+      });
+    }
+  }
 
   // Wire agent-host events → ctx.emit
   agentClient.on(
@@ -636,6 +771,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         },
         emitOptions,
       );
+
+      if ((hostEventType === "stop" || hostEventType === "error") && task.status !== "running") {
+        void notifyTaskCompletion(task);
+      }
     };
 
     agentClient.on("task.event", listener);
@@ -1334,6 +1473,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           },
         };
         tasks.set(task.taskId, task);
+        taskNotificationsSent.delete(task.taskId);
         upsertSession({
           id: task.taskId,
           workspaceId,
@@ -1431,7 +1571,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const merged = new Map<string, SessionTask>();
         for (const task of stored) merged.set(task.taskId, task);
         for (const task of hostTasks) merged.set(task.taskId, task);
-        return { tasks: Array.from(merged.values()) };
+        const hydrated = Array.from(merged.values()).map((task) => {
+          if (!task.cwd) return task;
+          const git = getTaskGitInfo(task.cwd, task.parentRepoPath, task.worktreePath);
+          return git ? { ...task, git } : task;
+        });
+        return { tasks: hydrated };
       }
 
       case "session.interrupt_task": {
@@ -1472,25 +1617,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
         log.info("Sending notification", { sessionId: sid(sessionId), text: truncate(text) });
 
-        // Set up request context so the session's response streams to the right connection.
-        // Don't clobber the primary context — notifications are transient.
-        const notifCtx: RequestContext = {
+        await sendSessionNotification(sessionId, text, {
           connectionId: ctx.connectionId,
           tags: ctx.tags,
-          responseText: "",
-        };
-        requestContexts.set(sessionId, notifCtx);
-        // primaryContexts is NOT modified — voice tags persist through notifications
-
-        const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-        const stored = getStoredSession(sessionId);
-        await agentClient.prompt(
-          sessionId,
-          wrapped,
-          undefined,
-          stored?.model || sessionConfig.model,
-          stored?.agent || "claude",
-        );
+        });
 
         return { ok: true, sessionId };
       }

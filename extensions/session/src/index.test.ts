@@ -465,6 +465,47 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("sends a user_notification to parent session when task completes", async () => {
+    startTaskSpy.mockImplementationOnce(function (this: AgentHostClient) {
+      setTimeout(() => {
+        this.emit("task.event", {
+          taskId: "ctask_notify",
+          eventName: "task.ctask_notify.stop",
+          type: "stop",
+          status: "completed",
+          outputFile: "/tmp/ctask_notify.md",
+        });
+      }, 0);
+      return Promise.resolve({
+        taskId: "ctask_notify",
+        status: "running",
+        outputFile: "/tmp/ctask_notify.md",
+        message: "started",
+      });
+    });
+
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    await ext.handleMethod("session.start_task", {
+      sessionId,
+      agent: "codex",
+      prompt: "do thing",
+      mode: "general",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(promptSpy).toHaveBeenCalledWith(
+      sessionId,
+      expect.stringContaining("<user_notification>"),
+      undefined,
+      expect.any(String),
+      expect.any(String),
+    );
+
+    await ext.stop();
+  });
+
   it("switches and resets sessions through manager methods", async () => {
     createSpy.mockResolvedValueOnce({ sessionId: "reset-session-1" });
 
