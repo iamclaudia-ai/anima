@@ -15,6 +15,7 @@
     "@claudia/ext-audiobooks": "workspace:*",
     "@claudia/ext-chat": "workspace:*",
     "@claudia/ext-control": "workspace:*",
+    "@claudia/ext-editor": "workspace:*",
     "@claudia/ext-imessage": "workspace:*",
     "@claudia/shared": "workspace:*",
     "@claudia/ui": "workspace:*",

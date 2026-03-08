@@ -7,6 +7,9 @@
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { ComponentType, ReactNode } from "react";
+import type { LayoutDefinition, LayoutNode } from "@claudia/shared";
+import type { PanelRegistry } from "./components/LayoutManager";
+import { LayoutManager } from "./components/LayoutManager";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -16,6 +19,8 @@ export interface Route {
   component?: ComponentType<any>;
   /** Base directory for static file serving (e.g., "~/romance-novels") */
   static?: string;
+  /** Named layout to use instead of a single component (e.g., "ide") */
+  layout?: string;
   label?: string;
   icon?: string;
 }
@@ -68,8 +73,34 @@ export function useRouter(): RouterState {
 
 // ── Router Component ─────────────────────────────────────────
 
-export function Router({ routes, fallback }: { routes: Route[]; fallback?: ReactNode }) {
+/** Determine if current viewport is mobile */
+function useIsMobile(breakpoint = 768): boolean {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth < breakpoint : false,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
+export interface RouterProps {
+  routes: Route[];
+  fallback?: ReactNode;
+  /** Layout registry — named layouts from extensions */
+  layouts?: Record<string, LayoutDefinition>;
+  /** Panel registry — maps panel IDs to components */
+  panelRegistry?: PanelRegistry;
+}
+
+export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps) {
   const [pathname, setPathname] = useState(window.location.pathname);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const onPopState = () => setPathname(window.location.pathname);
@@ -81,15 +112,37 @@ export function Router({ routes, fallback }: { routes: Route[]; fallback?: React
 
   // First match wins (skip static routes - they're handled server-side)
   for (const route of routes) {
-    if (!route.component) continue; // Skip static file routes
+    // Skip routes with no component and no layout
+    if (!route.component && !route.layout) continue;
     const params = matchPath(route.path, pathname);
     if (params !== null) {
-      const Component = route.component;
-      return (
-        <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
-          <Component {...params} />
-        </RouterContext.Provider>
-      );
+      // Layout-based route
+      if (route.layout && layouts && panelRegistry) {
+        const layoutDef = layouts[route.layout];
+        if (layoutDef) {
+          const layoutNode: LayoutNode =
+            isMobile && layoutDef.mobile ? layoutDef.mobile : layoutDef.default;
+          return (
+            <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
+              <LayoutManager
+                registry={panelRegistry}
+                layout={layoutNode}
+                storageKey={`layout:${route.layout}:${isMobile ? "mobile" : "desktop"}`}
+              />
+            </RouterContext.Provider>
+          );
+        }
+      }
+
+      // Component-based route (backward compatible)
+      if (route.component) {
+        const Component = route.component;
+        return (
+          <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
+            <Component {...params} />
+          </RouterContext.Provider>
+        );
+      }
     }
   }
 

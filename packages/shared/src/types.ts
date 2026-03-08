@@ -265,6 +265,57 @@ export interface HealthItem {
 }
 
 // ============================================================================
+// Panel Layout System
+// ============================================================================
+
+/**
+ * A panel component that an extension contributes to the layout system.
+ * Panels are registered by string ID and resolved at runtime — no cross-extension imports.
+ *
+ * Convention: IDs are namespaced as "{extensionId}.{panelName}" (e.g., "chat.main", "editor.viewer").
+ */
+export interface PanelDefinition {
+  /** Unique panel ID, namespaced by extension (e.g., "chat.main", "editor.viewer") */
+  id: string;
+  /** Display title for the panel tab */
+  title: string;
+  /** Icon name (Lucide icon name or emoji) */
+  icon?: string;
+}
+
+/**
+ * A node in the layout tree — either a leaf panel or a split container.
+ */
+export type LayoutNode = LayoutLeaf | LayoutSplit;
+
+export interface LayoutLeaf {
+  /** Panel ID to render (resolved from panel registry at runtime) */
+  panel: string;
+  /** Size as percentage of parent */
+  size?: number;
+}
+
+export interface LayoutSplit {
+  /** Split direction */
+  direction: "horizontal" | "vertical";
+  /** Child nodes */
+  children: LayoutNode[];
+  /** Size as percentage of parent */
+  size?: number;
+}
+
+/**
+ * A named layout configuration with responsive variants.
+ * Extensions export these as defaults; user customizations override via persisted JSON.
+ */
+export interface LayoutDefinition {
+  /** Default layout tree */
+  default: LayoutNode;
+  /** Mobile layout override (matched via media query) */
+  mobile?: LayoutNode;
+}
+
+// ============================================================================
 // Hooks System
 // ============================================================================
 

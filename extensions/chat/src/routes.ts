@@ -1,17 +1,43 @@
 /**
- * Chat Extension — route declarations.
+ * Chat Extension — route, panel, and layout declarations.
  *
- * New unified layout with navigation drawer (Slack-style):
- * - MainPage handles both root and session routes
- * - Receives workspaceId/sessionId as props from route params
- * - Shows drawer always, activates workspace/session based on URL
+ * Panels: Components that can be placed in layout panels.
+ * Layouts: Named layout configurations referencing panel IDs.
+ * Routes: URL patterns mapped to either a layout or a component.
  */
 
 import type { Route } from "@claudia/ui";
+import type { PanelDefinition, LayoutDefinition } from "@claudia/shared";
 import { MainPage } from "./pages/MainPage";
+import { ChatPanel } from "./panels/ChatPanel";
+
+// ── Panels ──────────────────────────────────────────────────
+
+export const chatPanels: (PanelDefinition & { component: React.ComponentType })[] = [
+  { id: "chat.main", title: "Chat", icon: "MessageSquare", component: ChatPanel },
+];
+
+// ── Layouts ─────────────────────────────────────────────────
+
+export const chatLayouts: Record<string, LayoutDefinition> = {
+  ide: {
+    default: {
+      direction: "horizontal",
+      children: [
+        { panel: "chat.main", size: 40 },
+        { panel: "editor.viewer", size: 60 },
+      ],
+    },
+    mobile: {
+      panel: "chat.main",
+    },
+  },
+};
+
+// ── Routes ──────────────────────────────────────────────────
 
 export const chatRoutes: Route[] = [
-  { path: "/", component: MainPage, label: "Claudia" },
-  { path: "/workspace/:workspaceId", component: MainPage, label: "Workspace" },
-  { path: "/workspace/:workspaceId/session/:sessionId", component: MainPage, label: "Chat" },
+  { path: "/", layout: "ide", label: "Claudia" },
+  { path: "/workspace/:workspaceId", layout: "ide", label: "Workspace" },
+  { path: "/workspace/:workspaceId/session/:sessionId", layout: "ide", label: "Chat" },
 ];

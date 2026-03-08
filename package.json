@@ -34,6 +34,8 @@
   },
   "dependencies": {
     "@google/genai": "1.43.0",
+    "dockview": "5.1.0",
+    "dockview-react": "5.1.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sharp": "0.34.5"

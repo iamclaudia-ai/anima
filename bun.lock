@@ -6,6 +6,8 @@
       "name": "claudia",
       "dependencies": {
         "@google/genai": "1.43.0",
+        "dockview": "5.1.0",
+        "dockview-react": "5.1.0",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "sharp": "0.34.5",
@@ -121,6 +123,14 @@
         "zod": "^3.25.76",
       },
     },
+    "extensions/editor": {
+      "name": "@claudia/ext-editor",
+      "version": "0.1.0",
+      "dependencies": {
+        "@claudia/shared": "workspace:*",
+        "@claudia/ui": "workspace:*",
+      },
+    },
     "extensions/hooks": {
       "name": "@claudia/ext-hooks",
       "version": "0.1.0",
@@ -213,6 +223,7 @@
         "@claudia/ext-audiobooks": "workspace:*",
         "@claudia/ext-chat": "workspace:*",
         "@claudia/ext-control": "workspace:*",
+        "@claudia/ext-editor": "workspace:*",
         "@claudia/ext-imessage": "workspace:*",
         "@claudia/shared": "workspace:*",
         "@claudia/ui": "workspace:*",
@@ -313,6 +324,8 @@
     "@claudia/ext-control": ["@claudia/ext-control@workspace:extensions/control"],
 
     "@claudia/ext-dominatrix": ["@claudia/ext-dominatrix@workspace:extensions/dominatrix"],
+
+    "@claudia/ext-editor": ["@claudia/ext-editor@workspace:extensions/editor"],
 
     "@claudia/ext-hooks": ["@claudia/ext-hooks@workspace:extensions/hooks"],
 
@@ -765,6 +778,12 @@
     "devlop": ["devlop@1.1.0", "", { "dependencies": { "dequal": "^2.0.0" } }, "sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA=="],
 
     "dir-glob": ["dir-glob@3.0.1", "", { "dependencies": { "path-type": "^4.0.0" } }, "sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA=="],
+
+    "dockview": ["dockview@5.1.0", "", { "dependencies": { "dockview-core": "^5.1.0" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-ej/RvP0r8a5qVHa7U7f2D1JsxomxVFHJs4kbYWTfVBsUFvLmBu+WbjnerDLKV7K6ex76dKR8Kt54L5MAgxiu6A=="],
+
+    "dockview-core": ["dockview-core@5.1.0", "", {}, "sha512-fqfr/mRUxL9Ap2gegGUW5EUL19nyvnHhXPTJ4PbbOjTBXu1g4rYN2gY9uSF3zfYdS3TVXY/jGXuGNKxoes1GHw=="],
+
+    "dockview-react": ["dockview-react@5.1.0", "", { "dependencies": { "dockview": "^5.1.0" } }, "sha512-4rG7LNrKnq7YOlZyBGfUt9pAAu7XJIdpNm+4153k1e1xbXoX/smDl4W7sf8roBsZIEpEnVJJViypTH93fVVEBw=="],
 
     "doctrine": ["doctrine@3.0.0", "", { "dependencies": { "esutils": "^2.0.2" } }, "sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w=="],
 
@@ -1442,7 +1461,7 @@
 
     "@claudia/client-dominatrix/@types/chrome": ["@types/chrome@0.0.278", "", { "dependencies": { "@types/filesystem": "*", "@types/har-format": "*" } }, "sha512-PDIJodOu7o54PpSOYLybPW/MDZBCjM1TKgf31I3Q/qaEbNpIH09rOM3tSEH3N7Q+FAqb1933LhF8ksUPYeQLNg=="],
 
-    "@claudia/ext-audiobooks/@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
+    "@claudia/ext-audiobooks/@types/bun": ["@types/bun@1.3.10", "", { "dependencies": { "bun-types": "1.3.10" } }, "sha512-0+rlrUrOrTSskibryHbvQkDOWRJwJZqZlxrUs1u4oOoTln8+WIXBPmAuCF35SWB2z4Zl3E84Nl/D0P7803nigQ=="],
 
     "@claudia/extension-session/@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
 
@@ -1516,7 +1535,7 @@
 
     "@claudia/agent-host/@types/bun/bun-types": ["bun-types@1.3.10", "", { "dependencies": { "@types/node": "*" } }, "sha512-tcpfCCl6XWo6nCVnpcVrxQ+9AYN1iqMIzgrSKYMB/fjLtV2eyAVEg7AxQJuCq/26R6HpKWykQXuSOq/21RYcbg=="],
 
-    "@claudia/ext-audiobooks/@types/bun/bun-types": ["bun-types@1.3.9", "", { "dependencies": { "@types/node": "*" } }, "sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg=="],
+    "@claudia/ext-audiobooks/@types/bun/bun-types": ["bun-types@1.3.10", "", { "dependencies": { "@types/node": "*" } }, "sha512-tcpfCCl6XWo6nCVnpcVrxQ+9AYN1iqMIzgrSKYMB/fjLtV2eyAVEg7AxQJuCq/26R6HpKWykQXuSOq/21RYcbg=="],
 
     "@claudia/extension-session/@types/bun/bun-types": ["bun-types@1.3.9", "", { "dependencies": { "@types/node": "*" } }, "sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg=="],
 

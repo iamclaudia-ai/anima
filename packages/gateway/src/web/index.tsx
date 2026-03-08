@@ -1,18 +1,22 @@
 import { createRoot } from "react-dom/client";
 import { Router, ErrorBoundary, GatewayClientProvider } from "@claudia/ui";
+import type { PanelRegistry } from "@claudia/ui";
+import type { LayoutDefinition } from "@claudia/shared";
 import "@claudia/ui/styles";
 
-import { chatRoutes } from "@claudia/ext-chat/routes";
+// ── Extension route imports ─────────────────────────────────
+import { chatRoutes, chatPanels, chatLayouts } from "@claudia/ext-chat/routes";
 import { controlRoutes } from "@claudia/ext-control/routes";
 import { audiobooksRoutes } from "@claudia/ext-audiobooks/routes";
+import { editorPanels } from "@claudia/ext-editor/routes";
 
+// ── Hash-to-path redirect (PWA / legacy links) ─────────────
 if (window.location.hash.startsWith("#/")) {
   const path = window.location.hash.slice(1);
   window.history.replaceState(null, "", path);
 }
 
-// PWA — inject manifest and apple-touch-icon dynamically to avoid
-// Bun's HTML bundler trying to resolve the href paths at build time.
+// ── PWA manifest injection ──────────────────────────────────
 const manifestLink = document.createElement("link");
 manifestLink.rel = "manifest";
 manifestLink.href = "/manifest.json";
@@ -30,16 +34,35 @@ if (import.meta.env.DEV) {
   document.head.appendChild(script);
 }
 
+// ── Aggregate routes from all extensions ────────────────────
 const allRoutes = [...controlRoutes, ...chatRoutes, ...audiobooksRoutes];
 
+// ── Build panel registry from all extensions ────────────────
+const panelRegistry: PanelRegistry = new Map();
+for (const panel of [...chatPanels, ...editorPanels]) {
+  panelRegistry.set(panel.id, {
+    id: panel.id,
+    title: panel.title,
+    icon: panel.icon,
+    component: panel.component,
+  });
+}
+
+// ── Merge layout definitions from all extensions ────────────
+const allLayouts: Record<string, LayoutDefinition> = {
+  ...chatLayouts,
+};
+
+// ── Render ──────────────────────────────────────────────────
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
     <GatewayClientProvider>
-      <Router routes={allRoutes} />
+      <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
     </GatewayClientProvider>
   </ErrorBoundary>,
 );
 
+// ── Service Worker ──────────────────────────────────────────
 // Register service worker for PWA functionality.
 // Skip SW in dev to avoid reload loops during active local rebuilds.
 if ("serviceWorker" in navigator && !import.meta.env.DEV) {

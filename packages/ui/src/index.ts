@@ -51,6 +51,8 @@ export { InputArea } from "./components/InputArea";
 export { CopyButton } from "./components/CopyButton";
 export { ClaudiaThinking } from "./components/ClaudiaThinking";
 export { TaskActivityStrip } from "./components/TaskActivityStrip";
+export { LayoutManager } from "./components/LayoutManager";
+export type { PanelRegistration, PanelRegistry } from "./components/LayoutManager";
 export { ErrorBoundary } from "./components/ErrorBoundary";
 export { NavigationDrawer } from "./components/NavigationDrawer";
 export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
