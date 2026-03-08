@@ -151,8 +151,11 @@ export class SessionManager extends EventEmitter {
       log.info("Auto-resuming session", {
         sessionId: sessionId.slice(0, 8),
         cwd,
-        model: this.defaults.model || "default",
+        model: this.defaults.model,
       });
+      if (!this.defaults.model) {
+        throw new Error("Session model is required for auto-resume");
+      }
       await this.resume({
         sessionId,
         cwd,

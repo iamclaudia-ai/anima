@@ -260,7 +260,7 @@ export interface HealthItem {
   label: string;
   /** Status for colored indicator */
   status: "healthy" | "stale" | "dead" | "inactive";
-  /** Extra columns: { model: "sonnet-4", lastActivity: "2m ago" } */
+  /** Extra columns: { model: "claude-opus-4-6", lastActivity: "2m ago" } */
   details?: Record<string, string>;
 }
 

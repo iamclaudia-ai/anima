@@ -10,9 +10,10 @@ export type RuntimeStatus = "idle" | "running" | "completed" | "failed" | "inter
 export type SessionPurpose = "chat" | "task" | "review" | "test";
 
 interface SessionRow {
-  id: string;
+  id: number;
   workspace_id: string;
   provider_session_id: string;
+  model: string;
   agent: string | null;
   purpose: string | null;
   parent_session_id: string | null;
@@ -31,6 +32,7 @@ export interface StoredSession {
   id: string;
   workspaceId: string;
   providerSessionId: string;
+  model: string;
   agent: string;
   purpose: SessionPurpose;
   parentSessionId: string | null;
@@ -67,6 +69,9 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
 }
 
 function toStoredSession(row: SessionRow): StoredSession {
+  if (!row.model || !row.model.trim()) {
+    throw new Error(`Session ${row.provider_session_id} is missing model`);
+  }
   const runtimeRaw = row.runtime_status || "idle";
   const runtimeStatus: RuntimeStatus =
     runtimeRaw === "running" ||
@@ -80,9 +85,10 @@ function toStoredSession(row: SessionRow): StoredSession {
   const purpose: SessionPurpose =
     purposeRaw === "task" || purposeRaw === "review" || purposeRaw === "test" ? purposeRaw : "chat";
   return {
-    id: row.id,
+    id: row.provider_session_id,
     workspaceId: row.workspace_id,
     providerSessionId: row.provider_session_id,
+    model: row.model,
     agent: row.agent || "claude",
     purpose,
     parentSessionId: row.parent_session_id,
@@ -112,18 +118,19 @@ function ensureSessionTable(currentDb: Database): void {
 
   currentDb.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
-      id                  TEXT PRIMARY KEY,
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       workspace_id        TEXT NOT NULL REFERENCES workspaces(id),
-      provider_session_id TEXT NOT NULL,
+      provider_session_id TEXT NOT NULL UNIQUE,
+      model               TEXT NOT NULL,
       agent               TEXT NOT NULL DEFAULT 'claude',
       purpose             TEXT NOT NULL DEFAULT 'chat',
-      parent_session_id   TEXT REFERENCES sessions(id),
+      parent_session_id   TEXT,
       status              TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
       runtime_status      TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','completed','failed','interrupted','stalled')),
       title               TEXT,
       summary             TEXT,
       metadata_json       TEXT,
-      previous_session_id TEXT REFERENCES sessions(id),
+      previous_session_id TEXT,
       last_activity       TEXT NOT NULL DEFAULT (datetime('now')),
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
@@ -143,9 +150,10 @@ function ensureSessionTable(currentDb: Database): void {
 
   // Backfill for legacy schemas from early migrations.
   addColumn("provider_session_id", "provider_session_id TEXT");
+  addColumn("model", "model TEXT");
   addColumn("agent", "agent TEXT NOT NULL DEFAULT 'claude'");
   addColumn("purpose", "purpose TEXT NOT NULL DEFAULT 'chat'");
-  addColumn("parent_session_id", "parent_session_id TEXT REFERENCES sessions(id)");
+  addColumn("parent_session_id", "parent_session_id TEXT");
   addColumn(
     "runtime_status",
     "runtime_status TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','completed','failed','interrupted','stalled'))",
@@ -153,7 +161,9 @@ function ensureSessionTable(currentDb: Database): void {
   addColumn("metadata_json", "metadata_json TEXT");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
 
-  currentDb.exec("UPDATE sessions SET provider_session_id = COALESCE(provider_session_id, id)");
+  currentDb.exec(
+    "UPDATE sessions SET provider_session_id = COALESCE(provider_session_id, CAST(id AS TEXT))",
+  );
   currentDb.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_provider_session ON sessions(provider_session_id);
@@ -190,6 +200,7 @@ export function upsertSession(params: {
   id: string;
   workspaceId: string;
   providerSessionId?: string;
+  model?: string;
   agent?: string;
   purpose?: SessionPurpose;
   parentSessionId?: string | null;
@@ -203,6 +214,11 @@ export function upsertSession(params: {
 }): void {
   const now = new Date().toISOString();
   const providerSessionId = params.providerSessionId || params.id;
+  const agent = params.agent || "claude";
+  const model = params.model?.trim();
+  if (!model) {
+    throw new Error("Session model is required for upsertSession");
+  }
   const metadataJson =
     params.metadata === undefined ? null : params.metadata ? JSON.stringify(params.metadata) : null;
   const dbConn = getDb();
@@ -223,13 +239,14 @@ export function upsertSession(params: {
   dbConn
     .query(
       `INSERT INTO sessions (
-        id, workspace_id, provider_session_id, agent, purpose, parent_session_id,
+        workspace_id, provider_session_id, model, agent, purpose, parent_session_id,
         status, runtime_status, title, summary, metadata_json, previous_session_id,
         last_activity, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
+      ON CONFLICT(provider_session_id) DO UPDATE SET
         workspace_id = excluded.workspace_id,
         provider_session_id = excluded.provider_session_id,
+        model = excluded.model,
         agent = excluded.agent,
         purpose = excluded.purpose,
         parent_session_id = excluded.parent_session_id,
@@ -243,10 +260,10 @@ export function upsertSession(params: {
         updated_at = excluded.updated_at`,
     )
     .run(
-      params.id,
       params.workspaceId,
       providerSessionId,
-      params.agent || "claude",
+      model,
+      agent,
       params.purpose || "chat",
       params.parentSessionId ?? null,
       params.status || "active",
@@ -262,7 +279,9 @@ export function upsertSession(params: {
 }
 
 export function getStoredSession(id: string): StoredSession | null {
-  const row = getDb().query("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRow | null;
+  const row = getDb()
+    .query("SELECT * FROM sessions WHERE provider_session_id = ?")
+    .get(id) as SessionRow | null;
   return row ? toStoredSession(row) : null;
 }
 
@@ -271,13 +290,13 @@ export function touchSession(id: string, runtimeStatus?: RuntimeStatus): void {
   if (runtimeStatus) {
     getDb()
       .query(
-        "UPDATE sessions SET runtime_status = ?, last_activity = ?, updated_at = ? WHERE id = ?",
+        "UPDATE sessions SET runtime_status = ?, last_activity = ?, updated_at = ? WHERE provider_session_id = ?",
       )
       .run(runtimeStatus, now, now, id);
     return;
   }
   getDb()
-    .query("UPDATE sessions SET last_activity = ?, updated_at = ? WHERE id = ?")
+    .query("UPDATE sessions SET last_activity = ?, updated_at = ? WHERE provider_session_id = ?")
     .run(now, now, id);
 }
 
@@ -296,6 +315,7 @@ export function updateSessionRuntime(
     id,
     workspaceId: existing.workspaceId,
     providerSessionId: existing.providerSessionId,
+    model: existing.model,
     agent: existing.agent,
     purpose: existing.purpose,
     parentSessionId: existing.parentSessionId ?? null,

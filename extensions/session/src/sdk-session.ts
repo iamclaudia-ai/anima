@@ -77,8 +77,6 @@ export interface ResumeSessionOptions {
 
 // ── Constants ────────────────────────────────────────────────
 
-const DEFAULT_MODEL = "claude-sonnet-4-20250514";
-
 /** Tools that require a tool_result sent back (not auto-executed by CLI) */
 const INTERACTIVE_TOOLS = new Set(["ExitPlanMode", "EnterPlanMode", "AskUserQuestion"]);
 
@@ -222,16 +220,45 @@ export class SDKSession extends EventEmitter {
       `SDKSession:${id.slice(0, 8)}`,
       join(homedir(), ".claudia", "logs", "session.log"),
     );
+    if (!options.model || !options.model.trim()) {
+      throw new Error(
+        "SDKSession requires a configured model (extensions.session.config.model in ~/.claudia/claudia.json)",
+      );
+    }
     this.cwd = options.cwd;
-    this.model = options.model || DEFAULT_MODEL;
+    this.model = options.model;
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.effort = options.effort;
     this.isFirstPrompt = !isResume;
 
     // Load image processing config from global settings
     const globalConfig = loadConfig();
-    this.imageProcessingConfig = globalConfig.session.imageProcessing;
-    this.skillsPaths = globalConfig.session.skills.paths || [];
+    const sessionExtConfig = (globalConfig.extensions?.session?.config || {}) as Record<
+      string,
+      unknown
+    >;
+    const configuredImageProcessing = sessionExtConfig.imageProcessing;
+    const configuredSkills = sessionExtConfig.skills;
+    this.imageProcessingConfig =
+      configuredImageProcessing &&
+      typeof configuredImageProcessing === "object" &&
+      !Array.isArray(configuredImageProcessing)
+        ? (configuredImageProcessing as ImageProcessingConfig)
+        : {
+            enabled: true,
+            maxWidth: 1600,
+            maxHeight: 1600,
+            maxFileSizeBytes: 1024 * 1024,
+            format: "webp",
+            quality: 85,
+          };
+    this.skillsPaths =
+      configuredSkills &&
+      typeof configuredSkills === "object" &&
+      !Array.isArray(configuredSkills) &&
+      Array.isArray((configuredSkills as { paths?: unknown }).paths)
+        ? (configuredSkills as { paths: string[] }).paths || []
+        : [];
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"

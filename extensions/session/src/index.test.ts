@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { ExtensionContext } from "@claudia/shared";
+import { clearConfigCache } from "@claudia/shared";
 import { createSessionExtension } from "./index";
 import { AgentHostClient } from "./agent-client";
 import * as workspace from "./workspace";
@@ -50,6 +51,21 @@ describe("session extension", () => {
   let homedirSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
+    clearConfigCache();
+    mkdirSync(join(testHome, ".claudia"), { recursive: true });
+    writeFileSync(
+      join(testHome, ".claudia", "claudia.json"),
+      JSON.stringify({
+        gateway: { port: 30086, host: "localhost" },
+        extensions: {
+          session: {
+            enabled: true,
+            config: { model: "claude-opus-4-6", thinking: false, effort: "medium" },
+          },
+        },
+      }),
+      "utf-8",
+    );
     homedirSpy = spyOn(os, "homedir").mockReturnValue(testHome);
     emitEventSpy = spyOn(AgentHostClient.prototype, "emit");
     connectSpy = spyOn(AgentHostClient.prototype, "connect").mockImplementation(
@@ -181,6 +197,7 @@ describe("session extension", () => {
   });
 
   afterEach(() => {
+    clearConfigCache();
     homedirSpy.mockRestore();
     promptSpy.mockRestore();
     emitEventSpy.mockRestore();
@@ -263,7 +280,7 @@ describe("session extension", () => {
 
     expect(result).toEqual({ status: "streaming", sessionId });
     expect(promptSpy).toHaveBeenCalledTimes(1);
-    expect(promptSpy).toHaveBeenCalledWith(sessionId, "ping", undefined, "claude");
+    expect(promptSpy).toHaveBeenCalledWith(sessionId, "ping", undefined, "claude-test", "claude");
 
     await ext.stop();
   });
@@ -449,9 +466,9 @@ describe("session extension", () => {
     const switched = await ext.handleMethod("session.switch_session", {
       sessionId: "resume-1",
       cwd: "/repo/project",
-      model: "claude-sonnet",
+      model: "claude-sonnet-4-6",
     });
-    expect(promptSpy).toHaveBeenCalledWith("resume-1", "", "/repo/project");
+    expect(promptSpy).toHaveBeenCalledWith("resume-1", "", "/repo/project", "claude-sonnet-4-6");
     expect(switched).toEqual({ sessionId: "resume-1" });
 
     const reset = await ext.handleMethod("session.reset_session", {
@@ -463,6 +480,45 @@ describe("session extension", () => {
       model: "claude-opus",
     });
     expect(reset).toEqual({ sessionId: "reset-session-1" });
+
+    await ext.stop();
+  });
+
+  it("recycles running session when active model drifts from stored model", async () => {
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    // Simulate drift: host reports claude-sonnet-4-6 while request wants opus.
+    listSpy.mockResolvedValueOnce([
+      {
+        id: "drift-session",
+        cwd: "/repo/project",
+        model: "claude-sonnet-4-6",
+        isActive: true,
+        isProcessRunning: true,
+        createdAt: new Date().toISOString(),
+        healthy: true,
+        stale: false,
+        lastActivity: new Date().toISOString(),
+      },
+    ]);
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: "drift-session",
+      cwd: "/repo/project",
+      content: "ping",
+      model: "claude-opus-4-6",
+      streaming: true,
+    });
+
+    expect(closeSpy).toHaveBeenCalledWith("drift-session");
+    expect(promptSpy).toHaveBeenCalledWith(
+      "drift-session",
+      "ping",
+      "/repo/project",
+      "claude-opus-4-6",
+      "claude",
+    );
 
     await ext.stop();
   });
@@ -906,9 +962,14 @@ describe("session extension", () => {
 
     const pending = ext.handleMethod("session.send_prompt", {
       sessionId,
+      cwd: "/repo/project",
+      model: "claude-test",
       content: "ping",
       streaming: false,
     });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(timeoutCallbacks.length).toBe(1);
     timeoutCallbacks[0]?.();
     await expect(pending).rejects.toThrow("Prompt timed out after 5 minutes");

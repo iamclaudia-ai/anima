@@ -39,6 +39,7 @@ describe("session store", () => {
       id: "ses_parent",
       workspaceId: "ws_1",
       providerSessionId: "ses_parent",
+      model: "claude-opus-4-6",
       agent: "claude",
       purpose: "chat",
       runtimeStatus: "idle",
@@ -50,6 +51,7 @@ describe("session store", () => {
       id: "task_1",
       workspaceId: "ws_1",
       providerSessionId: "task_1",
+      model: "gpt-5.2-codex",
       agent: "codex",
       purpose: "review",
       parentSessionId: "ses_parent",
@@ -70,5 +72,6 @@ describe("session store", () => {
 
     const parent = getStoredSession("ses_parent");
     expect(parent?.id).toBe("ses_parent");
+    expect(parent?.model).toBe("claude-opus-4-6");
   });
 });

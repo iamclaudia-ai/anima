@@ -115,7 +115,13 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
     return { sessionId: params.sessionId };
   }
 
-  async prompt(_sessionId: string, _content: string | unknown[], _cwd?: string): Promise<void> {}
+  async prompt(
+    _sessionId: string,
+    _content: string | unknown[],
+    _cwd?: string,
+    _model?: string,
+    _agent?: string,
+  ): Promise<void> {}
 
   interrupt(sessionId: string): boolean {
     return this.sessions.has(sessionId);
@@ -146,7 +152,7 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
     return Array.from(this.sessions.keys()).map((id) => ({
       id,
       cwd: "/repo",
-      model: "sonnet",
+      model: "claude-opus-4-6",
       createdAt: "2024-01-01T00:00:00.000Z",
       lastActivity: "2024-01-01T00:00:01.000Z",
     }));
@@ -233,7 +239,7 @@ describe("agent-host server", () => {
   const fakeConfig: ClaudiaConfig = {
     gateway: { port: 0, host: "127.0.0.1" },
     session: {
-      model: "sonnet",
+      model: "claude-opus-4-6",
       thinking: false,
       effort: "medium",
       systemPrompt: null,
@@ -247,7 +253,16 @@ describe("agent-host server", () => {
         quality: 85,
       },
     },
-    extensions: {},
+    extensions: {
+      session: {
+        enabled: true,
+        config: {
+          model: "claude-sonnet-4-6",
+          thinking: false,
+          effort: "medium",
+        },
+      },
+    },
     agentHost: { url: "ws://127.0.0.1:0/ws", port: 0 },
     federation: { enabled: false, nodeId: "test", peers: [] },
   };

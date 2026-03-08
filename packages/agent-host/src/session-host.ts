@@ -120,9 +120,13 @@ export class SessionHost extends EventEmitter {
       throw new Error(`Unsupported session agent: ${params.agent}`);
     }
 
+    const resolvedModel = params.model ?? this.defaults.model;
+    if (!resolvedModel) {
+      throw new Error("Session model is required. Configure extensions.session.config.model.");
+    }
     const options: CreateSessionOptions = {
       cwd: params.cwd,
-      model: params.model ?? this.defaults.model,
+      model: resolvedModel,
       systemPrompt: params.systemPrompt,
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
@@ -150,9 +154,13 @@ export class SessionHost extends EventEmitter {
       return { sessionId: existing.id };
     }
 
+    const resolvedModel = params.model ?? this.defaults.model;
+    if (!resolvedModel) {
+      throw new Error("Session model is required. Configure extensions.session.config.model.");
+    }
     const options: ResumeSessionOptions = {
       cwd: params.cwd,
-      model: params.model ?? this.defaults.model,
+      model: resolvedModel,
       lastActivity: params.lastActivity,
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
@@ -179,6 +187,7 @@ export class SessionHost extends EventEmitter {
     sessionId: string,
     content: string | unknown[],
     cwd?: string,
+    model?: string,
     agent?: string,
   ): Promise<void> {
     if (agent && agent !== "claude") {
@@ -195,12 +204,16 @@ export class SessionHost extends EventEmitter {
       log.info("Auto-resuming session", {
         sessionId: sessionId.slice(0, 8),
         cwd,
-        model: this.defaults.model || "default",
+        model: model || this.defaults.model,
       });
+      const resumeModel = model ?? this.defaults.model;
+      if (!resumeModel) {
+        throw new Error("Session model is required. Configure extensions.session.config.model.");
+      }
       await this.resume({
         sessionId,
         cwd,
-        model: this.defaults.model,
+        model: resumeModel,
         thinking: this.defaults.thinking,
         effort: this.defaults.effort,
       });

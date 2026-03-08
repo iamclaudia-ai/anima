@@ -110,7 +110,12 @@ describe("gateway routing (isolated process)", () => {
       JSON.stringify(
         {
           gateway: { port, host: "127.0.0.1" },
-          session: { model: "sonnet", thinking: false, effort: "medium", systemPrompt: null },
+          session: {
+            model: "claude-opus-4-6",
+            thinking: false,
+            effort: "medium",
+            systemPrompt: null,
+          },
           extensions: {
             testroute: { enabled: true, config: {} },
           },

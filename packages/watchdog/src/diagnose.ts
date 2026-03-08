@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn, type Subprocess } from "bun";
+import { loadConfig } from "@claudia/shared";
 import {
   PROJECT_DIR,
   CLAUDE_PATH,
@@ -48,6 +49,17 @@ export const diagnose: DiagnoseState = {
 
 let diagnoseProc: Subprocess | null = null;
 let diagnoseTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getDiagnoseModel(): string {
+  const config = loadConfig();
+  const model = (config.extensions?.session?.config as { model?: unknown } | undefined)?.model;
+  if (typeof model === "string" && model.trim().length > 0) {
+    return model.trim();
+  }
+  throw new Error(
+    "Missing required config: extensions.session.config.model in ~/.claudia/claudia.json",
+  );
+}
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -143,7 +155,7 @@ After fixing, verify by reading the file to confirm the fix looks correct.`;
   }
 
   // Build command
-  const cmd = [CLAUDE_PATH, "-p", "--dangerously-skip-permissions", "--model", "sonnet"];
+  const cmd = [CLAUDE_PATH, "-p", "--dangerously-skip-permissions", "--model", getDiagnoseModel()];
   if (isResume) {
     cmd.push("--resume", sessionId);
   } else {

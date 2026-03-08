@@ -91,7 +91,7 @@ describe("restorePersistedSessions", () => {
         ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
     });
 
-    const { sessionId } = await hostA.create({ cwd: "/repo", model: "sonnet" });
+    const { sessionId } = await hostA.create({ cwd: "/repo", model: "claude-opus-4-6" });
     mod.saveState(hostA.getSessionRecords());
 
     const hostB = new SessionHost({
@@ -159,7 +159,7 @@ describe("restorePersistedSessions", () => {
           {
             id: sessionId,
             cwd,
-            model: "sonnet",
+            model: "claude-opus-4-6",
             createdAt: new Date().toISOString(),
             lastActivity: "",
           },

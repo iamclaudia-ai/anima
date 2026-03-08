@@ -37,6 +37,20 @@ import manifestData from "./web/manifest.json";
 const config = loadConfig();
 const PORT = config.gateway.port;
 const DATA_DIR = process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia");
+const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
+const sessionExtensionEnabled = Boolean(config.extensions?.session?.enabled);
+const sessionModel = (() => {
+  if (!sessionExtensionEnabled) return "disabled";
+  const model = sessionExtConfig.model;
+  if (typeof model === "string" && model.trim().length > 0) {
+    return model.trim();
+  }
+  throw new Error(
+    "Missing required config: extensions.session.config.model in ~/.claudia/claudia.json",
+  );
+})();
+const sessionThinking =
+  typeof sessionExtConfig.thinking === "boolean" ? String(sessionExtConfig.thinking) : "false";
 
 // Structured logger — writes to console + ~/.claudia/logs/gateway.log
 const log = createLogger("Gateway", join(DATA_DIR, "logs", "gateway.log"));
@@ -738,8 +752,8 @@ log.info(`
 ║   WebSocket: ws://localhost:${PORT}/ws                     ║
 ║   Health:    http://localhost:${PORT}/health               ║
 ║                                                           ║
-║   Model:    ${config.session.model.padEnd(42)}║
-║   Thinking: ${String(config.session.thinking).padEnd(42)}║
+║   Model:    ${sessionModel.padEnd(42)}║
+║   Thinking: ${sessionThinking.padEnd(42)}║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 `);

@@ -50,7 +50,7 @@ describe("SessionHost", () => {
         fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
     });
 
-    await host.create({ cwd: "/repo" });
+    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
     fake.emit("sse", { type: "content_block_delta", delta: { text: "hi" } });
 
     expect(host.getEventsAfter("s-cleanup", 0)).toHaveLength(1);
@@ -76,14 +76,43 @@ describe("SessionHost", () => {
       },
     });
 
-    host.setDefaults({ model: "sonnet", thinking: true, effort: "low" });
+    host.setDefaults({ model: "claude-opus-4-6", thinking: true, effort: "low" });
     await host.prompt("s-resume", "hi", "/repo");
 
     expect(startCalls).toBe(1);
     expect(resumed).toEqual([
       {
         sessionId: "s-resume",
-        options: { cwd: "/repo", model: "sonnet", thinking: true, effort: "low" },
+        options: { cwd: "/repo", model: "claude-opus-4-6", thinking: true, effort: "low" },
+      },
+    ]);
+  });
+
+  it("uses prompt model for auto-resume when provided", async () => {
+    const resumed: Array<{ sessionId: string; options: unknown }> = [];
+    const fake = new FakeSession("s-explicit-model");
+    let startCalls = 0;
+    fake.start = async () => {
+      startCalls += 1;
+    };
+
+    const host = new SessionHost({
+      create: () =>
+        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      resume: (sessionId, options) => {
+        resumed.push({ sessionId, options });
+        return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+      },
+    });
+
+    host.setDefaults({ model: "claude-sonnet-4-6", thinking: true, effort: "low" });
+    await host.prompt("s-explicit-model", "hi", "/repo", "claude-opus-4-6");
+
+    expect(startCalls).toBe(1);
+    expect(resumed).toEqual([
+      {
+        sessionId: "s-explicit-model",
+        options: { cwd: "/repo", model: "claude-opus-4-6", thinking: true, effort: "low" },
       },
     ]);
   });
@@ -107,8 +136,8 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo" });
-    await host.create({ cwd: "/repo" });
+    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
 
     const closed = await host.reapIdleRunningSessions(300_000, 301_000);
     expect(closed).toEqual(["s-stale"]);
@@ -133,8 +162,8 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo" });
-    await host.create({ cwd: "/repo" });
+    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
 
     const records = host.getSessionRecords();
     expect(records.map((r) => r.id)).toEqual(["s-running"]);

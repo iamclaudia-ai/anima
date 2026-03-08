@@ -4,8 +4,7 @@
  * Features:
  * - JSON5 format (supports comments, trailing commas)
  * - Environment variable interpolation: "${ENV_VAR}"
- * - Type-safe config with defaults
- * - Falls back to env vars if no config file
+ * - Type-safe config
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -118,7 +117,7 @@ const DEFAULT_CONFIG: ClaudiaConfig = {
     heartbeatIntervalMs: 300000, // 5 minutes
   },
   session: {
-    model: "sonnet",
+    model: "claude-opus-4-6",
     thinking: false,
     effort: "medium",
     systemPrompt: null,
@@ -192,9 +191,9 @@ let cachedConfig: ClaudiaConfig | null = null;
  * Load configuration from claudia.json
  *
  * Search order:
- * 1. CLAUDIA_CONFIG env var (explicit path)
- * 2. ./claudia.json (current directory)
- * 3. Fall back to defaults + env vars
+ * 1. explicit configPath argument
+ * 2. CLAUDIA_CONFIG env var
+ * 3. ~/.claudia/claudia.json
  */
 export function loadConfig(configPath?: string): ClaudiaConfig {
   if (cachedConfig && !configPath) {
@@ -210,7 +209,7 @@ export function loadConfig(configPath?: string): ClaudiaConfig {
     join(configHome, ".claudia", "claudia.json"),
   ].filter(Boolean) as string[];
 
-  let rawConfig: Partial<ClaudiaConfig> = {};
+  let rawConfig: Partial<ClaudiaConfig> | null = null;
   let loadedFrom: string | null = null;
 
   for (const path of paths) {
@@ -221,18 +220,18 @@ export function loadConfig(configPath?: string): ClaudiaConfig {
         loadedFrom = path;
         break;
       } catch (error) {
-        console.error(`[Config] Error parsing ${path}:`, error);
+        throw new Error(`[Config] Error parsing ${path}: ${String(error)}`);
       }
     }
   }
 
-  if (loadedFrom) {
-    console.log(`[Config] Loaded from: ${loadedFrom}`);
-  } else {
-    console.log("[Config] No config file found, using defaults + env vars");
-    // Build config from env vars for backward compatibility
-    rawConfig = buildConfigFromEnv();
+  if (!loadedFrom || !rawConfig) {
+    const searched = paths.length > 0 ? paths.join(", ") : "(none)";
+    throw new Error(
+      `[Config] No config file found. Searched: ${searched}. Copy claudia.example.json to ~/.claudia/claudia.json`,
+    );
   }
+  console.log(`[Config] Loaded from: ${loadedFrom}`);
 
   // Interpolate environment variables
   const interpolated = interpolateEnvVars(rawConfig) as Partial<ClaudiaConfig>;
@@ -247,50 +246,6 @@ export function loadConfig(configPath?: string): ClaudiaConfig {
   };
 
   cachedConfig = config;
-  return config;
-}
-
-/**
- * Build config from environment variables (backward compatibility)
- */
-function buildConfigFromEnv(): Partial<ClaudiaConfig> {
-  const config: Partial<ClaudiaConfig> = {
-    gateway: {
-      port: parseInt(process.env.CLAUDIA_PORT || "30086"),
-      host: process.env.CLAUDIA_HOST || "localhost",
-    },
-    session: {
-      model: process.env.CLAUDIA_MODEL || "sonnet",
-      thinking: process.env.CLAUDIA_THINKING === "true",
-      effort: (process.env.CLAUDIA_THINKING_EFFORT || "medium") as ThinkingEffort,
-      systemPrompt: process.env.CLAUDIA_SYSTEM_PROMPT || null,
-      skills: DEFAULT_CONFIG.session.skills,
-      imageProcessing: DEFAULT_CONFIG.session.imageProcessing,
-    },
-    extensions: {},
-  };
-
-  // Build extensions from CLAUDIA_EXTENSIONS env var
-  const extensionIds = process.env.CLAUDIA_EXTENSIONS?.split(",").map((s) => s.trim()) || [];
-
-  for (const id of extensionIds) {
-    if (id === "voice") {
-      config.extensions![id] = {
-        enabled: true,
-        config: {
-          apiKey: process.env.ELEVENLABS_API_KEY || "",
-          voiceId: process.env.ELEVENLABS_VOICE_ID,
-        },
-      };
-    } else {
-      // Generic extension
-      config.extensions![id] = {
-        enabled: true,
-        config: {},
-      };
-    }
-  }
-
   return config;
 }
 

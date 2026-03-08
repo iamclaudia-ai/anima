@@ -63,7 +63,7 @@ describe("SessionManager", () => {
       events.push(e as Record<string, unknown>);
     });
 
-    await expect(manager.create({ cwd: "/repo", model: "claude-sonnet" })).resolves.toEqual({
+    await expect(manager.create({ cwd: "/repo", model: "claude-sonnet-4-6" })).resolves.toEqual({
       sessionId: "s-created",
     });
     expect(manager.list()[0]?.id).toBe("s-created");

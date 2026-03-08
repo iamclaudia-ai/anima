@@ -30,6 +30,7 @@ export interface SessionHostLike {
     sessionId: string,
     content: string | unknown[],
     cwd?: string,
+    model?: string,
     agent?: string,
   ) => Promise<void> | void;
   interrupt: (sessionId: string) => boolean;
@@ -113,22 +114,32 @@ export async function createAgentHostServer(
   let loadedConfig: ClaudiaConfig | null = null;
 
   // Load config for session defaults
-  try {
-    const config = loadConfigFn();
-    loadedConfig = config;
-    sessionHost.setDefaults({
-      model: config.session?.model,
-      thinking: config.session?.thinking,
-      effort: config.session?.effort,
-    });
-    log.info("Loaded config", {
-      model: config.session?.model,
-      thinking: config.session?.thinking,
-      effort: config.session?.effort,
-    });
-  } catch (error) {
-    log.warn("Failed to load config, using defaults", { error: String(error) });
-  }
+  const config = loadConfigFn();
+  loadedConfig = config;
+  const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
+  const sessionModel =
+    typeof sessionExtConfig.model === "string" && sessionExtConfig.model.trim().length > 0
+      ? sessionExtConfig.model.trim()
+      : undefined;
+  const sessionThinking =
+    typeof sessionExtConfig.thinking === "boolean" ? sessionExtConfig.thinking : undefined;
+  const sessionEffort =
+    sessionExtConfig.effort === "low" ||
+    sessionExtConfig.effort === "medium" ||
+    sessionExtConfig.effort === "high" ||
+    sessionExtConfig.effort === "max"
+      ? (sessionExtConfig.effort as ThinkingEffort)
+      : undefined;
+  sessionHost.setDefaults({
+    model: sessionModel,
+    thinking: sessionThinking,
+    effort: sessionEffort,
+  });
+  log.info("Loaded config", {
+    model: sessionModel,
+    thinking: sessionThinking,
+    effort: sessionEffort,
+  });
 
   const taskHost =
     options.taskHost ??
@@ -307,7 +318,7 @@ export async function createAgentHostServer(
             client.subscribedSessions.add(msg.sessionId);
           }
 
-          await sessionHost.prompt(msg.sessionId, msg.content, msg.cwd, msg.agent);
+          await sessionHost.prompt(msg.sessionId, msg.content, msg.cwd, msg.model, msg.agent);
           sendResponse(ws, {
             type: "res",
             requestId: msg.requestId,

@@ -18,7 +18,6 @@ import type {
   HealthCheckResponse,
 } from "@claudia/shared";
 import { createLogger, loadConfig } from "@claudia/shared";
-import type { SessionConfig } from "@claudia/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -69,6 +68,13 @@ interface AgentHostSessionInfo {
   lastActivity: string;
   healthy: boolean;
   stale: boolean;
+}
+
+interface SessionRuntimeConfig {
+  model: string;
+  thinking: boolean;
+  effort: "low" | "medium" | "high" | "max";
+  systemPrompt: string | null;
 }
 
 // ── Session Discovery ────────────────────────────────────────
@@ -341,22 +347,32 @@ function toSessionTaskFromStored(stored: StoredSession | null): SessionTask | nu
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
   let ctx: ExtensionContext;
 
-  // Load global configuration (claudia.json + defaults)
+  // Load global configuration for non-session settings (e.g., agent-host URL).
   const globalConfig = loadConfig();
-  const sessionConfig: SessionConfig = {
-    ...globalConfig.session,
-    model: (config.model as string | undefined) || globalConfig.session.model,
-    thinking:
-      (config.thinking as boolean | undefined) === undefined
-        ? globalConfig.session.thinking
-        : (config.thinking as boolean),
-    effort:
-      (config.effort as "low" | "medium" | "high" | "max" | undefined) ||
-      globalConfig.session.effort,
-    systemPrompt:
-      (config.systemPrompt as string | null | undefined) === undefined
-        ? globalConfig.session.systemPrompt
-        : ((config.systemPrompt as string | null) ?? null),
+  const globalSessionExtConfig = (globalConfig.extensions?.session?.config || {}) as Record<
+    string,
+    unknown
+  >;
+  const configuredModel = (() => {
+    if (typeof config.model === "string" && config.model.trim().length > 0) {
+      return config.model.trim();
+    }
+    const globalModel = globalSessionExtConfig.model;
+    if (typeof globalModel === "string" && globalModel.trim().length > 0) {
+      return globalModel.trim();
+    }
+    return null;
+  })();
+  if (!configuredModel) {
+    throw new Error(
+      "Session extension requires extensions.session.config.model in ~/.claudia/claudia.json",
+    );
+  }
+  const sessionConfig: SessionRuntimeConfig = {
+    model: configuredModel,
+    thinking: (config.thinking as boolean | undefined) ?? false,
+    effort: (config.effort as "low" | "medium" | "high" | "max" | undefined) || "medium",
+    systemPrompt: (config.systemPrompt as string | null | undefined) ?? null,
   };
   const agentHostConfig = globalConfig.agentHost;
 
@@ -522,6 +538,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           id: task.taskId,
           workspaceId,
           providerSessionId: task.taskId,
+          model: taskStored?.model || parentStored?.model || sessionConfig.model,
           agent: task.agent,
           purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
           parentSessionId: task.sessionId,
@@ -593,6 +610,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         sessionId: z.string().describe("Session UUID"),
         content: z.union([z.string(), z.array(z.unknown())]).describe("Prompt content"),
         cwd: z.string().optional().describe("CWD for auto-resume"),
+        model: z.string().optional().describe("Model override for auto-resume"),
         agent: z.string().optional().describe("Agent/provider (default: claude)"),
         streaming: z.boolean().optional().default(true).describe("Stream events or await result"),
         source: z.string().optional().describe("Source for routing (e.g. imessage/+1555...)"),
@@ -821,6 +839,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           id: result.sessionId,
           workspaceId: workspaceResult.workspace.id,
           providerSessionId: result.sessionId,
+          model,
           agent,
           purpose: "chat",
           runtimeStatus: "idle",
@@ -834,6 +853,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const sessionId = params.sessionId as string;
         const content = params.content as string | unknown[];
         const cwd = params.cwd as string | undefined;
+        const model = params.model as string | undefined;
         const agent = (params.agent as string | undefined) || "claude";
         const streaming = params.streaming !== false;
         const source = params.source as string | undefined;
@@ -847,12 +867,30 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         });
 
         const existing = getStoredSession(sessionId);
+        const resumeModel = model || existing?.model || sessionConfig.model;
+        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
+        const activeSession = activeSessions.find((s) => s.id === sessionId);
+        if (
+          activeSession &&
+          activeSession.isProcessRunning &&
+          activeSession.model &&
+          resumeModel &&
+          activeSession.model !== resumeModel
+        ) {
+          log.warn("Detected model drift; recycling session runtime", {
+            sessionId: sid(sessionId),
+            runningModel: activeSession.model,
+            desiredModel: resumeModel,
+          });
+          await agentClient.close(sessionId);
+        }
         if (!existing && cwd) {
           const workspaceResult = getOrCreateWorkspace(cwd);
           upsertSession({
             id: sessionId,
             workspaceId: workspaceResult.workspace.id,
             providerSessionId: sessionId,
+            model: resumeModel,
             agent,
             purpose: "chat",
             runtimeStatus: "idle",
@@ -893,7 +931,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         if (streaming) {
           // Fire and forget — events stream back via ctx.emit
           const promptStart = Date.now();
-          await agentClient.prompt(sessionId, content, cwd, agent);
+          await agentClient.prompt(sessionId, content, cwd, resumeModel, agent);
 
           // Log turn completion when we see turn_stop
           const turnListener = (event: { sessionId: string; type?: string }) => {
@@ -946,7 +984,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           };
 
           agentClient.on("session.event", onEvent);
-          agentClient.prompt(sessionId, content, cwd, agent).catch((err) => {
+          agentClient.prompt(sessionId, content, cwd, resumeModel, agent).catch((err) => {
             cleanup();
             reject(err);
           });
@@ -970,6 +1008,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             id: existing.id,
             workspaceId: existing.workspaceId,
             providerSessionId: existing.providerSessionId,
+            model: existing.model,
             agent: existing.agent,
             purpose: existing.purpose,
             parentSessionId: existing.parentSessionId,
@@ -995,6 +1034,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             id: entry.sessionId,
             workspaceId: workspaceResult.workspace.id,
             providerSessionId: entry.sessionId,
+            model: sessionConfig.model,
             agent: "claude",
             purpose: "chat",
             runtimeStatus: "idle",
@@ -1062,15 +1102,33 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const cwd = params.cwd as string;
         const model = params.model as string | undefined;
         const workspaceResult = getOrCreateWorkspace(cwd);
-
-        log.info("Switching session", { sessionId: sid(sessionId), cwd, model });
-        // Agent-host handles resume internally via prompt with cwd
-        await agentClient.prompt(sessionId, "", cwd);
         const existing = getStoredSession(sessionId);
+        const resumeModel = model || existing?.model || sessionConfig.model;
+        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
+        const activeSession = activeSessions.find((s) => s.id === sessionId);
+        if (
+          activeSession &&
+          activeSession.isProcessRunning &&
+          activeSession.model &&
+          resumeModel &&
+          activeSession.model !== resumeModel
+        ) {
+          log.warn("Detected model drift during switch; recycling session runtime", {
+            sessionId: sid(sessionId),
+            runningModel: activeSession.model,
+            desiredModel: resumeModel,
+          });
+          await agentClient.close(sessionId);
+        }
+
+        log.info("Switching session", { sessionId: sid(sessionId), cwd, model: resumeModel });
+        // Agent-host handles resume internally via prompt with cwd
+        await agentClient.prompt(sessionId, "", cwd, resumeModel);
         upsertSession({
           id: sessionId,
           workspaceId: workspaceResult.workspace.id,
           providerSessionId: existing?.providerSessionId || sessionId,
+          model: existing?.model || resumeModel,
           agent: existing?.agent || "claude",
           purpose: existing?.purpose || "chat",
           runtimeStatus: "idle",
@@ -1083,17 +1141,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
       case "session.reset_session": {
         const cwd = params.cwd as string;
+        const model = (params.model as string | undefined) || sessionConfig.model;
         const workspaceResult = getOrCreateWorkspace(cwd);
         const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
         log.info("Resetting session", { cwd });
         const result = await agentClient.createSession({
           cwd,
-          model: params.model as string | undefined,
+          model,
         });
         upsertSession({
           id: result.sessionId,
           workspaceId: workspaceResult.workspace.id,
           providerSessionId: result.sessionId,
+          model,
           agent: "claude",
           purpose: "chat",
           runtimeStatus: "idle",
@@ -1193,6 +1253,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           id: task.taskId,
           workspaceId,
           providerSessionId: task.taskId,
+          model: model || parentSession?.model || sessionConfig.model,
           agent: task.agent,
           purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
           parentSessionId: task.sessionId,
@@ -1269,6 +1330,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
               id: stored.id,
               workspaceId: stored.workspaceId,
               providerSessionId: stored.providerSessionId,
+              model: stored.model,
               agent: stored.agent,
               purpose: stored.purpose,
               parentSessionId: stored.parentSessionId,
@@ -1301,7 +1363,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         // primaryContexts is NOT modified — voice tags persist through notifications
 
         const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-        await agentClient.prompt(sessionId, wrapped, undefined, "claude");
+        const stored = getStoredSession(sessionId);
+        await agentClient.prompt(
+          sessionId,
+          wrapped,
+          undefined,
+          stored?.model || sessionConfig.model,
+          stored?.agent || "claude",
+        );
 
         return { ok: true, sessionId };
       }
@@ -1466,6 +1535,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
             id: session.id,
             workspaceId: workspaceResult.workspace.id,
             providerSessionId: session.id,
+            model: session.model,
             agent: "claude",
             purpose: "chat",
             runtimeStatus,

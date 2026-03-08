@@ -60,49 +60,21 @@ describe("config loader", () => {
     expect(config.extensions.hooks?.enabled).toBe(true);
   });
 
-  it("falls back to env vars when no config file exists (in-process)", () => {
+  it("throws when no config file exists", () => {
     const missingPath = join(tempDir, "missing.json");
     process.env.CLAUDIA_HOME = tempDir;
-    process.env.CLAUDIA_CONFIG = "";
-    process.env.CLAUDIA_PORT = "40123";
-    process.env.CLAUDIA_HOST = "0.0.0.0";
-    process.env.CLAUDIA_MODEL = "claude-sonnet";
-    process.env.CLAUDIA_THINKING = "true";
-    process.env.CLAUDIA_THINKING_EFFORT = "max";
-    process.env.CLAUDIA_SYSTEM_PROMPT = "be brief";
-    process.env.CLAUDIA_EXTENSIONS = "voice,session";
-    process.env.ELEVENLABS_API_KEY = "secret-key";
-    process.env.ELEVENLABS_VOICE_ID = "voice-1";
-
-    const config = loadConfig(missingPath);
-
-    expect(config.gateway).toMatchObject({ port: 40123, host: "0.0.0.0" });
-    expect(config.session).toMatchObject({
-      model: "claude-sonnet",
-      thinking: true,
-      effort: "max",
-      systemPrompt: "be brief",
-      skills: { paths: [] },
-    });
-    expect(config.extensions.voice).toEqual({
-      enabled: true,
-      config: { apiKey: "secret-key", voiceId: "voice-1" },
-    });
-    expect(config.extensions.session).toEqual({ enabled: true, config: {} });
+    delete process.env.CLAUDIA_CONFIG;
+    expect(() => loadConfig(missingPath)).toThrow("No config file found");
   });
 
   it("handles missing interpolated env vars and parse errors gracefully", () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
     const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
     const badPath = join(tempDir, "bad.json");
     writeFileSync(badPath, "{ invalid json", "utf-8");
 
-    // Parse error path should fall back to env/default config
-    const parsedFallback = loadConfig(badPath);
-    expect(parsedFallback.gateway.port).toBe(30086);
-    expect(errorSpy).toHaveBeenCalled();
+    expect(() => loadConfig(badPath)).toThrow("Error parsing");
 
     // Missing env interpolation warning path
     clearConfigCache();
@@ -119,7 +91,6 @@ describe("config loader", () => {
     expect(warnSpy).toHaveBeenCalled();
 
     warnSpy.mockRestore();
-    errorSpy.mockRestore();
     logSpy.mockRestore();
   });
 
