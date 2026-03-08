@@ -67,7 +67,7 @@ claudia session list_tasks --status running
 
 ## Worktree Isolation
 
-Use `--worktree true` to give a task its own git worktree in `/tmp/worktrees/<taskId>`. This prevents file conflicts when multiple agents are working on the same repo, or when an agent's changes shouldn't interfere with your working tree.
+Use `--worktree true` to give a task its own git worktree in `/tmp/worktrees/<taskId>` on branch `task/<taskId>`. This prevents file conflicts when multiple agents are working on the same repo, or when an agent's changes shouldn't interfere with your working tree.
 
 ```bash
 # Isolated refactor — won't touch your working tree
@@ -76,7 +76,7 @@ claudia session start_task --agent codex \
   --worktree true --sandbox "workspace-write"
 ```
 
-When the task completes, review its changes in the worktree. If you like them, merge or cherry-pick into your branch.
+**IMPORTANT**: When an agent is working in a worktree, do NOT edit the same files in the main tree. The whole point of worktree isolation is parallel work without conflicts. Review and merge when the task completes.
 
 ### Continuing in a Worktree
 
@@ -88,6 +88,47 @@ claudia session start_task --agent codex \
   --prompt "The tests are failing — fix the import paths" \
   --continue "task_abc123"
 ```
+
+### Git State Tracking
+
+`get_task` and `list_tasks` return a `git` object for worktree tasks:
+
+```json
+{
+  "git": {
+    "isRepo": true,
+    "dirty": false,
+    "staged": 0,
+    "unstaged": 0,
+    "untracked": 0,
+    "branchName": "task/task_abc123",
+    "worktreeExists": true,
+    "mergedToParent": false
+  }
+}
+```
+
+Key fields:
+
+- **`dirty`** — Whether the agent has uncommitted changes (always ask them to commit!)
+- **`mergedToParent`** — Whether the task's commits have been merged into the parent repo. Use this to identify tasks that still need your attention.
+- **`worktreeExists`** — Whether the worktree directory still exists on disk
+
+### Merging Worktree Changes
+
+Use **rebase + fast-forward merge** to bring worktree changes into the main tree. This keeps linear history and ensures `mergedToParent` detection works correctly.
+
+```bash
+# 1. Rebase task branch onto main (resolves conflicts in the worktree, not main)
+git -C /tmp/worktrees/<taskId> rebase main
+
+# 2. Fast-forward merge into main repo
+git merge --ff-only task/<taskId>
+```
+
+**Do NOT use cherry-pick or squash merge** — these rewrite the commit SHA, so `mergedToParent` (which uses `git merge-base --is-ancestor`) won't detect them as merged.
+
+After merging, verify with `get_task` — `mergedToParent` should flip to `true`.
 
 ## Interactive Task Control
 
