@@ -194,6 +194,7 @@ export class AgentHostClient extends EventEmitter {
     sessionId: string,
     content: string | unknown[],
     cwd?: string,
+    model?: string,
     agent?: string,
   ): Promise<void> {
     await this.sendRequest({
@@ -202,6 +203,7 @@ export class AgentHostClient extends EventEmitter {
       sessionId,
       content,
       cwd,
+      model,
       agent,
     });
   }

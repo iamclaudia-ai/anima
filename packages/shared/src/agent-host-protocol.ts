@@ -37,6 +37,7 @@ export interface PromptMessage {
   sessionId: string;
   content: string | unknown[];
   cwd?: string; // for auto-resume
+  model?: string; // preferred model for auto-resume
   agent?: string;
 }
 
