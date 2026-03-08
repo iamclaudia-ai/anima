@@ -106,6 +106,10 @@ function runGit(cwd: string, args: string[]): { ok: boolean; stdout: string; std
   };
 }
 
+function sanitizeBranchSuffix(value: string): string {
+  return value.replace(/[^A-Za-z0-9._/-]+/g, "-");
+}
+
 function summarizeItem(item: any): Record<string, unknown> {
   const base: Record<string, unknown> = { type: item.type, id: item.id };
   if (item.type === "agent_message") base.text = item.text;
@@ -146,6 +150,31 @@ export class TaskHost extends EventEmitter {
     return root || null;
   }
 
+  private ensureWorktreeBranch(cwd: string, preferredBranch: string): string | undefined {
+    const current = runGit(cwd, ["branch", "--show-current"]);
+    if (current.ok && current.stdout) {
+      return current.stdout;
+    }
+
+    const switched = runGit(cwd, ["switch", preferredBranch]);
+    if (switched.ok) {
+      return preferredBranch;
+    }
+
+    const created = runGit(cwd, ["switch", "-c", preferredBranch]);
+    if (created.ok) {
+      return preferredBranch;
+    }
+
+    log.warn("Failed to attach detached worktree to branch", {
+      cwd,
+      preferredBranch,
+      switchError: switched.stderr,
+      createError: created.stderr,
+    });
+    return undefined;
+  }
+
   private resolveTaskWorkingDirectory(
     taskId: string,
     params: TaskStartParams,
@@ -154,6 +183,7 @@ export class TaskHost extends EventEmitter {
     worktreePath?: string;
     parentRepoPath?: string;
     continuedFromTaskId?: string;
+    branchName?: string;
   } {
     const baseCwd = params.cwd || this.cfg.codex?.cwd || process.cwd();
     const continueTaskId = params.continue?.trim();
@@ -162,12 +192,17 @@ export class TaskHost extends EventEmitter {
     if (continueTaskId) {
       const continuePath = join("/tmp", "worktrees", continueTaskId);
       if (existsSync(continuePath)) {
+        const branchName = this.ensureWorktreeBranch(
+          continuePath,
+          `task/${sanitizeBranchSuffix(continueTaskId)}`,
+        );
         log.info("Reusing task worktree", { taskId, continueTaskId, path: continuePath });
         return {
           cwd: continuePath,
           worktreePath: continuePath,
           parentRepoPath,
           continuedFromTaskId: continueTaskId,
+          ...(branchName ? { branchName } : {}),
         };
       }
       log.info("Requested continue task worktree not found; using base cwd", {
@@ -187,9 +222,17 @@ export class TaskHost extends EventEmitter {
     }
 
     const worktreePath = join("/tmp", "worktrees", taskId);
+    const branchName = `task/${sanitizeBranchSuffix(taskId)}`;
     ensureDir(dirname(worktreePath));
     if (!existsSync(worktreePath)) {
-      const add = runGit(parentRepoPath, ["worktree", "add", "--detach", worktreePath, "HEAD"]);
+      const add = runGit(parentRepoPath, [
+        "worktree",
+        "add",
+        "-b",
+        branchName,
+        worktreePath,
+        "HEAD",
+      ]);
       if (!add.ok) {
         const stderr = add.stderr;
         throw new Error(`Failed to create worktree ${worktreePath}: ${stderr || "unknown error"}`);
@@ -197,7 +240,7 @@ export class TaskHost extends EventEmitter {
       log.info("Created task worktree", { taskId, gitRoot: parentRepoPath, worktreePath });
     }
 
-    return { cwd: worktreePath, worktreePath, parentRepoPath };
+    return { cwd: worktreePath, worktreePath, parentRepoPath, branchName };
   }
 
   private getGitState(record: TaskRecord): TaskGitState | undefined {

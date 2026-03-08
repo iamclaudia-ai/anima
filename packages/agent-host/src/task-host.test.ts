@@ -15,6 +15,19 @@ function runOrThrow(cmd: string[], cwd?: string): void {
   throw new Error(`Command failed (${cmd.join(" ")}): ${stderr}`);
 }
 
+function runAndRead(cmd: string[], cwd?: string): string {
+  const proc = Bun.spawnSync(cmd, {
+    ...(cwd ? { cwd } : {}),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (proc.exitCode !== 0) {
+    const stderr = new TextDecoder().decode(proc.stderr);
+    throw new Error(`Command failed (${cmd.join(" ")}): ${stderr}`);
+  }
+  return new TextDecoder().decode(proc.stdout).trim();
+}
+
 function initGitRepo(): string {
   const repoDir = mkdtempSync(join(tmpdir(), "claudia-task-host-"));
   runOrThrow(["git", "init"], repoDir);
@@ -65,6 +78,9 @@ describe("TaskHost worktree options", () => {
     cleanupPaths.add(worktreePath);
     expect(existsSync(worktreePath)).toBe(true);
     expect(threadOptions[0]?.workingDirectory).toBe(worktreePath);
+    expect(runAndRead(["git", "-C", worktreePath, "branch", "--show-current"])).toBe(
+      `task/${started.taskId}`,
+    );
   });
 
   it("reuses /tmp/worktrees/<task_id> when continue is provided", async () => {
@@ -94,6 +110,9 @@ describe("TaskHost worktree options", () => {
     const firstWorktree = join("/tmp", "worktrees", first.taskId);
     cleanupPaths.add(firstWorktree);
     expect(existsSync(firstWorktree)).toBe(true);
+    // Simulate legacy detached worktree then verify continue auto-attaches a branch.
+    runOrThrow(["git", "switch", "--detach"], firstWorktree);
+    expect(runAndRead(["git", "-C", firstWorktree, "branch", "--show-current"])).toBe("");
 
     const second = await host.start({
       sessionId: "ses_1",
@@ -106,5 +125,8 @@ describe("TaskHost worktree options", () => {
 
     expect(threadOptions[1]?.workingDirectory).toBe(firstWorktree);
     expect(existsSync(join("/tmp", "worktrees", second.taskId))).toBe(false);
+    expect(runAndRead(["git", "-C", firstWorktree, "branch", "--show-current"])).toBe(
+      `task/${first.taskId}`,
+    );
   });
 });
