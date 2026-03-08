@@ -396,6 +396,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     prompt: z.string().min(1).describe("Task prompt"),
     mode: z.enum(["general", "review", "test"]).optional().default("general"),
     cwd: z.string().optional().describe("Working directory override"),
+    worktree: z
+      .boolean()
+      .optional()
+      .describe("Create a git worktree in /tmp/worktrees/<task_id> and run task there"),
+    continue: z
+      .string()
+      .optional()
+      .describe("Reuse /tmp/worktrees/<task_id> if present; otherwise run in resolved cwd"),
     model: z.string().optional().describe("Model override"),
     effort: z.string().optional().describe("Effort/reasoning override"),
     sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
@@ -1208,6 +1216,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const prompt = params.prompt as string;
         const mode = normalizeTaskMode(params.mode as string | undefined);
         const cwd = params.cwd as string | undefined;
+        const worktree = params.worktree as boolean | undefined;
+        const continueTaskId = params.continue as string | undefined;
         const model = params.model as string | undefined;
         const effort = params.effort as string | undefined;
         const sandbox = params.sandbox as "read-only" | "workspace-write" | "danger-full-access";
@@ -1231,6 +1241,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           prompt,
           mode,
           cwd: effectiveCwd,
+          worktree,
+          continue: continueTaskId,
           model,
           effort,
           sandbox,

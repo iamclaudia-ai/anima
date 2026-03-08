@@ -429,6 +429,7 @@ describe("session extension", () => {
       agent: "codex",
       prompt: "review this",
       mode: "general",
+      worktree: true,
     })) as Record<string, unknown>;
 
     expect(started.taskId).toBe("ctask_123");
@@ -437,6 +438,7 @@ describe("session extension", () => {
       expect.objectContaining({
         sessionId,
         cwd: "/repo/project",
+        worktree: true,
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));

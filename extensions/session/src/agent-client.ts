@@ -249,6 +249,8 @@ export class AgentHostClient extends EventEmitter {
     prompt: string;
     mode?: "general" | "review" | "test";
     cwd?: string;
+    worktree?: boolean;
+    continue?: string;
     model?: string;
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";

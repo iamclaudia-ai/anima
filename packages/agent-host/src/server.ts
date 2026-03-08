@@ -57,6 +57,8 @@ export interface TaskHostLike {
     prompt: string;
     mode?: string;
     cwd?: string;
+    worktree?: boolean;
+    continue?: string;
     model?: string;
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";

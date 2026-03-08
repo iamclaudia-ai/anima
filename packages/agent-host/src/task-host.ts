@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createLogger } from "@claudia/shared";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
 
@@ -16,6 +16,8 @@ export interface TaskStartParams {
   prompt: string;
   mode?: string;
   cwd?: string;
+  worktree?: boolean;
+  continue?: string;
   model?: string;
   effort?: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
@@ -70,6 +72,11 @@ function ensureDir(path: string): void {
   if (!existsSync(path)) mkdirSync(path, { recursive: true });
 }
 
+function decodeOutput(data: Uint8Array | null | undefined): string {
+  if (!data) return "";
+  return new TextDecoder().decode(data).trim();
+}
+
 function summarizeItem(item: any): Record<string, unknown> {
   const base: Record<string, unknown> = { type: item.type, id: item.id };
   if (item.type === "agent_message") base.text = item.text;
@@ -101,6 +108,63 @@ export class TaskHost extends EventEmitter {
     super();
     this.outputDir = join(process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia"), "codex");
     ensureDir(this.outputDir);
+  }
+
+  private resolveGitRoot(cwd: string): string | null {
+    const proc = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (proc.exitCode !== 0) return null;
+    const root = decodeOutput(proc.stdout);
+    return root || null;
+  }
+
+  private resolveTaskWorkingDirectory(taskId: string, params: TaskStartParams): string {
+    const baseCwd = params.cwd || this.cfg.codex?.cwd || process.cwd();
+    const continueTaskId = params.continue?.trim();
+
+    if (continueTaskId) {
+      const continuePath = join("/tmp", "worktrees", continueTaskId);
+      if (existsSync(continuePath)) {
+        log.info("Reusing task worktree", { taskId, continueTaskId, path: continuePath });
+        return continuePath;
+      }
+      log.info("Requested continue task worktree not found; using base cwd", {
+        taskId,
+        continueTaskId,
+        baseCwd,
+      });
+      return baseCwd;
+    }
+
+    if (!params.worktree) {
+      return baseCwd;
+    }
+
+    const gitRoot = this.resolveGitRoot(baseCwd);
+    if (!gitRoot) {
+      throw new Error(`Cannot create worktree: ${baseCwd} is not inside a git repository`);
+    }
+
+    const worktreePath = join("/tmp", "worktrees", taskId);
+    ensureDir(dirname(worktreePath));
+    if (!existsSync(worktreePath)) {
+      const add = Bun.spawnSync(
+        ["git", "-C", gitRoot, "worktree", "add", "--detach", worktreePath, "HEAD"],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      if (add.exitCode !== 0) {
+        const stderr = decodeOutput(add.stderr);
+        throw new Error(`Failed to create worktree ${worktreePath}: ${stderr || "unknown error"}`);
+      }
+      log.info("Created task worktree", { taskId, gitRoot, worktreePath });
+    }
+
+    return worktreePath;
   }
 
   private async ensureCodex(): Promise<any> {
@@ -242,8 +306,9 @@ export class TaskHost extends EventEmitter {
     });
 
     const sdk = await this.ensureCodex();
+    const workingDirectory = this.resolveTaskWorkingDirectory(taskId, params);
     const threadOptions = {
-      workingDirectory: params.cwd || this.cfg.codex?.cwd || process.cwd(),
+      workingDirectory,
       skipGitRepoCheck: true,
       model: params.model || this.cfg.codex?.model,
       sandboxMode: params.sandbox || this.cfg.codex?.sandboxMode || "workspace-write",
