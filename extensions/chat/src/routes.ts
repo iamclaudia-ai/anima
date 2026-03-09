@@ -22,11 +22,7 @@ export const chatPanels: (PanelDefinition & { component: React.ComponentType })[
 export const chatLayouts: Record<string, LayoutDefinition> = {
   ide: {
     default: {
-      direction: "horizontal",
-      children: [
-        { panel: "chat.main", size: 40 },
-        { panel: "editor.viewer", size: 60 },
-      ],
+      panel: "chat.main",
     },
     mobile: {
       panel: "chat.main",
