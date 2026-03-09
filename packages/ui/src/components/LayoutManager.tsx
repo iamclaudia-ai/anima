@@ -9,7 +9,7 @@
  * The LayoutManager auto-persists to localStorage keyed by layout name.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import type { ComponentType } from "react";
 import {
   DockviewReact,
@@ -36,6 +36,11 @@ export interface PanelRegistration {
 
 export type PanelRegistry = Map<string, PanelRegistration>;
 
+// ── Registry Context ────────────────────────────────────────
+// Passed via React context (not dockview params) because Maps aren't serializable.
+
+const PanelRegistryContext = createContext<PanelRegistry>(new Map());
+
 // ── Panel Not Found ─────────────────────────────────────────
 
 function PanelNotFound({ panelId }: { panelId: string }) {
@@ -56,10 +61,11 @@ function PanelNotFound({ panelId }: { panelId: string }) {
 
 /**
  * Wraps a registered panel component for dockview.
- * Receives the panel registry via params and resolves the component at render time.
+ * Resolves the panel component from the registry context at render time.
  */
-function PanelWrapper(props: IDockviewPanelProps<{ panelId: string; registry: PanelRegistry }>) {
-  const { panelId, registry } = props.params;
+function PanelWrapper(props: IDockviewPanelProps<{ panelId: string }>) {
+  const { panelId } = props.params;
+  const registry = useContext(PanelRegistryContext);
   const registration = registry.get(panelId);
 
   if (!registration) {
@@ -150,8 +156,6 @@ export interface LayoutManagerProps {
 
 export function LayoutManager({ registry, layout, storageKey, className }: LayoutManagerProps) {
   const apiRef = useRef<DockviewApi | null>(null);
-  const registryRef = useRef(registry);
-  registryRef.current = registry;
 
   // Dockview components map — single wrapper that resolves via registry
   const components = useMemo(
@@ -176,7 +180,7 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
           id: req.id,
           component: "panel-wrapper",
           title,
-          params: { panelId: req.panelId, registry: registryRef.current },
+          params: { panelId: req.panelId },
           renderer,
         };
 
@@ -239,12 +243,14 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
   }, [storageKey]);
 
   return (
-    <div className={className} style={{ width: "100%", height: "100%" }}>
-      <DockviewReact
-        components={components}
-        onReady={handleReady}
-        className="dockview-theme-dark"
-      />
-    </div>
+    <PanelRegistryContext.Provider value={registry}>
+      <div className={className} style={{ width: "100%", height: "100%" }}>
+        <DockviewReact
+          components={components}
+          onReady={handleReady}
+          className="dockview-theme-dark"
+        />
+      </div>
+    </PanelRegistryContext.Provider>
   );
 }
