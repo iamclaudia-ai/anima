@@ -10,6 +10,15 @@
 }
 
 @layer base {
+  /* Full-height chain for dockview layout system.
+     Without this, height: 100% on child elements collapses to zero. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
   body {
     font-family: var(--font-sans);
     background: var(--color-background);
@@ -91,7 +100,7 @@
 /* Dockview — hide tab headers for single-panel layouts.
    The layout system stays active for future multi-panel splits,
    but a single chat panel doesn't need visible chrome. */
-.dockview-theme-dark .groupview > .tabs-and-actions-container {
+.dockview-theme-dark .dv-groupview > .dv-tabs-and-actions-container {
   display: none !important;
 }
 
