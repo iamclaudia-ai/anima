@@ -8,7 +8,8 @@ import "@claudia/ui/styles";
 import { chatRoutes, chatPanels, chatLayouts } from "@claudia/ext-chat/routes";
 import { controlRoutes } from "@claudia/ext-control/routes";
 import { audiobooksRoutes } from "@claudia/ext-audiobooks/routes";
-import { editorPanels } from "@claudia/ext-editor/routes";
+// Editor panel disabled — code-server iframe not yet configured for embedding.
+// import { editorPanels } from "@claudia/ext-editor/routes";
 
 // ── Hash-to-path redirect (PWA / legacy links) ─────────────
 if (window.location.hash.startsWith("#/")) {
@@ -38,8 +39,9 @@ if (import.meta.env.DEV) {
 const allRoutes = [...controlRoutes, ...chatRoutes, ...audiobooksRoutes];
 
 // ── Build panel registry from all extensions ────────────────
+// Editor panels disabled until code-server iframe embedding is sorted out.
 const panelRegistry: PanelRegistry = new Map();
-for (const panel of [...chatPanels, ...editorPanels]) {
+for (const panel of [...chatPanels]) {
   panelRegistry.set(panel.id, {
     id: panel.id,
     title: panel.title,
