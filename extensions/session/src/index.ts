@@ -202,7 +202,8 @@ function extractFirstPrompt(filepath: string): string | undefined {
         if (typeof content === "string") return content.slice(0, 200);
         if (Array.isArray(content)) {
           const textBlock = content.find(
-            (b: { type: string; text?: string }) => b.type === "text" && b.text,
+            (b: { type: string; text?: string }) =>
+              b.type === "text" && b.text && !b.text.startsWith("<local-command-caveat>"),
           );
           if (textBlock?.text) return textBlock.text.slice(0, 200);
         }
