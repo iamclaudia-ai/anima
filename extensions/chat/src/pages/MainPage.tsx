@@ -332,7 +332,7 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
 
   return (
     <>
-      <div className="flex h-screen w-screen overflow-x-hidden">
+      <div className="flex h-full w-full overflow-x-hidden">
         <NavigationDrawer
           workspaces={workspaces}
           sessions={sessions}

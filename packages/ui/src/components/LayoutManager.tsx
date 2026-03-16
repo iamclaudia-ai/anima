@@ -139,6 +139,19 @@ function getFirstPanelId(node: LayoutNode): string {
   return "";
 }
 
+// ── Layout Fingerprint ──────────────────────────────────────
+
+/**
+ * Compute a stable fingerprint for a layout definition.
+ * When the layout shape changes (panels added/removed, direction changed),
+ * the fingerprint changes — invalidating any stale persisted layout.
+ */
+function layoutFingerprint(node: LayoutNode): string {
+  if ("panel" in node) return node.panel;
+  const childKeys = node.children.map(layoutFingerprint).join(",");
+  return `${node.direction}[${childKeys}]`;
+}
+
 // ── Props ───────────────────────────────────────────────────
 
 export interface LayoutManagerProps {
@@ -204,43 +217,56 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
 
-      // Try to restore persisted layout
+      // Try to restore persisted layout — but only if the layout definition
+      // hasn't changed. A fingerprint mismatch means panels were added/removed,
+      // so the saved state would reference stale panels.
       if (storageKey) {
+        const fingerprint = layoutFingerprint(layout);
+        const fingerprintKey = `${storageKey}:fingerprint`;
+        const savedFingerprint = localStorage.getItem(fingerprintKey);
         const saved = localStorage.getItem(storageKey);
-        if (saved) {
+
+        if (saved && savedFingerprint === fingerprint) {
           try {
             const parsed = JSON.parse(saved);
             event.api.fromJSON(parsed);
             return;
           } catch {
             // Fall through to default layout
-            localStorage.removeItem(storageKey);
           }
         }
+
+        // Fingerprint mismatch or no saved state — clear stale data
+        localStorage.removeItem(storageKey);
+        localStorage.setItem(fingerprintKey, fingerprint);
       }
 
       // Build from default layout definition
       buildLayout(event.api);
     },
-    [buildLayout, storageKey],
+    [buildLayout, layout, storageKey],
   );
 
-  // Auto-persist on layout changes
+  // Auto-persist on layout changes (with fingerprint for cache invalidation)
   useEffect(() => {
     const api = apiRef.current;
     if (!api || !storageKey) return;
+
+    const fingerprint = layoutFingerprint(layout);
+    const fingerprintKey = `${storageKey}:fingerprint`;
 
     const disposable = api.onDidLayoutChange(() => {
       try {
         const state = api.toJSON();
         localStorage.setItem(storageKey, JSON.stringify(state));
+        localStorage.setItem(fingerprintKey, fingerprint);
       } catch {
         // Silently fail — persistence is best-effort
       }
     });
 
     return () => disposable.dispose();
-  }, [storageKey]);
+  }, [layout, storageKey]);
 
   return (
     <PanelRegistryContext.Provider value={registry}>
