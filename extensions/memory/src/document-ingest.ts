@@ -84,6 +84,7 @@ export function ingestMemoryDocument(
   try {
     const stat = statSync(filePath);
     const fileMtime = stat.mtime.toISOString();
+    const relPath = relative(memoryRoot, filePath);
 
     // Skip if file hasn't changed since last ingestion
     if (!opts?.force) {
@@ -92,7 +93,10 @@ export function ingestMemoryDocument(
     }
 
     const content = readFileSync(filePath, "utf-8");
-    if (!content.trim()) return false;
+    if (!content.trim()) {
+      log?.("INFO", `DocumentIngest: Skipping empty file ${relPath}`);
+      return false;
+    }
 
     const category = getCategoryFromPath(filePath, memoryRoot);
     const title = extractTitle(content, filePath);
@@ -105,10 +109,14 @@ export function ingestMemoryDocument(
       fileModifiedAt: fileMtime,
     });
 
+    log?.(
+      "INFO",
+      `DocumentIngest: Indexed ${relPath} [${category}] "${title}" (${(content.length / 1024).toFixed(1)}KB)`,
+    );
     return true;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    log?.("ERROR", `Failed to ingest document ${filePath}: ${msg}`);
+    log?.("ERROR", `DocumentIngest: Failed to ingest ${filePath}: ${msg}`);
     return false;
   }
 }
@@ -142,21 +150,32 @@ export function scanAndIngestMemoryDir(
   log?: (level: string, msg: string) => void,
 ): number {
   let count = 0;
+  let scanned = 0;
+  let skippedDir = 0;
 
   const glob = new Glob("**/*.md");
   for (const match of glob.scanSync({ cwd: memoryRoot, absolute: false })) {
     // Skip ignored directories
     const firstSegment = match.split("/")[0];
-    if (IGNORED_DIRS.has(firstSegment)) continue;
+    if (IGNORED_DIRS.has(firstSegment)) {
+      skippedDir++;
+      continue;
+    }
 
     // Skip dotfiles
     if (match.startsWith(".") || match.includes("/.")) continue;
 
+    scanned++;
     const fullPath = join(memoryRoot, match);
     if (ingestMemoryDocument(fullPath, memoryRoot, log)) {
       count++;
     }
   }
+
+  log?.(
+    "INFO",
+    `DocumentIngest: Scan complete — ${scanned} files checked, ${count} indexed, ${scanned - count} unchanged, ${skippedDir} skipped (ignored dirs)`,
+  );
 
   return count;
 }

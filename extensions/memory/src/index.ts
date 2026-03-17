@@ -435,17 +435,16 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           if (!ctx || worker) return;
           if (actor.getSnapshot().value !== "running") return;
           try {
-            // FTS backfill + document indexing (runs once, fast)
+            // FTS backfill + document indexing (runs once, fast on subsequent restarts)
             if (ftsTableExists()) {
+              fileLog("INFO", "FTS: Index available, running backfill check...");
               try {
                 const backfilledSummaries = backfillSummariesIntoFts();
                 const indexedDocs = scanAndIngestMemoryDir(memoryRoot, fileLog);
-                if (backfilledSummaries > 0 || indexedDocs > 0) {
-                  fileLog(
-                    "INFO",
-                    `FTS: Indexed ${backfilledSummaries} summaries, ${indexedDocs} documents`,
-                  );
-                }
+                fileLog(
+                  "INFO",
+                  `FTS: Backfill complete — ${backfilledSummaries} new summaries, ${indexedDocs} new/updated documents`,
+                );
               } catch (error) {
                 fileLog(
                   "ERROR",
@@ -468,6 +467,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
                   `DocumentWatcher start failed: ${error instanceof Error ? error.message : String(error)}`,
                 );
               }
+            } else {
+              fileLog(
+                "WARN",
+                "FTS: memory_search_fts table not found — migration 016 may not have run. Search will be unavailable.",
+              );
             }
 
             const libbyConfig: LibbyConfig = {

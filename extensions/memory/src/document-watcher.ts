@@ -76,10 +76,12 @@ export class DocumentWatcher {
 
     this.watcher.on("add", (path) => {
       if (!this.ready) return;
+      this.log("INFO", `DocumentWatcher: New file detected: ${path}`);
       this.handleChange(path);
     });
 
     this.watcher.on("change", (path) => {
+      this.log("INFO", `DocumentWatcher: File changed: ${path}`);
       this.handleChange(path);
     });
 
