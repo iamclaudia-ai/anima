@@ -457,7 +457,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
               try {
                 docWatcher = new DocumentWatcher(
                   memoryRoot,
-                  (filePath) => ingestMemoryDocument(filePath, memoryRoot, fileLog),
+                  (filePath) =>
+                    ingestMemoryDocument(filePath, memoryRoot, fileLog, { force: true }),
                   fileLog,
                 );
                 docWatcher.start();

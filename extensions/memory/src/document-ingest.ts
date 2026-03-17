@@ -11,7 +11,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join, relative, basename, extname } from "node:path";
 import { Glob } from "bun";
-import { upsertMemoryDocument, deleteMemoryDocument } from "./db";
+import { upsertMemoryDocument, deleteMemoryDocument, getMemoryDocumentMtime } from "./db";
 
 // ============================================================================
 // Category Extraction
@@ -70,17 +70,30 @@ function extractTitle(content: string, filePath: string): string {
 /**
  * Ingest a single markdown file into memory_documents.
  * The SQL trigger on memory_documents handles FTS indexing automatically.
+ *
+ * Compares file mtime against stored mtime to skip unchanged files.
+ * Pass `force: true` to bypass the mtime check (used by DocumentWatcher
+ * which already knows the file changed).
  */
 export function ingestMemoryDocument(
   filePath: string,
   memoryRoot: string,
   log?: (level: string, msg: string) => void,
+  opts?: { force?: boolean },
 ): boolean {
   try {
+    const stat = statSync(filePath);
+    const fileMtime = stat.mtime.toISOString();
+
+    // Skip if file hasn't changed since last ingestion
+    if (!opts?.force) {
+      const storedMtime = getMemoryDocumentMtime(filePath);
+      if (storedMtime === fileMtime) return false;
+    }
+
     const content = readFileSync(filePath, "utf-8");
     if (!content.trim()) return false;
 
-    const stat = statSync(filePath);
     const category = getCategoryFromPath(filePath, memoryRoot);
     const title = extractTitle(content, filePath);
 
@@ -89,7 +102,7 @@ export function ingestMemoryDocument(
       category,
       title,
       content,
-      fileModifiedAt: stat.mtime.toISOString(),
+      fileModifiedAt: fileMtime,
     });
 
     return true;

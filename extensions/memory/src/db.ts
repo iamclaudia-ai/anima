@@ -959,6 +959,17 @@ export function deleteMemoryDocument(filePath: string): void {
   getDb().query("DELETE FROM memory_documents WHERE file_path = ?").run(filePath);
 }
 
+/**
+ * Get the stored file_modified_at for a document.
+ * Used to skip re-ingestion of unchanged files on restart.
+ */
+export function getMemoryDocumentMtime(filePath: string): string | null {
+  const row = getDb()
+    .query("SELECT file_modified_at FROM memory_documents WHERE file_path = ?")
+    .get(filePath) as { file_modified_at: string } | null;
+  return row?.file_modified_at ?? null;
+}
+
 export interface SearchResult {
   content: string;
   sourceType: string;
