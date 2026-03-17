@@ -936,6 +936,144 @@ export function getRecentArchivedSummaries(
 }
 
 // ============================================================================
+// Memory Documents + FTS Search
+// ============================================================================
+
+export function upsertMemoryDocument(doc: {
+  filePath: string;
+  category: string;
+  title: string;
+  content: string;
+  fileModifiedAt: string;
+}): void {
+  getDb()
+    .query(
+      `INSERT OR REPLACE INTO memory_documents
+        (file_path, category, title, content, file_modified_at, ingested_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    )
+    .run(doc.filePath, doc.category, doc.title, doc.content, doc.fileModifiedAt);
+}
+
+export function deleteMemoryDocument(filePath: string): void {
+  getDb().query("DELETE FROM memory_documents WHERE file_path = ?").run(filePath);
+}
+
+export interface SearchResult {
+  content: string;
+  sourceType: string;
+  sourceId: string;
+  cwd: string;
+  timestamp: string;
+  category: string;
+  rank: number;
+}
+
+/**
+ * Full-text search across conversation summaries and memory documents.
+ * Uses FTS5 with BM25 ranking.
+ */
+export function searchMemory(
+  query: string,
+  opts?: {
+    limit?: number;
+    category?: string;
+    cwd?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  },
+): SearchResult[] {
+  const limit = opts?.limit ?? 20;
+
+  // Build WHERE clauses for filters
+  const conditions: string[] = ["memory_search_fts MATCH ?"];
+  const params: (string | number)[] = [query];
+
+  if (opts?.category) {
+    conditions.push("category = ?");
+    params.push(opts.category);
+  }
+
+  if (opts?.cwd) {
+    conditions.push("cwd = ?");
+    params.push(opts.cwd);
+  }
+
+  if (opts?.dateFrom) {
+    conditions.push("timestamp >= ?");
+    params.push(opts.dateFrom);
+  }
+
+  if (opts?.dateTo) {
+    conditions.push("timestamp <= ?");
+    params.push(opts.dateTo);
+  }
+
+  params.push(limit);
+
+  const whereClause = conditions.join(" AND ");
+
+  return getDb()
+    .query(
+      `SELECT
+        content, source_type AS sourceType, source_id AS sourceId,
+        cwd, timestamp, category, rank
+      FROM memory_search_fts
+      WHERE ${whereClause}
+      ORDER BY rank
+      LIMIT ?`,
+    )
+    .all(...params) as SearchResult[];
+}
+
+/**
+ * Backfill existing archived conversation summaries into the FTS index.
+ * One-time operation — future archives are indexed via SQL trigger.
+ * Returns the number of summaries inserted.
+ */
+export function backfillSummariesIntoFts(): number {
+  const d = getDb();
+
+  // Check if we already have summaries in FTS
+  const existing = d
+    .query("SELECT count(*) AS n FROM memory_search_fts WHERE source_type = 'summary'")
+    .get() as { n: number };
+
+  if (existing.n > 0) return 0; // Already backfilled
+
+  const result = d
+    .query(
+      `INSERT INTO memory_search_fts(content, source_type, source_id, cwd, timestamp, category)
+       SELECT
+         summary,
+         'summary',
+         CAST(id AS TEXT),
+         COALESCE(json_extract(metadata, '$.cwd'), ''),
+         first_message_at,
+         'summary'
+       FROM memory_conversations
+       WHERE status = 'archived'
+         AND summary IS NOT NULL
+         AND length(summary) > 0`,
+    )
+    .run();
+
+  return result.changes;
+}
+
+/**
+ * Check if the FTS table exists (for graceful degradation).
+ */
+export function ftsTableExists(): boolean {
+  try {
+    getDb().query("SELECT count(*) FROM memory_search_fts LIMIT 1").get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================================
 // Stats
 // ============================================================================
 

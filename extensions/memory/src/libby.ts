@@ -50,7 +50,7 @@ const LIBBY_CWD = join(homedir(), "libby");
 if (!existsSync(LIBBY_CWD)) mkdirSync(LIBBY_CWD, { recursive: true });
 
 const MEMORY_ROOT = join(homedir(), "memory");
-const LIBBY_LOGS_DIR = join(MEMORY_ROOT, "libby", "logs");
+const LIBBY_LOGS_DIR = join(homedir(), ".claudia", "memory", "libby", "logs");
 if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
 
 const LIBBY_TRANSCRIPTS_DIR = join(LIBBY_CWD, "transcripts");
@@ -356,7 +356,7 @@ export class LibbyWorker {
 
     // Build the prompt — transcript + context (system prompt already sent)
     // Include conversation ID explicitly so Libby uses it for the reasoning log filename
-    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}). FIRST write your reasoning log to ~/memory/libby/logs/${conv.id}.md, THEN write memories to ~/memory/, then respond with SUMMARY or SKIP:\n\n${transcript.text}`;
+    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}). FIRST write your reasoning log to ~/.claudia/memory/libby/logs/${conv.id}.md, THEN write memories to ~/memory/, then respond with SUMMARY or SKIP:\n\n${transcript.text}`;
 
     // Save transcript to ~/libby/transcripts/{id}.md for easy cross-reference
     try {

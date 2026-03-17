@@ -37,7 +37,7 @@ You receive a conversation transcript and use your tools to write memories to `~
 
 ### Reasoning Log (REQUIRED — always do this first)
 
-**Before** any other tool use, write a reasoning log to `~/memory/libby/logs/{id}.md` where `{id}` is the **numeric conversation ID** from the prompt (e.g., "conversation ID: 882" → `~/memory/libby/logs/882.md`). This log must include:
+**Before** any other tool use, write a reasoning log to `~/.claudia/memory/libby/logs/{id}.md` where `{id}` is the **numeric conversation ID** from the prompt (e.g., "conversation ID: 882" → `~/.claudia/memory/libby/logs/882.md`). This log must include:
 
 1. **Content summary** — 1-2 sentences describing what the conversation is about
 2. **Files to write/edit** — every path you plan to touch, with a brief reason

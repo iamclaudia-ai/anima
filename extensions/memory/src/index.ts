@@ -48,12 +48,17 @@ import {
   transitionActiveConversationsByCwd,
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
+  searchMemory,
+  backfillSummariesIntoFts,
+  ftsTableExists,
 } from "./db";
 import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import { formatTranscript } from "./transcript-formatter";
 import { LibbyWorker, type LibbyConfig } from "./libby";
 import { memoryExtensionMachine } from "./state-machine";
+import { ingestMemoryDocument, scanAndIngestMemoryDir } from "./document-ingest";
+import { DocumentWatcher } from "./document-watcher";
 
 // ============================================================================
 // File Logging (tail -f ~/.claudia/logs/memory.log)
@@ -189,8 +194,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
   const expandPath = (p: string) => p.replace(/^~/, homedir());
   const basePath = expandPath(cfg.watchPath);
 
+  const memoryRoot = join(homedir(), "memory");
+
   let ctx: ExtensionContext | null = null;
   let watcher: MemoryWatcher | null = null;
+  let docWatcher: DocumentWatcher | null = null;
   let worker: LibbyWorker | null = null;
   let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
   let isLockOwner = false;
@@ -274,6 +282,24 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             .describe(
               "Workspace directory — all active conversations matching this CWD will transition",
             ),
+        }),
+      },
+      {
+        name: "memory.search",
+        description:
+          "Full-text search across conversation summaries and memory documents. Uses FTS5 with BM25 ranking.",
+        inputSchema: z.object({
+          query: z.string().describe("Search query (supports natural language)"),
+          limit: z.number().optional().default(20).describe("Max results to return"),
+          category: z
+            .string()
+            .optional()
+            .describe(
+              "Filter by category (episodes, milestones, insights, relationships, projects, core, personas, summary)",
+            ),
+          cwd: z.string().optional().describe("Filter by workspace directory"),
+          dateFrom: z.string().optional().describe("Filter results from this date (ISO format)"),
+          dateTo: z.string().optional().describe("Filter results up to this date (ISO format)"),
         }),
       },
       {
@@ -409,6 +435,40 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           if (!ctx || worker) return;
           if (actor.getSnapshot().value !== "running") return;
           try {
+            // FTS backfill + document indexing (runs once, fast)
+            if (ftsTableExists()) {
+              try {
+                const backfilledSummaries = backfillSummariesIntoFts();
+                const indexedDocs = scanAndIngestMemoryDir(memoryRoot, fileLog);
+                if (backfilledSummaries > 0 || indexedDocs > 0) {
+                  fileLog(
+                    "INFO",
+                    `FTS: Indexed ${backfilledSummaries} summaries, ${indexedDocs} documents`,
+                  );
+                }
+              } catch (error) {
+                fileLog(
+                  "ERROR",
+                  `FTS backfill failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+
+              // Start DocumentWatcher for ongoing ~/memory changes
+              try {
+                docWatcher = new DocumentWatcher(
+                  memoryRoot,
+                  (filePath) => ingestMemoryDocument(filePath, memoryRoot, fileLog),
+                  fileLog,
+                );
+                docWatcher.start();
+              } catch (error) {
+                fileLog(
+                  "ERROR",
+                  `DocumentWatcher start failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+
             const libbyConfig: LibbyConfig = {
               model: cfg.model,
               timezone: cfg.timezone,
@@ -458,6 +518,12 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
       if (unsubscribeHeartbeat) {
         unsubscribeHeartbeat();
         unsubscribeHeartbeat = null;
+      }
+
+      // Stop DocumentWatcher
+      if (docWatcher) {
+        await docWatcher.stop();
+        docWatcher = null;
       }
 
       // Stop Libby worker first
@@ -821,6 +887,25 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           }
 
           return { cwd, transitioned: changed };
+        }
+
+        case "memory.search": {
+          if (!ftsTableExists()) {
+            throw new Error("FTS index not available — migration may not have run yet");
+          }
+          const query = params.query as string;
+          const results = searchMemory(query, {
+            limit: params.limit as number | undefined,
+            category: params.category as string | undefined,
+            cwd: params.cwd as string | undefined,
+            dateFrom: params.dateFrom as string | undefined,
+            dateTo: params.dateTo as string | undefined,
+          });
+          return {
+            results,
+            query,
+            totalResults: results.length,
+          };
         }
 
         case "memory.get_session_context": {

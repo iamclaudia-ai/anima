@@ -36,6 +36,7 @@ import type {
   MemoryCategory,
 } from "./types.js";
 import { syncMemoryFiles } from "./sync.js";
+import { hasFtsTable, searchFts } from "./db.js";
 
 // ============================================================================
 // Tool Definitions
@@ -94,10 +95,9 @@ The tool will suggest consistent section names based on existing sections.`,
   },
   {
     name: "memory_recall",
-    description: `Search through Claudia's memories.
+    description: `Search through Claudia's memories using full-text search.
 
-Currently uses keyword/section matching. Vector search coming soon.
-Use this to find relevant memories before responding to questions about past conversations, preferences, or projects.`,
+Searches across conversation summaries (1,300+ archived conversations) and memory documents (episodes, milestones, insights, relationships, projects). Uses FTS5 with BM25 ranking for fast, relevant results. Falls back to keyword matching if FTS index is unavailable.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -296,9 +296,36 @@ async function handleRemember(params: RememberParams): Promise<string> {
 
 async function handleRecall(params: RecallParams): Promise<string> {
   const { query, limit = 5, category } = params;
-  const queryLower = query.toLowerCase();
 
-  // Get files to search
+  // Try FTS5 search first (backed by SQLite full-text index)
+  if (hasFtsTable()) {
+    try {
+      const ftsResults = searchFts(query, { limit, category });
+
+      if (ftsResults.length > 0) {
+        const memories = ftsResults.map((r) => ({
+          filepath: r.sourceType === "document" ? r.sourceId : `conversation #${r.sourceId}`,
+          section: r.category,
+          content: r.content.slice(0, 500) + (r.content.length > 500 ? "..." : ""),
+          score: Math.abs(r.rank),
+          sourceType: r.sourceType,
+          timestamp: r.timestamp,
+        }));
+
+        return JSON.stringify({
+          query,
+          count: memories.length,
+          memories,
+          searchMethod: "fts5",
+        });
+      }
+    } catch {
+      // FTS search failed, fall through to keyword matching
+    }
+  }
+
+  // Fallback: keyword matching on ~/memory files
+  const queryLower = query.toLowerCase();
   const files = await listMemoryFiles(category as MemoryCategory | undefined);
   const results: Array<{
     filepath: string;
@@ -311,12 +338,10 @@ async function handleRecall(params: RecallParams): Promise<string> {
     const parsed = await parseMemoryFile(file);
     if (!parsed) continue;
 
-    // Search in sections
     for (const section of parsed.sections) {
       const contentLower = section.content.toLowerCase();
       const titleLower = section.title.toLowerCase();
 
-      // Simple keyword matching (TODO: vector search)
       let score = 0;
       const queryWords = queryLower.split(/\s+/);
 
@@ -336,7 +361,6 @@ async function handleRecall(params: RecallParams): Promise<string> {
     }
   }
 
-  // Sort by score and limit
   results.sort((a, b) => b.score - a.score);
   const topResults = results.slice(0, limit);
 
@@ -344,7 +368,7 @@ async function handleRecall(params: RecallParams): Promise<string> {
     query,
     count: topResults.length,
     memories: topResults,
-    note: "Currently using keyword matching. Vector search coming soon.",
+    searchMethod: "keyword",
   });
 }
 
