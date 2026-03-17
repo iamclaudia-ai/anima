@@ -53,6 +53,36 @@ const MEMORY_ROOT = join(homedir(), "memory");
 const LIBBY_LOGS_DIR = join(homedir(), ".claudia", "memory", "libby", "logs");
 if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
 
+/**
+ * Compute the episode file path for a conversation.
+ * Format: episodes/YYYY-MM/YYYY-MM-DD-HHMM-{convId}.md
+ *
+ * Uses the first entry's timestamp converted to local time for the date/time components.
+ */
+function computeEpisodePath(firstTimestamp: string, convId: number, timezone: string): string {
+  const d = new Date(firstTimestamp);
+
+  // Format in local timezone
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+  const hour = get("hour");
+  const minute = get("minute");
+
+  return `episodes/${year}-${month}/${year}-${month}-${day}-${hour}${minute}-${convId}.md`;
+}
+
 const LIBBY_TRANSCRIPTS_DIR = join(LIBBY_CWD, "transcripts");
 if (!existsSync(LIBBY_TRANSCRIPTS_DIR)) mkdirSync(LIBBY_TRANSCRIPTS_DIR, { recursive: true });
 
@@ -317,6 +347,23 @@ export class LibbyWorker {
       return;
     }
 
+    // Pre-compute episode file path: ~/memory/episodes/YYYY-MM/YYYY-MM-DD-HHMM-{convId}.md
+    const episodePath = computeEpisodePath(entries[0].timestamp, conv.id, this.config.timezone);
+
+    // Skip if episode file already exists (duplicate processing guard)
+    if (existsSync(join(homedir(), "memory", episodePath))) {
+      updateConversationProcessed(
+        conv.id,
+        "skipped",
+        `Episode file already exists: ${episodePath}`,
+      );
+      this.log(
+        "INFO",
+        `Libby: Skipped conversation ${conv.id} — episode file already exists: ${episodePath} [${queuedRemaining - 1} queued]`,
+      );
+      return;
+    }
+
     this.log(
       "INFO",
       `Libby: [${conv.id}] ${transcript.date} ${transcript.timeRange} — ${entries.length} entries, ${transcriptKB}KB transcript [${queuedRemaining - 1} queued]`,
@@ -355,8 +402,14 @@ export class LibbyWorker {
     }
 
     // Build the prompt — transcript + context (system prompt already sent)
-    // Include conversation ID explicitly so Libby uses it for the reasoning log filename
-    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}). FIRST write your reasoning log to ~/.claudia/memory/libby/logs/${conv.id}.md, THEN write memories to ~/memory/, then respond with SUMMARY or SKIP:\n\n${transcript.text}`;
+    // Include conversation ID, episode path so Libby knows exactly where to write
+    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}).
+
+Episode file: ~/memory/${episodePath}
+
+FIRST write your reasoning log to ~/.claudia/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP:
+
+${transcript.text}`;
 
     // Save transcript to ~/libby/transcripts/{id}.md for easy cross-reference
     try {

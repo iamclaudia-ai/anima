@@ -49,7 +49,6 @@ import {
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
   searchMemory,
-  backfillSummariesIntoFts,
   ftsTableExists,
 } from "./db";
 import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
@@ -435,20 +434,20 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           if (!ctx || worker) return;
           if (actor.getSnapshot().value !== "running") return;
           try {
-            // FTS backfill + document indexing (runs once, fast on subsequent restarts)
+            // Document indexing (runs once, fast on subsequent restarts)
+            // Episodes are now indexed as documents — summaries no longer go into FTS
             if (ftsTableExists()) {
-              fileLog("INFO", "FTS: Index available, running backfill check...");
+              fileLog("INFO", "FTS: Index available, running document scan...");
               try {
-                const backfilledSummaries = backfillSummariesIntoFts();
                 const indexedDocs = scanAndIngestMemoryDir(memoryRoot, fileLog);
                 fileLog(
                   "INFO",
-                  `FTS: Backfill complete — ${backfilledSummaries} new summaries, ${indexedDocs} new/updated documents`,
+                  `FTS: Document scan complete — ${indexedDocs} new/updated documents`,
                 );
               } catch (error) {
                 fileLog(
                   "ERROR",
-                  `FTS backfill failed: ${error instanceof Error ? error.message : String(error)}`,
+                  `FTS document scan failed: ${error instanceof Error ? error.message : String(error)}`,
                 );
               }
 

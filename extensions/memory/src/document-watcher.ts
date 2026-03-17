@@ -56,7 +56,6 @@ export class DocumentWatcher {
       },
       ignored: [
         "**/libby/**",
-        "**/episodes/**",
         "**/.git/**",
         "**/node_modules/**",
         // Only watch .md files

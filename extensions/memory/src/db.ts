@@ -945,14 +945,15 @@ export function upsertMemoryDocument(doc: {
   title: string;
   content: string;
   fileModifiedAt: string;
+  cwd?: string;
 }): void {
   getDb()
     .query(
       `INSERT OR REPLACE INTO memory_documents
-        (file_path, category, title, content, file_modified_at, ingested_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+        (file_path, category, title, content, file_modified_at, cwd, ingested_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
     )
-    .run(doc.filePath, doc.category, doc.title, doc.content, doc.fileModifiedAt);
+    .run(doc.filePath, doc.category, doc.title, doc.content, doc.fileModifiedAt, doc.cwd ?? "");
 }
 
 export function deleteMemoryDocument(filePath: string): void {

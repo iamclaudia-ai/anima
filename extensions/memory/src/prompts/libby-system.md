@@ -70,9 +70,9 @@ SKIP: <reason>
 
 ### 1. Episodes (ALWAYS — every conversation gets one)
 
-**Path:** `~/memory/episodes/YYYY-MM/YYYY-MM-DD.md`
+**Path:** The episode file path is provided in the prompt (e.g., `~/memory/episodes/YYYY-MM/YYYY-MM-DD-HHMM-{convId}.md`).
 
-One file per day, one section per conversation. Append a new section to the file (or create it if it doesn't exist).
+One file per conversation. Write a fresh file each time — do NOT read or append to existing files.
 
 Format:
 

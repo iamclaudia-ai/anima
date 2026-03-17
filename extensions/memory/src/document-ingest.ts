@@ -63,6 +63,17 @@ function extractTitle(content: string, filePath: string): string {
   return basename(filePath, extname(filePath));
 }
 
+/**
+ * Extract the project/cwd from a **Project:** line in episode files.
+ * Returns empty string if not found.
+ *
+ * Example: **Project:** `/Users/michael/Projects/beehiiv/swarm` → "/Users/michael/Projects/beehiiv/swarm"
+ */
+function extractProject(content: string): string {
+  const match = content.match(/\*\*Project:\*\*\s*`?([^`\n]+)`?/);
+  return match ? match[1].trim() : "";
+}
+
 // ============================================================================
 // Ingestion
 // ============================================================================
@@ -100,6 +111,7 @@ export function ingestMemoryDocument(
 
     const category = getCategoryFromPath(filePath, memoryRoot);
     const title = extractTitle(content, filePath);
+    const cwd = category === "episodes" ? extractProject(content) : "";
 
     upsertMemoryDocument({
       filePath,
@@ -107,6 +119,7 @@ export function ingestMemoryDocument(
       title,
       content,
       fileModifiedAt: fileMtime,
+      cwd,
     });
 
     log?.(
@@ -134,10 +147,9 @@ export function removeMemoryDocument(filePath: string): void {
 
 /** Directories to skip during scanning.
  * - libby: internal reasoning logs (moved to ~/.claudia)
- * - episodes: duplicate of conversation summaries already in FTS
  * - .git, node_modules: obvious
  */
-const IGNORED_DIRS = new Set(["libby", "episodes", ".git", "node_modules"]);
+const IGNORED_DIRS = new Set(["libby", ".git", "node_modules"]);
 
 /**
  * Scan ~/memory recursively and ingest all .md files.
