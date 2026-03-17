@@ -304,16 +304,17 @@ export const memoryExtensionMachine = setup({
                   context.ctx?.emit("memory.conversation_ready", {
                     count: marked,
                   });
+                }
 
-                  // Auto-process if enabled
-                  if (context.config.autoProcess) {
-                    const queued = queueConversations(context.config.processBatchSize);
-                    if (queued > 0) {
-                      context.fileLog("INFO", `Auto-queued ${queued} conversations for processing`);
-                      context.ctx?.emit("memory.processing_started", {
-                        count: queued,
-                      });
-                    }
+                // Auto-process if enabled — check independently of markConversationsReady
+                // since conversations can be marked ready by other paths (e.g. size-split segments)
+                if (context.config.autoProcess) {
+                  const queued = queueConversations(context.config.processBatchSize);
+                  if (queued > 0) {
+                    context.fileLog("INFO", `Auto-queued ${queued} conversations for processing`);
+                    context.ctx?.emit("memory.processing_started", {
+                      count: queued,
+                    });
                   }
                 }
               } catch (error) {
