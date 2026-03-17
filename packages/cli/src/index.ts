@@ -311,6 +311,26 @@ export function injectSessionIdFromEnv(
   return { didInject: false };
 }
 
+/**
+ * Auto-inject `cwd` from process.cwd() when the method schema has an
+ * optional `cwd` property and the caller didn't provide one explicitly.
+ * This lets users run `claudia session get_memory_context` without --cwd.
+ */
+export function injectCwdFromProcess(
+  params: Record<string, unknown>,
+  methodDef: MethodCatalogEntry,
+): void {
+  if (params.cwd) return;
+  if (!methodDef.inputSchema) return;
+
+  const schema =
+    resolveSchema(methodDef.inputSchema, methodDef.inputSchema) ?? methodDef.inputSchema;
+  const hasCwd = schema.type === "object" && schema.properties?.cwd;
+  if (!hasCwd) return;
+
+  params.cwd = process.cwd();
+}
+
 export function splitMethod(method: string): { namespace: string; action: string } | null {
   const idx = method.indexOf(".");
   if (idx <= 0 || idx >= method.length - 1) return null;
@@ -1068,6 +1088,9 @@ async function main(): Promise<void> {
     printMethodHelp(methodDef);
     process.exit(1);
   }
+
+  // Auto-inject cwd from process.cwd() if the method accepts it and it wasn't provided
+  injectCwdFromProcess(params, methodDef);
 
   validateParamsAgainstSchema(resolvedMethod, params, methodDef.inputSchema);
   await invokeMethod(resolvedMethod, params);

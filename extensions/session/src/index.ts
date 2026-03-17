@@ -1020,9 +1020,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
     {
       name: "session.get_memory_context",
       description:
-        "Preview the memory context that would be injected into a new session. Returns the raw formatted block and the underlying data.",
+        "Preview the memory context that would be injected into a new session. Returns the raw formatted block and the underlying data. If cwd is omitted, uses the caller's working directory.",
       inputSchema: z.object({
-        cwd: z.string().describe("Workspace directory"),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Workspace directory (defaults to caller's working directory)"),
       }),
     },
   ];
@@ -1793,7 +1796,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       }
 
       case "session.get_memory_context": {
-        const cwd = params.cwd as string;
+        const cwd = (params.cwd as string | undefined) || process.cwd();
 
         try {
           const memoryContext = (await ctx.call("memory.get_session_context", {
