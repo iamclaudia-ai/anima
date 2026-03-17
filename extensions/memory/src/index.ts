@@ -828,13 +828,12 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
           const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
 
-          // Encode CWD to match source_file pattern in DB
-          // source_file looks like: -Users-michael-Projects-foo/UUID.jsonl
+          // Recent transcript entries — query by cwd column (absolute path)
+          const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
+
+          // Archived summaries — query by source_file pattern (encoded CWD)
           const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
           const pattern = `%${encodedCwd}%`;
-
-          // Get recent transcript entries across ALL sessions for this workspace
-          const recentMessages = getRecentTranscriptEntries(pattern, maxRecentMessages);
           const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
           return { recentMessages, recentSummaries };
