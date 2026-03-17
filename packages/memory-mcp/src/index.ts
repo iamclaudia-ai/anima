@@ -53,6 +53,8 @@ const TOOLS: Tool[] = [
 
 Uses full-text search (FTS5 with BM25 ranking) across 4,000+ archived conversation summaries and 500+ memory documents in ~/memory. Use this to find past conversations, look up facts about people, recall project details, find milestones, or answer questions about shared history.
 
+Supports date filtering for temporal queries like "what did we work on last week?" — combine a broad query with dateFrom/dateTo to scope results to a time range.
+
 Examples: "birthday", "beehiiv deployment", "wedding vows", "Cartesia voice", "Maria", "first production deploy"`,
     inputSchema: {
       type: "object",
@@ -80,6 +82,16 @@ Examples: "birthday", "beehiiv deployment", "wedding vows", "Cartesia voice", "M
           ],
           description:
             "Filter by source category. 'summary' = conversation summaries, others = ~/memory document categories.",
+        },
+        dateFrom: {
+          type: "string",
+          description:
+            "Filter results from this date (ISO format, e.g. '2026-03-10'). Useful for temporal queries like 'what did we do last week?'",
+        },
+        dateTo: {
+          type: "string",
+          description:
+            "Filter results up to this date (ISO format, e.g. '2026-03-16'). Combine with dateFrom for date ranges.",
         },
       },
       required: ["query"],
@@ -179,8 +191,10 @@ Use this to explore what memories exist before reading or searching.`,
 // Tool Handlers
 // ============================================================================
 
-async function handleRecall(params: RecallParams): Promise<string> {
-  const { query, limit = 10, category } = params;
+async function handleRecall(
+  params: RecallParams & { dateFrom?: string; dateTo?: string },
+): Promise<string> {
+  const { query, limit = 10, category, dateFrom, dateTo } = params;
 
   if (!hasFtsTable()) {
     return JSON.stringify({
@@ -191,7 +205,7 @@ async function handleRecall(params: RecallParams): Promise<string> {
     });
   }
 
-  const ftsResults = searchFts(query, { limit, category });
+  const ftsResults = searchFts(query, { limit, category, dateFrom, dateTo });
 
   const memories = ftsResults.map((r) => ({
     filepath: r.sourceType === "document" ? r.sourceId : `conversation #${r.sourceId}`,

@@ -61,7 +61,7 @@ export function hasFtsTable(): boolean {
  */
 export function searchFts(
   query: string,
-  opts?: { limit?: number; category?: string },
+  opts?: { limit?: number; category?: string; dateFrom?: string; dateTo?: string },
 ): FtsSearchResult[] {
   const d = getDb();
   if (!d) return [];
@@ -75,6 +75,16 @@ export function searchFts(
     if (opts?.category) {
       conditions.push("category = ?");
       params.push(opts.category);
+    }
+
+    if (opts?.dateFrom) {
+      conditions.push("timestamp >= ?");
+      params.push(opts.dateFrom);
+    }
+
+    if (opts?.dateTo) {
+      conditions.push("timestamp <= ?");
+      params.push(opts.dateTo);
     }
 
     params.push(limit);
