@@ -425,6 +425,53 @@ function toSessionTaskFromStored(stored: StoredSession | null): SessionTask | nu
   };
 }
 
+// ── Memory Context Formatting ────────────────────────────────
+
+interface MemoryContextResult {
+  recentMessages: Array<{ role: string; content: string; timestamp: string }>;
+  recentSummaries: Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }>;
+}
+
+/**
+ * Format memory context for injection into the system prompt.
+ * Returns null if there's nothing meaningful to inject.
+ */
+function formatMemoryContext(memory: MemoryContextResult): string | null {
+  if (memory.recentMessages.length === 0 && memory.recentSummaries.length === 0) return null;
+
+  const parts: string[] = ["<claudia_memory_context>"];
+
+  if (memory.recentMessages.length > 0) {
+    parts.push("## Recent Conversation");
+    parts.push("These are the last messages from the previous session for continuity:\n");
+    for (const msg of memory.recentMessages) {
+      const time = new Date(msg.timestamp).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const name = msg.role === "user" ? "Michael" : "Claudia";
+      // Truncate very long messages to keep context reasonable
+      const content = msg.content.length > 500 ? msg.content.slice(0, 500) + "..." : msg.content;
+      parts.push(`[${time}] ${name}: ${content}`);
+    }
+  }
+
+  if (memory.recentSummaries.length > 0) {
+    parts.push("\n## Recent Session Summaries");
+    for (const s of memory.recentSummaries) {
+      const date = new Date(s.firstMessageAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
+      parts.push(`- [${date}] ${s.summary}`);
+    }
+  }
+
+  parts.push("</claudia_memory_context>");
+  return parts.join("\n");
+}
+
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
@@ -1012,7 +1059,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const thinking = (params.thinking as boolean | undefined) ?? sessionConfig.thinking;
         const effort =
           (params.effort as "low" | "medium" | "high" | "max" | undefined) || sessionConfig.effort;
-        const systemPrompt =
+        let systemPrompt =
           (params.systemPrompt as string | undefined) || sessionConfig.systemPrompt || undefined;
 
         log.info("Creating session", {
@@ -1023,6 +1070,52 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           effort,
         });
         const workspaceResult = getOrCreateWorkspace(cwd);
+
+        // Transition previous session's active conversations to 'ready' for Libby,
+        // and inject memory context into the new session's system prompt.
+        const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
+        if (previousSessionId) {
+          try {
+            await ctx.call("memory.transition_conversation", { sessionId: previousSessionId });
+          } catch (err) {
+            log.warn("Failed to transition previous conversation (non-fatal)", {
+              previousSessionId: sid(previousSessionId),
+              error: String(err),
+            });
+          }
+        }
+
+        // Inject recent memory context into system prompt for continuity
+        try {
+          const memoryContext = (await Promise.race([
+            ctx.call("memory.get_session_context", {
+              cwd,
+              sessionId: previousSessionId || undefined,
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+          ])) as {
+            recentMessages: Array<{ role: string; content: string; timestamp: string }>;
+            recentSummaries: Array<{
+              summary: string;
+              firstMessageAt: string;
+              lastMessageAt: string;
+            }>;
+          } | null;
+
+          if (memoryContext) {
+            const memoryBlock = formatMemoryContext(memoryContext);
+            if (memoryBlock) {
+              systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryBlock}` : memoryBlock;
+              log.info("Injected memory context into session", {
+                recentMessages: memoryContext.recentMessages.length,
+                recentSummaries: memoryContext.recentSummaries.length,
+              });
+            }
+          }
+        } catch (err) {
+          log.warn("Failed to inject memory context (non-fatal)", { error: String(err) });
+        }
+
         const result = await agentClient.createSession({
           cwd,
           agent,
@@ -1299,6 +1392,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const model = params.model as string | undefined;
         const workspaceResult = getOrCreateWorkspace(cwd);
         const existing = getStoredSession(sessionId);
+
+        // Transition previous session's active conversations to 'ready' for Libby
+        const prevSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
+        if (prevSessionId && prevSessionId !== sessionId) {
+          try {
+            await ctx.call("memory.transition_conversation", { sessionId: prevSessionId });
+          } catch (err) {
+            log.warn("Failed to transition previous conversation (non-fatal)", {
+              previousSessionId: sid(prevSessionId),
+              error: String(err),
+            });
+          }
+        }
         const resumeModel = model || existing?.model || sessionConfig.model;
         const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
         const activeSession = activeSessions.find((s) => s.id === sessionId);
@@ -1340,6 +1446,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         const model = (params.model as string | undefined) || sessionConfig.model;
         const workspaceResult = getOrCreateWorkspace(cwd);
         const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
+
+        // Transition previous session's active conversations to 'ready' for Libby
+        if (previousSessionId) {
+          try {
+            await ctx.call("memory.transition_conversation", { sessionId: previousSessionId });
+          } catch (err) {
+            log.warn("Failed to transition previous conversation (non-fatal)", {
+              previousSessionId: sid(previousSessionId),
+              error: String(err),
+            });
+          }
+        }
+
         log.info("Resetting session", { cwd });
         const result = await agentClient.createSession({
           cwd,
