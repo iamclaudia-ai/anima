@@ -11,6 +11,7 @@ import {
   upsertConversation,
   deleteActiveConversationsForFile,
   markConversationsReady,
+  updateConversationStatus,
 } from "./db";
 
 interface ConversationSegment {
@@ -19,6 +20,8 @@ interface ConversationSegment {
   firstMessageAt: string;
   lastMessageAt: string;
   entryCount: number;
+  /** True if this segment was closed because it hit entry/size limits (not the final/active segment) */
+  complete: boolean;
 }
 
 /** Max entries per conversation segment */
@@ -46,13 +49,14 @@ function segmentByGaps(
   let segCount = 1;
   let segBytes = entries[0].messageSize;
 
-  function closeSegment() {
+  function closeSegment(complete: boolean) {
     segments.push({
       sessionId,
       sourceFile,
       firstMessageAt: segStart,
       lastMessageAt: segEnd,
       entryCount: segCount,
+      complete,
     });
   }
 
@@ -64,7 +68,8 @@ function segmentByGaps(
 
     if (gap > gapMs || segCount >= MAX_ENTRIES_PER_SEGMENT || nextBytes > MAX_SEGMENT_BYTES) {
       // Split — close current segment, start new one
-      closeSegment();
+      // Segment is complete (hit a boundary, more entries follow)
+      closeSegment(true);
       segStart = entries[i].timestamp;
       segEnd = entries[i].timestamp;
       segCount = 1;
@@ -76,8 +81,8 @@ function segmentByGaps(
     }
   }
 
-  // Close final segment
-  closeSegment();
+  // Close final segment — still active (may receive more entries)
+  closeSegment(false);
 
   return segments;
 }
@@ -134,7 +139,13 @@ export function rebuildConversationsForFile(
 
     // Upsert each segment as a conversation
     for (const seg of segments) {
-      upsertConversation(seg);
+      const convId = upsertConversation(seg);
+
+      // Completed segments (hit entry/size limit, not the final active one)
+      // are ready for processing — don't wait for the gap timeout
+      if (seg.complete && convId) {
+        updateConversationStatus(convId, "ready");
+      }
     }
 
     // Mark conversations as ready if their gap has elapsed

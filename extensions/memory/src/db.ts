@@ -346,7 +346,7 @@ export function upsertConversation(conv: {
   firstMessageAt: string;
   lastMessageAt: string;
   entryCount: number;
-}): void {
+}): number | null {
   // If this exact time range was already archived/skipped, do not recreate it.
   // Rebuilds can run repeatedly as files grow; this prevents re-queuing old work.
   const alreadyFinalized = getDb()
@@ -360,16 +360,16 @@ export function upsertConversation(conv: {
     )
     .get(conv.sourceFile, conv.firstMessageAt, conv.lastMessageAt) as { id: number } | null;
 
-  if (alreadyFinalized) return;
+  if (alreadyFinalized) return null;
 
   // Match by source_file + first_message_at (unique within a file)
   const existing = getDb()
     .query(
-      `SELECT id FROM memory_conversations
+      `SELECT id, status FROM memory_conversations
       WHERE source_file = ? AND first_message_at = ? AND status NOT IN ('archived', 'skipped')
       LIMIT 1`,
     )
-    .get(conv.sourceFile, conv.firstMessageAt) as { id: number } | null;
+    .get(conv.sourceFile, conv.firstMessageAt) as { id: number; status: string } | null;
 
   if (existing) {
     getDb()
@@ -379,8 +379,9 @@ export function upsertConversation(conv: {
         WHERE id = ?`,
       )
       .run(conv.lastMessageAt, conv.entryCount, existing.id);
+    return existing.id;
   } else {
-    getDb()
+    const result = getDb()
       .query(
         `INSERT INTO memory_conversations
           (session_id, source_file, first_message_at, last_message_at, entry_count)
@@ -393,6 +394,7 @@ export function upsertConversation(conv: {
         conv.lastMessageAt,
         conv.entryCount,
       );
+    return result.lastInsertRowid as number;
   }
 }
 
