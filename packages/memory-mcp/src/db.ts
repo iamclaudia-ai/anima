@@ -59,6 +59,106 @@ export function hasFtsTable(): boolean {
  * Full-text search using FTS5 with BM25 ranking.
  * Returns results sorted by relevance.
  */
+// ============================================================================
+// Transcript Lookup
+// ============================================================================
+
+export interface TranscriptEntry {
+  role: string;
+  content: string;
+  timestamp: string;
+  toolNames: string | null;
+  cwd: string | null;
+}
+
+export interface ConversationInfo {
+  id: number;
+  sessionId: string;
+  sourceFile: string;
+  firstMessageAt: string;
+  lastMessageAt: string;
+  cwd: string | null;
+  summary: string | null;
+  entryCount: number;
+}
+
+/**
+ * Get conversation metadata by ID.
+ */
+export function getConversation(conversationId: number): ConversationInfo | null {
+  const d = getDb();
+  if (!d) return null;
+
+  try {
+    return d
+      .query(
+        `SELECT
+          id, session_id AS sessionId, source_file AS sourceFile,
+          first_message_at AS firstMessageAt, last_message_at AS lastMessageAt,
+          json_extract(metadata, '$.cwd') AS cwd,
+          summary, entry_count AS entryCount
+        FROM memory_conversations
+        WHERE id = ?`,
+      )
+      .get(conversationId) as ConversationInfo | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get transcript entries for a conversation by its ID.
+ * Uses the conversation's source_file and time range to find entries.
+ */
+export function getTranscript(
+  conversationId: number,
+  opts?: { limit?: number },
+): { conversation: ConversationInfo; entries: TranscriptEntry[] } | null {
+  const d = getDb();
+  if (!d) return null;
+
+  const conv = getConversation(conversationId);
+  if (!conv) return null;
+
+  const limit = opts?.limit ?? 500;
+
+  try {
+    const entries = d
+      .query(
+        `SELECT role, content, timestamp, tool_names AS toolNames, cwd
+        FROM memory_transcript_entries
+        WHERE source_file = ?
+          AND timestamp >= ?
+          AND timestamp <= ?
+          AND tool_names IS NULL
+        ORDER BY timestamp
+        LIMIT ?`,
+      )
+      .all(conv.sourceFile, conv.firstMessageAt, conv.lastMessageAt, limit) as TranscriptEntry[];
+
+    return { conversation: conv, entries };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract conversation ID from an episode source_id.
+ * Episode files are named: YYYY-MM-DD-HHMM-{convId}.md
+ * Returns null if the ID can't be extracted.
+ */
+export function extractConversationId(sourceId: string): number | null {
+  // Match the conv ID from filename like 2026-03-17-0832-77396.md
+  const match = sourceId.match(/(\d+)\.md$/);
+  if (!match) return null;
+  const id = parseInt(match[1]);
+  return isNaN(id) ? null : id;
+}
+
+// ============================================================================
+// FTS Search
+// ============================================================================
+
 export function searchFts(
   query: string,
   opts?: { limit?: number; category?: string; dateFrom?: string; dateTo?: string },

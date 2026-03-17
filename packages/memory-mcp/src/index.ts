@@ -40,7 +40,7 @@ import type {
   ListParams,
   MemoryCategory,
 } from "./types.js";
-import { hasFtsTable, searchFts } from "./db.js";
+import { hasFtsTable, searchFts, getTranscript, extractConversationId } from "./db.js";
 
 // ============================================================================
 // Tool Definitions
@@ -71,7 +71,7 @@ Examples: "birthday", "beehiiv deployment", "wedding vows", "Cartesia voice", "M
         category: {
           type: "string",
           enum: [
-            "summary",
+            "episodes",
             "milestones",
             "insights",
             "relationships",
@@ -81,7 +81,7 @@ Examples: "birthday", "beehiiv deployment", "wedding vows", "Cartesia voice", "M
             "other",
           ],
           description:
-            "Filter by source category. 'summary' = conversation summaries, others = ~/memory document categories.",
+            "Filter by source category. 'episodes' = per-conversation episode files, others = ~/memory document categories.",
         },
         dateFrom: {
           type: "string",
@@ -181,6 +181,38 @@ Use this to explore what memories exist before reading or searching.`,
         recent: {
           type: "number",
           description: "List the N most recently updated memory files",
+        },
+      },
+    },
+  },
+  {
+    name: "memory_transcript",
+    description: `Retrieve the full conversation transcript for a given conversation ID or episode source ID.
+
+Use this after memory_recall finds an episode — drill into the actual conversation to see the full dialogue. The conversation ID can be extracted from the episode filename (e.g., episodes/2026-03/2026-03-17-0832-77396.md → conversation 77396).
+
+Returns the raw transcript entries (Michael + Claudia messages) in chronological order.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversationId: {
+          type: "number",
+          description:
+            "Conversation ID (integer). Found in episode filenames: YYYY-MM-DD-HHMM-{conversationId}.md",
+        },
+        sourceId: {
+          type: "string",
+          description:
+            "Episode source_id from a recall result. The conversation ID will be extracted from the filename.",
+        },
+        query: {
+          type: "string",
+          description:
+            "Optional search term — if provided, only returns entries containing this text (case-insensitive).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum transcript entries to return (default: 500)",
         },
       },
     },
@@ -294,6 +326,61 @@ async function handleRemember(params: RememberParams): Promise<string> {
   });
 }
 
+async function handleTranscript(params: {
+  conversationId?: number;
+  sourceId?: string;
+  query?: string;
+  limit?: number;
+}): Promise<string> {
+  let convId = params.conversationId;
+
+  // Extract from episode source_id if provided
+  if (!convId && params.sourceId) {
+    convId = extractConversationId(params.sourceId) ?? undefined;
+    if (!convId) {
+      return JSON.stringify({
+        error: `Could not extract conversation ID from: ${params.sourceId}`,
+      });
+    }
+  }
+
+  if (!convId) {
+    return JSON.stringify({
+      error: "Provide either conversationId or sourceId",
+    });
+  }
+
+  const result = getTranscript(convId, { limit: params.limit });
+  if (!result) {
+    return JSON.stringify({
+      error: `Conversation ${convId} not found`,
+    });
+  }
+
+  let { entries } = result;
+
+  // Filter by query if provided
+  if (params.query) {
+    const q = params.query.toLowerCase();
+    entries = entries.filter((e) => e.content.toLowerCase().includes(q));
+  }
+
+  return JSON.stringify({
+    conversationId: convId,
+    cwd: result.conversation.cwd,
+    date: result.conversation.firstMessageAt,
+    summary: result.conversation.summary,
+    totalEntries: result.entries.length,
+    filteredEntries: entries.length,
+    query: params.query || null,
+    entries: entries.map((e) => ({
+      role: e.role,
+      timestamp: e.timestamp,
+      content: e.content,
+    })),
+  });
+}
+
 async function handleRead(params: ReadParams): Promise<string> {
   const { filepath, section } = params;
   const content = await readMemory(filepath, section);
@@ -392,6 +479,16 @@ async function main() {
           break;
         case "memory_list":
           result = await handleList(args as ListParams);
+          break;
+        case "memory_transcript":
+          result = await handleTranscript(
+            (args ?? {}) as {
+              conversationId?: number;
+              sourceId?: string;
+              query?: string;
+              limit?: number;
+            },
+          );
           break;
         default:
           throw new Error(`Unknown tool: ${name}`);
