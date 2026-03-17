@@ -45,7 +45,7 @@ import {
   renewMemoryExtensionLock,
   releaseMemoryExtensionLock,
   getMemoryExtensionLockStatus,
-  transitionActiveConversations,
+  transitionActiveConversationsByCwd,
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
 } from "./db";
@@ -267,9 +267,13 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
       {
         name: "memory.transition_conversation",
         description:
-          "Mark a session's active conversations as ready for Libby processing. Called when user switches sessions so the previous conversation enters the pipeline immediately instead of waiting for the 60-minute gap timer.",
+          "Mark all active conversations for a workspace as ready for Libby processing. Called when user switches sessions so previous conversations enter the pipeline immediately instead of waiting for the 60-minute gap timer.",
         inputSchema: z.object({
-          sessionId: z.string().describe("Session ID whose active conversations should transition"),
+          cwd: z
+            .string()
+            .describe(
+              "Workspace directory — all active conversations matching this CWD will transition",
+            ),
         }),
       },
       {
@@ -804,19 +808,21 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
         }
 
         case "memory.transition_conversation": {
-          const sessionId = params.sessionId as string;
-          const changed = transitionActiveConversations(sessionId);
+          const cwd = params.cwd as string;
+          const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
+          const pattern = `%${encodedCwd}%`;
+          const changed = transitionActiveConversationsByCwd(pattern);
 
           if (changed > 0) {
             ctx?.log.info("[memory] Transitioned active conversations to ready", {
-              sessionId,
+              cwd,
               changed,
             });
             // Wake Libby so she picks up the newly-ready conversations
             worker?.wake();
           }
 
-          return { sessionId, transitioned: changed };
+          return { cwd, transitioned: changed };
         }
 
         case "memory.get_session_context": {

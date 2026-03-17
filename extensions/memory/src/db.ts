@@ -857,18 +857,18 @@ export function releaseMemoryExtensionLock(pid: number): boolean {
 // ============================================================================
 
 /**
- * Transition a session's active conversations to 'ready' immediately.
- * Called when the user switches/creates sessions so the previous conversation
- * enters the Libby pipeline without waiting for the 60-minute gap timer.
+ * Transition all active conversations for a workspace to 'ready' immediately.
+ * Matches by source_file pattern (encoded CWD) so ALL active conversations
+ * for the workspace enter the Libby pipeline, not just the current session's.
  */
-export function transitionActiveConversations(sessionId: string): number {
+export function transitionActiveConversationsByCwd(sourceFilePattern: string): number {
   const result = getDb()
     .query(
       `UPDATE memory_conversations
        SET status = 'ready', status_at = datetime('now')
-       WHERE session_id = ? AND status = 'active'`,
+       WHERE source_file LIKE ? AND status = 'active'`,
     )
-    .run(sessionId);
+    .run(sourceFilePattern);
   return result.changes;
 }
 
@@ -899,21 +899,27 @@ export function getRecentTranscriptEntries(
  * Get recent archived conversation summaries matching a source file pattern.
  * The pattern matches the encoded CWD in the source_file path
  * (e.g., '%encoded-cwd%' matches '~/.claude/projects/-Users-michael-Projects-foo/UUID.jsonl').
+ *
+ * Returns in chronological order (oldest first) so the injected context reads
+ * naturally: earlier sessions listed first, most recent last.
  */
 export function getRecentArchivedSummaries(
   sourceFilePattern: string,
   limit: number,
 ): Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }> {
+  // Subquery grabs the N most recent, outer query re-sorts chronologically
   return getDb()
     .query(
-      `SELECT summary, first_message_at AS firstMessageAt, last_message_at AS lastMessageAt
-       FROM memory_conversations
-       WHERE source_file LIKE ?
-         AND status = 'archived'
-         AND summary IS NOT NULL
-         AND length(summary) > 0
-       ORDER BY last_message_at DESC
-       LIMIT ?`,
+      `SELECT summary, firstMessageAt, lastMessageAt FROM (
+         SELECT summary, first_message_at AS firstMessageAt, last_message_at AS lastMessageAt
+         FROM memory_conversations
+         WHERE source_file LIKE ?
+           AND status = 'archived'
+           AND summary IS NOT NULL
+           AND length(summary) > 0
+         ORDER BY last_message_at DESC
+         LIMIT ?
+       ) ORDER BY lastMessageAt ASC`,
     )
     .all(sourceFilePattern, limit) as Array<{
     summary: string;
