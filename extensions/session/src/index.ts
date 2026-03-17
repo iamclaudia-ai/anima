@@ -1017,6 +1017,20 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
       description: "Health status of session extension",
       inputSchema: z.object({}),
     },
+    {
+      name: "session.get_memory_context",
+      description:
+        "Preview the memory context that would be injected into a new session. Returns the raw formatted block and the underlying data.",
+      inputSchema: z.object({
+        cwd: z.string().describe("Workspace directory"),
+        sessionId: z
+          .string()
+          .optional()
+          .describe(
+            "Previous session ID for recent transcript (defaults to workspace active session)",
+          ),
+      }),
+    },
   ];
 
   // ── Method Handler ─────────────────────────────────────────
@@ -1785,6 +1799,36 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
       case "session.health_check": {
         return healthCheckDetailed();
+      }
+
+      case "session.get_memory_context": {
+        const cwd = params.cwd as string;
+        const workspaceResult = getOrCreateWorkspace(cwd);
+        const sessionId =
+          (params.sessionId as string | undefined) ||
+          getWorkspaceActiveSession(workspaceResult.workspace.id) ||
+          undefined;
+
+        try {
+          const memoryContext = (await ctx.call("memory.get_session_context", {
+            cwd,
+            sessionId,
+          })) as MemoryContextResult | null;
+
+          if (!memoryContext) {
+            return { formatted: null, raw: null, note: "No memory context available" };
+          }
+
+          const formatted = formatMemoryContext(memoryContext);
+          return {
+            formatted,
+            raw: memoryContext,
+            sessionId: sessionId || null,
+            formattedLength: formatted?.length || 0,
+          };
+        } catch (err) {
+          return { formatted: null, raw: null, error: String(err) };
+        }
       }
 
       default:
