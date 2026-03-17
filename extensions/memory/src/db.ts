@@ -891,7 +891,7 @@ export function getRecentTranscriptEntries(
     .query(
       `SELECT role, content, timestamp
        FROM memory_transcript_entries
-       WHERE cwd = ?
+       WHERE cwd = ? AND tool_names IS NULL
        ORDER BY timestamp DESC, id DESC
        LIMIT ?`,
     )
