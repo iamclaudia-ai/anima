@@ -863,7 +863,8 @@ export function releaseMemoryExtensionLock(pid: number): boolean {
 // ============================================================================
 
 /**
- * Transition all active conversations for a workspace to 'ready' immediately.
+ * Transition all active conversations for a workspace directly to 'queued'.
+ * Skips the 'ready' intermediate state so Libby picks them up immediately.
  * Matches by source_file pattern (encoded CWD) so ALL active conversations
  * for the workspace enter the Libby pipeline, not just the current session's.
  */
@@ -871,7 +872,7 @@ export function transitionActiveConversationsByCwd(sourceFilePattern: string): n
   const result = getDb()
     .query(
       `UPDATE memory_conversations
-       SET status = 'ready', status_at = datetime('now')
+       SET status = 'queued', status_at = datetime('now')
        WHERE source_file LIKE ? AND status = 'active'`,
     )
     .run(sourceFilePattern);
