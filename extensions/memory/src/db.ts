@@ -347,29 +347,28 @@ export function upsertConversation(conv: {
   lastMessageAt: string;
   entryCount: number;
 }): number | null {
-  // If this exact time range was already archived/skipped, do not recreate it.
-  // Rebuilds can run repeatedly as files grow; this prevents re-queuing old work.
-  const alreadyFinalized = getDb()
+  // If this conversation is already past 'active' (ready, queued, processing, archived, skipped),
+  // don't touch it — it's already in the pipeline or done.
+  const alreadyInPipeline = getDb()
     .query(
       `SELECT id FROM memory_conversations
       WHERE source_file = ?
         AND first_message_at = ?
-        AND last_message_at = ?
-        AND status IN ('archived', 'skipped')
+        AND status != 'active'
       LIMIT 1`,
     )
-    .get(conv.sourceFile, conv.firstMessageAt, conv.lastMessageAt) as { id: number } | null;
+    .get(conv.sourceFile, conv.firstMessageAt) as { id: number } | null;
 
-  if (alreadyFinalized) return null;
+  if (alreadyInPipeline) return null;
 
-  // Match by source_file + first_message_at (unique within a file)
+  // Match existing active conversation by source_file + first_message_at
   const existing = getDb()
     .query(
-      `SELECT id, status FROM memory_conversations
-      WHERE source_file = ? AND first_message_at = ? AND status NOT IN ('archived', 'skipped')
+      `SELECT id FROM memory_conversations
+      WHERE source_file = ? AND first_message_at = ? AND status = 'active'
       LIMIT 1`,
     )
-    .get(conv.sourceFile, conv.firstMessageAt) as { id: number; status: string } | null;
+    .get(conv.sourceFile, conv.firstMessageAt) as { id: number } | null;
 
   if (existing) {
     getDb()
@@ -451,9 +450,7 @@ export function updateConversationStatus(
  */
 export function deleteActiveConversationsForFile(sourceFile: string): number {
   const result = getDb()
-    .query(
-      "DELETE FROM memory_conversations WHERE source_file = ? AND status IN ('active', 'ready')",
-    )
+    .query("DELETE FROM memory_conversations WHERE source_file = ? AND status = 'active'")
     .run(sourceFile);
   return result.changes;
 }
