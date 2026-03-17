@@ -45,6 +45,9 @@ import {
   renewMemoryExtensionLock,
   releaseMemoryExtensionLock,
   getMemoryExtensionLockStatus,
+  transitionActiveConversations,
+  getRecentTranscriptEntries,
+  getRecentArchivedSummaries,
 } from "./db";
 import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
 import { MemoryWatcher } from "./watcher";
@@ -259,6 +262,36 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           "Get the formatted transcript for a conversation by ID. Returns the same text that Libby receives for processing.",
         inputSchema: z.object({
           id: z.number().describe("Conversation ID"),
+        }),
+      },
+      {
+        name: "memory.transition_conversation",
+        description:
+          "Mark a session's active conversations as ready for Libby processing. Called when user switches sessions so the previous conversation enters the pipeline immediately instead of waiting for the 60-minute gap timer.",
+        inputSchema: z.object({
+          sessionId: z.string().describe("Session ID whose active conversations should transition"),
+        }),
+      },
+      {
+        name: "memory.get_session_context",
+        description:
+          "Get recent conversation context for session continuity. Returns the last N transcript entries from a previous session plus recent archived summaries for the same workspace.",
+        inputSchema: z.object({
+          cwd: z.string().describe("Workspace directory to scope summary lookup"),
+          sessionId: z
+            .string()
+            .optional()
+            .describe("Previous session ID for recent transcript entries"),
+          maxRecentMessages: z
+            .number()
+            .optional()
+            .default(20)
+            .describe("Max recent messages to return"),
+          maxSummaries: z
+            .number()
+            .optional()
+            .default(5)
+            .describe("Max archived summaries to return"),
         }),
       },
     ],
@@ -768,6 +801,42 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             chars: transcript.text.length,
             transcript: transcript.text,
           };
+        }
+
+        case "memory.transition_conversation": {
+          const sessionId = params.sessionId as string;
+          const changed = transitionActiveConversations(sessionId);
+
+          if (changed > 0) {
+            ctx?.log.info("[memory] Transitioned active conversations to ready", {
+              sessionId,
+              changed,
+            });
+            // Wake Libby so she picks up the newly-ready conversations
+            worker?.wake();
+          }
+
+          return { sessionId, transitioned: changed };
+        }
+
+        case "memory.get_session_context": {
+          const cwd = params.cwd as string;
+          const sessionId = params.sessionId as string | undefined;
+          const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
+          const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
+
+          // Get recent transcript entries from the previous session
+          const recentMessages = sessionId
+            ? getRecentTranscriptEntries(sessionId, maxRecentMessages)
+            : [];
+
+          // Encode CWD to match source_file pattern in DB
+          // source_file looks like: ~/.claude/projects/-Users-michael-Projects-foo/UUID.jsonl
+          const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
+          const pattern = `%${encodedCwd}%`;
+          const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
+
+          return { recentMessages, recentSummaries };
         }
 
         default:

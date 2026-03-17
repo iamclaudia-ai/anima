@@ -853,6 +853,76 @@ export function releaseMemoryExtensionLock(pid: number): boolean {
 }
 
 // ============================================================================
+// Session Continuity
+// ============================================================================
+
+/**
+ * Transition a session's active conversations to 'ready' immediately.
+ * Called when the user switches/creates sessions so the previous conversation
+ * enters the Libby pipeline without waiting for the 60-minute gap timer.
+ */
+export function transitionActiveConversations(sessionId: string): number {
+  const result = getDb()
+    .query(
+      `UPDATE memory_conversations
+       SET status = 'ready', status_at = datetime('now')
+       WHERE session_id = ? AND status = 'active'`,
+    )
+    .run(sessionId);
+  return result.changes;
+}
+
+/**
+ * Get the most recent transcript entries for a session.
+ * Returns entries in chronological order (oldest first).
+ * Used to inject recent conversation context into new sessions.
+ */
+export function getRecentTranscriptEntries(
+  sessionId: string,
+  limit: number,
+): Array<{ role: string; content: string; timestamp: string }> {
+  const rows = getDb()
+    .query(
+      `SELECT role, content, timestamp
+       FROM memory_transcript_entries
+       WHERE session_id = ?
+       ORDER BY timestamp DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(sessionId, limit) as Array<{ role: string; content: string; timestamp: string }>;
+
+  // Reverse to chronological order
+  return rows.reverse();
+}
+
+/**
+ * Get recent archived conversation summaries matching a source file pattern.
+ * The pattern matches the encoded CWD in the source_file path
+ * (e.g., '%encoded-cwd%' matches '~/.claude/projects/-Users-michael-Projects-foo/UUID.jsonl').
+ */
+export function getRecentArchivedSummaries(
+  sourceFilePattern: string,
+  limit: number,
+): Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }> {
+  return getDb()
+    .query(
+      `SELECT summary, first_message_at AS firstMessageAt, last_message_at AS lastMessageAt
+       FROM memory_conversations
+       WHERE source_file LIKE ?
+         AND status = 'archived'
+         AND summary IS NOT NULL
+         AND length(summary) > 0
+       ORDER BY last_message_at DESC
+       LIMIT ?`,
+    )
+    .all(sourceFilePattern, limit) as Array<{
+    summary: string;
+    firstMessageAt: string;
+    lastMessageAt: string;
+  }>;
+}
+
+// ============================================================================
 // Stats
 // ============================================================================
 
