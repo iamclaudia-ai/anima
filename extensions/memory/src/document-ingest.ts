@@ -124,8 +124,12 @@ export function removeMemoryDocument(filePath: string): void {
 // Directory Scanning
 // ============================================================================
 
-/** Directories to skip during scanning */
-const IGNORED_DIRS = new Set(["libby", ".git", "node_modules"]);
+/** Directories to skip during scanning.
+ * - libby: internal reasoning logs (moved to ~/.claudia)
+ * - episodes: duplicate of conversation summaries already in FTS
+ * - .git, node_modules: obvious
+ */
+const IGNORED_DIRS = new Set(["libby", "episodes", ".git", "node_modules"]);
 
 /**
  * Scan ~/memory recursively and ingest all .md files.
