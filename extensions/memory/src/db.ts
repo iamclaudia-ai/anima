@@ -879,23 +879,24 @@ export function transitionActiveConversationsByCwd(sourceFilePattern: string): n
 }
 
 /**
- * Get the most recent transcript entries for a session.
+ * Get the most recent transcript entries across all sessions for a workspace.
+ * Matches by source_file pattern (encoded CWD) so it picks up messages from
+ * ANY session in the workspace, not just a specific one.
  * Returns entries in chronological order (oldest first).
- * Used to inject recent conversation context into new sessions.
  */
 export function getRecentTranscriptEntries(
-  sessionId: string,
+  sourceFilePattern: string,
   limit: number,
 ): Array<{ role: string; content: string; timestamp: string }> {
   const rows = getDb()
     .query(
       `SELECT role, content, timestamp
        FROM memory_transcript_entries
-       WHERE session_id = ?
+       WHERE source_file LIKE ?
        ORDER BY timestamp DESC, id DESC
        LIMIT ?`,
     )
-    .all(sessionId, limit) as Array<{ role: string; content: string; timestamp: string }>;
+    .all(sourceFilePattern, limit) as Array<{ role: string; content: string; timestamp: string }>;
 
   // Reverse to chronological order
   return rows.reverse();

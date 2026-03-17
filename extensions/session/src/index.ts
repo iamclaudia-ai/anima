@@ -1023,12 +1023,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         "Preview the memory context that would be injected into a new session. Returns the raw formatted block and the underlying data.",
       inputSchema: z.object({
         cwd: z.string().describe("Workspace directory"),
-        sessionId: z
-          .string()
-          .optional()
-          .describe(
-            "Previous session ID for recent transcript (defaults to workspace active session)",
-          ),
       }),
     },
   ];
@@ -1114,10 +1108,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
         // Inject recent memory context into system prompt for continuity
         try {
           const memoryContext = (await Promise.race([
-            ctx.call("memory.get_session_context", {
-              cwd,
-              sessionId: previousSessionId || undefined,
-            }),
+            ctx.call("memory.get_session_context", { cwd }),
             new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
           ])) as {
             recentMessages: Array<{ role: string; content: string; timestamp: string }>;
@@ -1803,16 +1794,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 
       case "session.get_memory_context": {
         const cwd = params.cwd as string;
-        const workspaceResult = getOrCreateWorkspace(cwd);
-        const sessionId =
-          (params.sessionId as string | undefined) ||
-          getWorkspaceActiveSession(workspaceResult.workspace.id) ||
-          undefined;
 
         try {
           const memoryContext = (await ctx.call("memory.get_session_context", {
             cwd,
-            sessionId,
           })) as MemoryContextResult | null;
 
           if (!memoryContext) {
@@ -1823,7 +1808,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
           return {
             formatted,
             raw: memoryContext,
-            sessionId: sessionId || null,
             formattedLength: formatted?.length || 0,
           };
         } catch (err) {

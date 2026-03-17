@@ -279,13 +279,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
       {
         name: "memory.get_session_context",
         description:
-          "Get recent conversation context for session continuity. Returns the last N transcript entries from a previous session plus recent archived summaries for the same workspace.",
+          "Get recent conversation context for session continuity. Returns the last N transcript entries across all sessions in the workspace plus recent archived summaries.",
         inputSchema: z.object({
-          cwd: z.string().describe("Workspace directory to scope summary lookup"),
-          sessionId: z
-            .string()
-            .optional()
-            .describe("Previous session ID for recent transcript entries"),
+          cwd: z.string().describe("Workspace directory to scope lookup"),
           maxRecentMessages: z
             .number()
             .optional()
@@ -829,19 +825,16 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
 
         case "memory.get_session_context": {
           const cwd = params.cwd as string;
-          const sessionId = params.sessionId as string | undefined;
           const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
           const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
 
-          // Get recent transcript entries from the previous session
-          const recentMessages = sessionId
-            ? getRecentTranscriptEntries(sessionId, maxRecentMessages)
-            : [];
-
           // Encode CWD to match source_file pattern in DB
-          // source_file looks like: ~/.claude/projects/-Users-michael-Projects-foo/UUID.jsonl
+          // source_file looks like: -Users-michael-Projects-foo/UUID.jsonl
           const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
           const pattern = `%${encodedCwd}%`;
+
+          // Get recent transcript entries across ALL sessions for this workspace
+          const recentMessages = getRecentTranscriptEntries(pattern, maxRecentMessages);
           const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
           return { recentMessages, recentSummaries };
