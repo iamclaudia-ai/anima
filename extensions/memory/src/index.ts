@@ -506,46 +506,48 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             : 0;
           const watcherDiag = watcher?.getDiagnostics() ?? null;
 
+          const statusDisplay: Record<
+            string,
+            { healthStatus: "healthy" | "inactive" | "stale" | "dead"; icon: string }
+          > = {
+            processing: { healthStatus: "healthy", icon: "⚙️" },
+            queued: { healthStatus: "inactive", icon: "⏳" },
+            ready: { healthStatus: "inactive", icon: "📋" },
+            active: { healthStatus: "inactive", icon: "💬" },
+          };
+
           const items: HealthItem[] = workItems.map((conv) => {
             const meta = conv.metadata
               ? (JSON.parse(conv.metadata) as Record<string, unknown>)
               : {};
             const isProcessing = conv.status === "processing";
+            const display = statusDisplay[conv.status] || { healthStatus: "inactive", icon: "" };
 
-            // Calculate elapsed time for processing items
-            let elapsed = "";
-            if (isProcessing && conv.statusAt) {
-              const elapsedMs = Date.now() - new Date(conv.statusAt + "Z").getTime();
-              elapsed =
-                elapsedMs < 60_000
-                  ? `${Math.round(elapsedMs / 1000)}s`
-                  : `${Math.round(elapsedMs / 60_000)}m`;
+            // Calculate elapsed/waiting time
+            let timeLabel = "";
+            if (conv.statusAt) {
+              const ms = Date.now() - new Date(conv.statusAt + "Z").getTime();
+              timeLabel = ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`;
             }
 
-            // Keep keys consistent so table columns align
-            let waiting = "";
-            if (!isProcessing && conv.statusAt) {
-              const queuedMs = Date.now() - new Date(conv.statusAt + "Z").getTime();
-              waiting =
-                queuedMs < 60_000
-                  ? `${Math.round(queuedMs / 1000)}s`
-                  : `${Math.round(queuedMs / 60_000)}m`;
-            }
+            const cwdLabel = ((meta.cwd as string) || conv.sourceFile).replace(
+              /^\/Users\/\w+/,
+              "~",
+            );
 
             const details: Record<string, string> = {
+              status: conv.status,
               entries: String(conv.entryCount),
               date: conv.firstMessageAt.slice(0, 10),
               transcript: isProcessing && meta.transcriptKB ? `${meta.transcriptKB}KB` : "",
               time: isProcessing && meta.timeRange ? (meta.timeRange as string) : "",
-              elapsed: isProcessing ? elapsed : waiting,
+              elapsed: timeLabel,
             };
 
             return {
               id: String(conv.id),
-              label: isProcessing
-                ? `#${conv.id} ${((meta.cwd as string) || conv.sourceFile).replace(/^\/Users\/\w+/, "~")}`
-                : `#${conv.id}`,
-              status: isProcessing ? "healthy" : "inactive",
+              label: `${display.icon} #${conv.id} ${cwdLabel}`,
+              status: display.healthStatus,
               details,
             };
           });

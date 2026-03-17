@@ -635,7 +635,8 @@ export function getNextQueued(): ConversationRow | null {
 }
 
 /**
- * Get queued and processing conversations (for health check display).
+ * Get conversations in the Libby pipeline (for health check display).
+ * Includes processing, queued, ready, and active — sorted by pipeline priority.
  */
 export function getActiveWorkItems(): ConversationRow[] {
   return getDb()
@@ -648,9 +649,14 @@ export function getActiveWorkItems(): ConversationRow[] {
         status_at AS statusAt, metadata,
         created_at AS createdAt
       FROM memory_conversations
-      WHERE status IN ('queued', 'processing')
+      WHERE status IN ('processing', 'queued', 'ready', 'active')
       ORDER BY
-        CASE status WHEN 'processing' THEN 0 ELSE 1 END,
+        CASE status
+          WHEN 'processing' THEN 0
+          WHEN 'queued' THEN 1
+          WHEN 'ready' THEN 2
+          WHEN 'active' THEN 3
+        END,
         first_message_at ASC`,
     )
     .all() as ConversationRow[];
