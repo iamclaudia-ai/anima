@@ -553,6 +553,16 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
     };
   }, [next, prev]);
 
+  // Scale the root font size — all rem-based Tailwind classes (text, spacing, etc.) scale naturally
+  useEffect(() => {
+    const html = document.documentElement;
+    const original = html.style.fontSize;
+    html.style.fontSize = `${scale * 100}%`;
+    return () => {
+      html.style.fontSize = original;
+    };
+  }, [scale]);
+
   // ── Loading / Error states ───────────────────────────────
 
   if (loading) {
@@ -585,16 +595,6 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
   // ── Render ───────────────────────────────────────────────
 
   const progress = totalSlides > 1 ? (currentSlide / (totalSlides - 1)) * 100 : 100;
-
-  // Scale the root font size — all rem-based Tailwind classes (text, spacing, etc.) scale naturally
-  useEffect(() => {
-    const html = document.documentElement;
-    const original = html.style.fontSize;
-    html.style.fontSize = `${scale * 100}%`;
-    return () => {
-      html.style.fontSize = original;
-    };
-  }, [scale]);
 
   return (
     <div
