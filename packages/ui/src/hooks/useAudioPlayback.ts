@@ -7,6 +7,13 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { UseChatGatewayReturn } from "./useChatGateway";
+import {
+  clearVoiceStreams,
+  createAudioPlaybackState,
+  endVoiceStream,
+  shouldAcceptVoiceChunk,
+  startVoiceStream,
+} from "./audioPlaybackState";
 
 export interface UseAudioPlaybackReturn {
   /** Whether audio is currently playing */
@@ -57,10 +64,10 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const playbackStateRef = useRef(createAudioPlaybackState());
   const isPlayingRef = useRef(false);
   const isStreamingRef = useRef(false);
   const playbackCursorRef = useRef(0);
-  const currentStreamIdRef = useRef<string | null>(null);
   const streamGenerationRef = useRef(0);
 
   /** Ensure AudioContext is initialized and resumed */
@@ -133,7 +140,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
   /** Stop playback and clear all scheduled sources */
   const stop = useCallback(() => {
     clearScheduledSources();
-    currentStreamIdRef.current = null;
+    clearVoiceStreams(playbackStateRef.current);
     streamGenerationRef.current += 1;
     isPlayingRef.current = false;
     isStreamingRef.current = false;
@@ -152,15 +159,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       if (event === "voice.stream_start") {
         const ctx = ensureAudioContext();
         const streamId = (data.streamId as string) || "?";
-        const prevStreamId = currentStreamIdRef.current;
-
-        if (prevStreamId !== streamId) {
-          clearScheduledSources();
-          streamGenerationRef.current += 1;
-          playbackCursorRef.current = ctx.currentTime + 0.02;
-        }
-
-        currentStreamIdRef.current = streamId;
+        startVoiceStream(playbackStateRef.current, streamId);
 
         isStreamingRef.current = true;
         setIsStreaming(true);
@@ -177,7 +176,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         const format = data.format as string | undefined;
         const streamId = data.streamId as string | undefined;
         if (!audio) return;
-        if (!streamId || streamId !== currentStreamIdRef.current) return;
+        if (!streamId || !shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
 
         const generation = streamGenerationRef.current;
 
@@ -189,13 +188,15 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
             .decodeAudioData(arrayBuffer.slice(0))
             .then((buffer) => {
               if (generation !== streamGenerationRef.current) return;
-              if (streamId !== currentStreamIdRef.current) return;
+              if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
               scheduleBuffer(buffer);
             })
             .catch((err) => {
               console.warn("[AudioPlayback] Failed to decode WAV chunk:", err);
             });
         } else {
+          if (generation !== streamGenerationRef.current) return;
+          if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
           const buffer = pcm16ToAudioBuffer(ctx, arrayBuffer, 24000);
           scheduleBuffer(buffer);
         }
@@ -204,20 +205,14 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
       if (event === "voice.stream_end") {
         const streamId = (data.streamId as string) || "?";
-        if (streamId !== currentStreamIdRef.current) return;
+        if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
 
         console.log(
           `[Audio] STREAM_END id=${streamId} aborted=${data.aborted ?? false} activeSources=${activeSourcesRef.current.size}`,
         );
-        const aborted = data.aborted as boolean | undefined;
-        isStreamingRef.current = false;
-        setIsStreaming(false);
-        currentStreamIdRef.current = null;
-
-        if (aborted) {
-          streamGenerationRef.current += 1;
-          clearScheduledSources();
-        }
+        const hasActiveStreams = endVoiceStream(playbackStateRef.current, streamId);
+        isStreamingRef.current = hasActiveStreams;
+        setIsStreaming(hasActiveStreams);
         return;
       }
 
@@ -229,7 +224,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         const ctx = ensureAudioContext();
         const arrayBuffer = base64ToArrayBuffer(audioData);
 
-        currentStreamIdRef.current = null;
+        clearVoiceStreams(playbackStateRef.current);
         streamGenerationRef.current += 1;
         clearScheduledSources();
         isStreamingRef.current = true;
