@@ -17,6 +17,7 @@
     "@claudia/ext-control": "workspace:*",
     "@claudia/ext-editor": "workspace:*",
     "@claudia/ext-imessage": "workspace:*",
+    "@claudia/ext-presenter": "workspace:*",
     "@claudia/memory": "workspace:*",
     "@claudia/shared": "workspace:*",
     "@claudia/ui": "workspace:*",

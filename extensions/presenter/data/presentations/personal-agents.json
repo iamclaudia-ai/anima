@@ -1,0 +1,230 @@
+{
+  "title": "Personal AI Agents",
+  "author": "Michael Kilman",
+  "date": "March 20, 2026",
+  "theme": "dark",
+  "slides": [
+    {
+      "type": "title",
+      "title": "Personal AI Agents",
+      "subtitle": "Building AI That Knows You",
+      "notes": "Welcome everyone. I'm Michael Kilman — software engineer, and I build with AI every day. Today I want to show you something I've been working on that I think represents the future of how we'll all interact with AI."
+    },
+    {
+      "type": "quote",
+      "quote": {
+        "text": "Every conversation starts from zero. You're always re-explaining who you are, what you're working on, what you care about.",
+        "attribution": "The Cold Start Problem"
+      },
+      "notes": "Raise your hand if you've used ChatGPT. Now keep it up if you've ever had to re-explain the same context for the third time. That frustration — that's the cold start problem. Every session is amnesia. Today I want to show you what happens when you solve it."
+    },
+    {
+      "type": "section",
+      "label": "The Problem",
+      "title": "AI Without Memory Is Just a Calculator",
+      "subtitle": "It can answer questions, but it doesn't know you",
+      "notes": "Think about the difference between asking a stranger for directions versus asking a friend. The friend knows where you live, where you work, what route you usually take. That context changes everything."
+    },
+    {
+      "type": "bullets",
+      "title": "What Is a Personal Agent?",
+      "bullets": [
+        {
+          "text": "Not a chatbot",
+          "sub": ["Stateless, generic, forgets everything"]
+        },
+        {
+          "text": "Not an assistant",
+          "sub": ["Siri, Alexa — limited, corporate-owned"]
+        },
+        {
+          "text": "A personal agent",
+          "sub": [
+            "Persistent, extensible, yours",
+            "Knows you, reaches you anywhere, acts on your behalf"
+          ]
+        }
+      ],
+      "notes": "This is the key distinction. A chatbot is a tool. An assistant is someone else's tool that you're allowed to use. A personal agent is YOUR tool — you own it, you control it, it grows with you."
+    },
+    {
+      "type": "section",
+      "label": "Professional Context",
+      "title": "AI at Scale — beehiiv",
+      "subtitle": "What building production AI systems taught me",
+      "notes": "Quick context on my day job. I'm a software engineer at beehiiv — one of the largest newsletter platforms. We use AI in production every day, serving millions of users. That experience building reliable AI systems is what led me to ask: what would it look like to build something this robust, but personal?"
+    },
+    {
+      "type": "bullets",
+      "title": "Lessons from Production AI",
+      "bullets": [
+        "AI is most powerful when it has context about the user",
+        "Reliability matters more than cleverness",
+        "The best AI systems are invisible — they just work",
+        "Ownership of your AI relationship matters"
+      ],
+      "notes": "These four lessons are what drove everything I built. Context, reliability, invisibility, ownership. Keep these in mind as I show you the three pillars."
+    },
+    {
+      "type": "section",
+      "label": "The Three Pillars",
+      "title": "What Makes a Personal Agent",
+      "subtitle": "Accessibility · Memory · Autonomy",
+      "notes": "Every personal agent needs three things. Let me tell you a story about each one."
+    },
+    {
+      "type": "section",
+      "label": "Pillar 1",
+      "title": "Accessibility",
+      "subtitle": "Reach your agent from anywhere, on any device",
+      "notes": "I'm on my couch and I text Claudia on iMessage to remind me about something. Next morning I'm at my desk and pick up the same thread in the web UI. On a walk, I talk to her through voice on my phone. Same agent, everywhere."
+    },
+    {
+      "type": "bullets",
+      "label": "Pillar 1 — Accessibility",
+      "title": "One Brain, Many Interfaces",
+      "bullets": [
+        "Web UI — browser-based chat",
+        "CLI — terminal for developers",
+        "VS Code — sidebar in your editor",
+        "macOS Menubar — quick access app",
+        "iOS App — native voice mode",
+        "iMessage — text-based, always on",
+        "Voice — real-time streaming TTS"
+      ],
+      "notes": "Seven interfaces, one agent. The key insight: the agent shouldn't care HOW you talk to it. A single gateway serves everything — WebSocket, web UI, extensions — on one port."
+    },
+    {
+      "type": "section",
+      "label": "Pillar 2",
+      "title": "Memory",
+      "subtitle": "An agent that remembers every conversation automatically",
+      "notes": "This is the one that blows people away. I never told Claudia to remember my preferences, my projects, my patterns. She has a librarian — we call her Libby — who reads every conversation and distills what matters."
+    },
+    {
+      "type": "bullets",
+      "label": "Pillar 2 — Memory",
+      "title": "The Memory Pipeline",
+      "bullets": [
+        {
+          "text": "Libby — the autonomous librarian",
+          "sub": ["Reads every conversation, distills what matters"]
+        },
+        {
+          "text": "Rich episode narratives",
+          "sub": ["Not just summaries — full stories of what happened"]
+        },
+        {
+          "text": "Full-text search with BM25 ranking",
+          "sub": ["4,000+ archived conversations, searchable instantly"]
+        },
+        {
+          "text": "Auto-injected context",
+          "sub": ["Every new session starts with relevant memories"]
+        }
+      ],
+      "notes": "The agent learns about you passively. You don't 'train' it. Libby processes conversations in the background, extracts milestones, insights, timeline events. When you start a new conversation, relevant context is automatically injected."
+    },
+    {
+      "type": "bigstat",
+      "label": "Memory System — By the Numbers",
+      "title": "A Living Archive",
+      "stats": [
+        { "label": "Conversations", "value": "4,000+" },
+        { "label": "Memory Documents", "value": "500+" },
+        { "label": "Index Time", "value": "< 1s" },
+        { "label": "Search", "value": "FTS5" }
+      ],
+      "notes": "4,000+ archived conversation summaries and 500+ memory documents — all indexed with SQLite FTS5 in under one second on startup. This is real, running right now on my machine."
+    },
+    {
+      "type": "section",
+      "label": "Pillar 3",
+      "title": "Autonomy",
+      "subtitle": "An agent that acts without waiting for a prompt",
+      "notes": "The third pillar is what separates a personal agent from a chatbot. I don't always have to ask. Claudia runs scheduled tasks, reacts to webhooks, processes things in the background."
+    },
+    {
+      "type": "bullets",
+      "label": "Pillar 3 — Autonomy",
+      "title": "Beyond Prompt-Response",
+      "bullets": [
+        {
+          "text": "Background processing",
+          "sub": ["Memory ingestion runs autonomously — no prompting needed"]
+        },
+        {
+          "text": "Scheduled tasks",
+          "sub": ["Heartbeats, periodic checks, maintenance"]
+        },
+        {
+          "text": "Webhook reactions",
+          "sub": ["Respond to external events in real-time"]
+        },
+        {
+          "text": "Proactive notifications",
+          "sub": ["Alert me when something important happens"]
+        }
+      ],
+      "notes": "The agent isn't passive. It's always running, always watching, always ready. The memory pipeline is a perfect example — it processes conversations without me lifting a finger."
+    },
+    {
+      "type": "section",
+      "title": "Live Demo",
+      "subtitle": "Let's see it in action",
+      "notes": "Alright, enough slides. Let me show you the real thing."
+    },
+    {
+      "type": "demo",
+      "title": "Demo Time",
+      "subtitle": "Watch the pillars in action",
+      "bullets": [
+        "Claude Code — the AI coding agent foundation",
+        "Web UI — real conversation with streaming",
+        "Memory recall — asking about past conversations",
+        "iMessage — texting Claudia live on stage",
+        "Developer workflow — git hooks, automated checks"
+      ],
+      "notes": "Start with Claude Code in terminal (30 sec). Show web UI conversation. Ask a memory question: 'When did I start working on the memory system?' Show iMessage from phone. If time, show git hooks / dev workflow."
+    },
+    {
+      "type": "quote",
+      "quote": {
+        "text": "By the way — this slide deck you're looking at? It's not PowerPoint. It's not Google Slides. It's a Claudia extension. She generated the slides, and this extension is rendering them right now.",
+        "attribution": "The Meta Moment"
+      },
+      "notes": "THIS is the mic drop. Pause here. Let it sink in. The presentation about Claudia is being presented BY Claudia. Everything they're seeing — the rendering, the slide transitions, the speaker notes — is running as a Claudia extension on port 30086."
+    },
+    {
+      "type": "section",
+      "title": "The Bigger Picture",
+      "subtitle": "Where personal agents are heading",
+      "notes": "Let me zoom out for a moment and talk about why this matters beyond my personal project."
+    },
+    {
+      "type": "bullets",
+      "title": "The Landscape Is Shifting",
+      "bullets": [
+        "Claude Code, Codex, Gemini — agents are becoming the interface",
+        "OpenClaw — the open-source personal agent movement",
+        "Memory and persistence are becoming table stakes",
+        "The question isn't if, it's who owns it"
+      ],
+      "notes": "Major AI labs are all moving toward agent-based interfaces. This isn't a hobby project anymore — it's the direction the entire industry is heading. The question is whether you'll build your own, or use someone else's."
+    },
+    {
+      "type": "quote",
+      "quote": {
+        "text": "The question isn't whether AI will be personal. It's whether you'll own that personal AI, or whether a company will own it for you.",
+        "attribution": ""
+      },
+      "notes": "End on this. For educators especially — think about what this means for your students. The students who learn to build and own their AI tools will have a fundamentally different relationship with technology than those who just consume it."
+    },
+    {
+      "type": "title",
+      "title": "Thank You",
+      "subtitle": "Questions?",
+      "notes": "Open the floor. Be ready for: How much does it cost? Is it private? Can I build one? How does Claude Code work? What about hallucinations?"
+    }
+  ]
+}
