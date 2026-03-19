@@ -1115,3 +1115,92 @@ export function getStats(): MemoryStats {
 
   return { fileCount, entryCount, conversationsByStatus };
 }
+
+// ============================================================================
+// Calendar & Timeline Queries (for Memory UI pages)
+// ============================================================================
+
+export interface CalendarDay {
+  date: string; // YYYY-MM-DD
+  conversationCount: number;
+  totalEntries: number;
+  archivedCount: number;
+}
+
+/**
+ * Get conversation counts grouped by day for a given month (YYYY-MM).
+ * Returns one row per day that has any conversations.
+ */
+export function getCalendarData(yearMonth: string): CalendarDay[] {
+  const d = getDb();
+  return d
+    .query(
+      `SELECT
+        date(first_message_at) AS date,
+        count(*) AS conversationCount,
+        sum(entry_count) AS totalEntries,
+        sum(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archivedCount
+      FROM memory_conversations
+      WHERE date(first_message_at) LIKE ? || '%'
+        AND status NOT IN ('skipped')
+      GROUP BY date(first_message_at)
+      ORDER BY date ASC`,
+    )
+    .all(yearMonth) as CalendarDay[];
+}
+
+export interface DayConversation {
+  id: number;
+  sessionId: string;
+  sourceFile: string;
+  firstMessageAt: string;
+  lastMessageAt: string;
+  entryCount: number;
+  status: string;
+  summary: string | null;
+  metadata: string | null;
+}
+
+/**
+ * Get all conversations for a specific day, ordered by time.
+ */
+export function getDayConversations(date: string): DayConversation[] {
+  const d = getDb();
+  return d
+    .query(
+      `SELECT
+        id,
+        session_id AS sessionId,
+        source_file AS sourceFile,
+        first_message_at AS firstMessageAt,
+        last_message_at AS lastMessageAt,
+        entry_count AS entryCount,
+        status,
+        summary,
+        metadata
+      FROM memory_conversations
+      WHERE date(first_message_at) = ?
+        AND status NOT IN ('skipped')
+      ORDER BY first_message_at ASC`,
+    )
+    .all(date) as DayConversation[];
+}
+
+/**
+ * Get the range of months that have conversation data.
+ */
+export function getMonthRange(): { earliest: string; latest: string } | null {
+  const d = getDb();
+  const row = d
+    .query(
+      `SELECT
+        min(date(first_message_at)) AS earliest,
+        max(date(first_message_at)) AS latest
+      FROM memory_conversations
+      WHERE status NOT IN ('skipped')`,
+    )
+    .get() as { earliest: string | null; latest: string | null } | null;
+
+  if (!row?.earliest || !row?.latest) return null;
+  return { earliest: row.earliest, latest: row.latest };
+}

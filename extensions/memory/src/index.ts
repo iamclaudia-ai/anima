@@ -23,7 +23,7 @@ import type {
   HealthCheckResponse,
   HealthItem,
 } from "@claudia/shared";
-import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
@@ -50,6 +50,9 @@ import {
   getRecentArchivedSummaries,
   searchMemory,
   ftsTableExists,
+  getCalendarData,
+  getDayConversations,
+  getMonthRange,
 } from "./db";
 import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
 import { MemoryWatcher } from "./watcher";
@@ -317,6 +320,35 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
             .optional()
             .default(5)
             .describe("Max archived summaries to return"),
+        }),
+      },
+      {
+        name: "memory.calendar",
+        description:
+          "Get conversation counts per day for a given month. Returns calendar heatmap data.",
+        inputSchema: z.object({
+          month: z.string().describe("Year-month in YYYY-MM format (e.g., 2026-03)"),
+        }),
+      },
+      {
+        name: "memory.day",
+        description:
+          "Get all conversations for a specific day, ordered by time. Returns timeline data.",
+        inputSchema: z.object({
+          date: z.string().describe("Date in YYYY-MM-DD format"),
+        }),
+      },
+      {
+        name: "memory.month_range",
+        description: "Get the earliest and latest months that have conversation data.",
+        inputSchema: z.object({}),
+      },
+      {
+        name: "memory.get_episode",
+        description:
+          "Get the full episode markdown file for a conversation. Returns the Libby-generated narrative from ~/memory/episodes/.",
+        inputSchema: z.object({
+          id: z.number().describe("Conversation ID"),
         }),
       },
     ],
@@ -926,6 +958,74 @@ export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtensi
           const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
           return { recentMessages, recentSummaries };
+        }
+
+        case "memory.calendar": {
+          const month = params.month as string;
+          const days = getCalendarData(month);
+          return { month, days };
+        }
+
+        case "memory.day": {
+          const date = params.date as string;
+          const conversations = getDayConversations(date);
+          return { date, conversations, count: conversations.length };
+        }
+
+        case "memory.month_range": {
+          const range = getMonthRange();
+          return range ?? { earliest: null, latest: null };
+        }
+
+        case "memory.get_episode": {
+          const id = params.id as number;
+          const d = getDb();
+          const conv = d
+            .query(
+              `SELECT id, first_message_at AS firstMessageAt, status
+               FROM memory_conversations WHERE id = ?`,
+            )
+            .get(id) as { id: number; firstMessageAt: string; status: string } | null;
+
+          if (!conv) {
+            throw new Error(`Conversation ${id} not found`);
+          }
+
+          // Compute episode path using same logic as Libby
+          const timestamp = new Date(conv.firstMessageAt);
+          const parts = new Intl.DateTimeFormat("en-CA", {
+            timeZone: cfg.timezone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).formatToParts(timestamp);
+          const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+          const [yr, mo, dy, hr, mi] = ["year", "month", "day", "hour", "minute"].map(get);
+
+          const episodeRelPath = `episodes/${yr}-${mo}/${yr}-${mo}-${dy}-${hr}${mi}-${id}.md`;
+          const episodePath = join(memoryRoot, episodeRelPath);
+
+          if (!existsSync(episodePath)) {
+            return {
+              conversationId: id,
+              status: conv.status,
+              episodePath: episodeRelPath,
+              found: false,
+              content: null,
+            };
+          }
+
+          const content = readFileSync(episodePath, "utf-8");
+          return {
+            conversationId: id,
+            status: conv.status,
+            episodePath: episodeRelPath,
+            found: true,
+            content,
+          };
         }
 
         default:

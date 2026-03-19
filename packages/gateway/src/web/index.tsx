@@ -7,6 +7,7 @@ import "@claudia/ui/styles";
 // ── Extension route imports ─────────────────────────────────
 import { chatRoutes, chatPanels, chatLayouts } from "@claudia/ext-chat/routes";
 import { controlRoutes } from "@claudia/ext-control/routes";
+import { memoryRoutes } from "@claudia/memory/routes";
 import { audiobooksRoutes } from "@claudia/ext-audiobooks/routes";
 // Editor panel disabled — code-server iframe not yet configured for embedding.
 // import { editorPanels } from "@claudia/ext-editor/routes";
@@ -36,7 +37,7 @@ if (import.meta.env.DEV) {
 }
 
 // ── Aggregate routes from all extensions ────────────────────
-const allRoutes = [...controlRoutes, ...chatRoutes, ...audiobooksRoutes];
+const allRoutes = [...controlRoutes, ...memoryRoutes, ...chatRoutes, ...audiobooksRoutes];
 
 // ── Build panel registry from all extensions ────────────────
 // Editor panels disabled until code-server iframe embedding is sorted out.

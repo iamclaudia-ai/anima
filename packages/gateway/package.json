@@ -17,9 +17,12 @@
     "@claudia/ext-control": "workspace:*",
     "@claudia/ext-editor": "workspace:*",
     "@claudia/ext-imessage": "workspace:*",
+    "@claudia/memory": "workspace:*",
     "@claudia/shared": "workspace:*",
     "@claudia/ui": "workspace:*",
     "@claudia/voice": "workspace:*",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.24.6"
   },

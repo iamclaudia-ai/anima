@@ -1,17 +1,25 @@
 {
   "name": "@claudia/memory",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    "./routes": "./src/routes.ts",
+    "./extension": "./src/index.ts"
+  },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun",
+    "build": "bun build src/index.ts src/routes.ts --outdir dist --target bun",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@claudia/extension-host": "workspace:*",
     "@claudia/shared": "workspace:*",
+    "@claudia/ui": "workspace:*",
     "chokidar": "^4.0.3",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "xstate": "5.28.0"
   }
 }
