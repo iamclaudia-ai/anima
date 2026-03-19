@@ -16,17 +16,55 @@
  *   Escape                 = exit to list
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { navigate } from "@claudia/ui";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useGatewayRpc } from "../hooks/useGatewayRpc";
 import { SlideRenderer, type Presentation } from "./PresenterPage";
 
+// ── Toast Notification ────────────────────────────────────────
+
+interface ToastData {
+  id: string;
+  message: string;
+  taskName: string;
+  timestamp: number;
+}
+
+function ToastNotification({ toast, onDismiss }: { toast: ToastData; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 15000); // Auto-dismiss after 15s
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div className="animate-in slide-in-from-top-2 fade-in duration-300 pointer-events-auto">
+      <div className="bg-violet-500/20 backdrop-blur-xl border border-violet-500/30 rounded-xl px-5 py-4 shadow-2xl shadow-violet-500/10 max-w-md">
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 w-8 h-8 rounded-full bg-violet-500/30 flex items-center justify-center text-sm">
+            💙
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-violet-300 font-medium mb-1">{toast.taskName}</div>
+            <p className="text-sm text-white/90 leading-relaxed">{toast.message}</p>
+          </div>
+          <button
+            onClick={onDismiss}
+            className="shrink-0 text-white/30 hover:text-white/60 transition-colors text-xs mt-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────
 
 export function PresenterNotesPage({ id }: { id: string }) {
-  const { request, connected } = useGatewayRpc();
+  const { request, connected, subscribe, on } = useGatewayRpc();
   const [presentation, setPresentation] = useState<Presentation | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -34,6 +72,8 @@ export function PresenterNotesPage({ id }: { id: string }) {
   const [elapsed, setElapsed] = useState(0);
   const [startTime] = useState(() => Date.now());
   const [scale, setScale] = useState(1.0);
+  const [toasts, setToasts] = useState<ToastData[]>([]);
+  const notificationPermissionRef = useRef(false);
 
   // Timer
   useEffect(() => {
@@ -51,6 +91,49 @@ export function PresenterNotesPage({ id }: { id: string }) {
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   }, [connected, request, id]);
+
+  // Request browser notification permission on mount
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then((perm) => {
+        notificationPermissionRef.current = perm === "granted";
+      });
+    } else if ("Notification" in window) {
+      notificationPermissionRef.current = Notification.permission === "granted";
+    }
+  }, []);
+
+  // Subscribe to scheduler notifications
+  useEffect(() => {
+    if (!connected) return;
+    subscribe(["scheduler.notification", "scheduler.task_fired"]);
+
+    const unsub = on("scheduler.notification", (_event, raw) => {
+      const payload = raw as { taskId?: string; taskName?: string; message?: string };
+      const message = payload.message ?? "Task completed";
+      const taskName = payload.taskName ?? "Claudia";
+
+      // Add in-app toast
+      const toast: ToastData = {
+        id: crypto.randomUUID(),
+        message,
+        taskName,
+        timestamp: Date.now(),
+      };
+      setToasts((prev) => [...prev, toast]);
+
+      // Also fire a browser notification
+      if (notificationPermissionRef.current) {
+        new Notification(`💙 ${taskName}`, { body: message, icon: "/favicon.ico" });
+      }
+    });
+
+    return unsub;
+  }, [connected, subscribe, on]);
+
+  const dismissToast = useCallback((toastId: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== toastId));
+  }, []);
 
   const totalSlides = presentation?.slides.length ?? 0;
   const slide = presentation?.slides[currentSlide];
@@ -340,6 +423,19 @@ export function PresenterNotesPage({ id }: { id: string }) {
           style={{ width: `${progress}%` }}
         />
       </div>
+
+      {/* Toast notifications overlay */}
+      {toasts.length > 0 && (
+        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+          {toasts.map((toast) => (
+            <ToastNotification
+              key={toast.id}
+              toast={toast}
+              onDismiss={() => dismissToast(toast.id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
