@@ -18,18 +18,18 @@ function Toast({ toast, onDismiss }: { toast: ToastData; onDismiss: () => void }
 
   return (
     <div className="animate-in slide-in-from-top-2 fade-in duration-300 pointer-events-auto">
-      <div className="bg-violet-500/20 backdrop-blur-xl border border-violet-500/30 rounded-xl px-5 py-4 shadow-2xl shadow-violet-500/10 max-w-md">
+      <div className="bg-violet-200/90 backdrop-blur-xl border border-violet-300 rounded-xl px-5 py-4 shadow-2xl shadow-violet-400/20 max-w-md">
         <div className="flex items-start gap-3">
-          <div className="shrink-0 w-8 h-8 rounded-full bg-violet-500/30 flex items-center justify-center text-sm">
+          <div className="shrink-0 w-8 h-8 rounded-full bg-violet-300/60 flex items-center justify-center text-sm">
             💙
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs text-violet-300 font-medium mb-1">{toast.taskName}</div>
-            <p className="text-sm text-white/90 leading-relaxed">{toast.message}</p>
+            <div className="text-xs text-violet-700 font-semibold mb-1">{toast.taskName}</div>
+            <p className="text-sm text-violet-900 leading-relaxed">{toast.message}</p>
           </div>
           <button
             onClick={onDismiss}
-            className="shrink-0 text-white/30 hover:text-white/60 transition-colors text-xs mt-0.5"
+            className="shrink-0 text-violet-400 hover:text-violet-600 transition-colors text-xs mt-0.5"
           >
             ✕
           </button>
