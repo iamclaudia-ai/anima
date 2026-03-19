@@ -113,8 +113,16 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
           id: z.string().describe("Presentation ID (filename without .json)"),
         }),
       },
+      {
+        name: "presenter.sync",
+        description: "Broadcast current slide to all display views",
+        inputSchema: z.object({
+          presentationId: z.string(),
+          slide: z.number(),
+        }),
+      },
     ],
-    events: [],
+    events: ["presenter.slide_changed"],
 
     async start(context: ExtensionContext) {
       ctx = context;
@@ -146,6 +154,12 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
           const pres = loadPresentation(id);
           if (!pres) throw new Error(`Presentation not found: ${id}`);
           return pres;
+        }
+
+        case "presenter.sync": {
+          const { presentationId, slide } = params as { presentationId: string; slide: number };
+          ctx?.emit("presenter.slide_changed", { presentationId, slide });
+          return { ok: true, slide };
         }
 
         default:

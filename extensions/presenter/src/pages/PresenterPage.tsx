@@ -14,7 +14,7 @@
  *   Escape                 = exit to list
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { navigate } from "@claudia/ui";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,7 +22,7 @@ import { useGatewayRpc } from "../hooks/useGatewayRpc";
 
 // ── Types ────────────────────────────────────────────────────
 
-interface Slide {
+export interface Slide {
   type: string;
   title?: string;
   subtitle?: string;
@@ -36,7 +36,7 @@ interface Slide {
   body?: string;
 }
 
-interface Presentation {
+export interface Presentation {
   id: string;
   title: string;
   author: string;
@@ -335,7 +335,7 @@ function ImageSlide({ slide }: { slide: Slide }) {
 
 // ── Slide Renderer Dispatch ──────────────────────────────────
 
-function SlideRenderer({ slide }: { slide: Slide }) {
+export function SlideRenderer({ slide }: { slide: Slide }) {
   switch (slide.type) {
     case "title":
       return <TitleSlide slide={slide} />;
@@ -362,13 +362,15 @@ function SlideRenderer({ slide }: { slide: Slide }) {
 
 // ── Main Page Component ──────────────────────────────────────
 
-export function PresenterPage({ id }: { id: string }) {
-  const { request, connected } = useGatewayRpc();
+export function PresenterPage({ id, display }: { id: string; display?: boolean }) {
+  const { request, connected, subscribe, on } = useGatewayRpc();
   const [presentation, setPresentation] = useState<Presentation | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [showNotes, setShowNotes] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isDisplay = display === true;
+  const syncingRef = useRef(false);
 
   // Parse initial slide from hash
   useEffect(() => {
@@ -388,8 +390,36 @@ export function PresenterPage({ id }: { id: string }) {
       .finally(() => setLoading(false));
   }, [connected, request, id]);
 
+  // Subscribe to slide sync events (display mode follows presenter)
+  useEffect(() => {
+    if (!connected || !isDisplay) return;
+    subscribe(["presenter.slide_changed"]);
+    const unsub = on("presenter.slide_changed", (_event, raw) => {
+      const payload = raw as { presentationId: string; slide: number };
+      if (payload.presentationId === id) {
+        syncingRef.current = true;
+        setCurrentSlide(payload.slide);
+        window.history.replaceState(null, "", `#${payload.slide}`);
+        // Reset syncing flag after state update
+        setTimeout(() => {
+          syncingRef.current = false;
+        }, 50);
+      }
+    });
+    return unsub;
+  }, [connected, isDisplay, subscribe, on, id]);
+
   const totalSlides = presentation?.slides.length ?? 0;
   const slide = presentation?.slides[currentSlide];
+
+  // Broadcast slide change to display views
+  const broadcastSync = useCallback(
+    (slideNum: number) => {
+      if (isDisplay || syncingRef.current) return;
+      request("presenter.sync", { presentationId: id, slide: slideNum }).catch(() => {});
+    },
+    [isDisplay, request, id],
+  );
 
   // Navigation
   const goTo = useCallback(
@@ -397,8 +427,9 @@ export function PresenterPage({ id }: { id: string }) {
       const clamped = Math.max(0, Math.min(n, totalSlides - 1));
       setCurrentSlide(clamped);
       window.history.replaceState(null, "", `#${clamped}`);
+      broadcastSync(clamped);
     },
-    [totalSlides],
+    [totalSlides, broadcastSync],
   );
 
   const next = useCallback(() => goTo(currentSlide + 1), [goTo, currentSlide]);

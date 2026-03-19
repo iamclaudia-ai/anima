@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useGatewayClient } from "@claudia/ui";
 
 export function useGatewayRpc() {
-  const { call, isConnected } = useGatewayClient();
+  const { call, isConnected, client } = useGatewayClient();
 
   const request = useCallback(
     <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
@@ -11,5 +11,21 @@ export function useGatewayRpc() {
     [call],
   );
 
-  return { request, connected: isConnected };
+  const subscribe = useCallback(
+    (events: string[]) => {
+      if (!client) return Promise.reject(new Error("Not connected"));
+      return client.subscribe(events);
+    },
+    [client],
+  );
+
+  const on = useCallback(
+    (pattern: string, listener: (event: string, payload: unknown) => void) => {
+      if (!client) return () => {};
+      return client.on(pattern, listener);
+    },
+    [client],
+  );
+
+  return { request, connected: isConnected, subscribe, on };
 }
