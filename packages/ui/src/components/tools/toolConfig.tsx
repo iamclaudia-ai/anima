@@ -2,6 +2,7 @@ import {
   BookOpen,
   Brain,
   ClipboardList,
+  Compass,
   FileEdit,
   FilePen,
   FileText,
@@ -91,6 +92,11 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
       return {
         icon: <Zap className="size-2.5" />,
         colors: indigoColors,
+      };
+    case "Agent":
+      return {
+        icon: <Compass className="size-2.5" />,
+        colors: violetColors,
       };
     case "TodoWrite":
       return {
@@ -189,6 +195,15 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
         return desc.length > 25 ? `${desc.substring(0, 22)}...` : desc;
       }
       return "Task";
+    }
+    case "Agent": {
+      const desc = parsedInput.description as string | undefined;
+      const subagentType = parsedInput.subagent_type as string | undefined;
+      if (desc) {
+        return desc.length > 25 ? `${desc.substring(0, 22)}...` : desc;
+      }
+      if (subagentType) return subagentType;
+      return "Agent";
     }
     case "TaskCreate":
       return "Create Task";

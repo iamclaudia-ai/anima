@@ -88,6 +88,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
     case "TaskUpdate":
     case "TaskGet":
     case "TaskList":
+    case "Agent":
       return <TaskTool {...toolProps} />;
     case "TodoWrite":
       return <TodoWriteTool {...toolProps} />;
