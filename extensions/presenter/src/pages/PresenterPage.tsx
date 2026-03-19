@@ -586,6 +586,16 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
 
   const progress = totalSlides > 1 ? (currentSlide / (totalSlides - 1)) * 100 : 100;
 
+  // Scale the root font size — all rem-based Tailwind classes (text, spacing, etc.) scale naturally
+  useEffect(() => {
+    const html = document.documentElement;
+    const original = html.style.fontSize;
+    html.style.fontSize = `${scale * 100}%`;
+    return () => {
+      html.style.fontSize = original;
+    };
+  }, [scale]);
+
   return (
     <div
       className="fixed inset-0 bg-zinc-950 text-white overflow-hidden select-none"
@@ -628,14 +638,12 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
         />
       </div>
 
-      {/* Slide content — scaled via CSS transform */}
-      <div className="relative h-full w-full overflow-hidden" key={currentSlide}>
+      {/* Slide content */}
+      <div className="relative h-full w-full" key={currentSlide}>
         <div
-          className="h-full w-full origin-center"
+          className="h-full w-full"
           style={{
             animation: "fadeSlideIn 0.35s ease-out both",
-            transform: scale !== 1.0 ? `scale(${scale})` : undefined,
-            transition: "transform 0.2s ease-out",
           }}
         >
           <SlideRenderer slide={slide} />
