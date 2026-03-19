@@ -35,12 +35,20 @@ When the user asks you to **say something out loud**, **speak**, **announce**, o
 
 ## CLI Usage
 
-All methods are available via the Claudia CLI:
+All methods are available via the Claudia CLI. **Use dot notation for the `action` object** — this avoids JSON quoting issues that break in different shell contexts:
 
 ```bash
 # Use the CLI — NEVER use curl for gateway methods
 bun run packages/cli/src/index.ts <method> [--param value]
+
+# Dot notation for nested objects (PREFERRED — always works):
+--action.type notification --action.target "Hello world"
+
+# JSON string (FRAGILE — breaks with special chars, shell quoting):
+--action '{"type":"notification","target":"Hello world"}'
 ```
+
+**IMPORTANT:** Always use dot notation (`--action.type`, `--action.target`, `--action.payload.text`) instead of passing `--action` as a JSON string. JSON strings are fragile across shell contexts and caused failures during live demos.
 
 ## Methods
 
@@ -57,12 +65,13 @@ bun run packages/cli/src/index.ts <method> [--param value]
 | `intervalSeconds` | number | For interval type | Repeat interval in seconds |
 | `action` | object | Yes | What to do when task fires |
 
-**Action object:**
+**Action object (use dot notation):**
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `"notification"` \| `"emit"` \| `"extension_call"` | Action type |
-| `target` | string | Message text (notification), event name (emit), or method name (extension_call) |
-| `payload` | object | Optional payload data |
+| `action.type` | `"notification"` \| `"emit"` \| `"extension_call"` | Action type |
+| `action.target` | string | Message text (notification), event name (emit), or method name (extension_call) |
+| `action.payload.text` | string | For voice.speak — the text to speak |
+| `action.payload.*` | any | Optional payload fields |
 
 ### `scheduler.list_tasks` — List all pending tasks
 
@@ -88,7 +97,8 @@ No parameters. Returns task counts and health status.
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Presentation Reminder" \
   --delaySeconds 600 \
-  --action '{"type":"notification","target":"10 minutes have passed — time to wrap up the presentation!"}'
+  --action.type notification \
+  --action.target "10 minutes have passed — time to wrap up the presentation!"
 ```
 
 ### One-shot notification (absolute time)
@@ -99,7 +109,8 @@ bun run packages/cli/src/index.ts scheduler.add_task \
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Afternoon Check-in" \
   --fireAt "2026-03-20T14:30:00.000-04:00" \
-  --action '{"type":"notification","target":"Time for your 2:30 check-in!"}'
+  --action.type notification \
+  --action.target "Time for your 2:30 check-in!"
 ```
 
 ### Recurring interval task
@@ -112,7 +123,8 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --type interval \
   --delaySeconds 3600 \
   --intervalSeconds 3600 \
-  --action '{"type":"extension_call","target":"memory.health_check"}'
+  --action.type extension_call \
+  --action.target memory.health_check
 ```
 
 ### Emit a custom gateway event
@@ -123,7 +135,10 @@ bun run packages/cli/src/index.ts scheduler.add_task \
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Custom Event" \
   --delaySeconds 30 \
-  --action '{"type":"emit","target":"my.custom_event","payload":{"source":"scheduler","data":"hello"}}'
+  --action.type emit \
+  --action.target my.custom_event \
+  --action.payload.source scheduler \
+  --action.payload.data hello
 ```
 
 ### Voice announcement (say it out loud)
@@ -134,7 +149,9 @@ bun run packages/cli/src/index.ts scheduler.add_task \
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Voice Announcement" \
   --delaySeconds 300 \
-  --action '{"type":"extension_call","target":"voice.speak","payload":{"text":"Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."}}'
+  --action.type extension_call \
+  --action.target voice.speak \
+  --action.payload.text "Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."
 ```
 
 ### Notification + Voice combo (best for demos)
@@ -146,13 +163,16 @@ When you want BOTH a visible toast AND spoken audio, schedule TWO tasks at the s
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Memory Report — Notification" \
   --delaySeconds 600 \
-  --action '{"type":"notification","target":"Finished processing 3 new conversations. 2 relationship updates, 1 new milestone detected. Memory indexes updated."}'
+  --action.type notification \
+  --action.target "Finished processing 3 new conversations. 2 relationship updates, 1 new milestone detected. Memory indexes updated."
 
 # Task 2: Voice announcement (spoken out loud via TTS)
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Memory Report — Voice" \
   --delaySeconds 600 \
-  --action '{"type":"extension_call","target":"voice.speak","payload":{"text":"Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."}}'
+  --action.type extension_call \
+  --action.target voice.speak \
+  --action.payload.text "Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."
 ```
 
 ### List and cancel tasks
@@ -196,4 +216,4 @@ bun run packages/cli/src/index.ts scheduler.cancel_task --taskId "78f31c98-35a4-
 - The check loop runs every **5 seconds**, so tasks may fire up to 5s after their scheduled time
 - The `delaySeconds` param computes `fireAt` relative to the current time when the task is created
 - For interval tasks, set BOTH `delaySeconds` (first fire) and `intervalSeconds` (subsequent fires)
-- Always use `--action` as a JSON string when using the CLI
+- **Always use dot notation** (`--action.type`, `--action.target`, `--action.payload.text`) instead of JSON strings for the `action` parameter

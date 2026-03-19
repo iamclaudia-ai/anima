@@ -120,12 +120,36 @@ export function coerceValue(value: string): unknown {
   ) {
     try {
       return JSON.parse(value);
-    } catch {
-      return value;
+    } catch (e) {
+      throw new Error(
+        `Failed to parse JSON parameter: ${value}\n${String(e)}\nHint: Wrap JSON in single quotes — --param '{"key":"value"}'`,
+      );
     }
   }
 
   return value;
+}
+
+/**
+ * Set a value at a dot-separated path in a nested object.
+ * e.g. setNestedValue(obj, "action.type", "notification")
+ *   → obj.action = { type: "notification" }
+ */
+function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const parts = path.split(".");
+  let current: Record<string, unknown> = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (
+      current[part] === undefined ||
+      typeof current[part] !== "object" ||
+      current[part] === null
+    ) {
+      current[part] = {};
+    }
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]] = value;
 }
 
 export function parseCliParams(rawArgs: string[]): Record<string, unknown> {
@@ -140,22 +164,32 @@ export function parseCliParams(rawArgs: string[]): Record<string, unknown> {
     const flag = token.slice(2);
     if (!flag) throw new Error("Invalid flag: --");
 
+    let key: string;
+    let raw: string | undefined;
+
     const eqIdx = flag.indexOf("=");
     if (eqIdx >= 0) {
-      const key = flag.slice(0, eqIdx);
-      const raw = flag.slice(eqIdx + 1);
-      params[key] = coerceValue(raw);
-      continue;
+      key = flag.slice(0, eqIdx);
+      raw = flag.slice(eqIdx + 1);
+    } else {
+      key = flag;
+      const next = rawArgs[i + 1];
+      if (!next || next.startsWith("--")) {
+        setNestedValue(params, key, true);
+        continue;
+      }
+      raw = next;
+      i += 1;
     }
 
-    const next = rawArgs[i + 1];
-    if (!next || next.startsWith("--")) {
-      params[flag] = true;
-      continue;
-    }
+    const value = coerceValue(raw);
 
-    params[flag] = coerceValue(next);
-    i += 1;
+    // Support dot notation: --action.type notification → { action: { type: "notification" } }
+    if (key.includes(".")) {
+      setNestedValue(params, key, value);
+    } else {
+      params[key] = value;
+    }
   }
 
   return params;

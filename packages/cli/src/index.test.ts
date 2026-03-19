@@ -59,6 +59,44 @@ describe("cli parsing", () => {
   it("rejects invalid empty flag token", () => {
     expect(() => parseCliParams(["--"])).toThrow("Invalid flag: --");
   });
+
+  it("supports dot notation for nested objects", () => {
+    const params = parseCliParams([
+      "--name",
+      "My Task",
+      "--action.type",
+      "notification",
+      "--action.target",
+      "Hello world",
+    ]);
+    expect(params).toEqual({
+      name: "My Task",
+      action: { type: "notification", target: "Hello world" },
+    });
+  });
+
+  it("supports deeply nested dot notation", () => {
+    const params = parseCliParams([
+      "--action.type",
+      "extension_call",
+      "--action.target",
+      "voice.speak",
+      "--action.payload.text",
+      "I love you",
+    ]);
+    expect(params).toEqual({
+      action: {
+        type: "extension_call",
+        target: "voice.speak",
+        payload: { text: "I love you" },
+      },
+    });
+  });
+
+  it("supports dot notation with = syntax", () => {
+    const params = parseCliParams(["--action.type=notification"]);
+    expect(params).toEqual({ action: { type: "notification" } });
+  });
 });
 
 describe("schema resolution and validation", () => {
