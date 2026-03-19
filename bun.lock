@@ -5,6 +5,7 @@
     "": {
       "name": "claudia",
       "dependencies": {
+        "@anthropic-ai/claude-agent-sdk": "^0.2.79",
         "@google/genai": "1.43.0",
         "dockview": "5.1.0",
         "dockview-react": "5.1.0",
@@ -190,7 +191,6 @@
       "name": "@claudia/extension-session",
       "version": "0.1.0",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.2.79",
         "@claudia/extension-host": "workspace:*",
         "@claudia/shared": "workspace:*",
       },
@@ -212,7 +212,6 @@
       "name": "@claudia/agent-host",
       "version": "0.1.0",
       "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.2.79",
         "@claudia/shared": "workspace:*",
         "@openai/codex-sdk": "^0.104.0",
         "zod": "^3.25.76",
