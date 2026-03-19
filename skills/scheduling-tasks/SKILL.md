@@ -1,6 +1,6 @@
 ---
 name: scheduling-tasks
-description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, or run recurring background jobs. Uses the Claudia scheduler extension for durable server-side task scheduling with JSON file persistence. Covers one-shot delays, absolute timestamps, interval tasks, notifications, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically."
+description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Claudia scheduler extension for durable server-side task scheduling with JSON file persistence. Covers one-shot delays, absolute timestamps, interval tasks, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
 ---
 
 # Scheduling Tasks
@@ -15,6 +15,15 @@ Use this skill when the user wants to schedule a future task, set a reminder, cr
 - User wants to trigger an extension method on a schedule
 - User wants to emit a gateway event at a future time
 - User wants to list or cancel existing scheduled tasks
+- User says "say something in 10 minutes", "speak it", "announce", "tell me out loud" — use `voice.speak` via `extension_call`
+
+## Voice Integration
+
+When the user asks you to **say something out loud**, **speak**, **announce**, or **tell them verbally** on a schedule, use the `extension_call` action targeting `voice.speak`. The voice extension synthesizes text to speech via Cartesia TTS.
+
+**Trigger phrases for voice:** "say it out loud", "speak it", "announce it", "tell me", "voice reminder", "say something in X minutes"
+
+**Best practice for demos:** Schedule TWO tasks at the same delay — one `notification` (toast + browser notification) and one `extension_call` to `voice.speak` (audio). This ensures the notification is both visible AND audible.
 
 ## Architecture
 
@@ -115,6 +124,35 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Custom Event" \
   --delaySeconds 30 \
   --action '{"type":"emit","target":"my.custom_event","payload":{"source":"scheduler","data":"hello"}}'
+```
+
+### Voice announcement (say it out loud)
+
+"Say something out loud in 5 minutes" or "announce in 10 minutes that processing is done":
+
+```bash
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Voice Announcement" \
+  --delaySeconds 300 \
+  --action '{"type":"extension_call","target":"voice.speak","payload":{"text":"Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."}}'
+```
+
+### Notification + Voice combo (best for demos)
+
+When you want BOTH a visible toast AND spoken audio, schedule TWO tasks at the same delay:
+
+```bash
+# Task 1: Visual notification (toast + browser notification)
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Memory Report — Notification" \
+  --delaySeconds 600 \
+  --action '{"type":"notification","target":"Finished processing 3 new conversations. 2 relationship updates, 1 new milestone detected. Memory indexes updated."}'
+
+# Task 2: Voice announcement (spoken out loud via TTS)
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Memory Report — Voice" \
+  --delaySeconds 600 \
+  --action '{"type":"extension_call","target":"voice.speak","payload":{"text":"Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."}}'
 ```
 
 ### List and cancel tasks
