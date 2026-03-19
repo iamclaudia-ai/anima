@@ -33,6 +33,7 @@ export function PresenterNotesPage({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [startTime] = useState(() => Date.now());
+  const [scale, setScale] = useState(1.0);
 
   // Timer
   useEffect(() => {
@@ -57,11 +58,37 @@ export function PresenterNotesPage({ id }: { id: string }) {
 
   // Broadcast sync to display views
   const broadcastSync = useCallback(
-    (slideNum: number) => {
-      request("presenter.sync", { presentationId: id, slide: slideNum }).catch(() => {});
+    (slideNum: number, newScale?: number) => {
+      request("presenter.sync", {
+        presentationId: id,
+        slide: slideNum,
+        scale: newScale ?? scale,
+      }).catch(() => {});
     },
-    [request, id],
+    [request, id, scale],
   );
+
+  // Zoom controls
+  const zoomIn = useCallback(() => {
+    setScale((s) => {
+      const next = Math.min(s + 0.1, 2.0);
+      broadcastSync(currentSlide, next);
+      return next;
+    });
+  }, [broadcastSync, currentSlide]);
+
+  const zoomOut = useCallback(() => {
+    setScale((s) => {
+      const next = Math.max(s - 0.1, 0.5);
+      broadcastSync(currentSlide, next);
+      return next;
+    });
+  }, [broadcastSync, currentSlide]);
+
+  const zoomReset = useCallback(() => {
+    setScale(1.0);
+    broadcastSync(currentSlide, 1.0);
+  }, [broadcastSync, currentSlide]);
 
   // Navigation
   const goTo = useCallback(
@@ -101,6 +128,20 @@ export function PresenterNotesPage({ id }: { id: string }) {
           e.preventDefault();
           goTo(totalSlides - 1);
           break;
+        case "=":
+        case "+":
+          e.preventDefault();
+          zoomIn();
+          break;
+        case "-":
+        case "_":
+          e.preventDefault();
+          zoomOut();
+          break;
+        case "0":
+          e.preventDefault();
+          zoomReset();
+          break;
         case "Escape":
           e.preventDefault();
           navigate("/present");
@@ -110,7 +151,7 @@ export function PresenterNotesPage({ id }: { id: string }) {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [next, prev, goTo, totalSlides]);
+  }, [next, prev, goTo, totalSlides, zoomIn, zoomOut, zoomReset]);
 
   // Format elapsed time
   const formatTime = (secs: number) => {
@@ -167,9 +208,32 @@ export function PresenterNotesPage({ id }: { id: string }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs text-white/30 mr-2">
-            Display: <code className="text-violet-400/60">/present/{id}/display</code>
-          </span>
+          {/* Zoom controls */}
+          <div className="flex items-center gap-1 mr-3 border-r border-white/5 pr-3">
+            <span className="text-[10px] text-white/20 uppercase tracking-wider mr-1.5">Zoom</span>
+            <button
+              onClick={zoomOut}
+              className="w-6 h-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
+              title="Zoom out (−)"
+            >
+              −
+            </button>
+            <button
+              onClick={zoomReset}
+              className="px-1.5 h-6 rounded text-[10px] font-mono tabular-nums bg-white/5 border border-white/10 text-white/40 hover:text-white/80 hover:bg-white/10 transition-all min-w-[40px]"
+              title="Reset zoom (0)"
+            >
+              {Math.round(scale * 100)}%
+            </button>
+            <button
+              onClick={zoomIn}
+              className="w-6 h-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
+              title="Zoom in (+)"
+            >
+              +
+            </button>
+          </div>
+
           <button
             onClick={prev}
             disabled={currentSlide === 0}

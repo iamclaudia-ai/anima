@@ -119,6 +119,7 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
         inputSchema: z.object({
           presentationId: z.string(),
           slide: z.number(),
+          scale: z.number().optional().describe("Display zoom level (default 1.0)"),
         }),
       },
     ],
@@ -157,9 +158,13 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
         }
 
         case "presenter.sync": {
-          const { presentationId, slide } = params as { presentationId: string; slide: number };
-          ctx?.emit("presenter.slide_changed", { presentationId, slide });
-          return { ok: true, slide };
+          const { presentationId, slide, scale } = params as {
+            presentationId: string;
+            slide: number;
+            scale?: number;
+          };
+          ctx?.emit("presenter.slide_changed", { presentationId, slide, scale });
+          return { ok: true, slide, scale };
         }
 
         default:

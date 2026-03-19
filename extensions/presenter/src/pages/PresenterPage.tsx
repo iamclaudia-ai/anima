@@ -369,8 +369,10 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
   const [showNotes, setShowNotes] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scale, setScale] = useState(1.0);
   const isDisplay = display === true;
   const syncingRef = useRef(false);
+  const scaleRef = useRef(1.0);
 
   // Parse initial slide from hash
   useEffect(() => {
@@ -395,10 +397,14 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
     if (!connected || !isDisplay) return;
     subscribe(["presenter.slide_changed"]);
     const unsub = on("presenter.slide_changed", (_event, raw) => {
-      const payload = raw as { presentationId: string; slide: number };
+      const payload = raw as { presentationId: string; slide: number; scale?: number };
       if (payload.presentationId === id) {
         syncingRef.current = true;
         setCurrentSlide(payload.slide);
+        if (payload.scale !== undefined) {
+          setScale(payload.scale);
+          scaleRef.current = payload.scale;
+        }
         window.history.replaceState(null, "", `#${payload.slide}`);
         // Reset syncing flag after state update
         setTimeout(() => {
@@ -414,9 +420,13 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
 
   // Broadcast slide change to display views
   const broadcastSync = useCallback(
-    (slideNum: number) => {
+    (slideNum: number, newScale?: number) => {
       if (isDisplay || syncingRef.current) return;
-      request("presenter.sync", { presentationId: id, slide: slideNum }).catch(() => {});
+      request("presenter.sync", {
+        presentationId: id,
+        slide: slideNum,
+        scale: newScale ?? scaleRef.current,
+      }).catch(() => {});
     },
     [isDisplay, request, id],
   );
@@ -475,6 +485,32 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
           e.preventDefault();
           setShowNotes((v) => !v);
           break;
+        case "=":
+        case "+":
+          e.preventDefault();
+          setScale((s) => {
+            const next = Math.min(s + 0.1, 2.0);
+            scaleRef.current = next;
+            broadcastSync(currentSlide, next);
+            return next;
+          });
+          break;
+        case "-":
+        case "_":
+          e.preventDefault();
+          setScale((s) => {
+            const next = Math.max(s - 0.1, 0.5);
+            scaleRef.current = next;
+            broadcastSync(currentSlide, next);
+            return next;
+          });
+          break;
+        case "0":
+          e.preventDefault();
+          setScale(1.0);
+          scaleRef.current = 1.0;
+          broadcastSync(currentSlide, 1.0);
+          break;
         case "Escape":
           e.preventDefault();
           if (document.fullscreenElement) {
@@ -488,7 +524,7 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [next, prev, goTo, totalSlides]);
+  }, [next, prev, goTo, totalSlides, broadcastSync, currentSlide]);
 
   // Touch/swipe support
   useEffect(() => {
@@ -592,17 +628,26 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
         />
       </div>
 
-      {/* Slide content */}
-      <div className="relative h-full w-full" key={currentSlide}>
+      {/* Slide content — scaled via CSS transform */}
+      <div className="relative h-full w-full overflow-hidden" key={currentSlide}>
         <div
-          className="h-full w-full"
+          className="h-full w-full origin-center"
           style={{
             animation: "fadeSlideIn 0.35s ease-out both",
+            transform: scale !== 1.0 ? `scale(${scale})` : undefined,
+            transition: "transform 0.2s ease-out",
           }}
         >
           <SlideRenderer slide={slide} />
         </div>
       </div>
+
+      {/* Scale indicator — shows briefly when not 1.0 */}
+      {scale !== 1.0 && (
+        <div className="absolute top-4 left-6 text-xs text-white/20 tabular-nums font-mono z-10">
+          {Math.round(scale * 100)}%
+        </div>
+      )}
 
       {/* Progress bar — thin line at bottom */}
       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/5">
