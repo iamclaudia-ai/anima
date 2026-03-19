@@ -5,7 +5,7 @@
  * Supports :param patterns, back/forward, and Link components.
  */
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
 import type { LayoutDefinition, LayoutNode } from "@claudia/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
@@ -23,6 +23,8 @@ export interface Route {
   layout?: string;
   label?: string;
   icon?: string;
+  /** Browser tab title — shown as "title — Claudia". Falls back to label. */
+  title?: string;
 }
 
 interface RouterState {
@@ -69,6 +71,33 @@ const RouterContext = createContext<RouterState>({
 
 export function useRouter(): RouterState {
   return useContext(RouterContext);
+}
+
+// ── Document Title ───────────────────────────────────────────
+
+const BASE_TITLE = "Claudia";
+
+function setDocumentTitle(title?: string): void {
+  document.title = title ? `${title} — ${BASE_TITLE}` : BASE_TITLE;
+}
+
+/**
+ * Hook to set a dynamic document title from any page component.
+ * Overrides the route's static title. Restores on unmount.
+ *
+ * Usage: useDocumentTitle("My Workspace")  →  "My Workspace — Claudia"
+ * Usage: useDocumentTitle(workspace?.name)  →  updates when name changes
+ */
+export function useDocumentTitle(title: string | undefined | null): void {
+  const previousRef = useRef(document.title);
+
+  useEffect(() => {
+    const prev = previousRef.current;
+    if (title) setDocumentTitle(title);
+    return () => {
+      document.title = prev;
+    };
+  }, [title]);
 }
 
 // ── Router Component ─────────────────────────────────────────
@@ -120,6 +149,7 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
       if (route.layout && layouts && panelRegistry) {
         const layoutDef = layouts[route.layout];
         if (layoutDef) {
+          setDocumentTitle(route.title ?? route.label);
           const layoutNode: LayoutNode =
             isMobile && layoutDef.mobile ? layoutDef.mobile : layoutDef.default;
           return (
@@ -136,6 +166,7 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
 
       // Component-based route (backward compatible)
       if (route.component) {
+        setDocumentTitle(route.title ?? route.label);
         const Component = route.component;
         return (
           <RouterContext.Provider value={{ pathname, params, navigate: nav }}>

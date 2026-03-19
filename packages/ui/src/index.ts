@@ -26,7 +26,7 @@ export type {
 } from "./types";
 
 // Router
-export { Router, Link, useRouter, navigate, matchPath } from "./router";
+export { Router, Link, useRouter, navigate, matchPath, useDocumentTitle } from "./router";
 export type { Route } from "./router";
 
 // Hooks

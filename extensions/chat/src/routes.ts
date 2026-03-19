@@ -33,7 +33,12 @@ export const chatLayouts: Record<string, LayoutDefinition> = {
 // ── Routes ──────────────────────────────────────────────────
 
 export const chatRoutes: Route[] = [
-  { path: "/", layout: "ide", label: "Claudia" },
-  { path: "/workspace/:workspaceId", layout: "ide", label: "Workspace" },
-  { path: "/workspace/:workspaceId/session/:sessionId", layout: "ide", label: "Chat" },
+  { path: "/", layout: "ide", title: "Chat", label: "Claudia" },
+  { path: "/workspace/:workspaceId", layout: "ide", title: "Workspace", label: "Workspace" },
+  {
+    path: "/workspace/:workspaceId/session/:sessionId",
+    layout: "ide",
+    title: "Chat",
+    label: "Chat",
+  },
 ];
