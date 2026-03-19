@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.39",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.79",
     "@claudia/shared": "workspace:*",
     "@openai/codex-sdk": "^0.104.0",
     "zod": "^3.25.76"
