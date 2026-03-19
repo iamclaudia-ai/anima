@@ -650,13 +650,6 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
         </div>
       </div>
 
-      {/* Scale indicator — shows briefly when not 1.0 */}
-      {scale !== 1.0 && (
-        <div className="absolute top-4 left-6 text-xs text-white/20 tabular-nums font-mono z-10">
-          {Math.round(scale * 100)}%
-        </div>
-      )}
-
       {/* Progress bar — thin line at bottom */}
       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/5">
         <div
