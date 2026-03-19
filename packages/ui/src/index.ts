@@ -54,5 +54,6 @@ export { TaskActivityStrip } from "./components/TaskActivityStrip";
 export { LayoutManager } from "./components/LayoutManager";
 export type { PanelRegistration, PanelRegistry } from "./components/LayoutManager";
 export { ErrorBoundary } from "./components/ErrorBoundary";
+export { GlobalNotifications } from "./components/GlobalNotifications";
 export { NavigationDrawer } from "./components/NavigationDrawer";
 export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";

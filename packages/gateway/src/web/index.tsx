@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { Router, ErrorBoundary, GatewayClientProvider } from "@claudia/ui";
+import { Router, ErrorBoundary, GatewayClientProvider, GlobalNotifications } from "@claudia/ui";
 import type { PanelRegistry } from "@claudia/ui";
 import type { LayoutDefinition } from "@claudia/shared";
 import "@claudia/ui/styles";
@@ -67,7 +67,9 @@ const allLayouts: Record<string, LayoutDefinition> = {
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
     <GatewayClientProvider>
-      <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+      <GlobalNotifications>
+        <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+      </GlobalNotifications>
     </GatewayClientProvider>
   </ErrorBoundary>,
 );
