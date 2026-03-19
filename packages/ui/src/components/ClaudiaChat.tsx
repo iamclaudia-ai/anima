@@ -42,11 +42,6 @@ function ChatInner({
   onBack?: () => void;
 }) {
   const bridge = useBridge();
-  const gateway = useChatGateway(bridge.gatewayUrl, gatewayOptions);
-  const audio = useAudioPlayback(gateway);
-
-  const [input, setInput] = useState(() => bridge.loadDraft());
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
     try {
       return localStorage.getItem("claudia:voice") === "true";
@@ -100,6 +95,15 @@ function ChatInner({
   const getVoiceTags = useCallback(() => {
     return voiceEnabledRef.current ? (["voice.speak"] as string[]) : undefined;
   }, []);
+
+  const gateway = useChatGateway(bridge.gatewayUrl, {
+    ...gatewayOptions,
+    getDefaultTags: getVoiceTags,
+  });
+  const audio = useAudioPlayback(gateway);
+
+  const [input, setInput] = useState(() => bridge.loadDraft());
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const shouldShowThinkingPanel = ENABLE_THINKING_TUNER
     ? thinkingVisible
     : gateway.isQuerying || gateway.isCompacting;
@@ -160,9 +164,9 @@ function ChatInner({
   /** For interactive tools to send tool_result directly */
   const handleToolResult = useCallback(
     (toolUseId: string, content: string, isError?: boolean) => {
-      gateway.sendToolResult(toolUseId, content, isError);
+      gateway.sendToolResult(toolUseId, content, isError, getVoiceTags());
     },
-    [gateway],
+    [gateway, getVoiceTags],
   );
 
   return (

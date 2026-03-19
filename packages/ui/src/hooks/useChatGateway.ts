@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useImmer } from "use-immer";
 import { useGatewayClient } from "./useGatewayClient";
+import { mergeRequestTags } from "./requestTags";
 import type {
   Message,
   ContentBlock,
@@ -76,6 +77,12 @@ export interface UseChatGatewayOptions {
    * When set, sends session.get_or_create_workspace on connect.
    */
   autoDiscoverCwd?: string;
+
+  /**
+   * Optional default tags that should be attached to session-affecting requests.
+   * Used by the web UI to persist things like voice.speak across prompt continuations.
+   */
+  getDefaultTags?: () => string[] | undefined;
 }
 
 // ─── Return Type ─────────────────────────────────────────────
@@ -106,7 +113,7 @@ export interface UseChatGatewayReturn {
   /** Whether user is scrolled to bottom (for auto-scroll indicator) */
   isAtBottom: boolean;
   sendPrompt(text: string, attachments: Attachment[], tags?: string[]): void;
-  sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
+  sendToolResult(toolUseId: string, content: string, isError?: boolean, tags?: string[]): void;
   sendInterrupt(): void;
   loadEarlierMessages(): void;
   createNewSession(title?: string): void;
@@ -1177,19 +1184,27 @@ export function useChatGateway(
         sessionId: sid,
         cwd: workspaceRef.current?.cwd,
       };
-      sendRequest("session.send_prompt", params, tags);
+      sendRequest(
+        "session.send_prompt",
+        params,
+        mergeRequestTags(tags, optionsRef.current.getDefaultTags?.()),
+      );
     },
     [isConnected, sendRequest, setMessages, stopToolTickSimulation],
   );
 
   const sendToolResult = useCallback(
-    (toolUseId: string, content: string, isError = false) => {
+    (toolUseId: string, content: string, isError = false, tags?: string[]) => {
       const sid = sessionIdRef.current;
       if (!sid) {
         console.warn("[sendToolResult] missing sessionId");
         return;
       }
-      sendRequest("session.send_tool_result", { sessionId: sid, toolUseId, content, isError });
+      sendRequest(
+        "session.send_tool_result",
+        { sessionId: sid, toolUseId, content, isError },
+        mergeRequestTags(tags, optionsRef.current.getDefaultTags?.()),
+      );
     },
     [sendRequest],
   );
