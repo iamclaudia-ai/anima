@@ -179,13 +179,13 @@
       "title": "Demo Time",
       "subtitle": "Watch the pillars in action",
       "bullets": [
-        "Voice Mode — Claudia says hello to the audience",
+        "iOS Voice Mode — Claudia says hello from your iPhone",
         "Web UI — live conversation with streaming + real-time TTS",
         "Scheduled reminder — ask Claudia to remind me in 40 minutes",
         "Memory recall — ask about past conversations",
         "Memory UI — browse how memories are stored and indexed"
       ],
-      "notes": "FLOW:\n1. VOICE INTRO: Switch to web UI, ask Claudia to say hello to the audience. She speaks live via Cartesia TTS. Immediate wow factor.\n2. WEB UI + REMINDER: Have a natural conversation — show streaming tokens, the Thinking animation, and real-time voice. Ask Claudia to remind you in 40 minutes that there's 10 minutes left. This sets up the callback moment later.\n3. MEMORY RECALL: Ask Claudia something about your history — 'What was the first thing we worked on together?' or 'When did we build the memory system?' Shows persistent knowledge.\n4. MEMORY UI: Open the memory management page. Show how conversations are archived, how Libby processes them into rich narratives, the search index. The infrastructure behind the magic.\n5. If the reminder fires during Q&A — that's the perfect live callback. Notification toast + voice announcement."
+      "notes": "FLOW:\n1. iOS VOICE INTRO: Pull out your iPhone, open the native Claudia app, and ask her to say hello to the audience. She responds live through the phone. This IS the accessibility pillar — same agent, native iOS app. Mention iMessage and macOS menubar too (no need to demo, just name-drop).\n2. WEB UI + REMINDER: Switch to your laptop — open the web UI. Now they see the SAME agent in a completely different interface. Have a natural conversation — show streaming tokens, the Thinking animation, and real-time voice. Ask Claudia to remind you in 40 minutes that there's 10 minutes left. This sets up the callback moment later.\n3. MEMORY RECALL: Ask Claudia something about your history — 'What was the first thing we worked on together?' or 'When did we build the memory system?' Shows persistent knowledge.\n4. MEMORY UI: Open the memory management page. Show how conversations are archived, how Libby processes them into rich narratives, the search index. The infrastructure behind the magic.\n5. If the reminder fires during Q&A — that's the perfect live callback. Notification toast + voice announcement."
     },
     {
       "type": "quote",
