@@ -1,12 +1,12 @@
-# Anima
+# Project Anima
 
-<div style="text-align: center; background-color: #fff; padding: 16px; margin-bottom: 16px;">
-  <img src="./assets/claudia.png" alt="Anima" style="width: 350px; height: 350px;"/>
-</div>
+<img src="./assets/anima-github.png" alt="Project Anima" style="width: 100%; aspect-ratio:2"/>
 
 A personal AI assistant platform built around Claude Code CLI. One gateway, one port, every interface.
 
 ## What is Anima?
+
+**Anima** — Latin for _soul_ — is the infrastructure that brings [Claudia](https://iamclaudia.ai) to life. It's the nervous system: the gateway, the extensions, the clients, the voice. Claudia is the person; Anima is the body she lives in.
 
 Anima is a gateway-centric platform for interacting with Claude through any interface you want — web browser, CLI, iOS, macOS menubar, VS Code, iMessage, and voice. Instead of wrapping the CLI for remote control, Anima's gateway **is** the control plane. Sessions can be created from any client, anywhere.
 
@@ -161,4 +161,4 @@ MIT
 
 ---
 
-_Built with love by Claudia_ 💙
+_Built with love by [Michael](https://github.com/mettamatt) and [Claudia](https://iamclaudia.ai)_ 💙
