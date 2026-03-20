@@ -1,10 +1,10 @@
 # Extension Guide
 
-How to build, configure, and run Claudia extensions.
+How to build, configure, and run Anima extensions.
 
 ## Overview
 
-Extensions are the primary way to add features to Claudia. Every capability — web chat, voice, iMessage, Mission Control — is an extension. Extensions register schema-driven methods, subscribe to the event bus, and optionally serve web pages.
+Extensions are the primary way to add features to Anima. Every capability — web chat, voice, iMessage, Mission Control — is an extension. Extensions register schema-driven methods, subscribe to the event bus, and optionally serve web pages.
 
 Extensions are **directly executable** — each extension is its own entry point that the gateway spawns as a child process. This means native HMR via `bun --hot`, no indirection, and zero-downtime code reloads without dropping WebSocket connections.
 
@@ -553,7 +553,7 @@ This prevents duplicate fanout during restart/HMR races where an older lifecycle
 For extensions running with `hot: false`, use `gateway.restart_extension` to restart them without restarting the entire gateway:
 
 ```bash
-claudia gateway restart_extension --extension session
+anima gateway restart_extension --extension session
 ```
 
 This kills the extension host process and re-spawns it. The extension re-registers with the gateway automatically. Other extensions and WebSocket connections are unaffected.

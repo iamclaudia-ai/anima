@@ -1,18 +1,18 @@
-# Claudia
+# Anima
 
 <div style="text-align: center; background-color: #fff; padding: 16px; margin-bottom: 16px;">
-  <img src="./assets/claudia.png" alt="Claudia" style="width: 350px; height: 350px;"/>
+  <img src="./assets/claudia.png" alt="Anima" style="width: 350px; height: 350px;"/>
 </div>
 
 A personal AI assistant platform built around Claude Code CLI. One gateway, one port, every interface.
 
-## What is Claudia?
+## What is Anima?
 
-Claudia is a gateway-centric platform for interacting with Claude through any interface you want — web browser, CLI, iOS, macOS menubar, VS Code, iMessage, and voice. Instead of wrapping the CLI for remote control, Claudia's gateway **is** the control plane. Sessions can be created from any client, anywhere.
+Anima is a gateway-centric platform for interacting with Claude through any interface you want — web browser, CLI, iOS, macOS menubar, VS Code, iMessage, and voice. Instead of wrapping the CLI for remote control, Anima's gateway **is** the control plane. Sessions can be created from any client, anywhere.
 
 **Ports:**
 
-- **30086** — Gateway (SHA256("Claudia") = `7586...`)
+- **30086** — Gateway
 - **30087** — Agent Host (SDK process isolation)
 
 ```
@@ -56,7 +56,7 @@ Claudia is a gateway-centric platform for interacting with Claude through any in
 # Install dependencies
 bun install
 
-# Start Claudia (single command — serves web UI + WebSocket + extensions)
+# Start Anima (single command — serves web UI + WebSocket + extensions)
 bun run dev
 
 # Open http://localhost:30086
@@ -94,7 +94,7 @@ Server extension code is config-driven and runs out-of-process by default: gatew
 ## Project Structure
 
 ```
-claudia/
+anima/
 ├── packages/
 │   ├── gateway/          # Event bus + extension host
 │   ├── agent-host/       # SDK process isolation server (Claude, Codex)

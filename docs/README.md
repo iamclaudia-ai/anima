@@ -1,6 +1,6 @@
-# Claudia Documentation
+# Anima Documentation
 
-Detailed design docs for Claudia's architecture, APIs, and subsystems.
+Detailed design docs for Anima's architecture, APIs, and subsystems.
 
 For a high-level overview, see the [project README](../README.md). For dev setup and tooling, see [DEVELOPMENT.md](../DEVELOPMENT.md).
 

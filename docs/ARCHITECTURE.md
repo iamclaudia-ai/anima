@@ -1,8 +1,8 @@
-# Claudia Architecture
+# Anima Architecture
 
 ## System Overview
 
-Claudia is a three-tier system:
+Anima is a three-tier system:
 
 1. **Watchdog** (port 30085) — Process supervisor
 2. **Agent Host** (port 30087) — SDK process isolation
@@ -466,7 +466,7 @@ Watchdog (port 30085)
 | 30085 | Watchdog | Process supervisor + dashboard      |
 | 30086 | Gateway  | HTTP + WebSocket + SPA + Extensions |
 
-Port 30086 = SHA256("Claudia") → x7586 → 30086
+Port 30086 is the fixed gateway port for Anima.
 
 ## File Map
 

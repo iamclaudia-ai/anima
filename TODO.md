@@ -79,7 +79,7 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
 - [x] **Voice Extension** - ElevenLabs TTS ✅
 - [x] **iMessage Extension** - imsg CLI integration ✅
   - Multimodal support (images, voice messages)
-  - Sender filtering (claudia@iamclaudia.ai)
+  - Sender filtering (anima@iamclaudia.ai)
   - Source routing for responses
 - [~] **Memory Extension** - _partially complete_
   - [x] MCP server (`@anima/memory-mcp`) with tools: remember, recall, read, list, sections, sync

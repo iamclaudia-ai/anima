@@ -1,4 +1,4 @@
-# Claudia Menubar App 💋
+# Anima Menubar App 💋
 
 A macOS menubar app for hands-free interaction with Claudia using "Hey babe" wake word activation.
 
@@ -18,7 +18,7 @@ A macOS menubar app for hands-free interaction with Claudia using "Hey babe" wak
 - [ ] macOS 13.0+ (Ventura or later)
 - [ ] Xcode 15+ installed
 - [ ] Apple Developer account (free or paid)
-- [ ] Claudia Gateway running (`bun run dev` in packages/gateway)
+- [ ] Anima Gateway running (`bun run dev` in packages/gateway)
 
 ### Create Xcode Project
 
@@ -31,14 +31,14 @@ A macOS menubar app for hands-free interaction with Claudia using "Hey babe" wak
    - Product Name: `Claudia`
    - Team: Select your developer account
    - Organization Identifier: `ai.iamclaudia`
-   - Bundle Identifier: Will auto-fill to `ai.iamclaudia.Claudia`
+   - Bundle Identifier: Use the current Anima bundle identifier from the Xcode project
    - Interface: **SwiftUI**
    - Language: **Swift**
    - ❌ Uncheck "Include Tests" (we can add later)
    - Click Next
 
 3. **Save location:**
-   - Navigate to: `~/Projects/iamclaudia-ai/claudia/clients/menubar/`
+   - Navigate to: `~/Projects/iamclaudia-ai/anima/clients/menubar/`
    - ❌ Uncheck "Create Git repository" (we're already in one)
    - Click Create
 
@@ -141,12 +141,12 @@ The gateway URL defaults to `ws://localhost:30086/ws`. To change it:
 ### "Microphone access denied"
 
 - System Preferences → Privacy & Security → Microphone
-- Enable for Claudia
+- Enable for the Anima menubar app
 
 ### "Speech recognition not available"
 
 - System Preferences → Privacy & Security → Speech Recognition
-- Enable for Claudia
+- Enable for the Anima menubar app
 
 ### "Connection failed"
 

@@ -4,7 +4,7 @@
 
 Currently, interacting with page elements from the CLI requires:
 
-1. Running `claudia dominatrix snapshot` → get 500KB+ JSON a11y tree
+1. Running `anima dominatrix snapshot` → get 500KB+ JSON a11y tree
 2. Grepping through it to find the right element
 3. Guessing a CSS selector for `click`/`fill`
 4. Often failing because the selector doesn't match or hits the wrong element (e.g., clicking a `<span>` instead of its parent `<a>`)
@@ -31,24 +31,24 @@ The content script maintains a `refMap: Map<string, Element>` that maps `@e1`, `
 
 ## Commands (New & Updated)
 
-All commands follow the gateway convention: `dominatrix.method-name` with explicit named params via zod schemas. The CLI maps these as `claudia dominatrix method-name --param value`.
+All commands follow the gateway convention: `dominatrix.method-name` with explicit named params via zod schemas. The CLI maps these as `anima dominatrix method-name --param value`.
 
 ### Snapshot & Page Info
 
 ```bash
 # Interactive snapshot with refs (NEW — the main addition)
-claudia dominatrix snapshot              # Interactive elements with @refs (new default)
-claudia dominatrix snapshot --full       # Full a11y tree JSON (old behavior)
-claudia dominatrix snapshot --scope "#main"  # Scope to CSS selector
+anima dominatrix snapshot              # Interactive elements with @refs (new default)
+anima dominatrix snapshot --full       # Full a11y tree JSON (old behavior)
+anima dominatrix snapshot --scope "#main"  # Scope to CSS selector
 
 # Getters (renamed from text/markdown for consistency)
-claudia dominatrix get-text              # Page innerText (was: text)
-claudia dominatrix get-text --ref @e5    # Text of specific element
-claudia dominatrix get-markdown          # Page as Markdown (was: markdown)
-claudia dominatrix get-url               # Current URL
-claudia dominatrix get-title             # Page title
-claudia dominatrix get-html              # Full page HTML (was: html)
-claudia dominatrix get-html --selector "div.main"  # Scoped HTML
+anima dominatrix get-text              # Page innerText (was: text)
+anima dominatrix get-text --ref @e5    # Text of specific element
+anima dominatrix get-markdown          # Page as Markdown (was: markdown)
+anima dominatrix get-url               # Current URL
+anima dominatrix get-title             # Page title
+anima dominatrix get-html              # Full page HTML (was: html)
+anima dominatrix get-html --selector "div.main"  # Scoped HTML
 ```
 
 **Gateway methods:**
@@ -66,19 +66,19 @@ claudia dominatrix get-html --selector "div.main"  # Scoped HTML
 
 ```bash
 # Click — supports @ref (preferred) or --selector fallback
-claudia dominatrix click --ref @e3                    # Click "Posts" link
-claudia dominatrix click --selector "button.submit"   # CSS fallback
+anima dominatrix click --ref @e3                    # Click "Posts" link
+anima dominatrix click --selector "button.submit"   # CSS fallback
 
 # Fill form fields
-claudia dominatrix fill --ref @e10 --value "hello"
-claudia dominatrix fill --selector "input[name=email]" --value "user@example.com"
+anima dominatrix fill --ref @e10 --value "hello"
+anima dominatrix fill --selector "input[name=email]" --value "user@example.com"
 
 # Checkbox / radio
-claudia dominatrix check --ref @e7
-claudia dominatrix uncheck --ref @e7
+anima dominatrix check --ref @e7
+anima dominatrix uncheck --ref @e7
 
 # Select dropdown
-claudia dominatrix select --ref @e5 --value "option-1"
+anima dominatrix select --ref @e5 --value "option-1"
 ```
 
 **Gateway methods:**
@@ -96,11 +96,11 @@ claudia dominatrix select --ref @e5 --value "option-1"
 Find elements by semantic attributes and perform actions. Each `find-*` method locates the element and executes an action in one call.
 
 ```bash
-claudia dominatrix find-text --text "Posts" --action click
-claudia dominatrix find-text --text "Email" --action fill --value "user@example.com"
-claudia dominatrix find-label --label "Password" --action fill --value "secret"
-claudia dominatrix find-role --role button --name "Submit" --action click
-claudia dominatrix find-placeholder --placeholder "Search..." --action fill --value "query"
+anima dominatrix find-text --text "Posts" --action click
+anima dominatrix find-text --text "Email" --action fill --value "user@example.com"
+anima dominatrix find-label --label "Password" --action fill --value "secret"
+anima dominatrix find-role --role button --name "Submit" --action click
+anima dominatrix find-placeholder --placeholder "Search..." --action fill --value "query"
 ```
 
 **Gateway methods:**
@@ -116,14 +116,14 @@ claudia dominatrix find-placeholder --placeholder "Search..." --action fill --va
 
 ```bash
 # Navigate
-claudia dominatrix navigate --url "https://example.com"
+anima dominatrix navigate --url "https://example.com"
 
 # Scroll
-claudia dominatrix scroll-down --value 500     # Scroll down 500px (default: 300)
-claudia dominatrix scroll-up --value 300        # Scroll up
-claudia dominatrix scroll-to --ref @e5          # Scroll element into view
-claudia dominatrix scroll-to --position top     # Scroll to top
-claudia dominatrix scroll-to --position bottom  # Scroll to bottom
+anima dominatrix scroll-down --value 500     # Scroll down 500px (default: 300)
+anima dominatrix scroll-up --value 300        # Scroll up
+anima dominatrix scroll-to --ref @e5          # Scroll element into view
+anima dominatrix scroll-to --position top     # Scroll to top
+anima dominatrix scroll-to --position bottom  # Scroll to bottom
 ```
 
 **Gateway methods:**
@@ -138,10 +138,10 @@ claudia dominatrix scroll-to --position bottom  # Scroll to bottom
 ### Wait (NEW)
 
 ```bash
-claudia dominatrix wait-for-element --selector "div.loaded"  # Wait for element
-claudia dominatrix wait-for-text --text "Success"            # Wait for text to appear
-claudia dominatrix wait-for-url --pattern "**/posts"         # Wait for URL change
-claudia dominatrix wait --ms 2000                            # Wait milliseconds
+anima dominatrix wait-for-element --selector "div.loaded"  # Wait for element
+anima dominatrix wait-for-text --text "Success"            # Wait for text to appear
+anima dominatrix wait-for-url --pattern "**/posts"         # Wait for URL change
+anima dominatrix wait --ms 2000                            # Wait milliseconds
 ```
 
 **Gateway methods:**
@@ -156,13 +156,13 @@ claudia dominatrix wait --ms 2000                            # Wait milliseconds
 ### Debugging (existing, renamed)
 
 ```bash
-claudia dominatrix exec --script "document.title = 'hi'"    # Execute JS (unchanged)
-claudia dominatrix eval --expression "document.title"        # Evaluate JS (unchanged)
-claudia dominatrix get-console                               # Console logs (was: console)
-claudia dominatrix get-network                               # Network requests (was: network)
-claudia dominatrix get-storage                               # localStorage/sessionStorage (was: storage)
-claudia dominatrix get-cookies                               # Cookies (was: cookies)
-claudia dominatrix screenshot                                # Screenshot (unchanged)
+anima dominatrix exec --script "document.title = 'hi'"    # Execute JS (unchanged)
+anima dominatrix eval --expression "document.title"        # Evaluate JS (unchanged)
+anima dominatrix get-console                               # Console logs (was: console)
+anima dominatrix get-network                               # Network requests (was: network)
+anima dominatrix get-storage                               # localStorage/sessionStorage (was: storage)
+anima dominatrix get-cookies                               # Cookies (was: cookies)
+anima dominatrix screenshot                                # Screenshot (unchanged)
 ```
 
 ### Snapshot Output Format
@@ -294,7 +294,7 @@ No CLI changes needed — the CLI is auto-generated from zod schemas.
 **How it works**:
 
 1. App loads react-grab → installs `window.__REACT_GRAB__` API
-2. User runs `claudia dominatrix get-source --ref @e35`
+2. User runs `anima dominatrix get-source --ref @e35`
 3. Content script resolves `@e35` → DOM element from refMap
 4. Calls `window.__REACT_GRAB__.getSource(element)`
 5. Returns `{ filePath, lineNumber, componentName }`
@@ -315,7 +315,7 @@ It returns the **full component ancestry chain** — from the immediate wrapper 
 **New command**:
 
 ```bash
-claudia dominatrix get-source --ref @e12
+anima dominatrix get-source --ref @e12
 # → {
 #   "components": [
 #     { "name": "Card", "file": "/ui/Card/Card.tsx" },
@@ -324,11 +324,11 @@ claudia dominatrix get-source --ref @e12
 #   ]
 # }
 
-claudia dominatrix get-source --selector ".my-button"
+anima dominatrix get-source --selector ".my-button"
 # → same, but via CSS selector
 
 # Bulk: get source for all interactive elements (enriched snapshot)
-claudia dominatrix snapshot --sources
+anima dominatrix snapshot --sources
 # → @e1 [button] "Submit" ← Card → ChartAreaInteractive (SubscriberEventsWidget.tsx) → AnalyticsSection
 # → @e2 [a] "Dashboard" ← NavLink (Sidebar.tsx)
 ```
@@ -391,10 +391,10 @@ Rewrite to document the new ref-based workflow:
 
 ```bash
 # Core workflow: snapshot → ref → act → re-snapshot
-claudia dominatrix snapshot                    # Get interactive elements with @refs
-claudia dominatrix click --ref @e3             # Click by ref
-claudia dominatrix fill --ref @e10 --value "text"  # Fill by ref
-claudia dominatrix snapshot                    # Re-snapshot after interaction
+anima dominatrix snapshot                    # Get interactive elements with @refs
+anima dominatrix click --ref @e3             # Click by ref
+anima dominatrix fill --ref @e10 --value "text"  # Fill by ref
+anima dominatrix snapshot                    # Re-snapshot after interaction
 ```
 
 ## Key Design Decisions

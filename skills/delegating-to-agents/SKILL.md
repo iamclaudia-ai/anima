@@ -19,7 +19,7 @@ Claude agents can use any model: haiku (fast/cheap), sonnet (balanced), opus (de
 ## How It Works
 
 ```
-claudia session start_task --agent <agent> --prompt "..."
+anima session start_task --agent <agent> --prompt "..."
   → session extension → AgentHostClient → TaskHost → Agent SDK
 ```
 
@@ -29,26 +29,26 @@ Agent-host owns all SDK processes. Tasks survive gateway/extension restarts.
 
 ```bash
 # Start a task
-claudia session start_task --agent codex --prompt "Review src/index.ts for bugs"
+anima session start_task --agent codex --prompt "Review src/index.ts for bugs"
 
 # Start with worktree isolation (creates /tmp/worktrees/<taskId>)
-claudia session start_task --agent codex --prompt "Refactor the database layer" --worktree true
+anima session start_task --agent codex --prompt "Refactor the database layer" --worktree true
 
 # Continue a previous task in its worktree
-claudia session start_task --agent codex --prompt "Now add tests for the refactor" --continue "task_abc123"
+anima session start_task --agent codex --prompt "Now add tests for the refactor" --continue "task_abc123"
 
 # Spawn a Claude agent
-claudia session start_task --agent claude --model sonnet --prompt "Analyze the architecture of extensions/"
+anima session start_task --agent claude --model sonnet --prompt "Analyze the architecture of extensions/"
 
 # List running tasks
-claudia session list_tasks
-claudia session list_tasks --agent codex --status running
+anima session list_tasks
+anima session list_tasks --agent codex --status running
 
 # Get task details
-claudia session get_task --taskId "task_abc123"
+anima session get_task --taskId "task_abc123"
 
 # Interrupt a task
-claudia session interrupt_task --taskId "task_abc123"
+anima session interrupt_task --taskId "task_abc123"
 ```
 
 ## Parallel Tasks
@@ -57,12 +57,12 @@ You can fire **multiple tasks in parallel** — they run concurrently and comple
 
 ```bash
 # Fire off three tasks at once
-claudia session start_task --agent codex --mode review --prompt "Review session-host.ts for memory leaks" --sandbox "read-only"
-claudia session start_task --agent codex --mode test --prompt "Write tests for event-buffer.ts" --sandbox "workspace-write"
-claudia session start_task --agent claude --model haiku --prompt "Summarize the changes in the last 5 commits"
+anima session start_task --agent codex --mode review --prompt "Review session-host.ts for memory leaks" --sandbox "read-only"
+anima session start_task --agent codex --mode test --prompt "Write tests for event-buffer.ts" --sandbox "workspace-write"
+anima session start_task --agent claude --model haiku --prompt "Summarize the changes in the last 5 commits"
 
 # Monitor all running tasks
-claudia session list_tasks --status running
+anima session list_tasks --status running
 ```
 
 ## Worktree Isolation
@@ -71,7 +71,7 @@ Use `--worktree true` to give a task its own git worktree in `/tmp/worktrees/<ta
 
 ```bash
 # Isolated refactor — won't touch your working tree
-claudia session start_task --agent codex \
+anima session start_task --agent codex \
   --prompt "Refactor the database layer to use prepared statements" \
   --worktree true --sandbox "workspace-write"
 ```
@@ -84,7 +84,7 @@ Use `--continue <taskId>` to send a follow-up prompt that reuses the `/tmp/workt
 
 ```bash
 # Task didn't finish? Continue where it left off
-claudia session start_task --agent codex \
+anima session start_task --agent codex \
   --prompt "The tests are failing — fix the import paths" \
   --continue "task_abc123"
 ```
@@ -144,7 +144,7 @@ When a task finishes, you receive a `<user_notification>` automatically — no p
 
 ```
 <user_notification>
-Cody completed task task_abc123 (15s). Output: /Users/michael/.claudia/codex/task_abc123.md
+Cody completed task task_abc123 (15s). Output: /Users/michael/.anima/codex/task_abc123.md
 </user_notification>
 ```
 
@@ -165,7 +165,7 @@ Each task starts a fresh thread with no prior context. To share context:
 ```bash
 # Write context, then reference it in the prompt
 echo "Review focus: the new provider routing in session extension..." > tmp/review-context.md
-claudia session start_task --agent codex \
+anima session start_task --agent codex \
   --prompt "Read tmp/review-context.md for context, then review extensions/session/src/index.ts"
 ```
 
@@ -191,18 +191,18 @@ claudia session start_task --agent codex \
 
 ```bash
 # General code review
-claudia session start_task --agent codex --mode review \
+anima session start_task --agent codex --mode review \
   --prompt "Review extensions/session/src/index.ts for error handling gaps, race conditions, and missing edge cases." \
   --sandbox "read-only"
 
 # Targeted review with file list
-claudia session start_task --agent codex --mode review \
+anima session start_task --agent codex --mode review \
   --prompt "Review the agent-host protocol for backward compatibility issues." \
   --files '["packages/shared/src/agent-host-protocol.ts", "packages/agent-host/src/server.ts"]' \
   --sandbox "read-only"
 
 # Architecture review with Claude (deeper reasoning)
-claudia session start_task --agent claude --model opus \
+anima session start_task --agent claude --model opus \
   --prompt "Review the session extension and agent-host boundary. Are there circular dependencies or leaky abstractions? Analyze the separation of concerns." \
   --sandbox "read-only"
 ```
@@ -211,12 +211,12 @@ claudia session start_task --agent claude --model opus \
 
 ```bash
 # Unit tests
-claudia session start_task --agent codex --mode test \
+anima session start_task --agent codex --mode test \
   --prompt "Write comprehensive bun tests for packages/agent-host/src/task-host.ts. Cover: task creation, status transitions, interrupt handling, error cases, and event emission. Use bun:test." \
   --sandbox "workspace-write"
 
 # Edge case tests
-claudia session start_task --agent codex --mode test \
+anima session start_task --agent codex --mode test \
   --prompt "Write edge case tests for extensions/voice/src/sentence-chunker.ts covering: emoji, unicode, empty strings, very long inputs, nested emotion tags, and malformed markup." \
   --sandbox "workspace-write"
 ```
@@ -225,12 +225,12 @@ claudia session start_task --agent codex --mode test \
 
 ```bash
 # Isolated refactor that won't interfere with your working tree
-claudia session start_task --agent codex \
+anima session start_task --agent codex \
   --prompt "Refactor extensions/session/src/session-store.ts to use prepared statements for all SQLite queries. Maintain the same public API. Run existing tests to verify." \
   --worktree true --effort high --sandbox "workspace-write"
 
 # Continue if more work is needed
-claudia session start_task --agent codex \
+anima session start_task --agent codex \
   --prompt "Good progress. Now update the migration files to match the new prepared statements." \
   --continue "task_abc123"
 ```
@@ -239,15 +239,15 @@ claudia session start_task --agent codex \
 
 ```bash
 # Fast analysis with Haiku
-claudia session start_task --agent claude --model haiku \
+anima session start_task --agent claude --model haiku \
   --prompt "Summarize the changes in the last 10 git commits and identify any breaking changes."
 
 # Deep reasoning with Opus
-claudia session start_task --agent claude --model opus \
+anima session start_task --agent claude --model opus \
   --prompt "Analyze our WebSocket protocol for potential security issues. Consider: auth bypass, event injection, reconnect race conditions, and sequence number manipulation."
 
 # Balanced task with Sonnet
-claudia session start_task --agent claude --model sonnet \
+anima session start_task --agent claude --model sonnet \
   --prompt "Read docs/ARCHITECTURE.md and suggest improvements for clarity and completeness."
 ```
 
@@ -255,12 +255,12 @@ claudia session start_task --agent claude --model sonnet \
 
 ```bash
 # Fire off multiple tasks at once — they run concurrently
-claudia session start_task --agent codex --mode review --prompt "Review session-host.ts for memory leaks" --sandbox "read-only"
-claudia session start_task --agent codex --mode test --prompt "Write tests for event-buffer.ts" --sandbox "workspace-write"
-claudia session start_task --agent claude --model haiku --prompt "Generate JSDoc comments for all exported functions in packages/shared/src/"
+anima session start_task --agent codex --mode review --prompt "Review session-host.ts for memory leaks" --sandbox "read-only"
+anima session start_task --agent codex --mode test --prompt "Write tests for event-buffer.ts" --sandbox "workspace-write"
+anima session start_task --agent claude --model haiku --prompt "Generate JSDoc comments for all exported functions in packages/shared/src/"
 
 # Monitor all running tasks
-claudia session list_tasks --status running
+anima session list_tasks --status running
 ```
 
 ## Streaming Events
@@ -279,7 +279,7 @@ Subscribe to `session.task.*` events to watch agents work in real-time.
 
 ## Calling from Extension Code
 
-From any Claudia extension, delegate via `ctx.call()`:
+From any Anima extension, delegate via `ctx.call()`:
 
 ```typescript
 const handle = await ctx.call("session.start_task", {
@@ -287,11 +287,11 @@ const handle = await ctx.call("session.start_task", {
   agent: "codex",
   prompt: "Review the session extension for memory leaks",
   mode: "review",
-  cwd: "/Users/michael/Projects/iamclaudia-ai/claudia",
+  cwd: "/Users/michael/Projects/iamclaudia-ai/anima",
   sandbox: "read-only",
   worktree: true,
 });
-// handle = { taskId: "task_abc123", status: "running", outputFile: "~/.claudia/codex/task_abc123.md" }
+// handle = { taskId: "task_abc123", status: "running", outputFile: "~/.anima/codex/task_abc123.md" }
 ```
 
 ## Task Modes and Sandbox Recommendations
@@ -304,7 +304,7 @@ const handle = await ctx.call("session.start_task", {
 
 ## Output Files
 
-Every task writes persistent output to `~/.claudia/codex/{taskId}.md`. The file includes:
+Every task writes persistent output to `~/.anima/codex/{taskId}.md`. The file includes:
 
 - The original prompt
 - Live command output and agent messages as they stream
@@ -316,7 +316,7 @@ Every task writes persistent output to `~/.claudia/codex/{taskId}.md`. The file 
 - **Auto-approve**: Agents auto-approve command executions and file changes by default.
 - **Fresh thread per task**: Each task creates a new conversation thread. Share context via files.
 - **Task returns immediately**: `session.start_task` returns a task handle right away. Work happens asynchronously.
-- **Session ID auto-detected**: The CLI auto-injects `$CLAUDIA_SESSION_ID`. Only use `--sessionId` to override.
+- **Session ID auto-detected**: The CLI auto-injects `$ANIMA_SESSION_ID`. Only use `--sessionId` to override.
 - **Process isolation**: Tasks run inside agent-host (port 30087), isolated from the gateway. Tasks survive restarts.
 - **Provider-agnostic API**: Same `session.start_task` API for all agents — just change `--agent`.
 - **Worktrees are ephemeral**: `/tmp/worktrees/<taskId>` — short-lived, no clutter in your project folders.

@@ -211,7 +211,7 @@ interface Presentation {
   id: string;
   title: string;
   author: string;
-  theme?: "dark" | "light" | "claudia";
+  theme?: "dark" | "light" | "anima";
   slides: Slide[];
 }
 

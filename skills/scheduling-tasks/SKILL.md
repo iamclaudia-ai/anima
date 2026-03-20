@@ -1,11 +1,11 @@
 ---
 name: scheduling-tasks
-description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Claudia scheduler extension for durable server-side task scheduling with JSON file persistence. Covers one-shot delays, absolute timestamps, interval tasks, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
+description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Anima scheduler extension for durable server-side task scheduling with JSON file persistence. Covers one-shot delays, absolute timestamps, interval tasks, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
 ---
 
 # Scheduling Tasks
 
-Use this skill when the user wants to schedule a future task, set a reminder, create a timed notification, or run a recurring background job through the Claudia scheduler extension.
+Use this skill when the user wants to schedule a future task, set a reminder, create a timed notification, or run a recurring background job through the Anima scheduler extension.
 
 ## When to Use
 
@@ -28,14 +28,14 @@ When the user asks you to **say something out loud**, **speak**, **announce**, o
 ## Architecture
 
 - **Extension**: `extensions/scheduler/` — out-of-process, config-driven
-- **Persistence**: `~/.claudia/scheduled-tasks.json` — survives gateway restarts
+- **Persistence**: `~/.anima/scheduled-tasks.json` — survives gateway restarts
 - **Check loop**: Every 5 seconds, the extension checks for due tasks
 - **Events**: Fires `scheduler.notification` and `scheduler.task_fired` gateway events
 - **Presenter integration**: The presenter notes page subscribes to `scheduler.notification` and shows toast notifications + browser Notification API popups
 
 ## CLI Usage
 
-All methods are available via the Claudia CLI. **Use dot notation for the `action` object** — this avoids JSON quoting issues that break in different shell contexts:
+All methods are available via the Anima CLI. **Use dot notation for the `action` object** — this avoids JSON quoting issues that break in different shell contexts:
 
 ```bash
 # Use the CLI — NEVER use curl for gateway methods
@@ -210,7 +210,7 @@ bun run packages/cli/src/index.ts scheduler.cancel_task --taskId "78f31c98-35a4-
 
 ## Notes
 
-- Tasks are **durable** — stored in `~/.claudia/scheduled-tasks.json` and survive gateway restarts
+- Tasks are **durable** — stored in `~/.anima/scheduled-tasks.json` and survive gateway restarts
 - One-shot tasks (`type: "once"`) are automatically removed after firing
 - Interval tasks update their `fireAt` to the next interval after each firing
 - The check loop runs every **5 seconds**, so tasks may fire up to 5s after their scheduled time

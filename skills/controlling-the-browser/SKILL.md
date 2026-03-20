@@ -1,7 +1,7 @@
 ---
 name: controlling-the-browser
-description: "MUST be used when you need to control the user's real Chrome browser — inspect pages, take screenshots, click elements, fill forms, read content, or execute JavaScript on live tabs with existing auth and cookies. Uses DOMINATRIX browser control through Claudia's gateway extension. Triggers on: control browser, inspect page, browser automation, chrome tab, read page content, get page text, page screenshot, DOM snapshot, fill form in browser, click in browser, browser cookies, console logs, network requests, control tab, dominatrix."
-allowed-tools: Bash(claudia dominatrix:*)
+description: "MUST be used when you need to control the user's real Chrome browser — inspect pages, take screenshots, click elements, fill forms, read content, or execute JavaScript on live tabs with existing auth and cookies. Uses DOMINATRIX browser control through Anima's gateway extension. Triggers on: control browser, inspect page, browser automation, chrome tab, read page content, get page text, page screenshot, DOM snapshot, fill form in browser, click in browser, browser cookies, console logs, network requests, control tab, dominatrix."
+allowed-tools: Bash(anima dominatrix:*)
 ---
 
 # Browser Control with DOMINATRIX
@@ -21,7 +21,7 @@ Control the user's real Chrome browser — live tabs with existing auth, cookies
 
 ```bash
 # 1. Take a snapshot to get interactive elements with @refs
-claudia dominatrix snapshot
+anima dominatrix snapshot
 
 # Output:
 # Page: beehiiv Dashboard
@@ -35,106 +35,106 @@ claudia dominatrix snapshot
 # @e6 [button] "Submit"
 
 # 2. Interact using @refs (reliable, no CSS selector guessing)
-claudia dominatrix click --ref @e3              # Click "Posts" link
-claudia dominatrix fill --ref @e5 --value "user@example.com"  # Fill email
+anima dominatrix click --ref @e3              # Click "Posts" link
+anima dominatrix fill --ref @e5 --value "user@example.com"  # Fill email
 
 # 3. Re-snapshot after navigation/interaction (refs are invalidated)
-claudia dominatrix snapshot
+anima dominatrix snapshot
 ```
 
 **Key principle**: Always snapshot before interacting. Refs are invalidated on page navigation or dynamic changes — re-snapshot to get fresh refs.
 
 ## Commands
 
-All commands go through `claudia dominatrix <method>`. When `--tab-id` is omitted, the active tab is used.
+All commands go through `anima dominatrix <method>`. When `--tab-id` is omitted, the active tab is used.
 
 ### Snapshot & Page Info
 
 ```bash
 # Interactive snapshot with @refs (DEFAULT — use this!)
-claudia dominatrix snapshot
-claudia dominatrix snapshot --full        # Full a11y tree JSON (old behavior, large)
-claudia dominatrix snapshot --scope "#main"  # Scope to CSS selector
-claudia dominatrix snapshot --sources        # Include React component source info
+anima dominatrix snapshot
+anima dominatrix snapshot --full        # Full a11y tree JSON (old behavior, large)
+anima dominatrix snapshot --scope "#main"  # Scope to CSS selector
+anima dominatrix snapshot --sources        # Include React component source info
 
 # Content extraction
-claudia dominatrix get_text               # Page innerText (plain text, most efficient)
-claudia dominatrix get_text --ref @e5     # Text of specific element
-claudia dominatrix get_markdown           # Page as Markdown
-claudia dominatrix get_markdown --ref @e5 # Markdown of specific element
-claudia dominatrix get_url                # Current URL
-claudia dominatrix get_title              # Page title
-claudia dominatrix get_html               # Full page HTML
-claudia dominatrix get_html --selector "div.main"  # Scoped HTML
+anima dominatrix get_text               # Page innerText (plain text, most efficient)
+anima dominatrix get_text --ref @e5     # Text of specific element
+anima dominatrix get_markdown           # Page as Markdown
+anima dominatrix get_markdown --ref @e5 # Markdown of specific element
+anima dominatrix get_url                # Current URL
+anima dominatrix get_title              # Page title
+anima dominatrix get_html               # Full page HTML
+anima dominatrix get_html --selector "div.main"  # Scoped HTML
 ```
 
 ### Interaction (ref-based — preferred)
 
 ```bash
 # Click — use @ref (preferred) or --selector fallback
-claudia dominatrix click --ref @e3
-claudia dominatrix click --selector "button.submit"
+anima dominatrix click --ref @e3
+anima dominatrix click --selector "button.submit"
 
 # Fill form fields
-claudia dominatrix fill --ref @e10 --value "hello"
-claudia dominatrix fill --selector "input[name=email]" --value "user@example.com"
+anima dominatrix fill --ref @e10 --value "hello"
+anima dominatrix fill --selector "input[name=email]" --value "user@example.com"
 
 # Checkbox / radio
-claudia dominatrix check --ref @e7
-claudia dominatrix uncheck --ref @e7
+anima dominatrix check --ref @e7
+anima dominatrix uncheck --ref @e7
 
 # Select dropdown
-claudia dominatrix select --ref @e5 --value "option-1"
+anima dominatrix select --ref @e5 --value "option-1"
 ```
 
 ### Semantic Find (locate + act in one call)
 
 ```bash
-claudia dominatrix find_text --text "Posts" --perform click
-claudia dominatrix find_text --text "Email" --perform fill --value "user@example.com"
-claudia dominatrix find_label --label "Password" --perform fill --value "secret"
-claudia dominatrix find_role --role button --name "Submit" --perform click
-claudia dominatrix find_placeholder --placeholder "Search..." --perform fill --value "query"
+anima dominatrix find_text --text "Posts" --perform click
+anima dominatrix find_text --text "Email" --perform fill --value "user@example.com"
+anima dominatrix find_label --label "Password" --perform fill --value "secret"
+anima dominatrix find_role --role button --name "Submit" --perform click
+anima dominatrix find_placeholder --placeholder "Search..." --perform fill --value "query"
 ```
 
 ### Navigation & Scrolling
 
 ```bash
-claudia dominatrix navigate --url "https://example.com"
+anima dominatrix navigate --url "https://example.com"
 
-claudia dominatrix scroll_down --value 500      # Scroll down 500px (default: 300)
-claudia dominatrix scroll_up --value 300         # Scroll up
-claudia dominatrix scroll_to --ref @e5           # Scroll element into view
-claudia dominatrix scroll_to --position top      # Scroll to top
-claudia dominatrix scroll_to --position bottom   # Scroll to bottom
+anima dominatrix scroll_down --value 500      # Scroll down 500px (default: 300)
+anima dominatrix scroll_up --value 300         # Scroll up
+anima dominatrix scroll_to --ref @e5           # Scroll element into view
+anima dominatrix scroll_to --position top      # Scroll to top
+anima dominatrix scroll_to --position bottom   # Scroll to bottom
 ```
 
 ### Wait
 
 ```bash
-claudia dominatrix wait_for_element --selector "div.loaded"  # Wait for element
-claudia dominatrix wait_for_text --text "Success"            # Wait for text to appear
-claudia dominatrix wait_for_url --pattern "**/posts"         # Wait for URL change
-claudia dominatrix wait --ms 2000                            # Wait milliseconds
+anima dominatrix wait_for_element --selector "div.loaded"  # Wait for element
+anima dominatrix wait_for_text --text "Success"            # Wait for text to appear
+anima dominatrix wait_for_url --pattern "**/posts"         # Wait for URL change
+anima dominatrix wait --ms 2000                            # Wait milliseconds
 ```
 
 ### React Source Inspection
 
 ```bash
-claudia dominatrix get_source --ref @e12             # Component ancestry + source for element
-claudia dominatrix get_source --selector ".my-button" # Same, via CSS selector
+anima dominatrix get_source --ref @e12             # Component ancestry + source for element
+anima dominatrix get_source --selector ".my-button" # Same, via CSS selector
 ```
 
 ### Debugging
 
 ```bash
-claudia dominatrix exec --script "document.title = 'hi'"     # Execute JS
-claudia dominatrix eval --expression "document.title"         # Evaluate JS
-claudia dominatrix get_console                                # Console logs
-claudia dominatrix get_network                                # Network requests
-claudia dominatrix get_storage                                # localStorage/sessionStorage
-claudia dominatrix get_cookies                                # Cookies
-claudia dominatrix screenshot                                 # Screenshot as PNG data URL
+anima dominatrix exec --script "document.title = 'hi'"     # Execute JS
+anima dominatrix eval --expression "document.title"         # Evaluate JS
+anima dominatrix get_console                                # Console logs
+anima dominatrix get_network                                # Network requests
+anima dominatrix get_storage                                # localStorage/sessionStorage
+anima dominatrix get_cookies                                # Cookies
+anima dominatrix screenshot                                 # Screenshot as PNG data URL
 ```
 
 ## React Source Mapping
@@ -143,20 +143,20 @@ Map DOM elements back to React component source files. Works on any React dev ap
 
 ```bash
 # Get source for a specific element
-claudia dominatrix get_source --ref @e12
+anima dominatrix get_source --ref @e12
 # Returns: component name, file path, line number, full ancestry chain
 
 # Enriched snapshot with source annotations
-claudia dominatrix snapshot --sources
+anima dominatrix snapshot --sources
 # Each element shows its nearest React component + file path
 # e.g. @e3 [button] "View site" <- Button (src/components/Header.tsx:15) → DashboardLayout
 ```
 
 ### Workflow: UI bug → source file
 
-1. `claudia dominatrix snapshot --sources` — see elements with component names
+1. `anima dominatrix snapshot --sources` — see elements with component names
 2. Identify the problematic element by its ref
-3. `claudia dominatrix get_source --ref @eN` — get full ancestry chain
+3. `anima dominatrix get_source --ref @eN` — get full ancestry chain
 4. Open the source file and fix the issue
 
 ### Requirements
@@ -190,4 +190,4 @@ claudia dominatrix snapshot --sources
 - **CSP bypass**: Script execution uses JailJS (AST interpreter) for sites with strict CSP
 - **Resilient injection**: If the content script isn't loaded (page reload, manual navigation), it's automatically injected on demand
 - **Console/Network**: Collected passively from content script load — retrieve history anytime
-- **Side panel context**: When the Claudia side panel is open, commands without `--tabId` target that tab
+- **Side panel context**: When the Anima side panel is open, commands without `--tabId` target that tab

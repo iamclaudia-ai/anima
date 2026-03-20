@@ -1,6 +1,6 @@
-# Claudia VS Code Extension
+# Anima VS Code Extension
 
-Claudia AI assistant integrated directly into VS Code.
+Anima's VS Code extension integrates the platform directly into VS Code.
 
 ## Features
 
@@ -11,7 +11,7 @@ Claudia AI assistant integrated directly into VS Code.
 
 ## Requirements
 
-- Claudia Gateway running locally (`ws://localhost:30086/ws`)
+- Anima Gateway running locally (`ws://localhost:30086/ws`)
 
 ## Commands
 
@@ -27,7 +27,7 @@ Claudia AI assistant integrated directly into VS Code.
 | Setting                    | Default                   | Description                      |
 | -------------------------- | ------------------------- | -------------------------------- |
 | `anima.gatewayUrl`         | `ws://localhost:30086/ws` | Gateway WebSocket URL            |
-| `claudia.webUiUrl`         | `http://localhost:3034`   | Web UI URL (for iframe mode)     |
+| `anima.webUiUrl`           | `http://localhost:3034`   | Web UI URL (for iframe mode)     |
 | `anima.includeFileContext` | `true`                    | Include file context in messages |
 
 ## Development
@@ -63,11 +63,11 @@ npm run package
                     │ WebSocket
                     ▼
 ┌─────────────────────────────────────────┐
-│  Claudia Gateway (localhost:30086)       │
+│  Anima Gateway (localhost:30086)         │
 └─────────────────────────────────────────┘
 ```
 
-The extension creates a webview in the sidebar that connects directly to the Claudia Gateway. It also tracks the active editor and selection, passing that context to the chat.
+The extension creates a webview in the sidebar that connects directly to the Anima Gateway. It also tracks the active editor and selection, passing that context to the chat.
 
 ## Future Enhancements
 

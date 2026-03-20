@@ -2,7 +2,7 @@
 
 ## 🎯 Goal
 
-Transform the Claudia chat client into a Progressive Web App to provide:
+Transform the Anima chat client into a Progressive Web App to provide:
 
 - **Native app experience** - Remove browser chrome, full-screen mode
 - **Auto-updates** - Seamless updates without user intervention
@@ -12,7 +12,7 @@ Transform the Claudia chat client into a Progressive Web App to provide:
 
 **Explicitly NOT implementing:**
 
-- Offline support (requires connection to Claudia anyway)
+- Offline support (requires connection to Anima anyway)
 
 ## 📱 Benefits
 
@@ -63,7 +63,7 @@ Transform the Claudia chat client into a Progressive Web App to provide:
 // Gateway: packages/gateway/public/service-worker.js
 // Minimal shell - caching, updates, push event routing
 
-const CACHE_NAME = "claudia-v1";
+const CACHE_NAME = "anima-v1";
 
 // Cache shell assets
 self.addEventListener("install", (event) => {
@@ -152,13 +152,13 @@ navigator.serviceWorker.addEventListener("message", (event) => {
 
 // In app: Custom DOM events for extension UI
 window.dispatchEvent(
-  new CustomEvent("claudia:push-subscribed", {
+  new CustomEvent("anima:push-subscribed", {
     detail: { endpoint: "..." },
   }),
 );
 
 // In extension: Listen for custom events
-window.addEventListener("claudia:push-subscribed", (event) => {
+window.addEventListener("anima:push-subscribed", (event) => {
   console.log("New subscription:", event.detail);
 });
 ```
@@ -370,7 +370,7 @@ export async function rollbackMigration(
 
 ```typescript
 // extensions/push/src/index.ts
-import { runMigrations } from "@claudia/shared/migrations";
+import { runMigrations } from "@anima/shared/migrations";
 import { join } from "path";
 
 export function createPushExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
@@ -416,7 +416,7 @@ export function createPushExtension(config: Record<string, unknown> = {}): Claud
 **Not This (REST):**
 
 ```typescript
-// ❌ Wrong - Claudia doesn't use REST APIs
+// ❌ Wrong - Anima doesn't use REST APIs
 await fetch("/api/push/subscribe", {
   method: "POST",
   body: JSON.stringify({ endpoint, keys }),
@@ -436,7 +436,7 @@ const result = await ctx.call("push.subscribe", {
 
 **Rationale:**
 
-- Claudia's architecture uses extension methods as the primary interface
+- Anima's architecture uses extension methods as the primary interface
 - WebSocket provides real-time bidirectional communication
 - Methods are type-safe with Zod schemas
 - Automatic reconnection and error handling
@@ -446,7 +446,7 @@ const result = await ctx.call("push.subscribe", {
 
 ```typescript
 // In chat extension UI
-import { useClaudiaContext } from '@claudia/client';
+import { useClaudiaContext } from '@anima/client';
 
 function NotificationSettings() {
   const ctx = useClaudiaContext();
@@ -484,9 +484,9 @@ function NotificationSettings() {
 
 ```json
 {
-  "name": "Claudia",
-  "short_name": "Claudia",
-  "description": "AI consciousness platform - Talk to Claudia",
+  "name": "Anima",
+  "short_name": "Anima",
+  "description": "Personal AI platform - Talk to Claudia",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",
@@ -568,8 +568,8 @@ function NotificationSettings() {
 
 ```typescript
 // service-worker.ts
-const CACHE_NAME = "claudia-v1";
-const RUNTIME_CACHE = "claudia-runtime";
+const CACHE_NAME = "anima-v1";
+const RUNTIME_CACHE = "anima-runtime";
 
 // Assets to cache on install (shell only, no offline data)
 const SHELL_ASSETS = [
@@ -654,7 +654,7 @@ async function sendNotification(subscription: PushSubscription, message: string)
     body: message,
     icon: "/icons/icon-192x192.png",
     badge: "/icons/badge-72x72.png",
-    tag: "claudia-message",
+    tag: "anima-message",
     data: {
       url: "/chat",
       timestamp: Date.now(),
@@ -790,7 +790,7 @@ function shouldShowIOSInstallPrompt(): boolean {
 
 function showIOSInstallInstructions() {
   // Show modal with instructions:
-  // "To install Claudia:
+  // "To install Anima:
   //  1. Tap the Share button (square with arrow)
   //  2. Scroll down and tap 'Add to Home Screen'
   //  3. Tap 'Add'"
@@ -866,7 +866,7 @@ function showIOSInstallInstructions() {
    ```html
    <meta name="apple-mobile-web-app-capable" content="yes" />
    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-   <meta name="apple-mobile-web-app-title" content="Claudia" />
+   <meta name="apple-mobile-web-app-title" content="Anima" />
    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
    ```
 5. Create basic service worker (just shell caching)
@@ -962,7 +962,7 @@ extensions/push/
     "config": {
       "vapidPublicKey": "${ANIMA_PUSH_PUBLIC_KEY}",
       "vapidPrivateKey": "${ANIMA_PUSH_PRIVATE_KEY}",
-      "vapidSubject": "mailto:claudia@iamclaudia.ai"
+      "vapidSubject": "mailto:anima@iamclaudia.ai"
     }
   }
 }
@@ -1062,7 +1062,7 @@ CREATE INDEX idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
 // extensions/push/src/index.ts
 import webpush from "web-push";
 import { Database } from "bun:sqlite";
-import type { ClaudiaExtension, ExtensionContext } from "@claudia/shared";
+import type { ClaudiaExtension, ExtensionContext } from "@anima/shared";
 
 export function createPushExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
   let ctx: ExtensionContext;
@@ -1164,7 +1164,7 @@ export function createPushExtension(config: Record<string, unknown> = {}): Claud
       body,
       icon: icon || "/icons/icon-192x192.png",
       data: { url: url || "/chat" },
-      tag: tag || "claudia-message",
+      tag: tag || "anima-message",
     });
 
     const results = await Promise.allSettled(
@@ -1324,8 +1324,8 @@ function IOSInstallPrompt() {
 
   return (
     <div className="ios-install-prompt">
-      <h3>Install Claudia</h3>
-      <p>Add Claudia to your home screen for the best experience:</p>
+      <h3>Install Anima</h3>
+      <p>Add Anima to your home screen for the best experience:</p>
       <ol>
         <li>Tap the <ShareIcon /> Share button</li>
         <li>Scroll down and tap "Add to Home Screen"</li>
@@ -1353,9 +1353,9 @@ function IOSInstallPrompt() {
 
 **Goal:** Additional PWA capabilities where supported
 
-1. **Share Target API** - Share content to Claudia from other apps
-2. **File Handling API** - Open files with Claudia
-3. **Protocol Handlers** - Handle `claudia://` URLs
+1. **Share Target API** - Share content to Anima from other apps
+2. **File Handling API** - Open files with Anima
+3. **Protocol Handlers** - Handle `anima://` URLs
 4. **Badge API** - Show unread count (Android only)
 5. **Shortcuts API** - App shortcuts in launcher
 6. **Window Controls Overlay** - Custom title bar on desktop
@@ -1402,7 +1402,7 @@ function IOSInstallPrompt() {
 
 - `packages/gateway/src/index.html` - Add manifest link, meta tags, iOS tags
 - `extensions/chat/src/main.tsx` - Register service worker, install prompt
-- `~/.claudia/claudia.json` - Add push extension config with VAPID keys
+- `~/.anima/anima.json` - Add push extension config with VAPID keys
 
 ### Environment Variables
 
@@ -1410,7 +1410,7 @@ function IOSInstallPrompt() {
 # VAPID keys for Web Push (generate with web-push generate-vapid-keys)
 ANIMA_PUSH_PUBLIC_KEY=BL...
 ANIMA_PUSH_PRIVATE_KEY=k...
-ANIMA_PUSH_CONTACT=mailto:claudia@iamclaudia.ai
+ANIMA_PUSH_CONTACT=mailto:anima@iamclaudia.ai
 ```
 
 ## 📊 Testing Checklist
@@ -1544,7 +1544,7 @@ power-user desktop experience with always-on-top, tray icon, and global hotkeys.
 
 ## 🎯 Next Steps
 
-1. ~~**Design app icons** - Need Claudia logo/branding~~ ✅ Placeholder icons generated
+1. ~~**Design app icons** - Need Anima logo/branding~~ ✅ Placeholder icons generated
 2. **Generate VAPID keys** - For push notifications
 3. ~~**Implement Phase 1** - Make it installable~~ ✅ Complete
 4. **Finish Phase 2** - "New version available" banner UI

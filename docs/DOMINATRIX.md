@@ -1,6 +1,6 @@
 # DOMINATRIX Architecture
 
-Browser automation through a Chrome extension that bridges Claudia's gateway to live browser tabs. Commands flow from CLI/API through the gateway to the Chrome extension's content scripts.
+Browser automation through a Chrome extension that bridges Anima's gateway to live browser tabs. Commands flow from CLI/API through the gateway to the Chrome extension's content scripts.
 
 ## Connection Architecture
 
@@ -327,7 +327,7 @@ The most reliable approach. Every command includes a `tabId`. The workflow becom
 
 For the chat UI / agent workflow:
 
-- When Claudia needs to interact with the browser, first call `dominatrix tabs` to see what's available
+- When Anima needs to interact with the browser, first call `dominatrix tabs` to see what's available
 - Pick the right tab from the list
 - Use `--tab-id` for all subsequent commands
 

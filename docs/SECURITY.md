@@ -107,7 +107,7 @@ User sees helpful agent. Credentials are gone. System is backdoored.
 | Local-first architecture     | Attack surface minimized |
 | Code review before use       | Human verification       |
 
-## Claudia's Architecture Advantages
+## Anima's Architecture Advantages
 
 1. **Gateway-centric** - Not a remote-control wrapper exposing endpoints
 2. **Local-first** - Gateway runs on Michael's machines only
@@ -118,7 +118,7 @@ User sees helpful agent. Credentials are gone. System is backdoored.
 
 ## Security Checklist
 
-Even though Claudia is personal and single-user, regular security hygiene is important.
+Even though Anima is personal and single-user, regular security hygiene is important.
 
 ### Network Binding
 
@@ -157,7 +157,7 @@ Even though Claudia is personal and single-user, regular security hygiene is imp
 ## Security Audit CLI (Planned)
 
 ```bash
-claudia security check
+anima security check
 
 ✓ Gateway bound to localhost (127.0.0.1:30086)
 ✓ ~/.anima permissions: 700

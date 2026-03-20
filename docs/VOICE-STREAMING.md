@@ -1,6 +1,6 @@
 # Voice Streaming Architecture
 
-How real-time voice streaming works in Claudia — from prompt to audio playback.
+How real-time voice streaming works in Anima — from prompt to audio playback.
 
 ## Overview
 

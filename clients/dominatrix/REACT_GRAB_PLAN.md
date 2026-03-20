@@ -46,7 +46,7 @@ Given a `@ref` from a snapshot, return the React component ancestry and source f
 
 ```
 "I see a bug on this button"
-  → claudia dominatrix get-source --ref @e35
+  → anima dominatrix get-source --ref @e35
   → PostEditor.tsx:87 (in PostEditor → DashboardPage → AppLayout)
 ```
 
@@ -67,7 +67,7 @@ react-grab remains a separate, complementary tool for **interactive** use — ho
 ### 1. `dominatrix.get-source` — Single Element Source Lookup
 
 ```bash
-claudia dominatrix get-source --ref @e12
+anima dominatrix get-source --ref @e12
 # → {
 #   "component": "PostCard",
 #   "file": "src/components/PostCard.tsx",
@@ -79,14 +79,14 @@ claudia dominatrix get-source --ref @e12
 #   ]
 # }
 
-claudia dominatrix get-source --selector ".my-button"
+anima dominatrix get-source --selector ".my-button"
 # Same, but via CSS selector
 ```
 
 ### 2. `dominatrix.snapshot --sources` — Enriched Snapshot
 
 ```bash
-claudia dominatrix snapshot --sources
+anima dominatrix snapshot --sources
 # Page: beehiiv Dashboard
 # URL: https://app.beehiiv.com/dashboard
 #
@@ -871,5 +871,5 @@ The main world bridge opens up more than just React. Future bridge methods could
 - **`get-app-state`**: Read application state from Redux, Zustand, Jotai, etc. via window globals
 - **`get-page-global`**: Already implemented — read any `window.x.y.z` path
 - **`observe-mutations`**: Set up MutationObserver in main world with access to framework internals
-- **Component search**: `claudia dominatrix find-component --name "PostCard"` — search by React component name
+- **Component search**: `anima dominatrix find-component --name "PostCard"` — search by React component name
 - **Props inspection**: Read `fiber.memoizedProps` to show component props (useful for debugging state)

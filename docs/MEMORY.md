@@ -1,6 +1,6 @@
 # Memory System
 
-Claudia's memory system ingests session transcripts from JSONL log files into SQLite, groups them into conversations by detecting time gaps, and provides the foundation for Libby (the Librarian) to process completed conversations into durable memories.
+Anima's memory system ingests session transcripts from JSONL log files into SQLite, groups them into conversations by detecting time gaps, and provides the foundation for Libby (the Librarian) to process completed conversations into durable memories.
 
 ## Architecture Overview
 
@@ -290,23 +290,23 @@ From `parser.ts` — what we extract from Claude Code JSONL:
 
 ```bash
 # Manual import — single file
-claudia memory.ingest --file ~/.claude/projects-backup/-Users-foo/abc.jsonl
+anima memory.ingest --file ~/.claude/projects-backup/-Users-foo/abc.jsonl
 
 # Manual import — entire directory (recursive)
-claudia memory.ingest --dir ~/.claude/projects-backup
+anima memory.ingest --dir ~/.claude/projects-backup
 
 # Force re-import (delete existing entries, re-ingest from scratch)
-claudia memory.ingest --dir ~/.claude/projects-backup --reimport
+anima memory.ingest --dir ~/.claude/projects-backup --reimport
 
 # Check system stats
-claudia memory.health_check
+anima memory.health_check
 
 # List conversations
-claudia memory.conversations
-claudia memory.conversations --status ready
+anima memory.conversations
+anima memory.conversations --status ready
 
 # Trigger Libby processing (Phase 2)
-claudia memory.process
+anima memory.process
 ```
 
 ## Historical Import Workflow
@@ -321,7 +321,7 @@ bun scripts/pi-to-cc.ts
 bun scripts/test-ingest.ts --dir ~/.claude/projects-backup
 
 # 3. Verify
-claudia memory.health_check
+anima memory.health_check
 
 # 4. Enable extension in anima.json
 #    On next startup, scan of ~/.claude/projects picks up any
@@ -466,7 +466,7 @@ From Chroma Research ("Context Rot: How Long-Term AI Memory Goes Stale"):
 - **Evergreen files** (durable facts, reference docs) should never be decayed — only dated entries
 - MMR (Maximal Marginal Relevance) re-ranking reduces near-duplicate results in search
 
-### Implications for Claudia's Memory
+### Implications for Anima's Memory
 
 1. **Relationship files are fact memory** — they should be living documents that Libby reads and updates directly, not append-only logs. When Libby learns someone's role changed, the file should reflect the current state with a revision history, not a growing list of dated observations.
 

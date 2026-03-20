@@ -334,7 +334,7 @@ Agent-host can handle notifications internally since it owns both session and co
 }
 ```
 
-**Important**: Agent-host uses `bun run` (NOT `bun --watch` and NOT `bun --hot`). It must be maximally stable. Code changes require manual restart via `claudia watchdog restart agent-host`.
+**Important**: Agent-host uses `bun run` (NOT `bun --watch` and NOT `bun --hot`). It must be maximally stable. Code changes require manual restart via `anima watchdog restart agent-host`.
 
 ### Startup Order
 

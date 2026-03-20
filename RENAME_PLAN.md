@@ -18,12 +18,12 @@ Use `Anima` when the reference is to the platform, infrastructure, runtime, pack
 
 Examples:
 
-- `@claudia/*` -> `@anima/*`
+- `@anima/*` -> `@anima/*`
 - `ClaudiaConfig` -> `AnimaConfig`
 - `ClaudiaExtension` -> `AnimaExtension`
-- `~/.claudia` -> `~/.anima`
-- `claudia.json` -> `anima.json`
-- `CLAUDIA_*` -> `ANIMA_*`
+- `~/.anima` -> `~/.anima`
+- `anima.json` -> `anima.json`
+- `ANIMA_*` -> `ANIMA_*`
 - App/product names such as desktop, VS Code, PWA, watchdog, and launcher metadata
 
 ### Do Not Rename
@@ -32,8 +32,8 @@ Keep `Claudia` when it refers to the person/assistant, user-facing identity, or 
 
 Examples that should stay:
 
-- Agent IDs such as `claudia-main`
-- Email/domain references such as `claudia@iamclaudia.ai` and `iamclaudia-ai`
+- Agent IDs such as `anima-main`
+- Email/domain references such as `anima@iamclaudia.ai` and `iamclaudia-ai`
 - Memory transcripts, autobiographical content, historical episode data, and persona prompts
 - Intentional copy that refers to Claudia as the assistant rather than the platform
 
@@ -53,12 +53,12 @@ Measured from the current repo:
 
 - `26` `package.json` files
 - `8` `tsconfig*.json` files
-- `123` files with `@claudia/` package-scope references
-- `71` files with `.claudia` path references
-- `22` files with `claudia.json`
+- `123` files with `@anima/` package-scope references
+- `71` files with `.anima` path references
+- `22` files with `anima.json`
 - `32` files with `Claudia*` type/component/class names
-- `29` files with `CLAUDIA_*` environment variables
-- `6` files with `claudia:` localStorage/settings key prefixes
+- `29` files with `ANIMA_*` environment variables
+- `6` files with `anima:` localStorage/settings key prefixes
 
 Additional rename surfaces now present:
 
@@ -68,7 +68,7 @@ Additional rename surfaces now present:
 - LaunchAgent/plist filename and service label
 - PWA manifest name/description/shortcuts and service-worker cache/notification tags
 - CLI defaults, temp file prefixes, and watchdog install/deploy paths
-- file and directory names containing `Claudia` or `claudia`
+- file and directory names containing `Claudia` or `anima`
 
 ## Explicit Non-Goals
 
@@ -79,8 +79,8 @@ This rename should not try to rewrite the entire memory archive or historical do
 ### Phase 0: Safety and Migration Strategy
 
 - [ ] Freeze the exact compatibility rules before editing code
-- [ ] Keep the live `~/.claudia` installation untouched until Anima is verified
-- [ ] Add a startup migration path from `~/.claudia` to `~/.anima`
+- [ ] Keep the live `~/.anima` installation untouched until Anima is verified
+- [ ] Add a startup migration path from `~/.anima` to `~/.anima`
 - [ ] Perform migration as a one-shot cutover with the old system stopped
 - [ ] Decide whether config migration is copy-on-first-run, explicit CLI command, or a manual preflight step
 - [ ] Stop/redeploy watchdog only after new binaries and configs exist
@@ -88,15 +88,15 @@ This rename should not try to rewrite the entire memory archive or historical do
 Cutover behavior:
 
 - Stop the live Claudia system first
-- Copy/migrate data from `~/.claudia` into `~/.anima`
+- Copy/migrate data from `~/.anima` into `~/.anima`
 - Start only the Anima system after code/config migration is complete
 - If the cutover fails, restart the old Claudia system from the untouched legacy files
 - Do not add long-term dual-read support unless cutover testing proves it is necessary
 
 ### Phase 1: Rename Files and Directory-Level Identifiers
 
-- [ ] `claudia.example.json` -> `anima.example.json`
-- [ ] `scripts/com.claudia.watchdog.plist` -> `scripts/com.anima.watchdog.plist`
+- [ ] `anima.example.json` -> `anima.example.json`
+- [ ] `scripts/com.anima.watchdog.plist` -> `scripts/com.anima.watchdog.plist`
 - [ ] Review whether these should be renamed now or later:
   - `clients/vscode/src/ClaudiaPanelProvider.ts`
   - `packages/ui/src/components/ClaudiaChat.tsx`
@@ -104,9 +104,9 @@ Cutover behavior:
   - `clients/menubar/Claudia/`
   - `clients/menubar/Claudia.xcodeproj`
 - [ ] Review asset filenames that encode the old product name:
-  - `assets/claudia.png`
-  - `assets/claudia-github.png`
-  - `assets/claudia-github.svg`
+  - `assets/anima.png`
+  - `assets/anima-github.png`
+  - `assets/anima-github.svg`
 
 Note:
 
@@ -115,10 +115,10 @@ Note:
 
 ### Phase 2: Workspace Package Namespace
 
-- [ ] Rename root package name `claudia` -> `anima`
-- [ ] Rename all workspace packages `@claudia/*` -> `@anima/*`
+- [ ] Rename root package name `anima` -> `anima`
+- [ ] Rename all workspace packages `@anima/*` -> `@anima/*`
 - [ ] Update all internal dependency references in `package.json`
-- [ ] Update root script filters such as `bun run --filter @claudia/...`
+- [ ] Update root script filters such as `bun run --filter @anima/...`
 - [ ] Regenerate the lockfile after package renames
 
 Primary package surface:
@@ -130,7 +130,7 @@ Primary package surface:
 
 ### Phase 3: Imports, Exports, and TS Path Mapping
 
-- [ ] Update all `@claudia/*` import/export references to `@anima/*`
+- [ ] Update all `@anima/*` import/export references to `@anima/*`
 - [ ] Update TS path aliases in root and package tsconfig files
 - [ ] Verify generated docs/scripts that parse package names
 
@@ -162,12 +162,12 @@ If these components represent "chat with Claudia" rather than "the Claudia produ
 
 ### Phase 5: Config, Data Paths, and Persistence
 
-- [ ] Rename default config/data directory from `~/.claudia` to `~/.anima`
-- [ ] Rename default config file from `claudia.json` to `anima.json`
-- [ ] Rename default database path from `~/.claudia/claudia.db` to `~/.anima/anima.db` if desired
+- [ ] Rename default config/data directory from `~/.anima` to `~/.anima`
+- [ ] Rename default config file from `anima.json` to `anima.json`
+- [ ] Rename default database path from `~/.anima/anima.db` to `~/.anima/anima.db` if desired
 - [ ] Update logger paths, watchdog paths, codex output paths, libby logs, and extension storage paths
 - [ ] Add the one-shot data/config migration step for cutover
-- [ ] Update scripts and tests that assume `claudia.db` or `claudia.json`
+- [ ] Update scripts and tests that assume `anima.db` or `anima.json`
 
 Important implementation detail:
 
@@ -175,33 +175,33 @@ Important implementation detail:
 
 ### Phase 6: Environment Variables and Transitional Compatibility
 
-- [ ] Rename `CLAUDIA_*` env vars to `ANIMA_*`
+- [ ] Rename `ANIMA_*` env vars to `ANIMA_*`
 - [ ] Update code to use only `ANIMA_*` after cutover
 - [ ] Update CLI help text, test harnesses, smoke scripts, and docs
 
 Confirmed active env vars now include:
 
-- `CLAUDIA_CONFIG`
-- `CLAUDIA_HOME`
-- `CLAUDIA_DATA_DIR`
-- `CLAUDIA_SKIP_ORPHAN_KILL`
-- `CLAUDIA_GATEWAY_URL`
-- `CLAUDIA_GATEWAY_HTTP`
-- `CLAUDIA_GATEWAY_WS`
-- `CLAUDIA_WATCHDOG_URL`
-- `CLAUDIA_SESSION_ID`
-- `CLAUDIA_PROJECT_DIR`
-- `CLAUDIA_AGENT_IDLE_REAP_INTERVAL_MS`
-- `CLAUDIA_AGENT_IDLE_STALE_MS`
-- `CLAUDIA_SCHEDULER_SESSION_ID`
-- `CLAUDIA_SMOKE_*`
+- `ANIMA_CONFIG`
+- `ANIMA_HOME`
+- `ANIMA_DATA_DIR`
+- `ANIMA_SKIP_ORPHAN_KILL`
+- `ANIMA_GATEWAY_URL`
+- `ANIMA_GATEWAY_HTTP`
+- `ANIMA_GATEWAY_WS`
+- `ANIMA_WATCHDOG_URL`
+- `ANIMA_SESSION_ID`
+- `ANIMA_PROJECT_DIR`
+- `ANIMA_AGENT_IDLE_REAP_INTERVAL_MS`
+- `ANIMA_AGENT_IDLE_STALE_MS`
+- `ANIMA_SCHEDULER_SESSION_ID`
+- `ANIMA_SMOKE_*`
 
 ### Phase 7: Client/Product Surface Rename
 
 - [ ] VS Code extension:
   - package name/display name/description
-  - command IDs like `claudia.openChat`
-  - config namespace like `claudia.gatewayUrl`
+  - command IDs like `anima.openChat`
+  - config namespace like `anima.gatewayUrl`
   - menu categories, titles, view type, README
 - [ ] Desktop/Tauri:
   - `productName`
@@ -222,33 +222,33 @@ Confirmed active env vars now include:
 
 ### Phase 8: Local Keys, Runtime IDs, and Miscellaneous String Constants
 
-- [ ] Rename localStorage/config key prefixes such as `claudia:*` and `claudia-draft`
+- [ ] Rename localStorage/config key prefixes such as `anima:*` and `anima-draft`
 - [ ] Rename DOM IDs and runtime identifiers that are product-specific
 - [ ] Review temp file prefixes and test tmpdir prefixes for consistency
 - [ ] Keep IDs that are intentionally persona-specific
 
 Examples already found:
 
-- `claudia:voice`
-- `claudia:thinking:*`
-- `claudia:workspace:*`
-- `claudia:nav:sessionsCollapsed`
-- `claudia-draft`
-- `claudia-inline-expansion-panel`
+- `anima:voice`
+- `anima:thinking:*`
+- `anima:workspace:*`
+- `anima:nav:sessionsCollapsed`
+- `anima-draft`
+- `anima-inline-expansion-panel`
 
 ### Phase 9: Operational Assets and Deployment
 
 - [ ] Update watchdog binary name, deploy destination, and install/uninstall logic
 - [ ] Update LaunchAgent label and plist references
 - [ ] Update bundle IDs and app identifiers across desktop/mobile/macOS
-- [ ] Update any hardcoded repo paths still pointing to `/iamclaudia-ai/claudia`
+- [ ] Update any hardcoded repo paths still pointing to `/iamclaudia-ai/anima`
 - [ ] Rebuild generated assets if app name changes affect packaging
 
 Already confirmed:
 
-- watchdog build currently outputs `dist/claudia-watchdog`
-- CLI install commands still target `com.claudia.watchdog.plist`
-- plist contents still point at the old `.../iamclaudia-ai/claudia` repo path
+- watchdog build currently outputs `dist/anima-watchdog`
+- CLI install commands still target `com.anima.watchdog.plist`
+- plist contents still point at the old `.../iamclaudia-ai/anima` repo path
 
 ### Phase 10: Documentation and Human Review
 
@@ -287,23 +287,23 @@ Use caution in:
 
 ```bash
 # Package namespace
-rg -n '@claudia/' .
+rg -n '@anima/' .
 
 # System-facing symbol names
 rg -n 'Claudia(Config|Extension|Client|PanelProvider|Chat|Thinking)' .
 
 # Config and data paths
-rg -n '\.claudia|claudia\.json|claudia\.db' .
+rg -n '\.anima|anima\.json|anima\.db' .
 
 # Environment variables
-rg -n 'CLAUDIA_' .
+rg -n 'ANIMA_' .
 
 # Product/runtime IDs
-rg -n 'claudia\.|claudia:|claudia-' clients packages extensions scripts
+rg -n 'anima\.|anima:|anima-' clients packages extensions scripts
 
 # File names
 find . -path './.git' -prune -o -name '*Claudia*' -print | sort
-find . -path './.git' -prune -o -name '*claudia*' -print | sort
+find . -path './.git' -prune -o -name '*anima*' -print | sort
 ```
 
 ## Success Criteria
@@ -313,7 +313,7 @@ find . -path './.git' -prune -o -name '*claudia*' -print | sort
 - [ ] Default config/data paths are `~/.anima`
 - [ ] Preferred env vars are `ANIMA_*`
 - [ ] Product shells are branded `Anima`
-- [ ] Legacy `~/.claudia` install remains untouched and recoverable
+- [ ] Legacy `~/.anima` install remains untouched and recoverable
 - [ ] Persona references to Claudia remain intentional and correct
 - [ ] Typecheck/tests pass after rename
 - [ ] Anima can boot cleanly after the one-shot migration

@@ -2,13 +2,13 @@
 
 Skills are self-contained capability packages that the agent loads on-demand. A skill provides specialized workflows, setup instructions, helper scripts, and reference documentation for specific tasks.
 
-Claudia follows the [Agent Skills standard](https://agentskills.io/specification), with lenient loading behavior to keep valid skills usable even when some metadata is imperfect.
+Anima follows the [Agent Skills standard](https://agentskills.io/specification), with lenient loading behavior to keep valid skills usable even when some metadata is imperfect.
 
 ## Locations
 
 > Security: Skills can instruct the model to perform actions and may include executable code the model invokes. Review skill content before use.
 
-Claudia loads skills from:
+Anima loads skills from:
 
 - Global:
   - `~/.anima/skills/`
@@ -44,7 +44,7 @@ These paths are additive to defaults. Path resolution:
 
 ## How Skills Work
 
-1. At session startup, Claudia scans skill locations and extracts names and descriptions.
+1. At session startup, Anima scans skill locations and extracts names and descriptions.
 1. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills).
 1. When a task matches, the agent uses `read` to load the full `SKILL.md`.
 1. The agent follows the instructions, resolving relative paths from the skill directory.

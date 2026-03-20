@@ -6,7 +6,7 @@
 
 ## App Name
 
-Claudia
+Anima
 
 ## App Category
 
@@ -14,7 +14,7 @@ Communication / Voice Assistant
 
 ## Brief Description (for the form)
 
-Claudia is a personal AI assistant app focused on hands-free voice interaction. The app enables users to have natural voice conversations with their AI assistant while driving, with responses delivered via text-to-speech. The interface is designed to be entirely voice-driven, requiring no visual attention or manual interaction, making it ideal for safe in-vehicle use.
+Anima is a personal AI assistant app focused on hands-free voice interaction. The app enables users to have natural voice conversations with their AI assistant while driving, with responses delivered via text-to-speech. The interface is designed to be entirely voice-driven, requiring no visual attention or manual interaction, making it ideal for safe in-vehicle use.
 
 ---
 
@@ -22,13 +22,13 @@ Claudia is a personal AI assistant app focused on hands-free voice interaction. 
 
 ### Overview
 
-Claudia is a personal AI assistant application that prioritizes voice-first interaction. The app connects to a secure personal server running on the user's home network, enabling private, always-available AI assistance.
+Anima is a personal AI assistant application that prioritizes voice-first interaction. The app connects to a secure personal server running on the user's home network, enabling private, always-available AI assistance.
 
 ### Why CarPlay?
 
-CarPlay integration is essential for Claudia because:
+CarPlay integration is essential for Anima because:
 
-1. **Safety-First Design**: Claudia is built around voice interaction with no requirement to look at or touch the screen. CarPlay's voice-optimized environment is the perfect fit for this interaction model.
+1. **Safety-First Design**: Anima is built around voice interaction with no requirement to look at or touch the screen. CarPlay's voice-optimized environment is the perfect fit for this interaction model.
 
 2. **Hands-Free Operation**: Users can initiate conversations using wake words ("Hey Claudia") and receive responses via text-to-speech through the vehicle's audio system. No manual interaction required.
 
@@ -94,7 +94,7 @@ You can say: "Initially for personal use and beta testing via TestFlight, with p
 
 ### If They Ask About Similar Apps
 
-Mention that voice assistant apps like those for home automation (HomeKit), messaging (Messages, WhatsApp), and navigation (Maps, Waze) all benefit from CarPlay's voice-first environment. Claudia follows this same pattern for AI assistance.
+Mention that voice assistant apps like those for home automation (HomeKit), messaging (Messages, WhatsApp), and navigation (Maps, Waze) all benefit from CarPlay's voice-first environment. Anima follows this same pattern for AI assistance.
 
 ---
 
@@ -102,7 +102,7 @@ Mention that voice assistant apps like those for home automation (HomeKit), mess
 
 If the Voice Assistant category seems uncertain, you could also position it as a **Communication** app:
 
-> Claudia is a communication app that enables users to have voice conversations with their AI assistant. Similar to how users make phone calls or send voice messages while driving, Claudia provides a hands-free way to communicate with an always-available AI companion. The app uses CarPlay's audio system for natural, phone-call-like conversations without requiring any visual attention.
+> Anima is a communication app that enables users to have voice conversations with their AI assistant. Similar to how users make phone calls or send voice messages while driving, Anima provides a hands-free way to communicate with an always-available AI companion. The app uses CarPlay's audio system for natural, phone-call-like conversations without requiring any visual attention.
 
 This framing might fit better with Apple's existing CarPlay categories (Phone, Messages, etc.).
 

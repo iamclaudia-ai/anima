@@ -1,8 +1,8 @@
-# Claudia - Personal AI Assistant Platform
+# Anima - Personal AI Assistant Platform
 
 ## Project Overview
 
-Claudia is a personal AI assistant platform built around Claude Code CLI. A single gateway on port 30086 serves everything — WebSocket, web UI, and extensions — providing a unified control plane for interacting with Claude through multiple interfaces:
+Anima is a personal AI assistant platform built around Claude Code CLI. A single gateway on port 30086 serves everything — WebSocket, web UI, and extensions — providing a unified control plane for interacting with Claude through multiple interfaces:
 
 - **Web UI** — Browser-based chat at `http://localhost:30086`
 - **CLI** — Schema-driven client with method discovery and validation
@@ -75,7 +75,7 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 ## Monorepo Structure
 
 ```
-claudia/
+anima/
 ├── packages/
 │   ├── gateway/          # Pure hub — routes messages, event fanout, no business logic
 │   ├── watchdog/         # Process supervisor — spawns gateway, health checks
@@ -249,7 +249,7 @@ bun run typecheck:fast   # Fast (tsgo, used in pre-commit)
 - **Single user** — This is a personal assistant, not multi-tenant
 - **Trust model** — Running with full permissions (YOLO mode)
 - **Tailscale** — Used for secure networking between devices
-- **Port 30086** — SHA256("Claudia") → x7586 → 30086
+- **Port 30086** — Fixed gateway port
 - **CLA-BOSSING** — Claudia's phone number: 252-267-7464
 
 ## Session Identity
