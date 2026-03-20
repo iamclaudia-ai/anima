@@ -447,7 +447,7 @@ async function handleList(params: ListParams): Promise<string> {
 async function main() {
   const server = new Server(
     {
-      name: "claudia-memory",
+      name: "anima-memory",
       version: "0.2.0",
     },
     {

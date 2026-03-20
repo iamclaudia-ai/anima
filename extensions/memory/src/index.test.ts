@@ -70,8 +70,8 @@ describe("memory health lock status", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "claudia-memory-health-"));
-    setDbPathForTests(join(tempDir, "claudia.test.db"));
+    tempDir = mkdtempSync(join(tmpdir(), "anima-memory-health-"));
+    setDbPathForTests(join(tempDir, "anima.test.db"));
     setupSchema();
   });
 

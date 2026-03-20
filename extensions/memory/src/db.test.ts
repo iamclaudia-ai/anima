@@ -54,8 +54,8 @@ describe("memory singleton lock", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "claudia-memory-lock-"));
-    setDbPathForTests(join(tempDir, "claudia.test.db"));
+    tempDir = mkdtempSync(join(tmpdir(), "anima-memory-lock-"));
+    setDbPathForTests(join(tempDir, "anima.test.db"));
     setupSchema();
   });
 
@@ -116,8 +116,8 @@ describe("memory conversation upsert", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "claudia-memory-upsert-"));
-    setDbPathForTests(join(tempDir, "claudia.test.db"));
+    tempDir = mkdtempSync(join(tmpdir(), "anima-memory-upsert-"));
+    setDbPathForTests(join(tempDir, "anima.test.db"));
     setupSchema();
   });
 

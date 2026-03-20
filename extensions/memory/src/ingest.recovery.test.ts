@@ -8,8 +8,8 @@ describe("ingest crash recovery", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "claudia-memory-recovery-"));
-    setDbPathForTests(join(tempDir, "claudia.test.db"));
+    tempDir = mkdtempSync(join(tmpdir(), "anima-memory-recovery-"));
+    setDbPathForTests(join(tempDir, "anima.test.db"));
 
     const db = getDb();
     db.exec(`
