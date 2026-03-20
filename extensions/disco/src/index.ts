@@ -14,11 +14,11 @@
  */
 
 import type {
-  ClaudiaExtension,
+  AnimaExtension,
   ExtensionContext,
   ExtensionMethodDefinition,
   GatewayEvent,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -55,9 +55,9 @@ interface AgentPresence {
   metadata?: unknown;
 }
 
-export function createDiscoExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
+export function createDiscoExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext;
-  const dbPath = join(homedir(), ".claudia", "disco.db");
+  const dbPath = join(homedir(), ".anima", "disco.db");
   let db: Database;
 
   // Method definitions
@@ -657,5 +657,5 @@ export function createDiscoExtension(config: Record<string, unknown> = {}): Clau
 export default createDiscoExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createDiscoExtension);

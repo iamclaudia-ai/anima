@@ -146,7 +146,7 @@ export function removeMemoryDocument(filePath: string): void {
 // ============================================================================
 
 /** Directories to skip during scanning.
- * - libby: internal reasoning logs (moved to ~/.claudia)
+ * - libby: internal reasoning logs (moved to ~/.anima)
  * - .git, node_modules: obvious
  */
 const IGNORED_DIRS = new Set(["libby", ".git", "node_modules"]);

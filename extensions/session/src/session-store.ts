@@ -2,9 +2,9 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 
-const log = createLogger("SessionStore", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("SessionStore", join(homedir(), ".anima", "logs", "session.log"));
 
 export type RuntimeStatus = "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
 export type SessionPurpose = "chat" | "task" | "review" | "test";
@@ -176,11 +176,11 @@ function ensureSessionTable(currentDb: Database): void {
 function getDb(): Database {
   if (db) return db;
 
-  const claudiaDir = process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia");
+  const claudiaDir = process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
   if (!existsSync(claudiaDir)) {
     mkdirSync(claudiaDir, { recursive: true });
   }
-  const dbPath = join(claudiaDir, "claudia.db");
+  const dbPath = join(claudiaDir, "anima.db");
   db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");

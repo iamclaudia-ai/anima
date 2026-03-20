@@ -44,7 +44,7 @@ All API methods declare Zod schemas for input validation. The gateway validates 
 
 Every feature — including the web chat UI — is an extension with routes and pages.
 
-Server extension loading is config-driven from `~/.claudia/claudia.json` and always out-of-process (one child process per enabled extension). Each extension calls `runExtensionHost(factory)` from `@claudia/extension-host` — making it directly executable with `bun --hot` for native HMR.
+Server extension loading is config-driven from `~/.anima/anima.json` and always out-of-process (one child process per enabled extension). Each extension calls `runExtensionHost(factory)` from `@anima/extension-host` — making it directly executable with `bun --hot` for native HMR.
 
 | Extension  | Location               | Server methods                                                              | Web pages                                         |
 | ---------- | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------- |
@@ -164,7 +164,7 @@ interface ExtensionMethodDefinition {
   inputSchema: ZodTypeAny;
 }
 
-interface ClaudiaExtension {
+interface AnimaExtension {
   id: string;
   name: string;
   methods: ExtensionMethodDefinition[];

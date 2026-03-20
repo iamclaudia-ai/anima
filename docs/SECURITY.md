@@ -129,7 +129,7 @@ Even though Claudia is personal and single-user, regular security hygiene is imp
 
 ### File Permissions
 
-- [ ] `~/.claudia/` directory: `700` (owner only)
+- [ ] `~/.anima/` directory: `700` (owner only)
 - [ ] Config files: `600` (owner read/write only)
 - [ ] `~/memory/` directory: `700` (owner only)
 - [ ] No credentials stored in plain text config
@@ -160,7 +160,7 @@ Even though Claudia is personal and single-user, regular security hygiene is imp
 claudia security check
 
 ✓ Gateway bound to localhost (127.0.0.1:30086)
-✓ ~/.claudia permissions: 700
+✓ ~/.anima permissions: 700
 ✓ Config file permissions: 600
 ✓ No credentials in config files
 ✓ Memory repo is private

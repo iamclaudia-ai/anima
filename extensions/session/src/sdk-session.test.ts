@@ -99,7 +99,7 @@ describe("SDKSession", () => {
 
   afterEach(() => {
     for (const id of createdSessionIds) {
-      rmSync(join(homedir(), ".claudia", "sessions", id), { recursive: true, force: true });
+      rmSync(join(homedir(), ".anima", "sessions", id), { recursive: true, force: true });
     }
     createdSessionIds.length = 0;
   });
@@ -151,17 +151,17 @@ describe("SDKSession", () => {
     const sessionId = `sdk-test-${Date.now()}-claude-md`;
     createdSessionIds.push(sessionId);
 
-    const root = join(homedir(), `.claudia-sdk-test-${Date.now()}`);
+    const root = join(homedir(), `.anima-sdk-test-${Date.now()}`);
     const parentDir = join(root, "parent");
     const projectDir = join(parentDir, "project");
     const cwd = join(projectDir, "app");
     const globalClaudePath = join(homedir(), ".claude", "CLAUDE.md");
     const rootClaudePath = join(root, "CLAUDE.md");
     const projectClaudePath = join(projectDir, "CLAUDE.md");
-    const globalSkillsDir = join(homedir(), ".claudia", "skills");
+    const globalSkillsDir = join(homedir(), ".anima", "skills");
     const globalSkillPath = join(globalSkillsDir, `sdk-global-skill-${Date.now()}.md`);
     const globalHiddenSkillPath = join(globalSkillsDir, `sdk-hidden-skill-${Date.now()}.md`);
-    const projectSkillPath = join(projectDir, ".claudia", "skills", "project-helper", "SKILL.md");
+    const projectSkillPath = join(projectDir, ".anima", "skills", "project-helper", "SKILL.md");
 
     const globalOriginal = existsSync(globalClaudePath)
       ? readFileSync(globalClaudePath, "utf-8")
@@ -172,7 +172,7 @@ describe("SDKSession", () => {
       mkdirSync(cwd, { recursive: true });
       mkdirSync(join(homedir(), ".claude"), { recursive: true });
       mkdirSync(globalSkillsDir, { recursive: true });
-      mkdirSync(join(projectDir, ".claudia", "skills", "project-helper"), { recursive: true });
+      mkdirSync(join(projectDir, ".anima", "skills", "project-helper"), { recursive: true });
 
       writeFileSync(globalClaudePath, "GLOBAL_INSTRUCTIONS");
       writeFileSync(rootClaudePath, "PARENT_INSTRUCTIONS");
@@ -261,12 +261,12 @@ describe("SDKSession", () => {
     const sessionId = `sdk-test-${Date.now()}-preset-only`;
     createdSessionIds.push(sessionId);
     let capturedOptions: Record<string, unknown> | undefined;
-    const previousClaudiaHome = process.env.CLAUDIA_HOME;
+    const previousClaudiaHome = process.env.ANIMA_HOME;
     const isolatedHome = join(tmpdir(), `claudia-sdk-home-${Date.now()}`);
     const isolatedCwd = join(isolatedHome, "repo", "app");
 
     try {
-      process.env.CLAUDIA_HOME = isolatedHome;
+      process.env.ANIMA_HOME = isolatedHome;
       mkdirSync(isolatedCwd, { recursive: true });
 
       const session = new SDKSession(sessionId, { cwd: isolatedCwd }, false, {
@@ -286,9 +286,9 @@ describe("SDKSession", () => {
       await session.close();
     } finally {
       if (previousClaudiaHome === undefined) {
-        delete process.env.CLAUDIA_HOME;
+        delete process.env.ANIMA_HOME;
       } else {
-        process.env.CLAUDIA_HOME = previousClaudiaHome;
+        process.env.ANIMA_HOME = previousClaudiaHome;
       }
       rmSync(isolatedHome, { recursive: true, force: true });
     }

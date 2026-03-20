@@ -2,14 +2,14 @@
  * Audio Store
  *
  * Saves and retrieves generated TTS audio files for future playback.
- * Audio is stored at ~/.claudia/audio/{sessionId}/{streamId}.wav
+ * Audio is stored at ~/.anima/audio/{sessionId}/{streamId}.wav
  */
 
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, mkdirSync } from "node:fs";
 
-const AUDIO_DIR = join(homedir(), ".claudia", "audio");
+const AUDIO_DIR = join(homedir(), ".anima", "audio");
 
 /** Convert raw PCM data to WAV format */
 export function pcmToWav(

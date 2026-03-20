@@ -26,7 +26,7 @@ import { homedir } from "node:os";
 
 const MEMORY_ROOT = join(homedir(), "memory");
 const EPISODES_DIR = join(MEMORY_ROOT, "episodes");
-const DB_PATH = join(homedir(), ".claudia", "claudia.db");
+const DB_PATH = join(homedir(), ".anima", "anima.db");
 
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has("--dry-run");

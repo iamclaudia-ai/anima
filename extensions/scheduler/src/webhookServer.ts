@@ -23,7 +23,7 @@ export class WebhookServer {
     this.db = db;
     this.log = log;
     this.port = port;
-    this.automationSessionId = process.env.CLAUDIA_SCHEDULER_SESSION_ID || null;
+    this.automationSessionId = process.env.ANIMA_SCHEDULER_SESSION_ID || null;
   }
 
   async start() {
@@ -363,7 +363,7 @@ export class WebhookServer {
     });
 
     if (!this.automationSessionId) {
-      this.log.warn("Skipping main-branch review: CLAUDIA_SCHEDULER_SESSION_ID not configured");
+      this.log.warn("Skipping main-branch review: ANIMA_SCHEDULER_SESSION_ID not configured");
       return;
     }
 
@@ -395,7 +395,7 @@ export class WebhookServer {
     });
 
     if (!this.automationSessionId) {
-      this.log.warn("Skipping PR review: CLAUDIA_SCHEDULER_SESSION_ID not configured");
+      this.log.warn("Skipping PR review: ANIMA_SCHEDULER_SESSION_ID not configured");
       return;
     }
 

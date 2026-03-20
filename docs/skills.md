@@ -11,11 +11,11 @@ Claudia follows the [Agent Skills standard](https://agentskills.io/specification
 Claudia loads skills from:
 
 - Global:
-  - `~/.claudia/skills/`
+  - `~/.anima/skills/`
   - `~/.claude/skills/`
   - `~/.agents/skills/`
 - Project:
-  - `.claudia/skills/`
+  - `.anima/skills/`
   - `.agents/skills/` in `cwd` and ancestor directories (up to git repo root, or filesystem root when not in a repo)
 
 Discovery rules:
@@ -25,13 +25,13 @@ Discovery rules:
 
 ### Configured Paths
 
-You can add extra probe paths in `~/.claudia/claudia.json`:
+You can add extra probe paths in `~/.anima/anima.json`:
 
 ```json
 {
   "session": {
     "skills": {
-      "paths": ["~/.claudia/skills", "~/.claude/skills", ".claudia/skills", "../shared-skills"]
+      "paths": ["~/.anima/skills", "~/.claude/skills", ".anima/skills", "../shared-skills"]
     }
   }
 }

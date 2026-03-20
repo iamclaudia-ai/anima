@@ -89,7 +89,7 @@ Every feature — including the web chat UI — is an extension that plugs into 
 
 Extensions provide server methods (RPC over WebSocket), web pages (React components with routes), event handlers, and structured health checks. All methods use schema-driven validation at the gateway boundary.
 
-Server extension code is config-driven and runs out-of-process by default: gateway enumerates enabled extension IDs from `~/.claudia/claudia.json` and spawns one extension-host child per extension, loading `extensions/<id>/src/index.ts`.
+Server extension code is config-driven and runs out-of-process by default: gateway enumerates enabled extension IDs from `~/.anima/anima.json` and spawns one extension-host child per extension, loading `extensions/<id>/src/index.ts`.
 
 ## Project Structure
 

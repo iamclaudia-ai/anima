@@ -1,6 +1,6 @@
 {
-  // Claudia Gateway Configuration
-  // Copy to ~/.claudia/claudia.json and customize
+  // Anima Gateway Configuration
+  // Copy to ~/.anima/anima.json and customize
 
   "gateway": {
     "port": 30086,
@@ -15,7 +15,7 @@
     "skills": {
       "paths": []
       // Example:
-      // "paths": ["~/.claudia/skills", "~/.claude/skills", ".claudia/skills", "../shared-skills"]
+      // "paths": ["~/.anima/skills", "~/.claude/skills", ".anima/skills", "../shared-skills"]
     }
   },
 
@@ -69,7 +69,7 @@
     },
 
     // Hooks Extension — lightweight event handlers (git-status, cost-tracker, etc.)
-    // Loads hooks from ~/.claudia/hooks/ and <workspace>/.claudia/hooks/
+    // Loads hooks from ~/.anima/hooks/ and <workspace>/.anima/hooks/
     "hooks": {
       "enabled": true,
       "config": {}

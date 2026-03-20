@@ -1,5 +1,5 @@
 /**
- * Log file API — list and tail log files from ~/.claudia/logs/.
+ * Log file API — list and tail log files from ~/.anima/logs/.
  *
  * Uses byte-level file reads (Buffer) so that byte offsets from stat.size
  * align correctly with the read position. This prevents the "missing lines"

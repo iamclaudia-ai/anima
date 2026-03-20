@@ -6,8 +6,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link } from "@claudia/ui";
-import type { HealthCheckResponse, HealthAction, HealthItem } from "@claudia/shared";
+import { Link } from "@anima/ui";
+import type { HealthCheckResponse, HealthAction, HealthItem } from "@anima/shared";
 import { useGatewayRpc } from "../hooks/useGatewayRpc";
 
 // ── Types ────────────────────────────────────────────────────

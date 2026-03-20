@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionContext, GatewayEvent } from "@claudia/shared";
+import type { ExtensionContext, GatewayEvent } from "@anima/shared";
 import { createMemoryExtension } from "./index";
 import { acquireMemoryExtensionLock, closeDb, getDb, setDbPathForTests } from "./db";
 

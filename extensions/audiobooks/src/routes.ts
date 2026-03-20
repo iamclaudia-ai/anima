@@ -2,7 +2,7 @@
  * Audiobooks Extension — route declarations
  */
 
-import type { Route } from "@claudia/ui";
+import type { Route } from "@anima/ui";
 import { Library } from "./pages/Library";
 import { BookDetail } from "./pages/BookDetail";
 import { ChapterPlayer } from "./pages/ChapterPlayer";

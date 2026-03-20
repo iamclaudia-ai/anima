@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for Claudia desktop",
+  "description": "Default capabilities for Anima desktop",
   "windows": ["main"],
   "permissions": [
     "core:default",

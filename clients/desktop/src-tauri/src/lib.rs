@@ -51,7 +51,7 @@ impl Default for WindowState {
 
 fn state_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".claudia").join("desktop-window-state.json")
+    home.join(".anima").join("desktop-window-state.json")
 }
 
 fn load_window_state() -> WindowState {
@@ -260,7 +260,7 @@ pub fn run() {
             });
 
             // Build tray menu
-            let show = MenuItem::with_id(app, "tray_show", "Show Claudia", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "tray_show", "Show Anima", true, None::<&str>)?;
             let on_top_tray =
                 MenuItem::with_id(app, "tray_on_top", on_top_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "tray_quit", "Quit", true, None::<&str>)?;
@@ -269,7 +269,7 @@ pub fn run() {
             // Create tray icon
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Claudia")
+                .tooltip("Anima")
                 .menu(&tray_menu)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "tray_show" => {
@@ -328,5 +328,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running Claudia desktop");
+        .expect("error while running Anima desktop");
 }

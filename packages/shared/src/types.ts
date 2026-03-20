@@ -159,7 +159,7 @@ export interface ExtensionContext {
   tags: string[] | null;
   /** Extension configuration */
   config: Record<string, unknown>;
-  /** Logger — writes to console + file at ~/.claudia/logs/{extensionId}.log */
+  /** Logger — writes to console + file at ~/.anima/logs/{extensionId}.log */
   log: {
     info(msg: string, meta?: unknown): void;
     warn(msg: string, meta?: unknown): void;
@@ -170,7 +170,7 @@ export interface ExtensionContext {
 /**
  * Extension interface - all extensions must implement this
  */
-export interface ClaudiaExtension {
+export interface AnimaExtension {
   /** Extension method definitions (inputSchema required for validation + discovery) */
   methods: ExtensionMethodDefinition[];
   /** Unique extension ID (e.g., "voice", "memory") */
@@ -321,7 +321,7 @@ export interface LayoutDefinition {
 
 /**
  * A hook is a lightweight event handler that reacts to gateway lifecycle events.
- * Hooks are loaded by the hooks extension from ~/.claudia/hooks and from <workspace>/.claudia/hooks.
+ * Hooks are loaded by the hooks extension from ~/.anima/hooks and from <workspace>/.anima/hooks.
  */
 export interface HookDefinition {
   /** Events to subscribe to (e.g., "turn_stop", "session.created") */

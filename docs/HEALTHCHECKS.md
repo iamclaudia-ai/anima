@@ -7,7 +7,7 @@ Last updated: 2026-02-12
 Every extension should expose a `{extensionId}.health_check` method with:
 
 - `inputSchema`: `z.object({})`
-- Output shape: `HealthCheckResponse` from `@claudia/shared`
+- Output shape: `HealthCheckResponse` from `@anima/shared`
 
 ```ts
 interface HealthCheckResponse {

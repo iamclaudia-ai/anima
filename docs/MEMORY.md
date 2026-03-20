@@ -32,7 +32,7 @@ Claudia's memory system ingests session transcripts from JSONL log files into SQ
 
 ## Configuration
 
-In `~/.claudia/claudia.json`:
+In `~/.anima/anima.json`:
 
 ```json
 {
@@ -323,7 +323,7 @@ bun scripts/test-ingest.ts --dir ~/.claude/projects-backup
 # 3. Verify
 claudia memory.health_check
 
-# 4. Enable extension in claudia.json
+# 4. Enable extension in anima.json
 #    On next startup, scan of ~/.claude/projects picks up any
 #    files not already imported (same keys → skip if unchanged)
 ```
@@ -488,7 +488,7 @@ From Chroma Research ("Context Rot: How Long-Term AI Memory Goes Stale"):
 ## Design Decisions
 
 - **SQLite (not filesystem):** Queryable, transactional, handles concurrent access via WAL mode
-- **Same DB as gateway:** `~/.claudia/claudia.db` — WAL + `busy_timeout = 5000ms` handles out-of-process contention
+- **Same DB as gateway:** `~/.anima/anima.db` — WAL + `busy_timeout = 5000ms` handles out-of-process contention
 - **Relative file keys:** Deduplicates across `projects/` and `projects-backup/`
 - **Conversations scoped to files:** No cross-file merging, clean cleanup on re-import
 - **Timestamp watermarks:** Stable across re-imports (unlike autoincrement IDs)

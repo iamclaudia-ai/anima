@@ -8,7 +8,7 @@
  * `dominatrix.command` events, and respond via `dominatrix.response` method calls.
  */
 
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 import { z } from "zod";
 
 // ============================================================================
@@ -213,7 +213,7 @@ const responseParam = z.object({
 // Extension Factory
 // ============================================================================
 
-export function createDominatrixExtension(): ClaudiaExtension {
+export function createDominatrixExtension(): AnimaExtension {
   let ctx: ExtensionContext;
   const clients = new Map<string, ChromeClient>();
   const pendingRequests = new Map<string, PendingRequest>();
@@ -605,5 +605,5 @@ export function createDominatrixExtension(): ClaudiaExtension {
 export default createDominatrixExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createDominatrixExtension);

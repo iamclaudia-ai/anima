@@ -1,5 +1,5 @@
 /**
- * @claudia/shared - Shared types and utilities
+ * @anima/shared - Shared types and utilities
  */
 
 export * from "./types";

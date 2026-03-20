@@ -15,11 +15,11 @@
  */
 
 import type {
-  ClaudiaExtension,
+  AnimaExtension,
   ExtensionContext,
   GatewayEvent,
   HealthCheckResponse,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -29,10 +29,10 @@ import { SentenceChunker } from "./sentence-chunker";
 import { saveAudio, getAudioPath, pcmToWav } from "./audio-store";
 
 // ============================================================================
-// File Logging (tail -f ~/.claudia/logs/voice.log)
+// File Logging (tail -f ~/.anima/logs/voice.log)
 // ============================================================================
 
-const LOG_DIR = join(homedir(), ".claudia", "logs");
+const LOG_DIR = join(homedir(), ".anima", "logs");
 if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
 const LOG_FILE = join(LOG_DIR, "voice.log");
 
@@ -326,7 +326,7 @@ function createConnectionState(connectionId: string): ConnectionVoiceState {
 // Voice Extension
 // ============================================================================
 
-export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension {
+export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
   // Filter out undefined values so they don't override defaults
   const defined = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
   const cfg: Required<VoiceConfig> = { ...DEFAULT_CONFIG, ...defined };
@@ -993,5 +993,5 @@ export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension
 export default createVoiceExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createVoiceExtension);

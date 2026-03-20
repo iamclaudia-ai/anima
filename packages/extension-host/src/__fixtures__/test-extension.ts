@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { ClaudiaExtension, ExtensionContext, GatewayEvent } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, GatewayEvent } from "@anima/shared";
 import { runExtensionHost } from "../index";
 
-function createFixtureExtension(): ClaudiaExtension {
+function createFixtureExtension(): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
   return {

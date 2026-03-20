@@ -2,7 +2,7 @@
  * Chat Extension — shared constants and bridge for page components.
  */
 
-import type { PlatformBridge } from "@claudia/ui";
+import type { PlatformBridge } from "@anima/ui";
 
 // Same-origin: SPA is served by the gateway
 const locationProtocol =
@@ -11,14 +11,14 @@ const locationHost =
   typeof globalThis.location !== "undefined" ? globalThis.location.host : "localhost";
 export const GATEWAY_URL = `${locationProtocol === "https:" ? "wss:" : "ws:"}//${locationHost}/ws`;
 
-const GLOBAL_DRAFT_KEY = "claudia-draft";
+const GLOBAL_DRAFT_KEY = "anima-draft";
 
 export function getDraftStorageKey(options?: { workspaceId?: string; sessionId?: string }): string {
   if (options?.workspaceId && options.sessionId) {
-    return `claudia:draft:${options.workspaceId}:${options.sessionId}`;
+    return `anima:draft:${options.workspaceId}:${options.sessionId}`;
   }
   if (options?.sessionId) {
-    return `claudia:draft:${options.sessionId}`;
+    return `anima:draft:${options.sessionId}`;
   }
   return GLOBAL_DRAFT_KEY;
 }

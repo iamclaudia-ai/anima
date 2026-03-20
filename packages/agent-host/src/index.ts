@@ -7,14 +7,14 @@
  * idle session reap).
  */
 
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { createAgentHostServer } from "./server";
 
-const log = createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
+const log = createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
 const PORT = 30087;
 const FORCE_STARTUP = process.argv.includes("--force");
@@ -25,13 +25,13 @@ function parseMs(value: string | undefined, fallbackMs: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-const IDLE_REAP_INTERVAL_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_REAP_INTERVAL_MS, 60000);
-const IDLE_STALE_MS = parseMs(process.env.CLAUDIA_AGENT_IDLE_STALE_MS, 600000);
+const IDLE_REAP_INTERVAL_MS = parseMs(process.env.ANIMA_AGENT_IDLE_REAP_INTERVAL_MS, 60000);
+const IDLE_STALE_MS = parseMs(process.env.ANIMA_AGENT_IDLE_STALE_MS, 600000);
 
 function forceClearGatewayLocks(): void {
   if (!FORCE_STARTUP) return;
 
-  const dbPath = join(homedir(), ".claudia", "claudia.db");
+  const dbPath = join(homedir(), ".anima", "anima.db");
   if (!existsSync(dbPath)) {
     log.warn("Force startup requested, but gateway DB does not exist yet", { dbPath });
     return;

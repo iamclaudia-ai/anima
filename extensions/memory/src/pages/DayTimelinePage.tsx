@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "@claudia/ui";
+import { Link } from "@anima/ui";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useGatewayRpc } from "../hooks/useGatewayRpc";

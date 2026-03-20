@@ -14,17 +14,17 @@
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 import type {
   AgentHostClientMessage as ClientMessage,
   AgentHostResponseMessage as ResponseMessage,
   AgentHostSessionEventMessage as SessionEventMessage,
   AgentHostTaskEventMessage as TaskEventMessage,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const log = createLogger("AgentClient", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("AgentClient", join(homedir(), ".anima", "logs", "session.log"));
 
 // ── Types ────────────────────────────────────────────────────
 

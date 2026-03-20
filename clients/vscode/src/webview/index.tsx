@@ -7,10 +7,10 @@
  */
 
 import { createRoot } from "react-dom/client";
-import { ClaudiaChat } from "@claudia/ui";
-import type { PlatformBridge } from "@claudia/ui";
+import { ClaudiaChat } from "@anima/ui";
+import type { PlatformBridge } from "@anima/ui";
 import { setEditorContext, useEditorContext } from "./editorContext";
-import "@claudia/ui/styles";
+import "@anima/ui/styles";
 
 // Declare VS Code API (provided by the webview runtime)
 declare function acquireVsCodeApi(): {

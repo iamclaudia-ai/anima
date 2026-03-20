@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-// ── Types matching @claudia/ui ──────────────────────────────
+// ── Types matching @anima/ui ──────────────────────────────
 
 interface TextBlock {
   type: "text" | "thinking";

@@ -73,7 +73,7 @@ if (specificConvId) {
   if (!dryRun) {
     console.log("\n  === Calling Libby (via gateway) ===\n");
 
-    const gatewayUrl = process.env.CLAUDIA_GATEWAY_URL || "ws://localhost:30086/ws";
+    const gatewayUrl = process.env.ANIMA_GATEWAY_URL || "ws://localhost:30086/ws";
 
     // Temporarily mark as ready if needed
     if (conv.status !== "ready") {
@@ -126,7 +126,7 @@ if (specificConvId) {
       console.log(`  First 500 chars:\n${transcript.text.slice(0, 500)}\n`);
     }
   } else {
-    const gatewayUrl = process.env.CLAUDIA_GATEWAY_URL || "ws://localhost:30086/ws";
+    const gatewayUrl = process.env.ANIMA_GATEWAY_URL || "ws://localhost:30086/ws";
 
     console.log(`\n  === Processing with Libby (gateway: ${gatewayUrl}) ===\n`);
 

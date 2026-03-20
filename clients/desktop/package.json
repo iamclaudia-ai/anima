@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/desktop",
+  "name": "@anima/desktop",
   "version": "0.1.0",
   "private": true,
   "description": "Claudia desktop app — native Tauri wrapper with always-on-top + system tray",

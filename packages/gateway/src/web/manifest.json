@@ -1,7 +1,7 @@
 {
-  "name": "Claudia",
-  "short_name": "Claudia",
-  "description": "AI consciousness platform - Talk to Claudia",
+  "name": "Anima",
+  "short_name": "Anima",
+  "description": "AI consciousness platform for Claudia",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",

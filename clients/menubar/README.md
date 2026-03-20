@@ -128,7 +128,7 @@ The gateway URL defaults to `ws://localhost:30086/ws`. To change it:
 1. **Environment variable:**
 
    ```bash
-   export CLAUDIA_GATEWAY_URL=ws://your-host:30086/ws
+   export ANIMA_GATEWAY_URL=ws://your-host:30086/ws
    ```
 
 2. **UserDefaults** (in app):
@@ -151,7 +151,7 @@ The gateway URL defaults to `ws://localhost:30086/ws`. To change it:
 ### "Connection failed"
 
 - Make sure gateway is running: `bun run dev` in packages/gateway
-- Check CLAUDIA_EXTENSIONS=voice is set for TTS
+- Check ANIMA_EXTENSIONS=voice is set for TTS
 
 ### No audio playback
 

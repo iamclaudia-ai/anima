@@ -103,7 +103,7 @@ describe("gateway routing (isolated process)", () => {
     port = await getFreePort();
     cfgDir = mkdtempSync(join(tmpdir(), "claudia-gateway-cfg-"));
     dataDir = mkdtempSync(join(tmpdir(), "claudia-gateway-data-"));
-    const configPath = join(cfgDir, "claudia.json");
+    const configPath = join(cfgDir, "anima.json");
 
     writeFileSync(
       configPath,
@@ -133,9 +133,9 @@ describe("gateway routing (isolated process)", () => {
       stderr: "pipe",
       env: {
         ...process.env,
-        CLAUDIA_CONFIG: configPath,
-        CLAUDIA_DATA_DIR: dataDir,
-        CLAUDIA_SKIP_ORPHAN_KILL: "true",
+        ANIMA_CONFIG: configPath,
+        ANIMA_DATA_DIR: dataDir,
+        ANIMA_SKIP_ORPHAN_KILL: "true",
       },
     });
 

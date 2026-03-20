@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useGatewayClient } from "@claudia/ui";
+import { useGatewayClient } from "@anima/ui";
 
 export function useGatewayRpc() {
   const { call, isConnected, client } = useGatewayClient();

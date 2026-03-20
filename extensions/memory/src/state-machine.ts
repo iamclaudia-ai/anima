@@ -17,7 +17,7 @@
  */
 
 import { setup, assign, fromPromise } from "xstate";
-import type { ExtensionContext } from "@claudia/shared";
+import type { ExtensionContext } from "@anima/shared";
 import { existsSync } from "node:fs";
 import {
   getDb,

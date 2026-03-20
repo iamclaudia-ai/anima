@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
 
-const log = createLogger("TaskHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
+const log = createLogger("TaskHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
 type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 type TaskMode = "general" | "review" | "test";
@@ -139,7 +139,7 @@ export class TaskHost extends EventEmitter {
 
   constructor(private cfg: TaskHostConfig = {}) {
     super();
-    this.outputDir = join(process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia"), "codex");
+    this.outputDir = join(process.env.ANIMA_DATA_DIR || join(homedir(), ".anima"), "codex");
     ensureDir(this.outputDir);
   }
 

@@ -1,5 +1,5 @@
 /**
- * Claudia Service Worker
+ * Anima Service Worker
  *
  * Minimal shell for PWA functionality:
  * - Caching strategy for shell assets
@@ -7,7 +7,7 @@
  * - Push notification event routing
  */
 
-const CACHE_NAME = "claudia-v1";
+const CACHE_NAME = "anima-v1";
 
 // Cache shell assets on install
 self.addEventListener("install", (event) => {
@@ -45,7 +45,7 @@ self.addEventListener("push", (event) => {
       body: data.body,
       icon: data.icon || "/icons/icon-192x192.png",
       badge: data.badge,
-      tag: data.tag || "claudia-notification",
+      tag: data.tag || "anima-notification",
       data: data.data,
     }),
   );

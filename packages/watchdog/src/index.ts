@@ -1,5 +1,5 @@
 /**
- * Claudia Watchdog
+ * Anima Watchdog
  *
  * Standalone process supervisor + dashboard that manages gateway, agent-host,
  * and claude remote-control as direct child processes. Provides health monitoring,
@@ -90,7 +90,7 @@ log("INFO", `Watchdog starting on http://localhost:${WATCHDOG_PORT}`);
 console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   Claudia Watchdog on http://localhost:${WATCHDOG_PORT}                ║
+║   Anima Watchdog on http://localhost:${WATCHDOG_PORT}                  ║
 ║                                                               ║
 ║   Dashboard:  http://localhost:${WATCHDOG_PORT}                        ║
 ║   Status:     http://localhost:${WATCHDOG_PORT}/status                 ║

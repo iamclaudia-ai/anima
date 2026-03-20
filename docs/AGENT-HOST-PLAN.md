@@ -355,7 +355,7 @@ Extension Host restarts (HMR or crash)
 
 ### Agent-Host Restarts
 
-Agent-host persists session registry to `~/.claudia/agent-host/sessions.json`. On restart:
+Agent-host persists session registry to `~/.anima/agent-host/sessions.json`. On restart:
 
 - Reads persisted sessions
 - SDK `query()` processes are dead (they were children of the old process)
@@ -434,7 +434,7 @@ The extra WebSocket hop adds negligible latency (localhost). The critical benefi
 
 ```
 packages/agent-host/
-  package.json                    -- @claudia/agent-host
+  package.json                    -- @anima/agent-host
   tsconfig.json
   src/
     index.ts                      -- HTTP + WebSocket server (port 30087)
@@ -485,4 +485,4 @@ Agent-host handles notifications internally since it owns both session and codex
 
 ### Config propagation
 
-Agent-host reads `~/.claudia/claudia.json` directly via `loadConfig()` from `@claudia/shared`, same as the gateway. No need for config to flow through extensions.
+Agent-host reads `~/.anima/anima.json` directly via `loadConfig()` from `@anima/shared`, same as the gateway. No need for config to flow through extensions.

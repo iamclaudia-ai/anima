@@ -1,6 +1,6 @@
 /**
  * Inline logger — no monorepo imports.
- * Writes to console + ~/.claudia/logs/watchdog.log with rotation.
+ * Writes to console + ~/.anima/logs/watchdog.log with rotation.
  */
 
 import { existsSync, mkdirSync, appendFileSync, statSync, renameSync } from "node:fs";

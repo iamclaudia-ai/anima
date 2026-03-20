@@ -26,7 +26,7 @@ interface SkillFrontmatter {
 const SKILL_MD_NAME = "SKILL.md";
 
 function getHomeDir(): string {
-  return process.env.CLAUDIA_HOME || homedir();
+  return process.env.ANIMA_HOME || homedir();
 }
 
 function normalizePath(input: string): string {
@@ -57,7 +57,7 @@ function findProjectSkillDirs(cwd: string): string[] {
 
   let dir = resolve(cwd);
   while (true) {
-    dirs.push(join(dir, ".claudia", "skills"));
+    dirs.push(join(dir, ".anima", "skills"));
     dirs.push(join(dir, ".agents", "skills"));
 
     if (gitRoot && dir === gitRoot) break;
@@ -199,7 +199,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): Skill[] {
   const additionalPaths = options.additionalPaths || [];
   const home = getHomeDir();
   const discoveredDirs: Array<{ dir: string; source: "global" | "project" }> = [
-    { dir: join(home, ".claudia", "skills"), source: "global" },
+    { dir: join(home, ".anima", "skills"), source: "global" },
     { dir: join(home, ".claude", "skills"), source: "global" },
     { dir: join(home, ".agents", "skills"), source: "global" },
     ...findProjectSkillDirs(cwd).map((dir) => ({ dir, source: "project" as const })),

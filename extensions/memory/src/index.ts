@@ -18,11 +18,11 @@
  */
 
 import type {
-  ClaudiaExtension,
+  AnimaExtension,
   ExtensionContext,
   HealthCheckResponse,
   HealthItem,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -63,10 +63,10 @@ import { ingestMemoryDocument, scanAndIngestMemoryDir } from "./document-ingest"
 import { DocumentWatcher } from "./document-watcher";
 
 // ============================================================================
-// File Logging (tail -f ~/.claudia/logs/memory.log)
+// File Logging (tail -f ~/.anima/logs/memory.log)
 // ============================================================================
 
-const LOG_DIR = join(homedir(), ".claudia", "logs");
+const LOG_DIR = join(homedir(), ".anima", "logs");
 if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
 const LOG_FILE = join(LOG_DIR, "memory.log");
 
@@ -188,7 +188,7 @@ function compactHomePath(path: string | null): string {
 // Memory Extension
 // ============================================================================
 
-export function createMemoryExtension(config: MemoryConfig = {}): ClaudiaExtension {
+export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension {
   const defined = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
   const cfg: Required<MemoryConfig> = { ...DEFAULT_CONFIG, ...defined };
 
@@ -1080,5 +1080,5 @@ function findBasePath(filePath: string, configuredBasePath: string): string {
 export default createMemoryExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createMemoryExtension);

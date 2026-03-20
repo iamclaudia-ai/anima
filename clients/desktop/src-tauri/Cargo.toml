@@ -1,12 +1,12 @@
 [package]
-name = "claudia-desktop"
+name = "anima-desktop"
 version = "0.1.0"
-description = "Claudia desktop app"
+description = "Anima desktop app"
 authors = ["Michael Carter"]
 edition = "2021"
 
 [lib]
-name = "claudia_desktop_lib"
+name = "anima_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

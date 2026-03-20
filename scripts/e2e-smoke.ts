@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 
-const gatewayWs = process.env.CLAUDIA_GATEWAY_WS || "ws://localhost:30086/ws";
-const model = process.env.CLAUDIA_SMOKE_MODEL || "claude-3-5-haiku-latest";
-const thinking = process.env.CLAUDIA_SMOKE_THINKING === "true";
-const effort = process.env.CLAUDIA_SMOKE_EFFORT || "low";
-const timeoutMs = Number(process.env.CLAUDIA_SMOKE_TIMEOUT_MS || 60000);
+const gatewayWs = process.env.ANIMA_GATEWAY_WS || "ws://localhost:30086/ws";
+const model = process.env.ANIMA_SMOKE_MODEL || "claude-3-5-haiku-latest";
+const thinking = process.env.ANIMA_SMOKE_THINKING === "true";
+const effort = process.env.ANIMA_SMOKE_EFFORT || "low";
+const timeoutMs = Number(process.env.ANIMA_SMOKE_TIMEOUT_MS || 60000);
 
 interface Message {
   type: "req" | "res" | "event";

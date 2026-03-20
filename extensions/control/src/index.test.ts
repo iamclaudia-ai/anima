@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createControlExtension } from "./index";
 
 describe("control extension", () => {
-  const logsDir = join(homedir(), ".claudia", "logs");
+  const logsDir = join(homedir(), ".anima", "logs");
   const testFiles: string[] = [];
 
   afterEach(() => {

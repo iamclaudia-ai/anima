@@ -2,7 +2,7 @@
  * Shared constants for the watchdog.
  * All magic numbers, paths, and config values live here.
  *
- * Config is loaded from ~/.claudia/watchdog.json — zero monorepo imports.
+ * Config is loaded from ~/.anima/watchdog.json — zero monorepo imports.
  */
 
 import { join } from "node:path";
@@ -28,7 +28,7 @@ export interface WatchdogConfig {
   services: Record<string, ServiceConfig>;
 }
 
-const CONFIG_PATH = join(homedir(), ".claudia", "watchdog.json");
+const CONFIG_PATH = join(homedir(), ".anima", "watchdog.json");
 
 function loadConfig(): WatchdogConfig {
   if (!existsSync(CONFIG_PATH)) {
@@ -49,9 +49,8 @@ function resolvePath(p: string): string {
 }
 
 export const WATCHDOG_PORT = config.port ?? 30085;
-export const PROJECT_DIR =
-  process.env.CLAUDIA_PROJECT_DIR || join(import.meta.dir, "..", "..", "..");
-export const LOGS_DIR = resolvePath(config.logsDir ?? "~/.claudia/logs");
+export const PROJECT_DIR = process.env.ANIMA_PROJECT_DIR || join(import.meta.dir, "..", "..", "..");
+export const LOGS_DIR = resolvePath(config.logsDir ?? "~/.anima/logs");
 export const LOG_FILE = join(LOGS_DIR, "watchdog.log");
 export const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
 export const MAX_LOG_FILES = 2;

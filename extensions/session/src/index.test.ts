@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import type { ExtensionContext } from "@claudia/shared";
-import { clearConfigCache } from "@claudia/shared";
+import type { ExtensionContext } from "@anima/shared";
+import { clearConfigCache } from "@anima/shared";
 import { createSessionExtension } from "./index";
 import { AgentHostClient } from "./agent-client";
 import * as workspace from "./workspace";
@@ -52,9 +52,9 @@ describe("session extension", () => {
 
   beforeEach(() => {
     clearConfigCache();
-    mkdirSync(join(testHome, ".claudia"), { recursive: true });
+    mkdirSync(join(testHome, ".anima"), { recursive: true });
     writeFileSync(
-      join(testHome, ".claudia", "claudia.json"),
+      join(testHome, ".anima", "anima.json"),
       JSON.stringify({
         gateway: { port: 30086, host: "localhost" },
         extensions: {

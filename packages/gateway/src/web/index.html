@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Claudia</title>
+    <title>Anima</title>
 
     <!-- Theme Color -->
     <meta name="theme-color" content="#8b5cf6" />
@@ -11,9 +11,9 @@
     <!-- iOS PWA Support (meta tags only — no link/href that Bun would resolve) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Claudia" />
+    <meta name="apple-mobile-web-app-title" content="Anima" />
 
-    <!-- Styles imported via @claudia/ui/styles in index.tsx -->
+    <!-- Styles imported via @anima/ui/styles in index.tsx -->
 
     <!-- Fonts: Newsreader (memory pages) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -166,7 +166,7 @@
         });
 
         // Expose for React ErrorBoundary to report caught render errors
-        window.__claudiaBeacon = {
+        window.__animaBeacon = {
           stopHeartbeat: stopHeartbeat,
           restartHeartbeat: restartHeartbeat,
           reportError: function (type, message, stack) {

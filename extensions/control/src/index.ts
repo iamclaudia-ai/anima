@@ -10,11 +10,11 @@ import { z } from "zod";
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 
-const LOGS_DIR = join(homedir(), ".claudia", "logs");
+const LOGS_DIR = join(homedir(), ".anima", "logs");
 
-export function createControlExtension(): ClaudiaExtension {
+export function createControlExtension(): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
   return {
@@ -28,7 +28,7 @@ export function createControlExtension(): ClaudiaExtension {
       },
       {
         name: "control.log_list",
-        description: "List available log files in ~/.claudia/logs/",
+        description: "List available log files in ~/.anima/logs/",
         inputSchema: z.object({}),
       },
       {
@@ -140,5 +140,5 @@ export function createControlExtension(): ClaudiaExtension {
 export default createControlExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createControlExtension);

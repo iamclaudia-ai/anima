@@ -98,7 +98,7 @@ export interface FederationConfig {
   peers: FederationPeer[];
 }
 
-export interface ClaudiaConfig {
+export interface AnimaConfig {
   gateway: GatewayConfig;
   session: SessionConfig;
   extensions: ExtensionsConfig;
@@ -110,7 +110,7 @@ export interface ClaudiaConfig {
 // Defaults
 // ============================================================================
 
-const DEFAULT_CONFIG: ClaudiaConfig = {
+const DEFAULT_CONFIG: AnimaConfig = {
   gateway: {
     port: 30086,
     host: "localhost",
@@ -185,31 +185,31 @@ function interpolateEnvVars(obj: unknown): unknown {
 // Config Loader
 // ============================================================================
 
-let cachedConfig: ClaudiaConfig | null = null;
+let cachedConfig: AnimaConfig | null = null;
 
 /**
- * Load configuration from claudia.json
+ * Load configuration from anima.json
  *
  * Search order:
  * 1. explicit configPath argument
- * 2. CLAUDIA_CONFIG env var
- * 3. ~/.claudia/claudia.json
+ * 2. ANIMA_CONFIG env var
+ * 3. ~/.anima/anima.json
  */
-export function loadConfig(configPath?: string): ClaudiaConfig {
+export function loadConfig(configPath?: string): AnimaConfig {
   if (cachedConfig && !configPath) {
     return cachedConfig;
   }
 
   // Determine config file path
-  // Search order: explicit path → env var → ~/.claudia/claudia.json
-  const configHome = process.env.CLAUDIA_HOME || homedir();
+  // Search order: explicit path → env var → ~/.anima/anima.json
+  const configHome = process.env.ANIMA_HOME || homedir();
   const paths = [
     configPath,
-    process.env.CLAUDIA_CONFIG,
-    join(configHome, ".claudia", "claudia.json"),
+    process.env.ANIMA_CONFIG,
+    join(configHome, ".anima", "anima.json"),
   ].filter(Boolean) as string[];
 
-  let rawConfig: Partial<ClaudiaConfig> | null = null;
+  let rawConfig: Partial<AnimaConfig> | null = null;
   let loadedFrom: string | null = null;
 
   for (const path of paths) {
@@ -228,16 +228,16 @@ export function loadConfig(configPath?: string): ClaudiaConfig {
   if (!loadedFrom || !rawConfig) {
     const searched = paths.length > 0 ? paths.join(", ") : "(none)";
     throw new Error(
-      `[Config] No config file found. Searched: ${searched}. Copy claudia.example.json to ~/.claudia/claudia.json`,
+      `[Config] No config file found. Searched: ${searched}. Copy anima.example.json to ~/.anima/anima.json`,
     );
   }
   console.log(`[Config] Loaded from: ${loadedFrom}`);
 
   // Interpolate environment variables
-  const interpolated = interpolateEnvVars(rawConfig) as Partial<ClaudiaConfig>;
+  const interpolated = interpolateEnvVars(rawConfig) as Partial<AnimaConfig>;
 
   // Merge with defaults
-  const config: ClaudiaConfig = {
+  const config: AnimaConfig = {
     gateway: { ...DEFAULT_CONFIG.gateway, ...interpolated.gateway },
     session: { ...DEFAULT_CONFIG.session, ...interpolated.session },
     extensions: interpolated.extensions ?? DEFAULT_CONFIG.extensions,

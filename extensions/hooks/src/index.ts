@@ -1,8 +1,8 @@
 /**
  * Hooks Extension
  *
- * Loads lightweight hook scripts from ~/.claudia/hooks/ and from the active
- * workspace at <workspace>/.claudia/hooks, subscribes to their declared events,
+ * Loads lightweight hook scripts from ~/.anima/hooks/ and from the active
+ * workspace at <workspace>/.anima/hooks, subscribes to their declared events,
  * and dispatches to handlers.
  * Hook output is emitted as hook.{hookId}.{event} for the UI to render.
  */
@@ -12,13 +12,13 @@ import { readdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type {
-  ClaudiaExtension,
+  AnimaExtension,
   ExtensionContext,
   GatewayEvent,
   HookDefinition,
   HookContext,
   HealthCheckResponse,
-} from "@claudia/shared";
+} from "@anima/shared";
 
 const DEFAULT_WORKSPACE_RESCAN_MS = 10_000;
 
@@ -76,12 +76,12 @@ function extractWorkspaceCwd(event: GatewayEvent): string | null {
   return null;
 }
 
-export function createHooksExtension(config: HooksConfig = {}): ClaudiaExtension {
+export function createHooksExtension(config: HooksConfig = {}): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
-  // Global hooks (~/.claudia/hooks and config.extraDirs)
+  // Global hooks (~/.anima/hooks and config.extraDirs)
   const globalHooks = new Map<string, LoadedHook>();
-  // Workspace hooks (<workspace>/.claudia/hooks)
+  // Workspace hooks (<workspace>/.anima/hooks)
   const workspaceHooks = new Map<string, LoadedHook>();
   // Active hooks after precedence merge (workspace overrides global by id)
   const hooks: LoadedHook[] = [];
@@ -176,7 +176,7 @@ export function createHooksExtension(config: HooksConfig = {}): ClaudiaExtension
   async function loadGlobalHooks(): Promise<void> {
     globalHooks.clear();
 
-    const globalDirs = [join(homedir(), ".claudia", "hooks"), ...(config.extraDirs || [])];
+    const globalDirs = [join(homedir(), ".anima", "hooks"), ...(config.extraDirs || [])];
     ctx?.log.info(`Loading global hooks from: ${globalDirs.join(", ")}`);
 
     for (const dir of globalDirs) {
@@ -187,7 +187,7 @@ export function createHooksExtension(config: HooksConfig = {}): ClaudiaExtension
   }
 
   async function loadWorkspaceHooks(cwd: string | null): Promise<void> {
-    const workspaceHooksDir = cwd ? join(cwd, ".claudia", "hooks") : null;
+    const workspaceHooksDir = cwd ? join(cwd, ".anima", "hooks") : null;
 
     if (!workspaceHooksDir) {
       if (currentWorkspaceHooksDir) {
@@ -365,5 +365,5 @@ export function createHooksExtension(config: HooksConfig = {}): ClaudiaExtension
 export default createHooksExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createHooksExtension);

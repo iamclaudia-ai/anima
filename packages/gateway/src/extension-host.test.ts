@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { join } from "node:path";
-import type { GatewayEvent } from "@claudia/shared";
+import type { GatewayEvent } from "@anima/shared";
 import { ExtensionHostProcess, type ExtensionRegistration } from "./extension-host";
 
 interface TestProc {

@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/ext-imessage",
+  "name": "@anima/ext-imessage",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",
@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*",
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

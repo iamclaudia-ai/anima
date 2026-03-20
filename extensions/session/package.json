@@ -1,11 +1,11 @@
 {
-  "name": "@claudia/extension-session",
+  "name": "@anima/extension-session",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*"
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

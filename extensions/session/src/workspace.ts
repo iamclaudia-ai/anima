@@ -1,7 +1,7 @@
 /**
  * Workspace CRUD
  *
- * Owns the workspace table in ~/.claudia/claudia.db.
+ * Owns the workspace table in ~/.anima/anima.db.
  * Opens its own SQLite connection (WAL mode) for concurrent access
  * with the gateway process.
  *
@@ -12,9 +12,9 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { generateWorkspaceId, createLogger } from "@claudia/shared";
+import { generateWorkspaceId, createLogger } from "@anima/shared";
 
-const log = createLogger("Workspace", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("Workspace", join(homedir(), ".anima", "logs", "session.log"));
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -67,12 +67,12 @@ let db: Database | null = null;
 function getDb(): Database {
   if (db) return db;
 
-  const claudiaDir = process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia");
+  const claudiaDir = process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
   if (!existsSync(claudiaDir)) {
     mkdirSync(claudiaDir, { recursive: true });
   }
 
-  const dbPath = join(claudiaDir, "claudia.db");
+  const dbPath = join(claudiaDir, "anima.db");
   db = new Database(dbPath);
 
   // WAL mode for concurrent access with gateway

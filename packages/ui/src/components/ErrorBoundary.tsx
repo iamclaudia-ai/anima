@@ -1,7 +1,7 @@
 /**
  * React ErrorBoundary — Catches render errors within the React tree.
  *
- * Delegates error reporting and heartbeat management to window.__claudiaBeacon,
+ * Delegates error reporting and heartbeat management to window.__animaBeacon,
  * which is installed in index.html BEFORE React loads. This ensures errors are
  * caught even if React fails to initialize entirely.
  *
@@ -22,7 +22,7 @@ import type { ReactNode, ErrorInfo } from "react";
 // Global beacon API exposed by index.html inline script
 declare global {
   interface Window {
-    __claudiaBeacon?: {
+    __animaBeacon?: {
       stopHeartbeat: () => void;
       restartHeartbeat: () => void;
       reportError: (type: string, message: string, stack?: string) => void;
@@ -51,15 +51,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     const stack = [error.stack || "", info.componentStack || ""]
       .filter(Boolean)
       .join("\n\n--- Component Stack ---\n");
-    window.__claudiaBeacon?.reportError("react", error.message, stack);
+    window.__animaBeacon?.reportError("react", error.message, stack);
 
     // Stop heartbeat — app is in error state
-    window.__claudiaBeacon?.stopHeartbeat?.();
+    window.__animaBeacon?.stopHeartbeat?.();
   }
 
   reset = (): void => {
     this.setState({ error: null });
-    window.__claudiaBeacon?.restartHeartbeat?.();
+    window.__animaBeacon?.restartHeartbeat?.();
   };
 
   render(): ReactNode {

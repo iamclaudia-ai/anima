@@ -6,7 +6,7 @@
  */
 
 import { useSyncExternalStore } from "react";
-import type { EditorContext } from "@claudia/ui";
+import type { EditorContext } from "@anima/ui";
 
 let editorContext: EditorContext | undefined;
 const listeners = new Set<() => void>();

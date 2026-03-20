@@ -7,7 +7,7 @@
  *   /memory/episode/:id — Episode detail with narrative + transcript
  */
 
-import type { Route } from "@claudia/ui";
+import type { Route } from "@anima/ui";
 import { MemoryCalendarPage } from "./pages/MemoryCalendarPage";
 import { DayTimelinePage } from "./pages/DayTimelinePage";
 import { EpisodeDetailPage } from "./pages/EpisodeDetailPage";

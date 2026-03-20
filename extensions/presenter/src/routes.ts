@@ -7,7 +7,7 @@
  *   /present/:id            — Standalone: fullscreen with optional notes (N key)
  */
 
-import type { Route } from "@claudia/ui";
+import type { Route } from "@anima/ui";
 import { PresenterPage } from "./pages/PresenterPage";
 import { PresenterNotesPage } from "./pages/PresenterNotesPage";
 import { DisplayPage } from "./pages/DisplayPage";

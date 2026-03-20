@@ -16,18 +16,18 @@ describe("workspace db", () => {
   let prevDataDir: string | undefined;
 
   beforeEach(() => {
-    prevDataDir = process.env.CLAUDIA_DATA_DIR;
+    prevDataDir = process.env.ANIMA_DATA_DIR;
     dataDir = mkdtempSync(join(tmpdir(), "claudia-workspace-db-"));
-    process.env.CLAUDIA_DATA_DIR = dataDir;
+    process.env.ANIMA_DATA_DIR = dataDir;
     closeDb();
   });
 
   afterEach(() => {
     closeDb();
     if (prevDataDir === undefined) {
-      delete process.env.CLAUDIA_DATA_DIR;
+      delete process.env.ANIMA_DATA_DIR;
     } else {
-      process.env.CLAUDIA_DATA_DIR = prevDataDir;
+      process.env.ANIMA_DATA_DIR = prevDataDir;
     }
     rmSync(dataDir, { recursive: true, force: true });
   });

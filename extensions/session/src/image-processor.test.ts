@@ -4,7 +4,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { processImage, processContent, type ImageBlock } from "./image-processor";
-import type { ImageProcessingConfig } from "@claudia/shared";
+import type { ImageProcessingConfig } from "@anima/shared";
 
 // Test config
 const testConfig: ImageProcessingConfig = {

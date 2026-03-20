@@ -23,12 +23,12 @@ import {
 } from "../../../extensions/session/src/sdk-session";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
 import type { SessionEventMessage } from "./protocol";
-import { createLogger } from "@claudia/shared";
-import type { ThinkingEffort } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
+import type { ThinkingEffort } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const log = createLogger("SessionHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
+const log = createLogger("SessionHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
 // ── Types ────────────────────────────────────────────────────
 

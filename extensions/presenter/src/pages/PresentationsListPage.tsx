@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Link } from "@claudia/ui";
+import { Link } from "@anima/ui";
 import { useGatewayRpc } from "../hooks/useGatewayRpc";
 
 interface PresentationSummary {

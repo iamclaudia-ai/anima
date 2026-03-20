@@ -1,8 +1,8 @@
 {
-  "name": "@claudia/cli",
+  "name": "@anima/cli",
   "version": "0.1.0",
   "bin": {
-    "claudia": "./src/index.ts"
+    "anima": "./src/index.ts"
   },
   "type": "module",
   "scripts": {
@@ -12,6 +12,6 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@claudia/shared": "workspace:*"
+    "@anima/shared": "workspace:*"
   }
 }

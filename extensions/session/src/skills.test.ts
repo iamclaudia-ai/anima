@@ -7,20 +7,20 @@ import { formatSkillsForPrompt, loadSkills } from "./skills";
 describe("skills", () => {
   it("loads global and project skills with expected discovery rules", () => {
     const tempHome = join(tmpdir(), `claudia-skills-test-${Date.now()}`);
-    const previousClaudiaHome = process.env.CLAUDIA_HOME;
+    const previousClaudiaHome = process.env.ANIMA_HOME;
     const cwd = join(tempHome, "repo", "apps", "chat");
 
     try {
-      process.env.CLAUDIA_HOME = tempHome;
+      process.env.ANIMA_HOME = tempHome;
 
       mkdirSync(cwd, { recursive: true });
-      mkdirSync(join(tempHome, ".claudia", "skills"), { recursive: true });
+      mkdirSync(join(tempHome, ".anima", "skills"), { recursive: true });
       mkdirSync(join(tempHome, ".claude", "skills"), { recursive: true });
-      mkdirSync(join(tempHome, "repo", ".claudia", "skills", "repo-skill"), { recursive: true });
+      mkdirSync(join(tempHome, "repo", ".anima", "skills", "repo-skill"), { recursive: true });
       mkdirSync(join(tempHome, "repo", "apps", ".agents", "skills"), { recursive: true });
 
       writeFileSync(
-        join(tempHome, ".claudia", "skills", "global.md"),
+        join(tempHome, ".anima", "skills", "global.md"),
         [
           "---",
           "name: global-skill",
@@ -42,7 +42,7 @@ describe("skills", () => {
         ].join("\n"),
       );
       writeFileSync(
-        join(tempHome, "repo", ".claudia", "skills", "repo-skill", "SKILL.md"),
+        join(tempHome, "repo", ".anima", "skills", "repo-skill", "SKILL.md"),
         ["---", "name: repo-skill", "description: A repo helper skill.", "---", "", "# Repo"].join(
           "\n",
         ),
@@ -75,9 +75,9 @@ describe("skills", () => {
       expect(skills.some((s) => s.name === "skipped-skill")).toBe(false);
     } finally {
       if (previousClaudiaHome === undefined) {
-        delete process.env.CLAUDIA_HOME;
+        delete process.env.ANIMA_HOME;
       } else {
-        process.env.CLAUDIA_HOME = previousClaudiaHome;
+        process.env.ANIMA_HOME = previousClaudiaHome;
       }
       rmSync(tempHome, { recursive: true, force: true });
     }
@@ -114,14 +114,14 @@ describe("skills", () => {
     const relativeDir = join(tempRoot, "workspace", "custom-skills");
     const absoluteDir = join(tempRoot, "external-skills");
     const home = join(tempRoot, "home");
-    const previousClaudiaHome = process.env.CLAUDIA_HOME;
+    const previousClaudiaHome = process.env.ANIMA_HOME;
 
     try {
-      process.env.CLAUDIA_HOME = home;
+      process.env.ANIMA_HOME = home;
       mkdirSync(cwd, { recursive: true });
       mkdirSync(relativeDir, { recursive: true });
       mkdirSync(join(absoluteDir, "absolute-skill"), { recursive: true });
-      mkdirSync(join(home, ".claudia", "skills"), { recursive: true });
+      mkdirSync(join(home, ".anima", "skills"), { recursive: true });
 
       writeFileSync(
         join(relativeDir, "relative.md"),
@@ -132,13 +132,13 @@ describe("skills", () => {
         ["---", "name: absolute-skill", "description: Absolute path skill.", "---"].join("\n"),
       );
       writeFileSync(
-        join(home, ".claudia", "skills", "home.md"),
+        join(home, ".anima", "skills", "home.md"),
         ["---", "name: home-skill", "description: Home path skill.", "---"].join("\n"),
       );
 
       const skills = loadSkills({
         cwd,
-        additionalPaths: ["../custom-skills", absoluteDir, "~/.claudia/skills"],
+        additionalPaths: ["../custom-skills", absoluteDir, "~/.anima/skills"],
       });
       const names = skills.map((s) => s.name);
 
@@ -147,9 +147,9 @@ describe("skills", () => {
       expect(names.includes("home-skill")).toBe(true);
     } finally {
       if (previousClaudiaHome === undefined) {
-        delete process.env.CLAUDIA_HOME;
+        delete process.env.ANIMA_HOME;
       } else {
-        process.env.CLAUDIA_HOME = previousClaudiaHome;
+        process.env.ANIMA_HOME = previousClaudiaHome;
       }
       rmSync(tempRoot, { recursive: true, force: true });
     }

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { ClaudiaExtension, ExtensionContext } from "@claudia/shared";
-import { runExtensionHost } from "@claudia/extension-host";
+import type { AnimaExtension, ExtensionContext } from "@anima/shared";
+import { runExtensionHost } from "@anima/extension-host";
 
-function createTestRouteExtension(): ClaudiaExtension {
+function createTestRouteExtension(): AnimaExtension {
   let ctx: ExtensionContext;
 
   return {

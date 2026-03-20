@@ -1,7 +1,7 @@
 /**
  * Database singleton
  *
- * Opens ~/.claudia/claudia.db, enables WAL mode, runs migrations.
+ * Opens ~/.anima/anima.db, enables WAL mode, runs migrations.
  * The DB is global since the gateway serves all workspaces.
  */
 
@@ -10,12 +10,12 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { migrate } from "./migrate";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 
-const log = createLogger("DB", join(homedir(), ".claudia", "logs", "gateway.log"));
+const log = createLogger("DB", join(homedir(), ".anima", "logs", "gateway.log"));
 
-const CLAUDIA_DIR = join(homedir(), ".claudia");
-const DB_PATH = join(CLAUDIA_DIR, "claudia.db");
+const ANIMA_DIR = join(homedir(), ".anima");
+const DB_PATH = join(ANIMA_DIR, "anima.db");
 
 let db: Database | null = null;
 
@@ -25,9 +25,9 @@ let db: Database | null = null;
 export function getDb(): Database {
   if (db) return db;
 
-  // Ensure ~/.claudia/ exists
-  if (!existsSync(CLAUDIA_DIR)) {
-    mkdirSync(CLAUDIA_DIR, { recursive: true });
+  // Ensure ~/.anima/ exists
+  if (!existsSync(ANIMA_DIR)) {
+    mkdirSync(ANIMA_DIR, { recursive: true });
   }
 
   db = new Database(DB_PATH);

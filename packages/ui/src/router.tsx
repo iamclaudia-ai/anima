@@ -1,5 +1,5 @@
 /**
- * Claudia Client-Side Router
+ * Anima Client-Side Router
  *
  * Lightweight pushState router — zero dependencies, ~75 lines.
  * Supports :param patterns, back/forward, and Link components.
@@ -7,7 +7,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
-import type { LayoutDefinition, LayoutNode } from "@claudia/shared";
+import type { LayoutDefinition, LayoutNode } from "@anima/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
 import { LayoutManager } from "./components/LayoutManager";
 
@@ -23,7 +23,7 @@ export interface Route {
   layout?: string;
   label?: string;
   icon?: string;
-  /** Browser tab title — shown as "title — Claudia". Falls back to label. */
+  /** Browser tab title — shown as "title — Anima". Falls back to label. */
   title?: string;
 }
 
@@ -75,7 +75,7 @@ export function useRouter(): RouterState {
 
 // ── Document Title ───────────────────────────────────────────
 
-const BASE_TITLE = "Claudia";
+const BASE_TITLE = "Anima";
 
 function setDocumentTitle(title?: string): void {
   document.title = title ? `${title} — ${BASE_TITLE}` : BASE_TITLE;
@@ -85,7 +85,7 @@ function setDocumentTitle(title?: string): void {
  * Hook to set a dynamic document title from any page component.
  * Overrides the route's static title. Restores on unmount.
  *
- * Usage: useDocumentTitle("My Workspace")  →  "My Workspace — Claudia"
+ * Usage: useDocumentTitle("My Workspace")  →  "My Workspace — Anima"
  * Usage: useDocumentTitle(workspace?.name)  →  updates when name changes
  */
 export function useDocumentTitle(title: string | undefined | null): void {

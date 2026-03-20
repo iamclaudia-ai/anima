@@ -5,8 +5,8 @@ import {
   CreateWorkspaceModal,
   navigate,
   useGatewayClient,
-} from "@claudia/ui";
-import type { WorkspaceInfo, SessionInfo } from "@claudia/ui";
+} from "@anima/ui";
+import type { WorkspaceInfo, SessionInfo } from "@anima/ui";
 import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
@@ -46,7 +46,7 @@ function mergeSessionsPreferLocal(
 // Get latest session ID for a workspace from localStorage
 function getLatestSessionId(workspaceId: string): string | null {
   try {
-    return localStorage.getItem(`claudia:workspace:${workspaceId}:latestSession`);
+    return localStorage.getItem(`anima:workspace:${workspaceId}:latestSession`);
   } catch {
     return null;
   }
@@ -55,7 +55,7 @@ function getLatestSessionId(workspaceId: string): string | null {
 // Save latest session ID for a workspace to localStorage
 function setLatestSessionId(workspaceId: string, sessionId: string): void {
   try {
-    localStorage.setItem(`claudia:workspace:${workspaceId}:latestSession`, sessionId);
+    localStorage.setItem(`anima:workspace:${workspaceId}:latestSession`, sessionId);
   } catch {
     // ignore localStorage errors
   }

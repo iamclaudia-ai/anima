@@ -27,7 +27,7 @@ describe("config loader", () => {
   });
 
   it("loads JSON5 config file and interpolates env vars", () => {
-    const configPath = join(tempDir, "claudia.json");
+    const configPath = join(tempDir, "anima.json");
     process.env.TEST_ENDPOINT = "gateway.example.com";
     process.env.TEST_MODEL = "claude-opus";
 
@@ -62,8 +62,8 @@ describe("config loader", () => {
 
   it("throws when no config file exists", () => {
     const missingPath = join(tempDir, "missing.json");
-    process.env.CLAUDIA_HOME = tempDir;
-    delete process.env.CLAUDIA_CONFIG;
+    process.env.ANIMA_HOME = tempDir;
+    delete process.env.ANIMA_CONFIG;
     expect(() => loadConfig(missingPath)).toThrow("No config file found");
   });
 
@@ -95,7 +95,7 @@ describe("config loader", () => {
   });
 
   it("caches loadConfig and supports extension helper APIs", () => {
-    const configPath = join(tempDir, "claudia.json");
+    const configPath = join(tempDir, "anima.json");
     writeFileSync(
       configPath,
       JSON.stringify({
@@ -119,13 +119,13 @@ describe("config loader", () => {
   });
 
   it("loads additive session skill paths from config", () => {
-    const configPath = join(tempDir, "claudia.json");
+    const configPath = join(tempDir, "anima.json");
     writeFileSync(
       configPath,
       JSON.stringify({
         session: {
           skills: {
-            paths: ["~/.claudia/skills", ".claudia/skills", "/tmp/custom-skills"],
+            paths: ["~/.anima/skills", ".anima/skills", "/tmp/custom-skills"],
           },
         },
       }),
@@ -133,8 +133,8 @@ describe("config loader", () => {
 
     const config = loadConfig(configPath);
     expect(config.session.skills.paths).toEqual([
-      "~/.claudia/skills",
-      ".claudia/skills",
+      "~/.anima/skills",
+      ".anima/skills",
       "/tmp/custom-skills",
     ]);
   });

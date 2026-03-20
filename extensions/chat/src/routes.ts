@@ -6,8 +6,8 @@
  * Routes: URL patterns mapped to either a layout or a component.
  */
 
-import type { Route } from "@claudia/ui";
-import type { PanelDefinition, LayoutDefinition } from "@claudia/shared";
+import type { Route } from "@anima/ui";
+import type { PanelDefinition, LayoutDefinition } from "@anima/shared";
 import { MainPage } from "./pages/MainPage";
 import { ChatPanel } from "./panels/ChatPanel";
 

@@ -44,21 +44,21 @@ function ChatInner({
   const bridge = useBridge();
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
     try {
-      return localStorage.getItem("claudia:voice") === "true";
+      return localStorage.getItem("anima:voice") === "true";
     } catch {
       return false;
     }
   });
   const [thinkingVisible, setThinkingVisible] = useState(() => {
     try {
-      return localStorage.getItem("claudia:thinking:visible") !== "false";
+      return localStorage.getItem("anima:thinking:visible") !== "false";
     } catch {
       return true;
     }
   });
   const [thinkingInactivityMs, setThinkingInactivityMs] = useState(() => {
     try {
-      const raw = Number(localStorage.getItem("claudia:thinking:inactivityMs"));
+      const raw = Number(localStorage.getItem("anima:thinking:inactivityMs"));
       if (Number.isFinite(raw) && raw >= 100) return raw;
     } catch {
       /* noop */
@@ -67,7 +67,7 @@ function ChatInner({
   });
   const [toolTickMs, setToolTickMs] = useState(() => {
     try {
-      const raw = Number(localStorage.getItem("claudia:thinking:toolTickMs"));
+      const raw = Number(localStorage.getItem("anima:thinking:toolTickMs"));
       if (Number.isFinite(raw) && raw >= 30) return raw;
     } catch {
       /* noop */
@@ -79,7 +79,7 @@ function ChatInner({
     setVoiceEnabled((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem("claudia:voice", String(next));
+        localStorage.setItem("anima:voice", String(next));
       } catch {
         /* noop */
       }
@@ -114,9 +114,9 @@ function ChatInner({
 
   useEffect(() => {
     try {
-      localStorage.setItem("claudia:thinking:visible", String(thinkingVisible));
-      localStorage.setItem("claudia:thinking:inactivityMs", String(thinkingInactivityMs));
-      localStorage.setItem("claudia:thinking:toolTickMs", String(toolTickMs));
+      localStorage.setItem("anima:thinking:visible", String(thinkingVisible));
+      localStorage.setItem("anima:thinking:inactivityMs", String(thinkingInactivityMs));
+      localStorage.setItem("anima:thinking:toolTickMs", String(toolTickMs));
     } catch {
       /* noop */
     }

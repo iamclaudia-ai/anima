@@ -1067,7 +1067,7 @@ export function useChatGateway(
       return;
     }
 
-    console.log("Connected to Claudia Gateway");
+    console.log("Connected to Anima Gateway");
 
     // Subscribe to voice and hook events (global, not session-scoped)
     sendRequest("gateway.subscribe", { events: [...GLOBAL_EVENT_SUBSCRIPTIONS] });

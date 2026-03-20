@@ -1,7 +1,7 @@
 /**
  * Service management — direct process supervision, health checks, auto-restart.
  *
- * Service definitions are loaded from ~/.claudia/watchdog.json — no hardcoded commands.
+ * Service definitions are loaded from ~/.anima/watchdog.json — no hardcoded commands.
  * Manages services as direct child processes (Bun.spawn).
  * No tmux — stdout/stderr pipe to log files, watchdog owns the process lifecycle.
  */

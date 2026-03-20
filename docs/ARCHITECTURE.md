@@ -121,7 +121,7 @@ Agent Host (port 30087)
 ├── SessionHost — manages Claude SDK sessions
 │   ├── SDK runtime (query() from @anthropic-ai/claude-agent-sdk)
 │   ├── Event buffers with sequence numbers (replay on reconnect)
-│   ├── Session registry (persisted to ~/.claudia/agent-host-state.json)
+│   ├── Session registry (persisted to ~/.anima/agent-host-state.json)
 │   └── Idle session reaper (closes stale sessions to reclaim resources)
 ├── TaskHost — manages delegated tasks (codex, future gemini)
 │   ├── Codex SDK runtime (@openai/codex-sdk)
@@ -139,7 +139,7 @@ Agent Host (port 30087)
 - **Event replay**: Sequence numbers enable gap-free reconnection after network drops
 - **Crash recovery**: Persisted session registry auto-resumes on startup
 - **Resource management**: Idle reaper closes stale SDK processes after 10min inactivity
-- **Unified protocol**: `@claudia/shared/agent-host-protocol` — shared types between host and extensions
+- **Unified protocol**: `@anima/shared/agent-host-protocol` — shared types between host and extensions
 
 ### Key Files
 
@@ -200,7 +200,7 @@ bun --hot extensions/<id>/src/index.ts <config-json>
 Each extension's `index.ts` is directly executable:
 
 ```typescript
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createMyExtension);
 ```
 
@@ -210,7 +210,7 @@ Communication between gateway and extension processes uses NDJSON over stdio (st
 
 ### Extension Loading
 
-Extensions are config-driven from `~/.claudia/claudia.json`. The gateway resolves `extensions/<id>/src/index.ts` and starts one `ExtensionHostProcess` per enabled extension.
+Extensions are config-driven from `~/.anima/anima.json`. The gateway resolves `extensions/<id>/src/index.ts` and starts one `ExtensionHostProcess` per enabled extension.
 
 ### Extension Process Singleton + Generations
 
@@ -233,7 +233,7 @@ interface ExtensionMethodDefinition {
   inputSchema: ZodTypeAny;
 }
 
-interface ClaudiaExtension {
+interface AnimaExtension {
   id: string;
   name: string;
   methods: ExtensionMethodDefinition[];
@@ -287,7 +287,7 @@ Extensions can declare web pages:
 
 ```
 extensions/<name>/src/
-  index.ts       # Server: createMyExtension() → ClaudiaExtension
+  index.ts       # Server: createMyExtension() → AnimaExtension
   routes.ts      # Client: export const myRoutes: Route[]
   pages/         # React page components
 ```
@@ -434,7 +434,7 @@ Standalone process supervisor that manages the gateway as a direct child process
 
 ```
 Watchdog (port 30085)
-  ├── Bun.spawn → Gateway (port 30086)  stdout/stderr → ~/.claudia/logs/gateway.log
+  ├── Bun.spawn → Gateway (port 30086)  stdout/stderr → ~/.anima/logs/gateway.log
   ├── Health monitor (5s interval, 6 consecutive failures → restart)
   ├── Orphan detection via lsof before restarts
   ├── Web dashboard with log viewer + service status
@@ -499,7 +499,7 @@ packages/
     src/
       types.ts            Extension, session, workspace types
       protocol.ts         WebSocket protocol types (req/res/event)
-      config.ts           claudia.json loader with env var interpolation
+      config.ts           anima.json loader with env var interpolation
       gateway-client.ts   Environment-agnostic Gateway RPC/event client
 
   ui/                   # React components + router

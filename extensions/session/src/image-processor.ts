@@ -11,12 +11,12 @@
  */
 
 import sharp from "sharp";
-import type { ImageProcessingConfig } from "@claudia/shared";
-import { createLogger } from "@claudia/shared";
+import type { ImageProcessingConfig } from "@anima/shared";
+import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const log = createLogger("ImageProcessor", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("ImageProcessor", join(homedir(), ".anima", "logs", "session.log"));
 
 // ── Types ────────────────────────────────────────────────────
 

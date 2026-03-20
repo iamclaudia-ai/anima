@@ -5,7 +5,7 @@
  * the editor panels are referenced by other extensions' layouts.
  */
 
-import type { PanelDefinition } from "@claudia/shared";
+import type { PanelDefinition } from "@anima/shared";
 import { EditorPanel } from "./panels/EditorPanel";
 
 export const editorPanels: (PanelDefinition & { component: React.ComponentType })[] = [

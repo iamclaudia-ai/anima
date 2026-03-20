@@ -5,7 +5,7 @@
  * and emits a summary of changed files for the UI status bar.
  */
 
-import type { HookDefinition } from "@claudia/shared";
+import type { HookDefinition } from "@anima/shared";
 
 type GitPorcelainCode = "M" | "A" | "D" | "R" | "C" | "U" | "?" | "!" | " ";
 

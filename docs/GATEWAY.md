@@ -49,7 +49,7 @@ Deep-dive into the gateway's startup, message routing, and extension communicati
 
 ### Gateway Init Order (index.ts)
 
-1. **Config** -- `loadConfig()` from `~/.claudia/claudia.json`
+1. **Config** -- `loadConfig()` from `~/.anima/anima.json`
 2. **Database** -- SQLite via `getDb()` (migrations only, data owned by extensions)
 3. **ExtensionManager** -- Empty, extensions registered later
 4. **Bun.serve** -- HTTP + WebSocket on single port
@@ -148,9 +148,9 @@ All communication uses a uniform envelope:
 
 Outside extension runtime context, the **official way** to connect to the gateway is via the shared gateway client stack:
 
-- **Core (all environments):** `createGatewayClient()` from `@claudia/shared`
-- **React RPC wrapper:** `useGatewayClient()` from `@claudia/ui`
-- **React chat state machine:** `useChatGateway()` from `@claudia/ui`
+- **Core (all environments):** `createGatewayClient()` from `@anima/shared`
+- **React RPC wrapper:** `useGatewayClient()` from `@anima/ui`
+- **React chat state machine:** `useChatGateway()` from `@anima/ui`
 - **Swift (iOS VoiceMode today):** `GatewayClient.swift` at `clients/ios/VoiceMode/GatewayClient.swift`
 
 This keeps CLI/web/control clients on one transport implementation (request matching, ping/pong, subscriptions, connection tracking).
@@ -158,7 +158,7 @@ This keeps CLI/web/control clients on one transport implementation (request matc
 ### 1) Environment-agnostic core client
 
 ```typescript
-import { createGatewayClient } from "@claudia/shared";
+import { createGatewayClient } from "@anima/shared";
 
 const client = createGatewayClient({ url: "ws://localhost:30086/ws" });
 await client.connect();
@@ -172,7 +172,7 @@ client.on("session.*", (event, payload) => {
 ### 2) React RPC wrapper
 
 ```typescript
-import { useGatewayClient } from "@claudia/ui";
+import { useGatewayClient } from "@anima/ui";
 
 const { call, isConnected } = useGatewayClient(gatewayUrl);
 const data = await call("gateway.list_methods");
@@ -181,7 +181,7 @@ const data = await call("gateway.list_methods");
 ### 3) React chat workflow wrapper
 
 ```typescript
-import { useChatGateway } from "@claudia/ui";
+import { useChatGateway } from "@anima/ui";
 
 const gateway = useChatGateway(gatewayUrl, { sessionId, workspaceId });
 gateway.sendPrompt("Hello", []);
@@ -204,12 +204,12 @@ As more native apps are added, this Swift client should be extracted into a reus
 
 ### Extension runtime is different
 
-Extensions should **not** use `createGatewayClient()` for hub calls. Inside extensions, use `ExtensionContext` (`ctx.call`, `ctx.emit`, `ctx.on`) provided by `@claudia/extension-host`.
+Extensions should **not** use `createGatewayClient()` for hub calls. Inside extensions, use `ExtensionContext` (`ctx.call`, `ctx.emit`, `ctx.on`) provided by `@anima/extension-host`.
 
 ### When direct raw WebSocket is acceptable
 
 - protocol-level tests/smoke scripts
-- non-TypeScript clients where sharing `@claudia/shared` is not practical
+- non-TypeScript clients where sharing `@anima/shared` is not practical
 
 For product code in this repo, prefer the shared client stack above.
 

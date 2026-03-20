@@ -1,8 +1,8 @@
 {
-  "name": "@claudia/memory-mcp",
+  "name": "@anima/memory-mcp",
   "version": "0.1.0",
   "bin": {
-    "claudia-memory-mcp": "./src/index.ts"
+    "anima-memory-mcp": "./src/index.ts"
   },
   "type": "module",
   "main": "src/index.ts",

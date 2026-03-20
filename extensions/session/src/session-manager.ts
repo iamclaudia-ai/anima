@@ -17,12 +17,12 @@ import {
   type ResumeSessionOptions,
   type StreamEvent,
 } from "./sdk-session";
-import { createLogger } from "@claudia/shared";
-import type { ThinkingEffort } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
+import type { ThinkingEffort } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const log = createLogger("SessionManager", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("SessionManager", join(homedir(), ".anima", "logs", "session.log"));
 
 // ── Types ────────────────────────────────────────────────────
 

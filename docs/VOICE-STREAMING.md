@@ -181,7 +181,7 @@ ctx.emit(
 After all chunks are emitted and the queue drains, the voice extension concatenates all PCM chunks and saves a complete WAV file:
 
 ```
-~/.claudia/audio/{sessionId}/{streamId}.wav
+~/.anima/audio/{sessionId}/{streamId}.wav
 ```
 
 This enables `voice.replay` to re-serve previously generated audio without re-synthesizing.

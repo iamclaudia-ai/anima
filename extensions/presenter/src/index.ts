@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { join } from "node:path";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ function listPresentations(): {
 
 // ── Extension Factory ────────────────────────────────────────
 
-export function createPresenterExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
+export function createPresenterExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
   return {
@@ -181,5 +181,5 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
 export default createPresenterExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createPresenterExtension);

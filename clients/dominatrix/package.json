@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/client-dominatrix",
+  "name": "@anima/client-dominatrix",
   "version": "0.1.0",
   "private": true,
   "description": "Chrome extension — browser control + Claudia side panel",

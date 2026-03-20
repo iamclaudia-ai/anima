@@ -1,7 +1,7 @@
 /**
  * Memory MCP — Read-only Database Connection
  *
- * Opens a read-only SQLite connection to ~/.claudia/claudia.db
+ * Opens a read-only SQLite connection to ~/.anima/anima.db
  * for FTS5 full-text search queries. Falls back gracefully
  * if the database or FTS table doesn't exist yet.
  */
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 
-const DB_PATH = join(homedir(), ".claudia", "claudia.db");
+const DB_PATH = join(homedir(), ".anima", "anima.db");
 
 let db: Database | null = null;
 

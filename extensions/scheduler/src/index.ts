@@ -17,7 +17,7 @@
  *   - "notification"   — Emit scheduler.notification event (convenience)
  */
 
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -52,7 +52,7 @@ interface TaskStore {
 
 // ── Persistence ──────────────────────────────────────────────
 
-const STORE_DIR = join(homedir(), ".claudia");
+const STORE_DIR = join(homedir(), ".anima");
 const STORE_PATH = join(STORE_DIR, "scheduled-tasks.json");
 
 function loadStore(): TaskStore {
@@ -72,7 +72,7 @@ function saveStore(store: TaskStore): void {
 
 // ── Extension Factory ────────────────────────────────────────
 
-export function createSchedulerExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
+export function createSchedulerExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext | null = null;
   let checkInterval: ReturnType<typeof setInterval> | null = null;
   const CHECK_INTERVAL_MS = 5_000; // Check every 5 seconds
@@ -370,5 +370,5 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
 export default createSchedulerExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createSchedulerExtension);

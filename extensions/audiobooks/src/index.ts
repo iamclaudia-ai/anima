@@ -7,8 +7,8 @@
  * - Static file serving for audio/covers via gateway
  */
 
-import { runExtensionHost } from "@claudia/extension-host";
-import type { ClaudiaExtension, ExtensionContext } from "@claudia/shared";
+import { runExtensionHost } from "@anima/extension-host";
+import type { AnimaExtension, ExtensionContext } from "@anima/shared";
 import { z } from "zod";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -146,7 +146,7 @@ async function getChapter(bookId: string, chapterNum: number): Promise<Audiobook
   };
 }
 
-export default function createAudiobooksExtension(): ClaudiaExtension {
+export default function createAudiobooksExtension(): AnimaExtension {
   return {
     id: "audiobooks",
     name: "Audiobooks",

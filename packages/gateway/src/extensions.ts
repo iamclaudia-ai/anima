@@ -5,13 +5,13 @@
  * Supports source-based routing for responses (e.g., "imessage/+1555..." -> iMessage extension)
  */
 
-import type { ExtensionMethodDefinition, GatewayEvent } from "@claudia/shared";
-import { createLogger } from "@claudia/shared";
+import type { ExtensionMethodDefinition, GatewayEvent } from "@anima/shared";
+import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionHostProcess, ExtensionRegistration } from "./extension-host";
 
-const log = createLogger("ExtensionManager", join(homedir(), ".claudia", "logs", "gateway.log"));
+const log = createLogger("ExtensionManager", join(homedir(), ".anima", "logs", "gateway.log"));
 
 export class ExtensionManager {
   // Source routing: maps source prefix -> extension ID

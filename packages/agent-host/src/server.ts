@@ -1,11 +1,11 @@
-import { createLogger, loadConfig } from "@claudia/shared";
+import { createLogger, loadConfig } from "@anima/shared";
 import type {
-  ClaudiaConfig,
+  AnimaConfig,
   AgentHostClientMessage as ClientMessage,
   AgentHostResponseMessage as ResponseMessage,
   AgentHostSessionEventMessage as SessionEventMessage,
   AgentHostTaskEventMessage as TaskEventMessage,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -18,7 +18,7 @@ import {
 import { loadState, saveState, type PersistedState } from "./state";
 import { restorePersistedSessions } from "./restore";
 import type { BufferedEvent } from "./event-buffer";
-import type { ThinkingEffort } from "@claudia/shared";
+import type { ThinkingEffort } from "@anima/shared";
 import { TaskHost, type TaskRecord } from "./task-host";
 
 export interface SessionHostLike {
@@ -116,13 +116,13 @@ export async function createAgentHostServer(
   const port = options.port ?? 30087;
   const log =
     options.logger ??
-    createLogger("AgentHost", join(homedir(), ".claudia", "logs", "agent-host.log"));
+    createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
   const sessionHost = options.sessionHost ?? new SessionHost();
   const loadConfigFn = options.loadConfig ?? loadConfig;
   const loadStateFn = options.loadState ?? loadState;
   const saveStateFn = options.saveState ?? saveState;
   const stateSaveIntervalMs = options.stateSaveIntervalMs ?? 30_000;
-  let loadedConfig: ClaudiaConfig | null = null;
+  let loadedConfig: AnimaConfig | null = null;
 
   // Load config for session defaults
   const config = loadConfigFn();

@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { createAgentHostServer, type SessionHostLike, type TaskHostLike } from "./server";
 import type { SessionEventMessage, TaskEventMessage } from "./protocol";
 import type { BufferedEvent } from "./event-buffer";
-import type { ClaudiaConfig } from "@claudia/shared";
+import type { AnimaConfig } from "@anima/shared";
 import type { SessionDefaults } from "./session-host";
 import type { TaskRecord } from "./task-host";
 
@@ -248,7 +248,7 @@ class FakeTaskHost extends EventEmitter implements TaskHostLike {
 describe("agent-host server", () => {
   let port: number;
   let serverCtx: Awaited<ReturnType<typeof createAgentHostServer>> | null = null;
-  const fakeConfig: ClaudiaConfig = {
+  const fakeConfig: AnimaConfig = {
     gateway: { port: 0, host: "127.0.0.1" },
     session: {
       model: "claude-opus-4-6",

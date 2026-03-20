@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { ExtensionManager } from "./extensions";
-import type { GatewayEvent } from "@claudia/shared";
+import type { GatewayEvent } from "@anima/shared";
 import type { ExtensionHostProcess, ExtensionRegistration } from "./extension-host";
 
 function createRemoteHostMock(overrides: Partial<ExtensionHostProcess> = {}): ExtensionHostProcess {

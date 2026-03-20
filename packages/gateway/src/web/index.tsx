@@ -1,17 +1,17 @@
 import { createRoot } from "react-dom/client";
-import { Router, ErrorBoundary, GatewayClientProvider, GlobalNotifications } from "@claudia/ui";
-import type { PanelRegistry } from "@claudia/ui";
-import type { LayoutDefinition } from "@claudia/shared";
-import "@claudia/ui/styles";
+import { Router, ErrorBoundary, GatewayClientProvider, GlobalNotifications } from "@anima/ui";
+import type { PanelRegistry } from "@anima/ui";
+import type { LayoutDefinition } from "@anima/shared";
+import "@anima/ui/styles";
 
 // ── Extension route imports ─────────────────────────────────
-import { chatRoutes, chatPanels, chatLayouts } from "@claudia/ext-chat/routes";
-import { controlRoutes } from "@claudia/ext-control/routes";
-import { memoryRoutes } from "@claudia/memory/routes";
-import { audiobooksRoutes } from "@claudia/ext-audiobooks/routes";
-import { presenterRoutes } from "@claudia/ext-presenter/routes";
+import { chatRoutes, chatPanels, chatLayouts } from "@anima/ext-chat/routes";
+import { controlRoutes } from "@anima/ext-control/routes";
+import { memoryRoutes } from "@anima/memory/routes";
+import { audiobooksRoutes } from "@anima/ext-audiobooks/routes";
+import { presenterRoutes } from "@anima/ext-presenter/routes";
 // Editor panel disabled — code-server iframe not yet configured for embedding.
-// import { editorPanels } from "@claudia/ext-editor/routes";
+// import { editorPanels } from "@anima/ext-editor/routes";
 
 // ── Hash-to-path redirect (PWA / legacy links) ─────────────
 if (window.location.hash.startsWith("#/")) {

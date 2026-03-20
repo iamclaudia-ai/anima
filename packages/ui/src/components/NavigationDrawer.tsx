@@ -126,7 +126,7 @@ export function NavigationDrawer({
   onNewSession,
   onNewWorkspace,
 }: NavigationDrawerProps) {
-  const SESSION_PANEL_COLLAPSED_KEY = "claudia:nav:sessionsCollapsed";
+  const SESSION_PANEL_COLLAPSED_KEY = "anima:nav:sessionsCollapsed";
 
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(() => {
     try {

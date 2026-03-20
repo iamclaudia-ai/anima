@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/ext-presenter",
+  "name": "@anima/ext-presenter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*",
-    "@claudia/ui": "workspace:*",
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
+    "@anima/ui": "workspace:*",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
     "zod": "^3.25.76"

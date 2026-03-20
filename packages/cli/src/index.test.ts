@@ -270,7 +270,7 @@ describe("sessionId auto-inject", () => {
       params,
       { method: "session.send_prompt", source: "gateway", inputSchema: requiredSchema },
       "session.send_prompt",
-      { CLAUDIA_SESSION_ID: "ses_123" },
+      { ANIMA_SESSION_ID: "ses_123" },
     );
 
     expect(result.didInject).toBe(true);
@@ -289,7 +289,7 @@ describe("sessionId auto-inject", () => {
 
     expect(result.didInject).toBe(false);
     expect(result.error).toBe(
-      "session.send_prompt requires --sessionId but $CLAUDIA_SESSION_ID is not set.",
+      "session.send_prompt requires --sessionId but $ANIMA_SESSION_ID is not set.",
     );
     expect(params.sessionId).toBeUndefined();
   });
@@ -314,7 +314,7 @@ describe("sessionId auto-inject", () => {
       params,
       { method: "session.send_prompt", source: "gateway", inputSchema: requiredSchema },
       "session.send_prompt",
-      { CLAUDIA_SESSION_ID: "ses_env" },
+      { ANIMA_SESSION_ID: "ses_env" },
     );
 
     expect(result.didInject).toBe(false);
@@ -366,7 +366,7 @@ describe("help/example output", () => {
     printMethodHelp(entry);
 
     const lines = logSpy.mock.calls.flat().map((v) => String(v));
-    expect(lines.some((l) => l.includes("claudia session send_prompt"))).toBe(true);
+    expect(lines.some((l) => l.includes("anima session send_prompt"))).toBe(true);
     expect(lines.some((l) => l.includes("--sessionId <SESSIONID> (string, required)"))).toBe(true);
     expect(lines.some((l) => l.includes("--verbose [VERBOSE] (boolean, optional)"))).toBe(true);
 
@@ -380,7 +380,7 @@ describe("help/example output", () => {
     const lines = logSpy.mock.calls.flat().map((v) => String(v));
     expect(
       lines.some((l) =>
-        l.includes('claudia session send_prompt --sessionId "value" --content "value"'),
+        l.includes('anima session send_prompt --sessionId "value" --content "value"'),
       ),
     ).toBe(true);
 
@@ -406,13 +406,13 @@ describe("help/example output", () => {
     const lines = logSpy.mock.calls.flat().map((v) => String(v));
     expect(
       lines.some((l) =>
-        l.includes("claudia dominatrix html --tab-id <TAB-ID> --selector [SELECTOR]"),
+        l.includes("anima dominatrix html --tab-id <TAB-ID> --selector [SELECTOR]"),
       ),
     ).toBe(true);
     expect(
       lines.some((l) =>
         l.includes(
-          "claudia session send_prompt --sessionId <SESSIONID> --content <CONTENT> --verbose [VERBOSE]",
+          "anima session send_prompt --sessionId <SESSIONID> --content <CONTENT> --verbose [VERBOSE]",
         ),
       ),
     ).toBe(true);
@@ -426,8 +426,8 @@ describe("help/example output", () => {
 
     const lines = logSpy.mock.calls.flat().map((v) => String(v));
     expect(lines.some((l) => l.includes("Namespace: dominatrix"))).toBe(true);
-    expect(lines.some((l) => l.includes("claudia dominatrix html"))).toBe(true);
-    expect(lines.some((l) => l.includes("claudia session send_prompt"))).toBe(false);
+    expect(lines.some((l) => l.includes("anima dominatrix html"))).toBe(true);
+    expect(lines.some((l) => l.includes("anima session send_prompt"))).toBe(false);
 
     logSpy.mockRestore();
   });
@@ -443,7 +443,7 @@ describe("help/example output", () => {
 
     expect(formatFlagPlaceholder("tab-id", true)).toBe("<TAB-ID>");
     expect(formatFlagPlaceholder("verbose", false)).toBe("[VERBOSE]");
-    expect(formatMethodCommand({ method: "broken", source: "gateway" })).toBe("claudia broken");
+    expect(formatMethodCommand({ method: "broken", source: "gateway" })).toBe("anima broken");
     expect(getNamespaces(methods)).toEqual(["dominatrix", "session"]);
 
     printMethodHelp({ method: "gateway.health_check", source: "gateway" });
@@ -457,7 +457,7 @@ describe("help/example output", () => {
     const lines = logSpy.mock.calls.flat().map((v) => String(v));
     expect(lines.some((l) => l.includes("No input schema available."))).toBe(true);
     expect(lines.some((l) => l.includes("No parameters."))).toBe(true);
-    expect(lines.some((l) => l.includes("claudia broken examples"))).toBe(true);
+    expect(lines.some((l) => l.includes("anima broken examples"))).toBe(true);
 
     logSpy.mockRestore();
     errSpy.mockRestore();

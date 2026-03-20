@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { ExtensionManager } from "./extensions";
 import type { ExtensionHostProcess } from "./extension-host";
-import type { GatewayEvent } from "@claudia/shared";
+import type { GatewayEvent } from "@anima/shared";
 
 describe("ExtensionManager integration", () => {
   it("broadcasts events to all registered out-of-process hosts", async () => {

@@ -1,7 +1,7 @@
 /**
  * Back-compat re-export.
  *
- * Canonical agent-host protocol types now live in @claudia/shared.
+ * Canonical agent-host protocol types now live in @anima/shared.
  */
 
 export type {
@@ -10,4 +10,4 @@ export type {
   AgentHostSessionEventMessage as SessionEventMessage,
   AgentHostTaskEventMessage as TaskEventMessage,
   AgentHostServerMessage as ServerMessage,
-} from "@claudia/shared";
+} from "@anima/shared";

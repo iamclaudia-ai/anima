@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/shared",
+  "name": "@anima/shared",
   "version": "0.1.0",
   "type": "module",
   "main": "src/index.ts",

@@ -9,8 +9,8 @@ const LOCAL_SETTINGS_FILE = ".vscode/settings.local.json";
 
 interface LocalSettings {
   [key: string]: unknown;
-  "claudia.openOnStartup"?: boolean;
-  "claudia.viewColumn"?: number;
+  "anima.openOnStartup"?: boolean;
+  "anima.viewColumn"?: number;
 }
 
 // Read local settings from .vscode/settings.local.json
@@ -48,17 +48,17 @@ async function saveLocalSetting(key: string, value: unknown): Promise<void> {
     const data = Buffer.from(JSON.stringify(current, null, 2));
     await vscode.workspace.fs.writeFile(uri, data);
   } catch (error) {
-    console.error("Failed to save Claudia local settings:", error);
+    console.error("Failed to save Anima local settings:", error);
   }
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log("Claudia extension activated");
+  console.log("Anima extension activated");
 
   // Register command to open the chat panel
   context.subscriptions.push(
     vscode.commands.registerCommand(
-      "claudia.openChat",
+      "anima.openChat",
       async (targetViewColumn?: vscode.ViewColumn) => {
         if (claudiaPanel) {
           claudiaPanel.reveal();
@@ -67,14 +67,14 @@ export function activate(context: vscode.ExtensionContext) {
           const settings = await getLocalSettings();
           const viewColumn =
             targetViewColumn ??
-            (settings["claudia.viewColumn"] as vscode.ViewColumn) ??
+            (settings["anima.viewColumn"] as vscode.ViewColumn) ??
             vscode.ViewColumn.Beside;
 
           claudiaPanel = new ClaudiaPanelProvider(context.extensionUri, viewColumn);
 
           // Track when panel's viewColumn changes - save to local settings
           claudiaPanel.onDidChangeViewColumn(async (newColumn) => {
-            await saveLocalSetting("claudia.viewColumn", newColumn);
+            await saveLocalSetting("anima.viewColumn", newColumn);
           });
 
           claudiaPanel.onDidDispose(() => {
@@ -92,7 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("claudia.sendSelection", () => {
+    vscode.commands.registerCommand("anima.sendSelection", () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
 
@@ -101,7 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Open panel if not open
       if (!claudiaPanel) {
-        vscode.commands.executeCommand("claudia.openChat");
+        vscode.commands.executeCommand("anima.openChat");
       }
 
       const ctx = getEditorContext(editor);
@@ -110,7 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("claudia.explainCode", () => {
+    vscode.commands.registerCommand("anima.explainCode", () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
 
@@ -119,7 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Open panel if not open
       if (!claudiaPanel) {
-        vscode.commands.executeCommand("claudia.openChat");
+        vscode.commands.executeCommand("anima.openChat");
       }
 
       const ctx = getEditorContext(editor);
@@ -131,7 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("claudia.fixCode", () => {
+    vscode.commands.registerCommand("anima.fixCode", () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
 
@@ -140,7 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Open panel if not open
       if (!claudiaPanel) {
-        vscode.commands.executeCommand("claudia.openChat");
+        vscode.commands.executeCommand("anima.openChat");
       }
 
       const ctx = getEditorContext(editor);
@@ -182,16 +182,16 @@ export function activate(context: vscode.ExtensionContext) {
   // Auto-open on startup if configured via .vscode/settings.local.json
   (async () => {
     const settings = await getLocalSettings();
-    if (settings["claudia.openOnStartup"] === true) {
-      // Wait for VS Code to fully initialize, then restore Claudia in saved position
+    if (settings["anima.openOnStartup"] === true) {
+      // Wait for VS Code to fully initialize, then restore Anima in saved position
       setTimeout(() => {
-        console.log("Claudia auto-open: viewColumn =", settings["claudia.viewColumn"]);
-        vscode.commands.executeCommand("claudia.openChat", settings["claudia.viewColumn"]);
+        console.log("Anima auto-open: viewColumn =", settings["anima.viewColumn"]);
+        vscode.commands.executeCommand("anima.openChat", settings["anima.viewColumn"]);
       }, 1500);
     }
   })();
 }
 
 export function deactivate() {
-  console.log("Claudia extension deactivated");
+  console.log("Anima extension deactivated");
 }

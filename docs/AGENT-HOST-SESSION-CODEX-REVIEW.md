@@ -70,7 +70,7 @@ Why:
 
 ### Protocol direction
 
-Introduce a shared protocol module in `@claudia/shared`:
+Introduce a shared protocol module in `@anima/shared`:
 
 - `agentHost.session.*` commands/events (current behavior)
 - `agentHost.codex.*` commands/events (new)
@@ -117,7 +117,7 @@ If needed later, add a convenience orchestration method (for example `agent.dele
 
 1. Move `sdk-session.ts` + related Claude runtime primitives into `packages/agent-host/src/claude/` (or shared runtime package).
 2. Move agent-host protocol types into `packages/shared/src/agent-host-protocol.ts`.
-3. Update `session` extension and `agent-host` to import protocol from `@claudia/shared`.
+3. Update `session` extension and `agent-host` to import protocol from `@anima/shared`.
 
 Outcome:
 

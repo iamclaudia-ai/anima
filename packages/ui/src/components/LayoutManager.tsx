@@ -18,7 +18,7 @@ import {
   type DockviewApi,
 } from "dockview-react";
 import "dockview/dist/styles/dockview.css";
-import type { LayoutNode } from "@claudia/shared";
+import type { LayoutNode } from "@anima/shared";
 
 // ── Panel Registry ──────────────────────────────────────────
 

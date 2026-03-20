@@ -6,7 +6,7 @@
  * panels (nav rail, chat, etc.).
  */
 
-import { useRouter } from "@claudia/ui";
+import { useRouter } from "@anima/ui";
 import { MainPage } from "../pages/MainPage";
 
 export function ChatPanel() {

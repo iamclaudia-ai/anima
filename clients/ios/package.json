@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/ios",
+  "name": "@anima/ios",
   "version": "0.1.0",
   "private": true,
   "description": "Native Swift iOS VoiceMode client for Claudia gateway",

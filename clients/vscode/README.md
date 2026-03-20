@@ -24,11 +24,11 @@ Claudia AI assistant integrated directly into VS Code.
 
 ## Configuration
 
-| Setting                      | Default                   | Description                      |
-| ---------------------------- | ------------------------- | -------------------------------- |
-| `claudia.gatewayUrl`         | `ws://localhost:30086/ws` | Gateway WebSocket URL            |
-| `claudia.webUiUrl`           | `http://localhost:3034`   | Web UI URL (for iframe mode)     |
-| `claudia.includeFileContext` | `true`                    | Include file context in messages |
+| Setting                    | Default                   | Description                      |
+| -------------------------- | ------------------------- | -------------------------------- |
+| `anima.gatewayUrl`         | `ws://localhost:30086/ws` | Gateway WebSocket URL            |
+| `claudia.webUiUrl`         | `http://localhost:3034`   | Web UI URL (for iframe mode)     |
+| `anima.includeFileContext` | `true`                    | Include file context in messages |
 
 ## Development
 

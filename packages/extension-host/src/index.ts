@@ -4,7 +4,7 @@
  *
  * Extensions call `runExtensionHost(factory)` at the bottom of their index.ts:
  *
- *   import { runExtensionHost } from "@claudia/extension-host";
+ *   import { runExtensionHost } from "@anima/extension-host";
  *   if (import.meta.main) runExtensionHost(createMyExtension);
  *
  * The gateway spawns them directly: `bun --hot extensions/my-ext/src/index.ts <config-json>`
@@ -12,16 +12,16 @@
  * keeping stdio pipes to the gateway intact.
  */
 
-import type { ClaudiaExtension, ExtensionContext, GatewayEvent } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, GatewayEvent } from "@anima/shared";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { createLogger, matchesEventPattern } from "@claudia/shared";
+import { createLogger, matchesEventPattern } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 // ── Types ──────────────────────────────────────────────────────
 
-type ExtensionFactory = (config: Record<string, unknown>) => ClaudiaExtension;
+type ExtensionFactory = (config: Record<string, unknown>) => AnimaExtension;
 
 interface PendingCall {
   resolve: (value: unknown) => void;
@@ -57,7 +57,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
   const hostLog = createLogger(
     "ExtensionHost",
-    join(homedir(), ".claudia", "logs", "extension-host.log"),
+    join(homedir(), ".anima", "logs", "extension-host.log"),
   );
 
   // ── Parent liveness check ───────────────────────────────────
@@ -142,9 +142,9 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
   // ── Extension Loading ───────────────────────────────────────
 
-  let extension: ClaudiaExtension | null = null;
+  let extension: AnimaExtension | null = null;
 
-  async function loadAndStart(): Promise<ClaudiaExtension> {
+  async function loadAndStart(): Promise<AnimaExtension> {
     const config = JSON.parse(configJson);
     const ext = factory(config);
 
@@ -221,7 +221,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
       config,
 
-      log: createLogger(ext.id, join(homedir(), ".claudia", "logs", `${ext.id}.log`)),
+      log: createLogger(ext.id, join(homedir(), ".anima", "logs", `${ext.id}.log`)),
     };
 
     await ext.start(ctx);

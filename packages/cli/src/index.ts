@@ -1,19 +1,19 @@
 #!/usr/bin/env bun
 /**
- * Claudia CLI - Gateway client
+ * Anima CLI - Gateway client
  *
  * Usage:
- *   claudia "Hello, how are you?"
- *   claudia workspace list
- *   claudia session send_prompt --sessionId ses_123 --content "Hello"
- *   claudia voice speak --text "Hello"
- *   claudia methods
+ *   anima "Hello, how are you?"
+ *   anima workspace list
+ *   anima session send_prompt --sessionId ses_123 --content "Hello"
+ *   anima voice speak --text "Hello"
+ *   anima methods
  */
 
-import { createGatewayClient } from "@claudia/shared";
+import { createGatewayClient } from "@anima/shared";
 
 const DEFAULT_GATEWAY_URL = "ws://localhost:30086/ws";
-let gatewayUrl = process.env.CLAUDIA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
+let gatewayUrl = process.env.ANIMA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
 
 function normalizeGatewayUrl(value: string): string {
   const input = value.trim();
@@ -331,14 +331,14 @@ export function injectSessionIdFromEnv(
   if (!hasSessionId) return { didInject: false };
 
   const isRequired = schema.required?.includes("sessionId") ?? false;
-  if (env.CLAUDIA_SESSION_ID) {
-    params.sessionId = env.CLAUDIA_SESSION_ID;
+  if (env.ANIMA_SESSION_ID) {
+    params.sessionId = env.ANIMA_SESSION_ID;
     return { didInject: true };
   }
   if (isRequired) {
     return {
       didInject: false,
-      error: `${resolvedMethod} requires --sessionId but $CLAUDIA_SESSION_ID is not set.`,
+      error: `${resolvedMethod} requires --sessionId but $ANIMA_SESSION_ID is not set.`,
     };
   }
 
@@ -348,7 +348,7 @@ export function injectSessionIdFromEnv(
 /**
  * Auto-inject `cwd` from process.cwd() when the method schema has an
  * optional `cwd` property and the caller didn't provide one explicitly.
- * This lets users run `claudia session get_memory_context` without --cwd.
+ * This lets users run `anima session get_memory_context` without --cwd.
  */
 export function injectCwdFromProcess(
   params: Record<string, unknown>,
@@ -381,12 +381,12 @@ export function formatFlagPlaceholder(name: string, required: boolean): string {
 
 export function formatMethodCommand(entry: MethodCatalogEntry): string {
   const split = splitMethod(entry.method);
-  if (!split) return `claudia ${entry.method}`;
+  if (!split) return `anima ${entry.method}`;
 
   const rootSchema = entry.inputSchema;
   const schema = resolveSchema(rootSchema, rootSchema) ?? rootSchema;
   if (!schema || schema.type !== "object") {
-    return `claudia ${split.namespace} ${split.action}`;
+    return `anima ${split.namespace} ${split.action}`;
   }
 
   const required = new Set(schema.required ?? []);
@@ -396,12 +396,12 @@ export function formatMethodCommand(entry: MethodCatalogEntry): string {
   );
 
   const suffix = flagParts.length > 0 ? ` ${flagParts.join(" ")}` : "";
-  return `claudia ${split.namespace} ${split.action}${suffix}`;
+  return `anima ${split.namespace} ${split.action}${suffix}`;
 }
 
 export function printMethodHelp(entry: MethodCatalogEntry): void {
   const split = splitMethod(entry.method);
-  const command = split ? `claudia ${split.namespace} ${split.action}` : `claudia ${entry.method}`;
+  const command = split ? `anima ${split.namespace} ${split.action}` : `anima ${entry.method}`;
 
   console.log(`\n`);
   if (entry.description) console.log(`  ${entry.description}`);
@@ -474,19 +474,19 @@ export function exampleValueForSchema(
 export function printMethodExamples(entry: MethodCatalogEntry): void {
   const split = splitMethod(entry.method);
   const command = split ? `${split.namespace} ${split.action}` : entry.method;
-  console.log(`\nclaudia ${command} examples`);
+  console.log(`\nanima ${command} examples`);
 
   const rootSchema = entry.inputSchema;
   const schema = resolveSchema(rootSchema, rootSchema) ?? rootSchema;
   if (!schema || schema.type !== "object") {
-    console.log(`  claudia ${command}`);
+    console.log(`  anima ${command}`);
     return;
   }
 
   const props = schema.properties ? Object.entries(schema.properties) : [];
   const required = new Set(schema.required ?? []);
   if (!split) {
-    console.log(`  claudia ${entry.method}`);
+    console.log(`  anima ${entry.method}`);
     return;
   }
 
@@ -499,12 +499,11 @@ export function printMethodExamples(entry: MethodCatalogEntry): void {
     .map(([name, prop]) => `--${name} ${exampleValueForSchema(prop, rootSchema)}`);
 
   if (requiredFlags.length === 0 && optionalFlags.length === 0) {
-    console.log(`  claudia ${split.namespace} ${split.action}`);
+    console.log(`  anima ${split.namespace} ${split.action}`);
     return;
   }
 
-  const requiredCmd =
-    `claudia ${split.namespace} ${split.action} ${requiredFlags.join(" ")}`.trim();
+  const requiredCmd = `anima ${split.namespace} ${split.action} ${requiredFlags.join(" ")}`.trim();
   console.log(`  ${requiredCmd}`);
 
   if (optionalFlags.length > 0) {
@@ -557,13 +556,13 @@ export function printMethodList(methods: MethodCatalogEntry[], namespace?: strin
 }
 
 export function printCliHelp(methods: MethodCatalogEntry[]): void {
-  console.log("Claudia CLI — gateway client for the Claudia AI assistant platform.\n");
+  console.log("Anima CLI — gateway client for the Anima AI assistant platform.\n");
   console.log("Usage:\n");
-  console.log("  claudia <namespace> <action> --param value  Call a method");
-  console.log("  claudia <namespace> <action> --help          Show method help");
-  console.log("  claudia <namespace> <action> --examples      Show usage examples");
-  console.log("  claudia <namespace> --help                   List namespace methods");
-  console.log("  claudia methods [namespace]                  List all available methods");
+  console.log("  anima <namespace> <action> --param value  Call a method");
+  console.log("  anima <namespace> <action> --help          Show method help");
+  console.log("  anima <namespace> <action> --examples      Show usage examples");
+  console.log("  anima <namespace> --help                   List namespace methods");
+  console.log("  anima methods [namespace]                  List all available methods");
   console.log("  (global) --host <host[:port]>                Override gateway host for this call");
   console.log("  (global) --gateway-url <ws(s)://.../ws>      Override full gateway URL");
 
@@ -574,8 +573,8 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
 
   console.log("\nSession ID:\n");
   console.log("  Commands that require a --sessionId will auto-detect it from the");
-  console.log("  $CLAUDIA_SESSION_ID environment variable. When running inside a");
-  console.log("  Claudia session, this is set automatically — one will be provided");
+  console.log("  $ANIMA_SESSION_ID environment variable. When running inside a");
+  console.log("  Anima session, this is set automatically — one will be provided");
   console.log("  for you at no extra charge. Pass --sessionId explicitly to override.");
 }
 
@@ -652,7 +651,7 @@ async function speak(text: string): Promise<void> {
       playbackQueue = playbackQueue.then(async () => {
         const audioBuffer = Buffer.from(voicePayload.data, "base64");
         const ext = voicePayload.format === "wav" ? "wav" : voicePayload.format || "bin";
-        const tempFile = `/tmp/claudia-speech-${Date.now()}.${ext}`;
+        const tempFile = `/tmp/anima-speech-${Date.now()}.${ext}`;
         await Bun.write(tempFile, audioBuffer);
 
         const proc = Bun.spawn(["afplay", tempFile], { stdout: "ignore", stderr: "ignore" });
@@ -697,7 +696,7 @@ async function promptCompat(args: string[]): Promise<void> {
   }
 
   if (!prompt) {
-    console.error('Usage: claudia "your message here"');
+    console.error('Usage: anima "your message here"');
     process.exit(1);
   }
 
@@ -778,7 +777,7 @@ async function promptCompat(args: string[]): Promise<void> {
 
 // ── Watchdog CLI ─────────────────────────────────────────
 
-const WATCHDOG_URL = process.env.CLAUDIA_WATCHDOG_URL || "http://localhost:30085";
+const WATCHDOG_URL = process.env.ANIMA_WATCHDOG_URL || "http://localhost:30085";
 
 const WATCHDOG_METHODS: MethodCatalogEntry[] = [
   {
@@ -839,12 +838,12 @@ async function watchdogCommand(args: string[]): Promise<void> {
 
   if (!sub || sub === "--help") {
     console.log("\nwatchdog commands:\n");
-    console.log("  claudia watchdog status                  Show service health");
-    console.log("  claudia watchdog restart <service> [--force]  Restart gateway or runtime");
-    console.log("  claudia watchdog logs                    List available log files");
-    console.log("  claudia watchdog logs <file> [lines]     Tail a log file");
-    console.log("  claudia watchdog install                 Install as launchd service");
-    console.log("  claudia watchdog uninstall               Uninstall launchd service");
+    console.log("  anima watchdog status                  Show service health");
+    console.log("  anima watchdog restart <service> [--force]  Restart gateway or runtime");
+    console.log("  anima watchdog logs                    List available log files");
+    console.log("  anima watchdog logs <file> [lines]     Tail a log file");
+    console.log("  anima watchdog install                 Install as launchd service");
+    console.log("  anima watchdog uninstall               Uninstall launchd service");
     return;
   }
 
@@ -895,7 +894,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
     const service = args[1];
     const force = args.includes("--force");
     if (!service) {
-      console.error("Usage: claudia watchdog restart <gateway|runtime> [--force]");
+      console.error("Usage: anima watchdog restart <gateway|runtime> [--force]");
       process.exit(1);
     }
     try {
@@ -928,7 +927,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
           const mod = new Date(f.modified).toLocaleString();
           console.log(`  ${f.name.padEnd(25)} ${formatBytes(f.size).padStart(8)}  ${mod}`);
         }
-        console.log(`\nTail a file: claudia watchdog logs <filename> [lines]\n`);
+        console.log(`\nTail a file: anima watchdog logs <filename> [lines]\n`);
       } catch {
         console.error("Error: Could not connect to watchdog at", WATCHDOG_URL);
         process.exit(1);
@@ -973,7 +972,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
   }
 
   if (sub === "install") {
-    const plistName = "com.claudia.watchdog.plist";
+    const plistName = "com.anima.watchdog.plist";
     const plistSrc = `${import.meta.dir}/../../../scripts/${plistName}`;
     const plistDst = `${process.env.HOME}/Library/LaunchAgents/${plistName}`;
 
@@ -1001,7 +1000,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
   }
 
   if (sub === "uninstall") {
-    const plistName = "com.claudia.watchdog.plist";
+    const plistName = "com.anima.watchdog.plist";
     const plistDst = `${process.env.HOME}/Library/LaunchAgents/${plistName}`;
 
     try {
@@ -1025,7 +1024,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
   }
 
   console.error(`Unknown watchdog command: ${sub}`);
-  console.error("Run 'claudia watchdog --help' for usage.");
+  console.error("Run 'anima watchdog --help' for usage.");
   process.exit(1);
 }
 
@@ -1039,7 +1038,7 @@ async function main(): Promise<void> {
   if (args[0] === "speak") {
     const text = args.slice(1).join(" ");
     if (!text) {
-      console.error('Usage: claudia speak "text to speak"');
+      console.error('Usage: anima speak "text to speak"');
       process.exit(1);
     }
     await speak(text);
@@ -1114,11 +1113,11 @@ async function main(): Promise<void> {
 
   const params = parseCliParams(paramArgs);
 
-  // Auto-inject sessionId from $CLAUDIA_SESSION_ID if not explicitly provided
+  // Auto-inject sessionId from $ANIMA_SESSION_ID if not explicitly provided
   const injectionResult = injectSessionIdFromEnv(params, methodDef, resolvedMethod);
   if (injectionResult.error) {
     console.error(`Error: ${injectionResult.error}`);
-    console.error(`Either pass --sessionId explicitly or run from within a Claudia session.\n`);
+    console.error(`Either pass --sessionId explicitly or run from within a Anima session.\n`);
     printMethodHelp(methodDef);
     process.exit(1);
   }

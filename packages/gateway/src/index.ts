@@ -1,7 +1,7 @@
 /**
- * Claudia Gateway
+ * Anima Gateway
  *
- * The heart of Claudia - manages Claude Code sessions, routes messages
+ * The heart of Anima - manages Claude Code sessions, routes messages
  * between clients and extensions, broadcasts events.
  *
  * Single server: serves both the web UI (SPA) and WebSocket on port 30086.
@@ -15,8 +15,8 @@ import type {
   Message,
   Ping,
   GatewayEvent,
-} from "@claudia/shared";
-import { loadConfig, createLogger, matchesEventPattern } from "@claudia/shared";
+} from "@anima/shared";
+import { loadConfig, createLogger, matchesEventPattern } from "@anima/shared";
 export type { GatewayEvent };
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -33,10 +33,10 @@ import index from "./web/index.html";
 import serviceWorker from "./web/service-worker.js" with { type: "file" };
 import manifestData from "./web/manifest.json";
 
-// Load configuration (claudia.json or env var fallback)
+// Load configuration (anima.json or env var fallback)
 const config = loadConfig();
 const PORT = config.gateway.port;
-const DATA_DIR = process.env.CLAUDIA_DATA_DIR || join(homedir(), ".claudia");
+const DATA_DIR = process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
 const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
 const sessionExtensionEnabled = Boolean(config.extensions?.session?.enabled);
 const sessionModel = (() => {
@@ -46,13 +46,13 @@ const sessionModel = (() => {
     return model.trim();
   }
   throw new Error(
-    "Missing required config: extensions.session.config.model in ~/.claudia/claudia.json",
+    "Missing required config: extensions.session.config.model in ~/.anima/anima.json",
   );
 })();
 const sessionThinking =
   typeof sessionExtConfig.thinking === "boolean" ? String(sessionExtConfig.thinking) : "false";
 
-// Structured logger — writes to console + ~/.claudia/logs/gateway.log
+// Structured logger — writes to console + ~/.anima/logs/gateway.log
 const log = createLogger("Gateway", join(DATA_DIR, "logs", "gateway.log"));
 
 // Ensure data directory exists
@@ -526,7 +526,7 @@ function broadcastEvent(
   }
 }
 
-// Combined HTTP + WebSocket server (single port, like claudia-code)
+// Combined HTTP + WebSocket server (single port, like the old claudia-code layout)
 const server = Bun.serve<ClientState>({
   port: PORT,
   hostname: config.gateway.host || "localhost",
@@ -746,7 +746,7 @@ const server = Bun.serve<ClientState>({
 log.info(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
-║   💙 Claudia running on http://localhost:${PORT}           ║
+║   Anima running on http://localhost:${PORT}                ║
 ║                                                           ║
 ║   Web UI:    http://localhost:${PORT}                      ║
 ║   WebSocket: ws://localhost:${PORT}/ws                     ║

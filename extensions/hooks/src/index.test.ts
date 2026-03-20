@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHooksExtension } from "./index";
-import type { ExtensionContext, GatewayEvent } from "@claudia/shared";
+import type { ExtensionContext, GatewayEvent } from "@anima/shared";
 
 type EventHandler = (event: GatewayEvent) => void | Promise<void>;
 
@@ -147,11 +147,11 @@ export default {
     await extension.stop();
   });
 
-  it("loads workspace hooks from <workspace>/.claudia/hooks only", async () => {
+  it("loads workspace hooks from <workspace>/.anima/hooks only", async () => {
     const workspaceA = join(testRoot, "workspace-a");
-    await mkdir(join(workspaceA, ".claudia", "hooks"), { recursive: true });
+    await mkdir(join(workspaceA, ".anima", "hooks"), { recursive: true });
     await writeHookFile(
-      join(workspaceA, ".claudia", "hooks"),
+      join(workspaceA, ".anima", "hooks"),
       "local.js",
       `export default {
   event: "custom.local",
@@ -162,7 +162,7 @@ export default {
 `,
     );
 
-    // Should be ignored entirely now that we only load workspace/.claudia/hooks.
+    // Should be ignored entirely now that we only load workspace/.anima/hooks.
     await writeHookFile(
       join(testRoot, "hooks"),
       "legacy.js",
@@ -214,8 +214,8 @@ export default {
 `,
     );
 
-    await mkdir(join(workspace, ".claudia"), { recursive: true });
-    await symlink(realHooksDir, join(workspace, ".claudia", "hooks"));
+    await mkdir(join(workspace, ".anima"), { recursive: true });
+    await symlink(realHooksDir, join(workspace, ".anima", "hooks"));
 
     const extension = createHooksExtension();
     const mock = createMockContext();
@@ -239,7 +239,7 @@ export default {
   it("uses latest matching workspace cwd and sessionId in HookContext", async () => {
     const workspaceB = join(testRoot, "workspace-b");
     await writeHookFile(
-      join(workspaceB, ".claudia", "hooks"),
+      join(workspaceB, ".anima", "hooks"),
       "context.js",
       `export default {
   event: "custom.workspace",
@@ -276,7 +276,7 @@ export default {
   it("clears workspace hooks when later events have no workspace cwd", async () => {
     const workspace = join(testRoot, "workspace-clear");
     await writeHookFile(
-      join(workspace, ".claudia", "hooks"),
+      join(workspace, ".anima", "hooks"),
       "ephemeral.js",
       `export default {
   event: "custom.ephemeral",
@@ -365,7 +365,7 @@ export default {
     );
 
     await writeHookFile(
-      join(workspace, ".claudia", "hooks"),
+      join(workspace, ".anima", "hooks"),
       "shadow.js",
       `export default {
   event: "custom.override",
@@ -487,7 +487,7 @@ export default {
 `,
     );
     await writeHookFile(
-      join(workspace, ".claudia", "hooks"),
+      join(workspace, ".anima", "hooks"),
       "throws.js",
       `export default {
   event: "custom.throw",
@@ -527,7 +527,7 @@ export default {
 
     // rescan throttling path: new file should not load immediately for same workspace
     await writeHookFile(
-      join(workspace, ".claudia", "hooks"),
+      join(workspace, ".anima", "hooks"),
       "late.js",
       `export default {
   event: "custom.late",

@@ -91,7 +91,7 @@ Payload includes:
 - command namespace remains explicit:
   - `session.*` for chat/session runtime
   - `task.*` for delegated runtime
-- shared protocol types live in `@claudia/shared`.
+- shared protocol types live in `@anima/shared`.
 
 ### Persistence
 
@@ -103,7 +103,7 @@ Payload includes:
 
 ## Phase 1 (Now): Boundary cleanup and protocol stabilization
 
-- Move agent-host protocol types into `@claudia/shared`.
+- Move agent-host protocol types into `@anima/shared`.
 - Remove cross-package source imports:
   - extensions should not import from `packages/agent-host/src/*`.
   - agent-host should not import from `extensions/*` long-term.

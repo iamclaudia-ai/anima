@@ -44,7 +44,7 @@ describe("state persistence", () => {
 
   it("returns empty state on corrupted JSON", async () => {
     const home = mkdtempSync(join(tmpdir(), "claudia-agent-host-home-"));
-    const stateDir = join(home, ".claudia", "agent-host");
+    const stateDir = join(home, ".anima", "agent-host");
     const stateFile = join(stateDir, "sessions.json");
 
     // Prepare corrupted state file.

@@ -11,9 +11,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { Database } from "bun:sqlite";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 
-const log = createLogger("DB", join(homedir(), ".claudia", "logs", "gateway.log"));
+const log = createLogger("DB", join(homedir(), ".anima", "logs", "gateway.log"));
 
 interface Migration {
   id: number;

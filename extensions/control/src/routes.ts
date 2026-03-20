@@ -2,7 +2,7 @@
  * Control Extension — Route declarations.
  */
 
-import type { Route } from "@claudia/ui";
+import type { Route } from "@anima/ui";
 import { MissionControlPage } from "./pages/MissionControlPage";
 import { LogViewerPage } from "./pages/LogViewerPage";
 

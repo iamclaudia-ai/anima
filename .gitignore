@@ -51,7 +51,7 @@ clients/ios/android/.gradle/
 clients/**/build/
 
 # Claudia data
-.claudia/
+.anima/
 
-# Config (contains secrets - use claudia.example.json as template)
-claudia.json
+# Config (contains secrets - use anima.example.json as template)
+anima.json

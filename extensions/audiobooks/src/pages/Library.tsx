@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Link, useGatewayClient } from "@claudia/ui";
+import { Link, useGatewayClient } from "@anima/ui";
 
 interface Audiobook {
   id: string;

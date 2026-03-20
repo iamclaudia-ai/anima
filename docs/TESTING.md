@@ -49,8 +49,8 @@ Checks:
 
 Env:
 
-- `CLAUDIA_GATEWAY_HTTP` (default `http://localhost:30086`)
-- `CLAUDIA_GATEWAY_WS` (default `ws://localhost:30086/ws`)
+- `ANIMA_GATEWAY_HTTP` (default `http://localhost:30086`)
+- `ANIMA_GATEWAY_WS` (default `ws://localhost:30086/ws`)
 
 ### E2E smoke (uses model)
 
@@ -64,11 +64,11 @@ Checks:
 
 Env:
 
-- `CLAUDIA_GATEWAY_WS` (default `ws://localhost:30086/ws`)
-- `CLAUDIA_SMOKE_MODEL` (default `claude-3-5-haiku-latest`)
-- `CLAUDIA_SMOKE_THINKING` (default `false`)
-- `CLAUDIA_SMOKE_EFFORT` (default `low`)
-- `CLAUDIA_SMOKE_TIMEOUT_MS` (default `60000`)
+- `ANIMA_GATEWAY_WS` (default `ws://localhost:30086/ws`)
+- `ANIMA_SMOKE_MODEL` (default `claude-3-5-haiku-latest`)
+- `ANIMA_SMOKE_THINKING` (default `false`)
+- `ANIMA_SMOKE_EFFORT` (default `low`)
+- `ANIMA_SMOKE_TIMEOUT_MS` (default `60000`)
 
 ## Notes
 

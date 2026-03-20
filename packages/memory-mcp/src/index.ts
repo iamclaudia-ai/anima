@@ -9,7 +9,7 @@
  * - memory_list: Browse memory files by category
  *
  * Search is backed by SQLite FTS5 (BM25 ranking) reading from
- * ~/.claudia/claudia.db. The index includes 4,000+ conversation
+ * ~/.anima/anima.db. The index includes 4,000+ conversation
  * summaries and 500+ memory documents (milestones, insights,
  * relationships, projects, core identity, personas).
  */

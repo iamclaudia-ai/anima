@@ -88,7 +88,7 @@ export function InlineExpansionProvider({ containerRef, children }: InlineExpans
     };
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target as Node;
-      const panel = document.getElementById("claudia-inline-expansion-panel");
+      const panel = document.getElementById("anima-inline-expansion-panel");
       const inPanel = !!panel?.contains(target);
       const inAnchor = open.anchorEl.contains(target);
       if (!inPanel && !inAnchor) close();
@@ -113,7 +113,7 @@ export function InlineExpansionProvider({ containerRef, children }: InlineExpans
         position &&
         createPortal(
           <div
-            id="claudia-inline-expansion-panel"
+            id="anima-inline-expansion-panel"
             className="fixed z-50 rounded-lg border border-neutral-200 bg-white p-3 shadow-lg max-h-[55vh] overflow-auto"
             style={{
               left: `${position.left}px`,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-const gatewayHttp = process.env.CLAUDIA_GATEWAY_HTTP || "http://localhost:30086";
-const gatewayWs = process.env.CLAUDIA_GATEWAY_WS || "ws://localhost:30086/ws";
+const gatewayHttp = process.env.ANIMA_GATEWAY_HTTP || "http://localhost:30086";
+const gatewayWs = process.env.ANIMA_GATEWAY_WS || "ws://localhost:30086/ws";
 
 interface Message {
   type: "req" | "res" | "event";

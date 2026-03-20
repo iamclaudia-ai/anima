@@ -26,7 +26,7 @@ import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionContext } from "@claudia/shared";
+import type { ExtensionContext } from "@anima/shared";
 import {
   getNextQueued,
   getQueuedCount,
@@ -50,7 +50,7 @@ const LIBBY_CWD = join(homedir(), "libby");
 if (!existsSync(LIBBY_CWD)) mkdirSync(LIBBY_CWD, { recursive: true });
 
 const MEMORY_ROOT = join(homedir(), "memory");
-const LIBBY_LOGS_DIR = join(homedir(), ".claudia", "memory", "libby", "logs");
+const LIBBY_LOGS_DIR = join(homedir(), ".anima", "memory", "libby", "logs");
 if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
 
 /**
@@ -407,7 +407,7 @@ export class LibbyWorker {
 
 Episode file: ~/memory/${episodePath}
 
-FIRST write your reasoning log to ~/.claudia/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP:
+FIRST write your reasoning log to ~/.anima/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP:
 
 ${transcript.text}`;
 

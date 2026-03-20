@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.claudia.watchdog</string>
+  <string>com.anima.watchdog</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/Users/michael/.bun/bin/bun</string>
     <string>run</string>
-    <string>/Users/michael/Projects/iamclaudia-ai/claudia/packages/watchdog/src/index.ts</string>
+    <string>/Users/michael/Projects/iamclaudia-ai/anima/packages/watchdog/src/index.ts</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/michael/Projects/iamclaudia-ai/claudia</string>
+  <string>/Users/michael/Projects/iamclaudia-ai/anima</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -30,9 +30,9 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/michael/.claudia/logs/watchdog-launchd.log</string>
+  <string>/Users/michael/.anima/logs/watchdog-launchd.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/michael/.claudia/logs/watchdog-launchd.log</string>
+  <string>/Users/michael/.anima/logs/watchdog-launchd.log</string>
 </dict>
 </plist>

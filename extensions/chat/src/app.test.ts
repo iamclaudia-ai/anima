@@ -4,15 +4,15 @@ import { getDraftStorageKey } from "./app";
 describe("chat draft storage key", () => {
   it("uses session-scoped key when workspace and session are present", () => {
     expect(getDraftStorageKey({ workspaceId: "ws_123", sessionId: "ses_456" })).toBe(
-      "claudia:draft:ws_123:ses_456",
+      "anima:draft:ws_123:ses_456",
     );
   });
 
   it("uses session-scoped key when only session is present", () => {
-    expect(getDraftStorageKey({ sessionId: "ses_456" })).toBe("claudia:draft:ses_456");
+    expect(getDraftStorageKey({ sessionId: "ses_456" })).toBe("anima:draft:ses_456");
   });
 
   it("falls back to global key when no session is present", () => {
-    expect(getDraftStorageKey()).toBe("claudia-draft");
+    expect(getDraftStorageKey()).toBe("anima-draft");
   });
 });

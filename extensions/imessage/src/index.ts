@@ -11,7 +11,7 @@
  * - Sends replies using the same chat_id
  */
 
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 import { ImsgRpcClient, type ImsgMessage, type ImsgAttachment } from "./imsg-client";
 import { z } from "zod";
 
@@ -106,7 +106,7 @@ export function isAllowedSender(sender: string, allowedSenders?: string[]): bool
   });
 }
 
-export function createIMessageExtension(config: IMessageConfig = {}): ClaudiaExtension {
+export function createIMessageExtension(config: IMessageConfig = {}): AnimaExtension {
   const cfg: IMessageConfig = { ...DEFAULT_CONFIG, ...config };
 
   let client: ImsgRpcClient | null = null;
@@ -502,5 +502,5 @@ export default createIMessageExtension;
 export type { ImsgMessage, ImsgChat } from "./imsg-client";
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createIMessageExtension);

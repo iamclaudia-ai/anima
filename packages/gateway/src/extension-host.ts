@@ -11,10 +11,10 @@ import { spawn, type Subprocess } from "bun";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createLogger } from "@claudia/shared";
-import type { GatewayEvent } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
+import type { GatewayEvent } from "@anima/shared";
 
-const log = createLogger("ExtensionHost", join(homedir(), ".claudia", "logs", "gateway.log"));
+const log = createLogger("ExtensionHost", join(homedir(), ".anima", "logs", "gateway.log"));
 
 /** Serialized method info from the host's register message (no Zod schemas) */
 export interface RemoteMethodInfo {

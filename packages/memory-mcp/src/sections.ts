@@ -12,14 +12,14 @@ import { homedir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import type { SectionRecord } from "./types.js";
 
-const DB_PATH = join(homedir(), ".claudia", "memory-sections.db");
+const DB_PATH = join(homedir(), ".anima", "memory-sections.db");
 
 export class SectionRegistry {
   private db: Database | null = null;
 
   async init(): Promise<void> {
     // Ensure directory exists
-    await mkdir(join(homedir(), ".claudia"), { recursive: true });
+    await mkdir(join(homedir(), ".anima"), { recursive: true });
 
     this.db = new Database(DB_PATH, { create: true });
 

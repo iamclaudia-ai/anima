@@ -6,19 +6,19 @@
  * but the session metadata survives. On the next prompt, lazy-resume recreates
  * the query() using `resume: sessionId` — the SDK picks up from its JSONL history.
  *
- * File: ~/.claudia/agent-host/sessions.json
+ * File: ~/.anima/agent-host/sessions.json
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createLogger } from "@claudia/shared";
+import { createLogger } from "@anima/shared";
 import type { SessionRecord } from "./session-host";
 
 const homeDir = process.env.HOME ?? homedir();
-const log = createLogger("State", join(homeDir, ".claudia", "logs", "agent-host.log"));
+const log = createLogger("State", join(homeDir, ".anima", "logs", "agent-host.log"));
 
-const STATE_DIR = join(homeDir, ".claudia", "agent-host");
+const STATE_DIR = join(homeDir, ".anima", "agent-host");
 const STATE_FILE = join(STATE_DIR, "sessions.json");
 
 export interface PersistedState {

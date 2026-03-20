@@ -3,11 +3,11 @@ import { EditorContext } from "./context";
 import * as crypto from "crypto";
 
 /**
- * Provides the Claudia chat as an editor panel using the shared @claudia/ui
+ * Provides the Claudia chat as an editor panel using the shared @anima/ui
  * React component, bundled into dist/webview/
  */
 export class ClaudiaPanelProvider {
-  public static readonly viewType = "claudia.chatPanel";
+  public static readonly viewType = "anima.chatPanel";
 
   private readonly _panel: vscode.WebviewPanel;
   private _currentContext?: EditorContext;
@@ -191,7 +191,7 @@ export class ClaudiaPanelProvider {
 
   private _getHtmlContent(): string {
     const webview = this._panel.webview;
-    const config = vscode.workspace.getConfiguration("claudia");
+    const config = vscode.workspace.getConfiguration("anima");
     const gatewayUrl = config.get<string>("gatewayUrl", "ws://localhost:30086/ws");
 
     // Generate nonce for CSP
@@ -225,7 +225,7 @@ export class ClaudiaPanelProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <link rel="stylesheet" href="${styleUri}">
-  <title>Claudia</title>
+  <title>Anima</title>
 </head>
 <body>
   <div id="root"></div>

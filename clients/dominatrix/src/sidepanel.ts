@@ -1,5 +1,5 @@
 /**
- * Side panel script — detects context tab and loads Claudia chat UI in iframe.
+ * Side panel script — detects context tab and loads the Anima chat UI in an iframe.
  */
 
 export {}; // Force module scope to avoid GATEWAY_URL redeclaration conflict
@@ -35,7 +35,7 @@ iframe.addEventListener("load", () => {
 });
 
 iframe.addEventListener("error", () => {
-  banner.textContent = "Cannot connect to Claudia gateway";
+  banner.textContent = "Cannot connect to Anima gateway";
   banner.classList.add("visible");
 });
 
@@ -51,7 +51,7 @@ function checkConnection() {
     .catch(() => {
       retryCount++;
       if (retryCount > 2) {
-        banner.textContent = "Cannot connect to Claudia gateway — is it running?";
+        banner.textContent = "Cannot connect to Anima gateway — is it running?";
         banner.classList.add("visible");
       }
       setTimeout(checkConnection, 5000);

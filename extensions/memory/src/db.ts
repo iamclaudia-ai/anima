@@ -1,7 +1,7 @@
 /**
  * Memory Extension — Database Access Layer
  *
- * Opens its own bun:sqlite connection to ~/.claudia/claudia.db.
+ * Opens its own bun:sqlite connection to ~/.anima/anima.db.
  * Safe for concurrent access: WAL mode + busy_timeout handles
  * contention with the gateway's connection.
  */
@@ -10,7 +10,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DEFAULT_DB_PATH = join(homedir(), ".claudia", "claudia.db");
+const DEFAULT_DB_PATH = join(homedir(), ".anima", "anima.db");
 let dbPath = DEFAULT_DB_PATH;
 
 let db: Database | null = null;

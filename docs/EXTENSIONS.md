@@ -23,7 +23,7 @@ extensions/my-feature/
 
 ```json
 {
-  "name": "@claudia/ext-my-feature",
+  "name": "@anima/ext-my-feature",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -31,22 +31,22 @@ extensions/my-feature/
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*",
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
     "zod": "^3.25.76"
   }
 }
 ```
 
-The `@claudia/extension-host` dependency provides `runExtensionHost()` — the function that wires your extension into the NDJSON stdio protocol. Every extension needs it.
+The `@anima/extension-host` dependency provides `runExtensionHost()` — the function that wires your extension into the NDJSON stdio protocol. Every extension needs it.
 
 ### 2. Implement the extension
 
 ```typescript
 import { z } from "zod";
-import type { ClaudiaExtension, ExtensionContext, HealthCheckResponse } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 
-export function createMyFeatureExtension(config: MyFeatureConfig = {}): ClaudiaExtension {
+export function createMyFeatureExtension(config: MyFeatureConfig = {}): AnimaExtension {
   let ctx: ExtensionContext;
 
   return {
@@ -112,16 +112,16 @@ export function createMyFeatureExtension(config: MyFeatureConfig = {}): ClaudiaE
 export default createMyFeatureExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createMyFeatureExtension);
 ```
 
 The last two lines are critical. `runExtensionHost()` handles the entire stdio protocol — console redirection, NDJSON I/O, event bus, `ctx.call()`, parent liveness detection, and HMR lifecycle. The `import.meta.main` guard ensures it only runs when the file is executed directly (not when imported for testing).
 
-### 3. Configure in claudia.json
+### 3. Configure in anima.json
 
 ```json5
-// ~/.claudia/claudia.json
+// ~/.anima/anima.json
 {
   extensions: {
     "my-feature": {
@@ -157,10 +157,10 @@ bun run packages/cli/src/index.ts my-feature.health_check
 
 ## Extension Interface
 
-All extensions implement `ClaudiaExtension` from `@claudia/shared`:
+All extensions implement `AnimaExtension` from `@anima/shared`:
 
 ```typescript
-interface ClaudiaExtension {
+interface AnimaExtension {
   id: string; // Unique ID: "voice", "imessage"
   name: string; // Display name: "Voice (TTS)"
   methods: ExtensionMethodDefinition[];
@@ -180,11 +180,11 @@ interface ClaudiaExtension {
 Extensions export a factory function named `createXxxExtension` and wire it into `runExtensionHost()`:
 
 ```typescript
-export function createVoiceExtension(config: VoiceConfig = {}): ClaudiaExtension { ... }
+export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension { ... }
 export default createVoiceExtension;
 
 // Direct execution — gateway spawns this file directly
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createVoiceExtension);
 ```
 
@@ -216,7 +216,7 @@ interface ExtensionContext {
   tags: string[] | null;
   /** Extension configuration */
   config: Record<string, unknown>;
-  /** Logger — writes to console + file at ~/.claudia/logs/{extensionId}.log */
+  /** Logger — writes to console + file at ~/.anima/logs/{extensionId}.log */
   log: {
     info(msg: string, meta?: unknown): void;
     warn(msg: string, meta?: unknown): void;
@@ -396,9 +396,9 @@ External message -> extension -> prompt_request event
 
 ## Configuration
 
-### claudia.json
+### anima.json
 
-Extension config lives in `~/.claudia/claudia.json` (JSON5 format):
+Extension config lives in `~/.anima/anima.json` (JSON5 format):
 
 ```json5
 {
@@ -422,7 +422,7 @@ Extension config lives in `~/.claudia/claudia.json` (JSON5 format):
 ### Config Flow
 
 ```
-~/.claudia/claudia.json
+~/.anima/anima.json
   -> loadConfig() interpolates ${ENV_VARS} from process.env / .env
   -> gateway start.ts enumerates enabled extension IDs
   -> resolves extensions/<id>/src/index.ts
@@ -441,7 +441,7 @@ const DEFAULT_CONFIG = {
 };
 
 // GOOD — config comes from the factory parameter
-export function createMyExtension(config: MyConfig = {}): ClaudiaExtension {
+export function createMyExtension(config: MyConfig = {}): AnimaExtension {
   const cfg = { ...DEFAULTS, ...config }; // Config has interpolated values
 }
 ```
@@ -456,7 +456,7 @@ CARTESIA_API_KEY=sk-...
 CARTESIA_VOICE_ID=931fb722-...
 ```
 
-Reference them in `claudia.json` via `${VAR_NAME}` syntax.
+Reference them in `anima.json` via `${VAR_NAME}` syntax.
 
 ---
 
@@ -486,7 +486,7 @@ Each extension is directly executable. The gateway:
 5. The host sends a `register` message with extension metadata (methods, events, sourceRoutes)
 6. Gateway registers the remote extension — methods, events, and source routing work transparently
 
-There is no generic host shim or dynamic import layer. The extension IS the process entry point. `runExtensionHost()` (from `@claudia/extension-host`) handles the stdio protocol, console redirection, event bus bridging, parent liveness detection, and HMR lifecycle.
+There is no generic host shim or dynamic import layer. The extension IS the process entry point. `runExtensionHost()` (from `@anima/extension-host`) handles the stdio protocol, console redirection, event bus bridging, parent liveness detection, and HMR lifecycle.
 
 ### Singleton Host Enforcement (Gateway-Wide)
 
@@ -573,7 +573,7 @@ Extension hosts also self-monitor: they poll `process.ppid` every 2 seconds and 
 Before enabling an extension, verify all of these:
 
 1. Entry point exists at `extensions/<id>/src/index.ts` with the `runExtensionHost()` call at the bottom.
-2. `package.json` includes `"@claudia/extension-host": "workspace:*"` in dependencies.
+2. `package.json` includes `"@anima/extension-host": "workspace:*"` in dependencies.
 3. Runtime config comes from the factory `config` argument (or `ctx.config`), not module-level `loadConfig()`/`process.env` reads.
 4. `start()`/`stop()` fully clean up timers, sockets, subprocesses, and event subscriptions so HMR does not leak state.
 5. Keep server logic and route/page logic split: server code runs out-of-process while React routes still load in the gateway web shell.
@@ -666,7 +666,7 @@ Extensions can serve web pages via the gateway's SPA.
 
 ```typescript
 // extensions/my-feature/src/routes.ts
-import type { Route } from "@claudia/ui";
+import type { Route } from "@anima/ui";
 import { MyPage } from "./pages/MyPage";
 
 export const myFeatureRoutes: Route[] = [
@@ -683,9 +683,9 @@ export const myFeatureRoutes: Route[] = [
     "./routes": "./src/routes.ts"
   },
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*",
-    "@claudia/ui": "workspace:*",
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
+    "@anima/ui": "workspace:*",
     "zod": "^3.25.76"
   }
 }
@@ -696,7 +696,7 @@ export const myFeatureRoutes: Route[] = [
 Add to `packages/gateway/src/web/index.tsx`:
 
 ```typescript
-import { myFeatureRoutes } from "@claudia/ext-my-feature/routes";
+import { myFeatureRoutes } from "@anima/ext-my-feature/routes";
 
 const allRoutes = [...controlRoutes, ...chatRoutes, ...myFeatureRoutes];
 ```
@@ -705,7 +705,7 @@ const allRoutes = [...controlRoutes, ...chatRoutes, ...myFeatureRoutes];
 
 - Chat owns `/` (workspaces, sessions)
 - Other extensions use `/{extension-name}` paths
-- Pages are React components using `@claudia/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`)
+- Pages are React components using `@anima/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`)
 
 ### Gateway URL Defaults (Web Extensions)
 
@@ -736,14 +736,14 @@ Chat still manages session scope explicitly (`session.<id>.*`) and unsubscribes 
 
 ## Existing Extensions
 
-| Extension       | ID           | Package                   | Web Pages                                         | Source Routes |
-| --------------- | ------------ | ------------------------- | ------------------------------------------------- | ------------- |
-| Chat            | `chat`       | `@claudia/ext-chat`       | `/`, `/workspace/:workspaceId/session/:sessionId` | --            |
-| Voice           | `voice`      | `@claudia/voice`          | --                                                | --            |
-| iMessage        | `imessage`   | `@claudia/ext-imessage`   | --                                                | `imessage`    |
-| Mission Control | `control`    | `@claudia/ext-control`    | `/control`, `/logs`                               | --            |
-| Hooks           | `hooks`      | `@claudia/ext-hooks`      | --                                                | --            |
-| DOMINATRIX      | `dominatrix` | `@claudia/ext-dominatrix` | --                                                | --            |
+| Extension       | ID           | Package                 | Web Pages                                         | Source Routes |
+| --------------- | ------------ | ----------------------- | ------------------------------------------------- | ------------- |
+| Chat            | `chat`       | `@anima/ext-chat`       | `/`, `/workspace/:workspaceId/session/:sessionId` | --            |
+| Voice           | `voice`      | `@anima/voice`          | --                                                | --            |
+| iMessage        | `imessage`   | `@anima/ext-imessage`   | --                                                | `imessage`    |
+| Mission Control | `control`    | `@anima/ext-control`    | `/control`, `/logs`                               | --            |
+| Hooks           | `hooks`      | `@anima/ext-hooks`      | --                                                | --            |
+| DOMINATRIX      | `dominatrix` | `@anima/ext-dominatrix` | --                                                | --            |
 
 All extensions run out-of-process. There is no in-process mode.
 
@@ -757,15 +757,15 @@ Hooks are lightweight event-driven scripts that run inside the **hooks extension
 
 The hooks extension (`extensions/hooks/`) loads hooks from:
 
-1. `~/.claudia/hooks/` — user-level hooks (apply to all workspaces)
-2. `<workspace>/.claudia/hooks/` — workspace-level hooks for the active workspace
+1. `~/.anima/hooks/` — user-level hooks (apply to all workspaces)
+2. `<workspace>/.anima/hooks/` — workspace-level hooks for the active workspace
 
 If multiple hook files share the same filename (same hook ID), workspace hooks override user hooks.
 
 Each `.ts` or `.js` file must default-export a `HookDefinition`:
 
 ```typescript
-import type { HookDefinition } from "@claudia/shared";
+import type { HookDefinition } from "@anima/shared";
 
 export default {
   event: "session.message_stop", // or an array: ["session.message_stop", "session.history_loaded"]
@@ -830,8 +830,8 @@ To add a new hook with UI rendering, emit data via `ctx.emit()` and add a corres
 ### Example: git-status Hook
 
 ```typescript
-// .claudia/hooks/git-status.ts
-import type { HookDefinition } from "@claudia/shared";
+// .anima/hooks/git-status.ts
+import type { HookDefinition } from "@anima/shared";
 
 interface GitStatusPayload {
   branch: string;
@@ -873,7 +873,7 @@ Hook handler signature is `handler(ctx, payload?)`: `ctx` is required and `paylo
 
 ### Configuration
 
-Enable the hooks extension in `~/.claudia/claudia.json`:
+Enable the hooks extension in `~/.anima/anima.json`:
 
 ```json5
 {
@@ -909,13 +909,13 @@ extensions/<name>/
     └── pages/             # React page components (if has UI)
         └── MyPage.tsx
 
-.claudia/
+.anima/
 └── hooks/                   # Workspace-level hook scripts (loaded by hooks extension)
     ├── git-status.ts        # Git status after each turn
     └── ...
 
 packages/
-├── shared/src/types.ts              # ClaudiaExtension, ExtensionContext, HookDefinition, etc.
+├── shared/src/types.ts              # AnimaExtension, ExtensionContext, HookDefinition, etc.
 ├── shared/src/config.ts             # Config loading + env interpolation
 ├── gateway/src/start.ts             # Config-driven extension startup (spawns extensions directly)
 ├── gateway/src/extensions.ts        # ExtensionManager (routing, events, lifecycle)

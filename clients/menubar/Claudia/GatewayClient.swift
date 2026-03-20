@@ -37,7 +37,7 @@ class GatewayClient: NSObject {
 
     override init() {
         // Default to localhost, can be configured via environment or defaults
-        let urlString = ProcessInfo.processInfo.environment["CLAUDIA_GATEWAY_URL"]
+        let urlString = ProcessInfo.processInfo.environment["ANIMA_GATEWAY_URL"]
             ?? UserDefaults.standard.string(forKey: "gatewayURL")
             ?? "ws://localhost:30086/ws"
         self.gatewayURL = URL(string: urlString)!

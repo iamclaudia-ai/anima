@@ -13,7 +13,7 @@ import {
   clearConfigCache,
   loadConfig,
   type ExtensionConfig,
-} from "@claudia/shared";
+} from "@anima/shared";
 import { existsSync, watch } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -31,7 +31,7 @@ import {
 } from "./db/extension-locks";
 import { getDb } from "./db";
 
-const log = createLogger("Startup", join(homedir(), ".claudia", "logs", "gateway.log"));
+const log = createLogger("Startup", join(homedir(), ".anima", "logs", "gateway.log"));
 const ROOT_DIR = join(import.meta.dir, "..", "..", "..");
 const config = loadConfig();
 
@@ -41,8 +41,8 @@ const config = loadConfig();
  * because SIGKILL doesn't allow cleanup handlers to run.
  */
 async function killOrphanExtensionHosts(): Promise<void> {
-  if (process.env.CLAUDIA_SKIP_ORPHAN_KILL === "true") {
-    log.info("Skipping orphan extension host cleanup (CLAUDIA_SKIP_ORPHAN_KILL=true)");
+  if (process.env.ANIMA_SKIP_ORPHAN_KILL === "true") {
+    log.info("Skipping orphan extension host cleanup (ANIMA_SKIP_ORPHAN_KILL=true)");
     return;
   }
 
@@ -484,7 +484,7 @@ function startHeartbeat(): NodeJS.Timeout | null {
  * Start config file watcher for dynamic extension management
  */
 function startConfigWatcher(): void {
-  const configPath = join(homedir(), ".claudia", "claudia.json");
+  const configPath = join(homedir(), ".anima", "anima.json");
 
   if (!existsSync(configPath)) {
     log.warn("Config file not found, skipping file watcher", { configPath });

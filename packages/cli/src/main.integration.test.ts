@@ -9,8 +9,8 @@ function runCli(args: string[], envOverrides?: Record<string, string>) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      CLAUDIA_GATEWAY_URL: "ws://127.0.0.1:1/ws",
-      CLAUDIA_WATCHDOG_URL: "http://127.0.0.1:1",
+      ANIMA_GATEWAY_URL: "ws://127.0.0.1:1/ws",
+      ANIMA_WATCHDOG_URL: "http://127.0.0.1:1",
       ...envOverrides,
     },
     stdout: "pipe",
@@ -27,8 +27,8 @@ async function runCliAsync(
     cwd: repoRoot,
     env: {
       ...process.env,
-      CLAUDIA_GATEWAY_URL: "ws://127.0.0.1:1/ws",
-      CLAUDIA_WATCHDOG_URL: "http://127.0.0.1:1",
+      ANIMA_GATEWAY_URL: "ws://127.0.0.1:1/ws",
+      ANIMA_WATCHDOG_URL: "http://127.0.0.1:1",
       ...envOverrides,
     },
     stdout: "pipe",
@@ -178,22 +178,22 @@ describe("cli main integration", () => {
   it("requires text for speak compat command", () => {
     const result = runCli(["speak"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString("utf-8")).toContain('Usage: claudia speak "text to speak"');
+    expect(result.stderr.toString("utf-8")).toContain('Usage: anima speak "text to speak"');
   });
 
   it("requires service argument for watchdog restart", () => {
     const result = runCli(["watchdog", "restart"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString("utf-8")).toContain(
-      "Usage: claudia watchdog restart <gateway|runtime> [--force]",
+      "Usage: anima watchdog restart <gateway|runtime> [--force]",
     );
   });
 
   it("loads method catalog through gateway client", async () => {
     await withGatewayServer(async (gatewayUrl) => {
-      const result = await runCliAsync(["methods"], { CLAUDIA_GATEWAY_URL: gatewayUrl });
+      const result = await runCliAsync(["methods"], { ANIMA_GATEWAY_URL: gatewayUrl });
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("claudia session send_prompt");
+      expect(result.stdout).toContain("anima session send_prompt");
     });
   });
 
@@ -201,7 +201,7 @@ describe("cli main integration", () => {
     await withGatewayServer(async (gatewayUrl) => {
       const result = await runCliAsync(
         ["session", "send_prompt", "--sessionId", "ses_test", "--content", "hello"],
-        { CLAUDIA_GATEWAY_URL: gatewayUrl },
+        { ANIMA_GATEWAY_URL: gatewayUrl },
       );
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("streamed text");
@@ -210,7 +210,7 @@ describe("cli main integration", () => {
 
   it("handles speak flow via gateway client", async () => {
     await withGatewayServer(async (gatewayUrl) => {
-      const result = await runCliAsync(["speak", "hello"], { CLAUDIA_GATEWAY_URL: gatewayUrl });
+      const result = await runCliAsync(["speak", "hello"], { ANIMA_GATEWAY_URL: gatewayUrl });
       expect(result.exitCode).toBe(0);
     });
   });

@@ -126,7 +126,7 @@ export class Logger {
  * Create a logger instance.
  *
  * @example
- * const log = createLogger("gateway", "~/.claudia/logs/gateway.log");
+ * const log = createLogger("gateway", "~/.anima/logs/gateway.log");
  * log.info("Server started", { port: 30086 });
  */
 export function createLogger(component: string, filePath?: string): Logger {

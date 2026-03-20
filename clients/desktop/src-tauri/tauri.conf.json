@@ -1,7 +1,7 @@
 {
-  "productName": "Claudia",
+  "productName": "Anima",
   "version": "0.1.0",
-  "identifier": "ai.iamclaudia.desktop",
+  "identifier": "ai.iamclaudia.anima",
   "build": {
     "beforeDevCommand": "",
     "beforeBuildCommand": "",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Claudia",
+        "title": "Anima",
         "url": "http://localhost:30086",
         "width": 500,
         "height": 700,

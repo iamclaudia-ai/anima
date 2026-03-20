@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useRouter, useGatewayClient } from "@claudia/ui";
+import { useRouter, useGatewayClient } from "@anima/ui";
 import ReactMarkdown from "react-markdown";
 
 interface Chapter {

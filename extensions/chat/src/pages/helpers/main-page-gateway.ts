@@ -1,4 +1,4 @@
-import type { SessionInfo, WorkspaceInfo } from "@claudia/ui";
+import type { SessionInfo, WorkspaceInfo } from "@anima/ui";
 
 export type GatewayCaller = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { createGatewayClient, type GatewayClient } from "@claudia/shared/gateway-client";
+import { createGatewayClient, type GatewayClient } from "@anima/shared/gateway-client";
 import { resolveGatewayUrl } from "../hooks/gateway-url";
 
 interface GatewayClientContextValue {

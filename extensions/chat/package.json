@@ -1,5 +1,5 @@
 {
-  "name": "@claudia/ext-chat",
+  "name": "@anima/ext-chat",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@claudia/extension-host": "workspace:*",
-    "@claudia/shared": "workspace:*",
-    "@claudia/ui": "workspace:*",
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
+    "@anima/ui": "workspace:*",
     "zod": "^3.25.76"
   }
 }

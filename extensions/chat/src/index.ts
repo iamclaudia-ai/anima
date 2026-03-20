@@ -5,9 +5,9 @@
  * No server-side methods needed — session extension handles all runtime concerns.
  */
 
-import type { ClaudiaExtension, ExtensionContext } from "@claudia/shared";
+import type { AnimaExtension, ExtensionContext } from "@anima/shared";
 
-export function createChatExtension(): ClaudiaExtension {
+export function createChatExtension(): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
   return {
@@ -38,5 +38,5 @@ export function createChatExtension(): ClaudiaExtension {
 export default createChatExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createChatExtension);

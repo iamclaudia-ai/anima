@@ -12,12 +12,12 @@
 
 import { z } from "zod";
 import type {
-  ClaudiaExtension,
+  AnimaExtension,
   ExtensionContext,
   ExtensionMethodDefinition,
   HealthCheckResponse,
-} from "@claudia/shared";
-import { createLogger, loadConfig } from "@claudia/shared";
+} from "@anima/shared";
+import { createLogger, loadConfig } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -56,7 +56,7 @@ import {
   type StoredSession,
 } from "./session-store";
 
-const log = createLogger("SessionExt", join(homedir(), ".claudia", "logs", "session.log"));
+const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
 interface AgentHostSessionInfo {
   id: string;
@@ -487,7 +487,7 @@ function formatMemoryContext(memory: MemoryContextResult): string | null {
 
 // ── Extension factory ────────────────────────────────────────
 
-export function createSessionExtension(config: Record<string, unknown> = {}): ClaudiaExtension {
+export function createSessionExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext;
 
   // Load global configuration for non-session settings (e.g., agent-host URL).
@@ -508,7 +508,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
   })();
   if (!configuredModel) {
     throw new Error(
-      "Session extension requires extensions.session.config.model in ~/.claudia/claudia.json",
+      "Session extension requires extensions.session.config.model in ~/.anima/anima.json",
     );
   }
   const sessionConfig: SessionRuntimeConfig = {
@@ -1986,5 +1986,5 @@ export function createSessionExtension(config: Record<string, unknown> = {}): Cl
 export default createSessionExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
-import { runExtensionHost } from "@claudia/extension-host";
+import { runExtensionHost } from "@anima/extension-host";
 if (import.meta.main) runExtensionHost(createSessionExtension);

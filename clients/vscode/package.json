@@ -1,8 +1,8 @@
 {
-  "name": "claudia",
-  "displayName": "Claudia",
+  "name": "anima",
+  "displayName": "Anima",
   "version": "0.1.0",
-  "description": "Claudia AI assistant for VS Code",
+  "description": "Anima platform for Claudia in VS Code",
   "categories": [
     "AI",
     "Chat",
@@ -10,9 +10,9 @@
   ],
   "keywords": [
     "ai",
+    "anima",
     "assistant",
     "claude",
-    "claudia",
     "coding"
   ],
   "publisher": "iamclaudia-ai",
@@ -28,7 +28,7 @@
     "lint": "eslint src --ext ts"
   },
   "dependencies": {
-    "@claudia/ui": "workspace:*",
+    "@anima/ui": "workspace:*",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "ws": "^8.x"
@@ -48,78 +48,78 @@
   "contributes": {
     "commands": [
       {
-        "command": "claudia.openChat",
+        "command": "anima.openChat",
         "title": "Open Claudia Chat",
-        "category": "Claudia",
+        "category": "Anima",
         "icon": {
           "light": "resources/icon-light.svg",
           "dark": "resources/icon-dark.svg"
         }
       },
       {
-        "command": "claudia.sendSelection",
+        "command": "anima.sendSelection",
         "title": "Send Selection to Claudia",
-        "category": "Claudia"
+        "category": "Anima"
       },
       {
-        "command": "claudia.explainCode",
+        "command": "anima.explainCode",
         "title": "Explain This Code",
-        "category": "Claudia"
+        "category": "Anima"
       },
       {
-        "command": "claudia.fixCode",
+        "command": "anima.fixCode",
         "title": "Fix This Code",
-        "category": "Claudia"
+        "category": "Anima"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "claudia.openChat",
+          "command": "anima.openChat",
           "group": "navigation@-100"
         }
       ],
       "editor/context": [
         {
-          "command": "claudia.sendSelection",
+          "command": "anima.sendSelection",
           "when": "editorHasSelection",
-          "group": "claudia@1"
+          "group": "anima@1"
         },
         {
-          "command": "claudia.explainCode",
+          "command": "anima.explainCode",
           "when": "editorHasSelection",
-          "group": "claudia@2"
+          "group": "anima@2"
         },
         {
-          "command": "claudia.fixCode",
+          "command": "anima.fixCode",
           "when": "editorHasSelection",
-          "group": "claudia@3"
+          "group": "anima@3"
         }
       ]
     },
     "configuration": {
-      "title": "Claudia",
+      "title": "Anima",
       "properties": {
-        "claudia.gatewayUrl": {
+        "anima.gatewayUrl": {
           "type": "string",
           "default": "ws://localhost:30086/ws",
-          "description": "Claudia Gateway WebSocket URL"
+          "description": "Anima Gateway WebSocket URL"
         },
-        "claudia.includeFileContext": {
+        "anima.includeFileContext": {
           "type": "boolean",
           "default": true,
           "description": "Automatically include current file context in messages"
         },
-        "claudia.openOnStartup": {
+        "anima.openOnStartup": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically open Claudia panel when VS Code starts (prefer .vscode/settings.local.json)"
+          "description": "Automatically open the Anima panel when VS Code starts (prefer .vscode/settings.local.json)"
         }
       }
     },
     "keybindings": [
       {
-        "command": "claudia.openChat",
+        "command": "anima.openChat",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c"
       }

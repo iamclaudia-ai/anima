@@ -25,7 +25,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { createLogger, loadConfig } from "@claudia/shared";
+import { createLogger, loadConfig } from "@anima/shared";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -37,7 +37,7 @@ import type {
   SDKPartialAssistantMessage,
   PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ThinkingEffort, ImageProcessingConfig } from "@claudia/shared";
+import type { ThinkingEffort, ImageProcessingConfig } from "@anima/shared";
 import { processContent } from "./image-processor";
 import { formatSkillsForPrompt, loadSkills } from "./skills";
 
@@ -218,11 +218,11 @@ export class SDKSession extends EventEmitter {
     this.id = id;
     this.logger = createLogger(
       `SDKSession:${id.slice(0, 8)}`,
-      join(homedir(), ".claudia", "logs", "session.log"),
+      join(homedir(), ".anima", "logs", "session.log"),
     );
     if (!options.model || !options.model.trim()) {
       throw new Error(
-        "SDKSession requires a configured model (extensions.session.config.model in ~/.claudia/claudia.json)",
+        "SDKSession requires a configured model (extensions.session.config.model in ~/.anima/anima.json)",
       );
     }
     this.cwd = options.cwd;
@@ -269,7 +269,7 @@ export class SDKSession extends EventEmitter {
     }
 
     // Set up log directory
-    const logDir = join(homedir(), ".claudia", "sessions", this.id);
+    const logDir = join(homedir(), ".anima", "sessions", this.id);
     if (!existsSync(logDir)) {
       mkdirSync(logDir, { recursive: true });
     }
@@ -546,7 +546,7 @@ export class SDKSession extends EventEmitter {
         ...process.env,
         CLAUDECODE: "",
         CLAUDE_CODE_ENTRYPOINT: "",
-        CLAUDIA_SESSION_ID: this.id,
+        ANIMA_SESSION_ID: this.id,
       },
     };
   }
