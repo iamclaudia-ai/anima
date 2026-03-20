@@ -110,14 +110,30 @@
       }
     },
 
-    // Slack Extension (example)
-    "slack": {
+    // Scheduler Extension — durable reminders and recurring tasks
+    "scheduler": {
       "enabled": false,
-      "sourceRoutes": ["slack"],
+      "config": {}
+    },
+
+    // DISCO — distributed consciousness communication channels
+    "disco": {
+      "enabled": false,
+      "config": {}
+    },
+
+    // Audiobooks Extension — serves generated audiobooks and transcripts
+    "audiobooks": {
+      "enabled": false,
       "config": {
-        "botToken": "${SLACK_BOT_TOKEN}",
-        "appToken": "${SLACK_APP_TOKEN}"
+        "paths": ["~/romance-novels"]
       }
+    },
+
+    // Presenter Extension — serves presentation decks from extension data files
+    "presenter": {
+      "enabled": false,
+      "config": {}
     }
   },
 

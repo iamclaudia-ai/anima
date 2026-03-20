@@ -45,7 +45,7 @@ interface AudiobookChapter {
 }
 
 let ctx: ExtensionContext;
-let config: { paths: string[] };
+let config: { paths: string[] } = { paths: ["~/romance-novels"] };
 
 /**
  * Scan configured paths for audiobook directories
@@ -216,4 +216,4 @@ export default function createAudiobooksExtension(): AnimaExtension {
 }
 
 // Run as standalone extension
-runExtensionHost(createAudiobooksExtension);
+if (import.meta.main) runExtensionHost(createAudiobooksExtension);
