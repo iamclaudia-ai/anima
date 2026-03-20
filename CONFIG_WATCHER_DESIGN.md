@@ -2,7 +2,7 @@
 
 ## Problem
 
-Currently the gateway only reads `claudia.json` at startup. Changes require manual gateway restart.
+Currently the gateway only reads `anima.json` at startup. Changes require manual gateway restart.
 
 ## Solution: Dynamic Extension Management
 
@@ -10,10 +10,10 @@ Currently the gateway only reads `claudia.json` at startup. Changes require manu
 
 ```typescript
 import { watch } from "node:fs";
-import { clearConfigCache, getEnabledExtensions } from "@claudia/shared";
+import { clearConfigCache, getEnabledExtensions } from "@anima/shared";
 
-// Watch ~/.claudia/claudia.json for changes
-const configPath = join(homedir(), ".claudia", "claudia.json");
+// Watch ~/.anima/anima.json for changes
+const configPath = join(homedir(), ".anima", "anima.json");
 watch(configPath, { persistent: true }, (eventType) => {
   if (eventType === "change") {
     handleConfigChange();

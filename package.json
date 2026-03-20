@@ -12,6 +12,7 @@
     "watchdog": "bun run packages/watchdog/src/index.ts",
     "watchdog:deploy": "bun run --filter @anima/watchdog deploy",
     "cli": "bun run packages/cli/src/index.ts",
+    "migrate:anima": "bun run scripts/migrate-to-anima.ts",
     "build": "bun run --filter '*' build",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text",

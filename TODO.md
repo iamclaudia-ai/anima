@@ -1,4 +1,4 @@
-# Claudia - Development Roadmap
+# Anima - Development Roadmap
 
 ## 🧪 Development Practices
 
@@ -26,10 +26,10 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
 
 - [x] Monorepo structure with Bun workspaces
 - [x] TypeScript configuration for workspace resolution
-- [x] SDK integration (`@claudia/sdk`) - Claude Code CLI wrapper
-- [x] Gateway (`@claudia/gateway`) - WebSocket server on port 30086
+- [x] SDK integration (`@anima/sdk`) - Claude Code CLI wrapper
+- [x] Gateway (`@anima/gateway`) - WebSocket server on port 30086
 - [x] Session persistence via `.session-id` file (KISS approach)
-- [x] CLI client (`@claudia/cli`) - one-shot testing tool
+- [x] CLI client (`@anima/cli`) - one-shot testing tool
 - [x] Web UI (gateway-hosted SPA) - React app with streaming support
   - Thinking animation (circuit brain)
   - Tool call blocks
@@ -39,8 +39,8 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
 
 ### Phase 2: Voice
 
-- [x] Voice Extension (`@claudia/voice`) - ElevenLabs TTS integration
-- [x] CLI `speak` command - `claudia speak "text"`
+- [x] Voice Extension (`@anima/voice`) - ElevenLabs TTS integration
+- [x] CLI `speak` command - `anima speak "text"`
 - [x] Gateway extension system with event bus
 
 ## 🚧 In Progress
@@ -82,7 +82,7 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
   - Sender filtering (claudia@iamclaudia.ai)
   - Source routing for responses
 - [~] **Memory Extension** - _partially complete_
-  - [x] MCP server (`@claudia/memory-mcp`) with tools: remember, recall, read, list, sections, sync
+  - [x] MCP server (`@anima/memory-mcp`) with tools: remember, recall, read, list, sections, sync
   - [x] Section consistency tracking (SQLite)
   - [x] Auto git commit/push after writes
   - [ ] Gateway extension for context injection (before prompts)
@@ -93,7 +93,7 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
   - Define standard preambles for `review`, `test`, and `task` commands
   - Update `packages/agent-host/src/task-host.ts` to prepend appropriate preamble based on command type
   - This ensures consistent prompt structure without Claudia having to remember every time
-  - Preambles should be configurable in `~/.claudia/claudia.json` (not hardcoded)
+  - Preambles should be configurable in `~/.anima/anima.json` (not hardcoded)
 
 ### Web UI Enhancements
 
@@ -111,9 +111,9 @@ Fix the tests in [file]. After writing your fixes, run the tests with 'bun test 
 
 ### Security
 
-- [ ] **Security audit CLI** - `claudia security check`
+- [ ] **Security audit CLI** - `anima security check`
   - Verify gateway binds to localhost only
-  - Check file/directory permissions (~/.claudia, ~/memory)
+  - Check file/directory permissions (~/.anima, ~/memory)
   - Scan config for exposed credentials
   - Verify memory repo is private
   - Check for common misconfigurations

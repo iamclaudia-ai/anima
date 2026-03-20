@@ -7,9 +7,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/michael/.bun/bin/bun</string>
-    <string>run</string>
-    <string>/Users/michael/Projects/iamclaudia-ai/anima/packages/watchdog/src/index.ts</string>
+    <string>/Users/michael/.anima/bin/watchdog</string>
   </array>
 
   <key>WorkingDirectory</key>
@@ -18,7 +16,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/Users/michael/.bun/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/michael/.local/bin:/Users/michael/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
     <string>/Users/michael</string>
   </dict>

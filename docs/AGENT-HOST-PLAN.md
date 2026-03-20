@@ -458,7 +458,7 @@ extensions/session/src/index.ts   -- Add AgentHostClient, feature flag
 extensions/codex/src/index.ts     -- Add CodexAgentClient, feature flag
 packages/watchdog/src/services.ts -- Add agent-host service
 packages/shared/src/config.ts     -- Add agentHost config section
-claudia.example.json              -- Add agentHost section
+anima.example.json                -- Add agentHost section
 ```
 
 ## 10. Edge Cases

@@ -49,7 +49,7 @@ function resolvePath(p: string): string {
 }
 
 export const WATCHDOG_PORT = config.port ?? 30085;
-export const PROJECT_DIR = process.env.ANIMA_PROJECT_DIR || join(import.meta.dir, "..", "..", "..");
+export const PROJECT_DIR = process.env.ANIMA_PROJECT_DIR || process.cwd();
 export const LOGS_DIR = resolvePath(config.logsDir ?? "~/.anima/logs");
 export const LOG_FILE = join(LOGS_DIR, "watchdog.log");
 export const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
