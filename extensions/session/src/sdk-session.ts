@@ -22,6 +22,7 @@ import {
   mkdirSync,
   appendFileSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -99,6 +100,24 @@ function normalizePathForTraversal(path: string): string {
   } catch {
     return resolve(path);
   }
+}
+
+function hasPersistedClaudeSession(cwd: string, sessionId: string): boolean {
+  const projectsDir = join(homedir(), ".claude", "projects");
+  const encodedCwd = cwd.replace(/\//g, "-");
+  const directPath = join(projectsDir, encodedCwd, `${sessionId}.jsonl`);
+  if (existsSync(directPath)) return true;
+
+  if (!existsSync(projectsDir)) return false;
+
+  for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (existsSync(join(projectsDir, entry.name, `${sessionId}.jsonl`))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ── MessageChannel ───────────────────────────────────────────
@@ -502,10 +521,11 @@ export class SDKSession extends EventEmitter {
    */
   private buildQueryOptions(): Record<string, unknown> {
     const combinedSystemPrompt = this.buildCombinedSystemPrompt();
+    const canResume = !this.isFirstPrompt && hasPersistedClaudeSession(this.cwd, this.id);
 
     return {
       // Session identity — SDK handles resume via `resume` option
-      ...(this.isFirstPrompt ? { sessionId: this.id } : { resume: this.id }),
+      ...(canResume ? { resume: this.id } : { sessionId: this.id }),
 
       // Working directory and model
       cwd: this.cwd,

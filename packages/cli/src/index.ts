@@ -11,6 +11,8 @@
  */
 
 import { createGatewayClient } from "@anima/shared";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const DEFAULT_GATEWAY_URL = "ws://localhost:30086/ws";
 let gatewayUrl = process.env.ANIMA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
@@ -827,6 +829,76 @@ const WATCHDOG_METHODS: MethodCatalogEntry[] = [
   },
 ];
 
+function escapePlistValue(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function renderWatchdogPlist(params: {
+  homeDir: string;
+  projectDir: string;
+  executable: string[];
+}): string {
+  const programArguments = params.executable
+    .map((arg) => `    <string>${escapePlistValue(arg)}</string>`)
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.anima.watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+${programArguments}
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>${escapePlistValue(params.projectDir)}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${escapePlistValue(process.env.PATH || "")}</string>
+    <key>HOME</key>
+    <string>${escapePlistValue(params.homeDir)}</string>
+    <key>ANIMA_PROJECT_DIR</key>
+    <string>${escapePlistValue(params.projectDir)}</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>${escapePlistValue(resolve(params.homeDir, ".anima", "logs", "watchdog-launchd.log"))}</string>
+
+  <key>StandardErrorPath</key>
+  <string>${escapePlistValue(resolve(params.homeDir, ".anima", "logs", "watchdog-launchd.log"))}</string>
+</dict>
+</plist>
+`;
+}
+
+function getWatchdogLaunchCommand(projectDir: string): string[] {
+  const homeDir = process.env.HOME;
+  const deployedBinary = homeDir ? resolve(homeDir, ".anima", "bin", "watchdog") : "";
+  if (deployedBinary && existsSync(deployedBinary)) {
+    return [deployedBinary];
+  }
+
+  const bunPath = process.execPath;
+  return [bunPath, "run", "watchdog"];
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -973,18 +1045,27 @@ async function watchdogCommand(args: string[]): Promise<void> {
 
   if (sub === "install") {
     const plistName = "com.anima.watchdog.plist";
-    const plistSrc = `${import.meta.dir}/../../../scripts/${plistName}`;
     const plistDst = `${process.env.HOME}/Library/LaunchAgents/${plistName}`;
 
     try {
-      const srcFile = Bun.file(plistSrc);
-      if (!(await srcFile.exists())) {
-        console.error(`Error: Plist not found at ${plistSrc}`);
+      const homeDir = process.env.HOME;
+      if (!homeDir) {
+        console.error("Error: HOME is not set");
         process.exit(1);
       }
 
-      await Bun.write(plistDst, srcFile);
-      console.log(`Copied plist to ${plistDst}`);
+      const projectDir = resolve(dirname(import.meta.dir), "..", "..");
+      const launchCommand = getWatchdogLaunchCommand(projectDir);
+      const plist = renderWatchdogPlist({
+        homeDir,
+        projectDir,
+        executable: launchCommand,
+      });
+
+      mkdirSync(resolve(homeDir, "Library", "LaunchAgents"), { recursive: true });
+      mkdirSync(resolve(homeDir, ".anima", "logs"), { recursive: true });
+      await Bun.write(plistDst, plist);
+      console.log(`Wrote plist to ${plistDst}`);
 
       const load = Bun.spawn(["launchctl", "load", plistDst], {
         stdout: "inherit",

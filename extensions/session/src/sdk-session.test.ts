@@ -214,7 +214,7 @@ describe("SDKSession", () => {
 
       const session = new SDKSession(
         sessionId,
-        { cwd, systemPrompt: "CUSTOM_PROMPT_INSTRUCTIONS" },
+        { cwd, model: "claude-test", systemPrompt: "CUSTOM_PROMPT_INSTRUCTIONS" },
         false,
         {
           queryFactory: ((args: { options: Record<string, unknown> }) => {
@@ -269,7 +269,7 @@ describe("SDKSession", () => {
       process.env.ANIMA_HOME = isolatedHome;
       mkdirSync(isolatedCwd, { recursive: true });
 
-      const session = new SDKSession(sessionId, { cwd: isolatedCwd }, false, {
+      const session = new SDKSession(sessionId, { cwd: isolatedCwd, model: "claude-test" }, false, {
         queryFactory: ((args: { options: Record<string, unknown> }) => {
           capturedOptions = args.options;
           return fakeQuery as unknown;
@@ -298,7 +298,7 @@ describe("SDKSession", () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-2`;
     createdSessionIds.push(sessionId);
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: asQueryFactory(fakeQuery),
     });
     const sseTypes: string[] = [];
@@ -325,7 +325,7 @@ describe("SDKSession", () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-3`;
     createdSessionIds.push(sessionId);
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: asQueryFactory(fakeQuery),
     });
     const sendToolSpy = spyOn(session, "sendToolResult");
@@ -367,7 +367,7 @@ describe("SDKSession", () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-4`;
     createdSessionIds.push(sessionId);
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: asQueryFactory(fakeQuery),
     });
 
@@ -386,7 +386,7 @@ describe("SDKSession", () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-5`;
     createdSessionIds.push(sessionId);
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: asQueryFactory(fakeQuery),
     });
     const sseEvents: Array<{ type: string; [key: string]: unknown }> = [];
@@ -446,7 +446,7 @@ describe("SDKSession", () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-6`;
     createdSessionIds.push(sessionId);
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: asQueryFactory(fakeQuery),
     });
     const sendToolSpy = spyOn(session, "sendToolResult");
@@ -482,9 +482,14 @@ describe("SDKSession", () => {
     const rejectingQuery = new RejectingOpsQuery();
     const sessionId1 = `sdk-test-${Date.now()}-7`;
     createdSessionIds.push(sessionId1);
-    const session1 = new SDKSession(sessionId1, { cwd: "/repo/test" }, false, {
-      queryFactory: asQueryFactory(rejectingQuery),
-    });
+    const session1 = new SDKSession(
+      sessionId1,
+      { cwd: "/repo/test", model: "claude-test" },
+      false,
+      {
+        queryFactory: asQueryFactory(rejectingQuery),
+      },
+    );
 
     await session1.start();
     session1.prompt("hello");
@@ -498,9 +503,14 @@ describe("SDKSession", () => {
     const throwingQuery = new ThrowingQuery();
     const sessionId2 = `sdk-test-${Date.now()}-8`;
     createdSessionIds.push(sessionId2);
-    const session2 = new SDKSession(sessionId2, { cwd: "/repo/test" }, false, {
-      queryFactory: asQueryFactory(throwingQuery),
-    });
+    const session2 = new SDKSession(
+      sessionId2,
+      { cwd: "/repo/test", model: "claude-test" },
+      false,
+      {
+        queryFactory: asQueryFactory(throwingQuery),
+      },
+    );
     const sseTypes: string[] = [];
     session2.on("sse", (e) => sseTypes.push((e as { type: string }).type));
 
@@ -511,7 +521,7 @@ describe("SDKSession", () => {
   });
 
   it("reports info/health correctly and supports factory constructors", async () => {
-    const created = createSDKSession({ cwd: "/repo/factory" });
+    const created = createSDKSession({ cwd: "/repo/factory", model: "claude-test" });
     createdSessionIds.push(created.id);
     await created.start();
     const createdInfo = created.getInfo();
@@ -525,12 +535,77 @@ describe("SDKSession", () => {
     expect(created.getInfo().stale).toBe(true);
     await created.close();
 
-    const resumed = resumeSDKSession(`sdk-test-${Date.now()}-9`, { cwd: "/repo/factory" });
+    const resumed = resumeSDKSession(`sdk-test-${Date.now()}-9`, {
+      cwd: "/repo/factory",
+      model: "claude-test",
+    });
     createdSessionIds.push(resumed.id);
     await resumed.start();
     expect(resumed.id).toMatch(/^sdk-test-/);
     expect(resumed.isActive).toBe(true);
     await resumed.close();
+  });
+
+  it("starts a resumed session fresh when no Claude transcript exists yet", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-resume-fresh`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+
+    const session = new SDKSession(
+      sessionId,
+      { cwd: "/repo/factory", model: "claude-test" },
+      true,
+      {
+        queryFactory: ((args: { options: Record<string, unknown> }) => {
+          capturedOptions = args.options;
+          return fakeQuery as unknown;
+        }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      },
+    );
+
+    await session.start();
+    await session.prompt("hello");
+
+    expect(capturedOptions?.sessionId).toBe(sessionId);
+    expect(capturedOptions?.resume).toBeUndefined();
+
+    await session.close();
+  });
+
+  it("uses Claude resume when a transcript already exists", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-resume-existing`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+    const root = join(tmpdir(), `sdk-session-existing-${Date.now()}`);
+    const cwd = join(root, "repo", "app");
+    const projectDir = join(homedir(), ".claude", "projects", cwd.replace(/\//g, "-"));
+
+    try {
+      mkdirSync(cwd, { recursive: true });
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(join(projectDir, `${sessionId}.jsonl`), "{}\n");
+
+      const session = new SDKSession(sessionId, { cwd, model: "claude-test" }, true, {
+        queryFactory: ((args: { options: Record<string, unknown> }) => {
+          capturedOptions = args.options;
+          return fakeQuery as unknown;
+        }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      });
+
+      await session.start();
+      await session.prompt("hello");
+
+      expect(capturedOptions?.resume).toBe(sessionId);
+      expect(capturedOptions?.sessionId).toBeUndefined();
+
+      await session.close();
+    } finally {
+      rmSync(join(projectDir, `${sessionId}.jsonl`), { force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("closes MessageChannel iterators cleanly when session closes", async () => {
@@ -541,7 +616,7 @@ describe("SDKSession", () => {
     let secondDone: boolean | undefined;
     let thirdDone: boolean | undefined;
 
-    const session = new SDKSession(sessionId, { cwd: "/repo/test" }, false, {
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
       queryFactory: ((args: { prompt: AsyncIterable<unknown> }) => {
         void (async () => {
           const iter = args.prompt[Symbol.asyncIterator]();
