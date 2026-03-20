@@ -6,6 +6,7 @@ function makeService(overrides: Partial<ManagedService> = {}): ManagedService {
     name: "Gateway",
     id: "gateway",
     command: ["bun", "run", "packages/gateway/src/start.ts"],
+    cwd: "/tmp/test",
     healthUrl: "http://localhost:30086/health",
     port: 30086,
     requireExtensions: true,

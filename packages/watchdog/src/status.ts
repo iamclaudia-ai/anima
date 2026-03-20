@@ -1,10 +1,9 @@
 /**
- * Status aggregation — composes service + client health into a single status object.
+ * Status aggregation — composes service health into a single status object.
  */
 
 import { HEALTH_HISTORY_SIZE } from "./constants";
 import { services, isProcessAlive, checkHealth } from "./services";
-import { lastClientHealth } from "./client-health";
 
 export async function getStatus(): Promise<Record<string, unknown>> {
   const status: Record<string, unknown> = {};
@@ -23,18 +22,6 @@ export async function getStatus(): Promise<Record<string, unknown>> {
       lastRestart: service.lastRestart ? new Date(service.lastRestart).toISOString() : null,
       lastHealthReason: service.lastHealthReason ?? null,
       history: service.history.slice(-HEALTH_HISTORY_SIZE),
-    };
-  }
-
-  // Include client health in status
-  if (lastClientHealth) {
-    status.client = {
-      name: "Web Client",
-      healthy: lastClientHealth.healthy,
-      recentErrors: lastClientHealth.recentErrors,
-      lastHeartbeat: lastClientHealth.lastHeartbeat,
-      heartbeatAge: lastClientHealth.heartbeatAge,
-      errors: lastClientHealth.errors,
     };
   }
 

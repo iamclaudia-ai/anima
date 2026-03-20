@@ -1,9 +1,9 @@
 /**
  * Claudia Watchdog
  *
- * Standalone process supervisor + dashboard that manages gateway and runtime
- * as direct child processes. Provides health monitoring, log viewing, and
- * restart capabilities independent of the gateway.
+ * Standalone process supervisor + dashboard that manages gateway, agent-host,
+ * and claude remote-control as direct child processes. Provides health monitoring,
+ * log viewing, and restart capabilities independent of the gateway.
  *
  * ZERO monorepo imports — this file is completely self-contained so it keeps running
  * even when the gateway or shared packages have build errors.
@@ -15,21 +15,17 @@
  *   curl localhost:30085/api/logs              # List log files
  *   curl localhost:30085/api/logs/gateway.log?lines=50  # Tail logs
  *   curl -X POST localhost:30085/restart/gateway        # Restart gateway
- *   curl -X POST localhost:30085/restart/runtime        # Restart runtime
  */
 
 import { WATCHDOG_PORT, STARTED_AT, HEALTH_CHECK_INTERVAL } from "./constants";
 import { log } from "./logger";
 import {
   services,
-  isProcessAlive,
   startService,
   restartService,
   monitorServices,
   stopAllServices,
 } from "./services";
-import { checkClientHealth } from "./client-health";
-import { startDiagnose, clearDiagnose, getDiagnoseStatus } from "./diagnose";
 import { listLogFiles, tailLogFile } from "./logs";
 import { getStatus } from "./status";
 import dashboard from "./dashboard/index.html";
@@ -78,34 +74,6 @@ const server = Bun.serve({
       return Response.json(result, { status: result.ok ? 200 : 400 });
     },
 
-    // Diagnose — GET status or POST to start
-    "/diagnose": async (req) => {
-      if (req.method === "POST") {
-        const result = await startDiagnose();
-        return Response.json(result, { status: result.ok ? 200 : 400 });
-      }
-      return Response.json(getDiagnoseStatus());
-    },
-
-    // Diagnose — continue with follow-up prompt
-    "/diagnose/continue": async (req) => {
-      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
-      let prompt = "Continue fixing the error. Check if it's resolved now.";
-      try {
-        const body = (await req.json()) as { prompt?: string };
-        if (body.prompt) prompt = body.prompt;
-      } catch {}
-      const result = await startDiagnose(prompt);
-      return Response.json(result, { status: result.ok ? 200 : 400 });
-    },
-
-    // Diagnose — clear UI state
-    "/diagnose/clear": (req) => {
-      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
-      const result = clearDiagnose();
-      return Response.json(result, { status: result.ok ? 200 : 400 });
-    },
-
     // Dashboard — SPA fallback
     "/*": dashboard,
   },
@@ -114,7 +82,6 @@ const server = Bun.serve({
 // ── Health Monitor ───────────────────────────────────────
 
 setInterval(monitorServices, HEALTH_CHECK_INTERVAL);
-setInterval(checkClientHealth, HEALTH_CHECK_INTERVAL);
 
 // ── Startup ──────────────────────────────────────────────
 

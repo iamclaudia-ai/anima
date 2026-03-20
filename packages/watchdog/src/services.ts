@@ -17,6 +17,7 @@ import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Subprocess } from "bun";
 
 // ── Types ────────────────────────────────────────────────
@@ -32,8 +33,9 @@ export interface ManagedService {
   name: string;
   id: string;
   command: string[];
-  healthUrl: string;
-  port: number;
+  cwd: string;
+  healthUrl: string | null;
+  port: number | null;
   requireExtensions: boolean;
   restartBackoff: number;
   lastRestart: number;
@@ -45,13 +47,18 @@ export interface ManagedService {
 
 // ── Build Services from Config ──────────────────────────
 
+function resolvePath(p: string): string {
+  return p.startsWith("~") ? p.replace("~", homedir()) : p;
+}
+
 function buildService(id: string, cfg: ServiceConfig): ManagedService {
   return {
     name: cfg.name,
     id,
     command: cfg.command,
-    healthUrl: cfg.healthUrl,
-    port: cfg.port,
+    cwd: cfg.cwd ? resolvePath(cfg.cwd) : PROJECT_DIR,
+    healthUrl: cfg.healthUrl ?? null,
+    port: cfg.port ?? null,
     requireExtensions: cfg.healthCheck?.requireExtensions ?? false,
     restartBackoff: 1000,
     lastRestart: 0,
@@ -149,7 +156,9 @@ export async function startService(
   }
 
   // Kill any orphan processes already bound to this port
-  await killOrphanProcesses(service.port);
+  if (service.port) {
+    await killOrphanProcesses(service.port);
+  }
 
   // Ensure log dir exists
   if (!existsSync(LOGS_DIR)) mkdirSync(LOGS_DIR, { recursive: true });
@@ -160,7 +169,7 @@ export async function startService(
   // Spawn as direct child process. Use pipes + explicit drains to avoid
   // Bun.file stdio redirection issues that can cause runaway CPU.
   service.proc = Bun.spawn(command, {
-    cwd: PROJECT_DIR,
+    cwd: service.cwd,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, FORCE_COLOR: "0" },
@@ -212,6 +221,11 @@ export interface HealthCheckResult {
 }
 
 export async function checkHealth(service: ManagedService): Promise<HealthCheckResult> {
+  // No healthUrl — process-alive is the only check
+  if (!service.healthUrl) {
+    return isProcessAlive(service) ? { healthy: true } : { healthy: false, reason: "dead" };
+  }
+
   try {
     const res = await fetch(service.healthUrl, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) {

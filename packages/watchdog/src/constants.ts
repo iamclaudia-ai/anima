@@ -14,8 +14,9 @@ import { existsSync, readFileSync } from "node:fs";
 export interface ServiceConfig {
   name: string;
   command: string[];
-  healthUrl: string;
-  port: number;
+  cwd?: string;
+  healthUrl?: string;
+  port?: number;
   healthCheck?: {
     requireExtensions?: boolean;
   };
@@ -58,11 +59,3 @@ export const HEALTH_CHECK_INTERVAL = 5000; // 5s
 export const HEALTH_HISTORY_SIZE = 60; // 5-minute window at 5s intervals
 export const UNHEALTHY_RESTART_THRESHOLD = 6; // 6 consecutive failures = 30s
 export const STARTED_AT = Date.now();
-
-// Diagnose & Fix
-export const CLAUDE_PATH = join(homedir(), ".local", "bin", "claude");
-export const DIAGNOSE_TIMEOUT = 180_000; // 3 minute max
-export const DIAGNOSE_COOLDOWN = 10_000; // 10s between runs
-export const DIAGNOSE_LOG_DIR = join(LOGS_DIR, "diagnose");
-
-export const JSON_HEADERS = { "Content-Type": "application/json" };
