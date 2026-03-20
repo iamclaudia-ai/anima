@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "build": "bun build --compile src/index.ts --outfile dist/claudia-watchdog",
+    "deploy": "bun run build && mkdir -p ~/.claudia/bin && cp dist/claudia-watchdog ~/.claudia/bin/watchdog && echo '✅ Deployed to ~/.claudia/bin/watchdog'"
   }
 }

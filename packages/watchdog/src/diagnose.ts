@@ -2,11 +2,11 @@
  * Diagnose & Fix — spawns claude -p to autonomously fix client errors.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn, type Subprocess } from "bun";
-import { loadConfig } from "@claudia/shared";
 import {
   PROJECT_DIR,
   CLAUDE_PATH,
@@ -51,10 +51,20 @@ let diagnoseProc: Subprocess | null = null;
 let diagnoseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function getDiagnoseModel(): string {
-  const config = loadConfig();
-  const model = (config.extensions?.session?.config as { model?: unknown } | undefined)?.model;
-  if (typeof model === "string" && model.trim().length > 0) {
-    return model.trim();
+  try {
+    const configPath = join(homedir(), ".claudia", "claudia.json");
+    const raw = readFileSync(configPath, "utf-8");
+    // Strip comments (JSON5-style) before parsing
+    const stripped = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const config = JSON.parse(stripped) as {
+      extensions?: { session?: { config?: { model?: string } } };
+    };
+    const model = config.extensions?.session?.config?.model;
+    if (typeof model === "string" && model.trim().length > 0) {
+      return model.trim();
+    }
+  } catch {
+    // Fall through to error
   }
   throw new Error(
     "Missing required config: extensions.session.config.model in ~/.claudia/claudia.json",

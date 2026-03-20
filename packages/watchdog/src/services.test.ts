@@ -8,6 +8,7 @@ function makeService(overrides: Partial<ManagedService> = {}): ManagedService {
     command: ["bun", "run", "packages/gateway/src/start.ts"],
     healthUrl: "http://localhost:30086/health",
     port: 30086,
+    requireExtensions: true,
     restartBackoff: 1000,
     lastRestart: 0,
     consecutiveFailures: 0,
@@ -54,6 +55,7 @@ describe("watchdog health checks", () => {
         id: "agent-host",
         name: "Agent Host",
         healthUrl: "http://localhost:30087/health",
+        requireExtensions: false,
       }),
     );
     expect(result.healthy).toBe(true);

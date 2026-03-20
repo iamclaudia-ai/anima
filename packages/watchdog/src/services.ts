@@ -1,16 +1,19 @@
 /**
  * Service management — direct process supervision, health checks, auto-restart.
  *
- * Manages gateway as a direct child process (Bun.spawn).
+ * Service definitions are loaded from ~/.claudia/watchdog.json — no hardcoded commands.
+ * Manages services as direct child processes (Bun.spawn).
  * No tmux — stdout/stderr pipe to log files, watchdog owns the process lifecycle.
  */
 
 import {
+  config,
   PROJECT_DIR,
   LOGS_DIR,
   HEALTH_HISTORY_SIZE,
   UNHEALTHY_RESTART_THRESHOLD,
 } from "./constants";
+import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +34,7 @@ export interface ManagedService {
   command: string[];
   healthUrl: string;
   port: number;
+  requireExtensions: boolean;
   restartBackoff: number;
   lastRestart: number;
   consecutiveFailures: number;
@@ -39,43 +43,28 @@ export interface ManagedService {
   lastHealthReason?: string | null;
 }
 
-function gatewayCommand(): string[] {
-  // Watch mode is useful for local dev, but too expensive for always-on watchdog usage.
-  if (process.env.CLAUDIA_GATEWAY_WATCH === "true") {
-    return ["bun", "run", "--watch", "packages/gateway/src/start.ts"];
-  }
-  return ["bun", "run", "packages/gateway/src/start.ts"];
+// ── Build Services from Config ──────────────────────────
+
+function buildService(id: string, cfg: ServiceConfig): ManagedService {
+  return {
+    name: cfg.name,
+    id,
+    command: cfg.command,
+    healthUrl: cfg.healthUrl,
+    port: cfg.port,
+    requireExtensions: cfg.healthCheck?.requireExtensions ?? false,
+    restartBackoff: 1000,
+    lastRestart: 0,
+    consecutiveFailures: 0,
+    history: [],
+    proc: null,
+  };
 }
 
-// ── Service Definitions ─────────────────────────────────
-
-export const services: Record<string, ManagedService> = {
-  // Agent-host starts BEFORE gateway — extensions need to connect to it during startup
-  "agent-host": {
-    name: "Agent Host",
-    id: "agent-host",
-    command: ["bun", "run", "packages/agent-host/src/index.ts"],
-    healthUrl: "http://localhost:30087/health",
-    port: 30087,
-    restartBackoff: 1000,
-    lastRestart: 0,
-    consecutiveFailures: 0,
-    history: [],
-    proc: null,
-  },
-  gateway: {
-    name: "Gateway",
-    id: "gateway",
-    command: gatewayCommand(),
-    healthUrl: "http://localhost:30086/health",
-    port: 30086,
-    restartBackoff: 1000,
-    lastRestart: 0,
-    consecutiveFailures: 0,
-    history: [],
-    proc: null,
-  },
-};
+export const services: Record<string, ManagedService> = {};
+for (const [id, cfg] of Object.entries(config.services)) {
+  services[id] = buildService(id, cfg);
+}
 
 // ── Process Helpers ─────────────────────────────────────
 
@@ -229,14 +218,13 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
       return { healthy: false, reason: `http_${res.status}` };
     }
 
-    if (service.id !== "gateway") {
-      return { healthy: true };
-    }
-
-    const body = (await res.json()) as { extensions?: Record<string, unknown> };
-    const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
-    if (extensionCount === 0) {
-      return { healthy: false, reason: "zero_extensions" };
+    // If this service requires extensions to be loaded, check for that
+    if (service.requireExtensions) {
+      const body = (await res.json()) as { extensions?: Record<string, unknown> };
+      const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
+      if (extensionCount === 0) {
+        return { healthy: false, reason: "zero_extensions" };
+      }
     }
 
     return { healthy: true };
