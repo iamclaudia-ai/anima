@@ -296,7 +296,7 @@ export function InputArea({
     : null;
 
   return (
-    <footer className="p-4 border-t border-gray-200">
+    <footer className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-gray-200">
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((attachment, idx) => {

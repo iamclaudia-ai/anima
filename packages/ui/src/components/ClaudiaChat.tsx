@@ -171,7 +171,7 @@ function ChatInner({
 
   return (
     <WorkspaceProvider cwd={gateway.workspace?.cwd}>
-      <div className="flex flex-col h-screen w-full">
+      <div className="flex flex-col h-dvh w-full">
         <Header
           isConnected={gateway.isConnected}
           sessionId={gateway.sessionId}
