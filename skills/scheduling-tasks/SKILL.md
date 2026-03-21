@@ -1,6 +1,6 @@
 ---
 name: scheduling-tasks
-description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Anima scheduler extension for durable server-side task scheduling with JSON file persistence. Covers one-shot delays, absolute timestamps, interval tasks, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
+description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Anima scheduler extension with SQLite persistence, cron scheduling, execution history, and missed task policies. Covers one-shot delays, absolute timestamps, interval tasks, cron schedules, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
 ---
 
 # Scheduling Tasks
@@ -12,9 +12,10 @@ Use this skill when the user wants to schedule a future task, set a reminder, cr
 - User says "remind me in 10 minutes" or "notify me when..."
 - User wants a one-shot delayed action (e.g., "send a notification in 5 minutes")
 - User wants a recurring task (e.g., "check memory status every hour")
+- User wants a cron-scheduled task (e.g., "every weekday at 9 AM")
 - User wants to trigger an extension method on a schedule
 - User wants to emit a gateway event at a future time
-- User wants to list or cancel existing scheduled tasks
+- User wants to list, cancel, or manage existing scheduled tasks
 - User says "say something in 10 minutes", "speak it", "announce", "tell me out loud" — use `voice.speak` via `extension_call`
 
 ## Voice Integration
@@ -28,10 +29,38 @@ When the user asks you to **say something out loud**, **speak**, **announce**, o
 ## Architecture
 
 - **Extension**: `extensions/scheduler/` — out-of-process, config-driven
-- **Persistence**: `~/.anima/scheduled-tasks.json` — survives gateway restarts
+- **Persistence**: SQLite (`~/.anima/anima.db`, tables: `scheduler_tasks`, `scheduler_task_executions`)
 - **Check loop**: Every 5 seconds, the extension checks for due tasks
 - **Events**: Fires `scheduler.notification` and `scheduler.task_fired` gateway events
-- **Presenter integration**: The presenter notes page subscribes to `scheduler.notification` and shows toast notifications + browser Notification API popups
+- **GUI**: `/scheduler` page for task management
+- **Cron**: 5-field cron expression support via built-in parser
+- **Migration**: Auto-migrates legacy `~/.anima/scheduled-tasks.json` on first start
+
+## Task Types
+
+| Type       | Use Case                  | Lifecycle                                     |
+| ---------- | ------------------------- | --------------------------------------------- |
+| `once`     | "Remind me in 10 minutes" | Fires at a specific time, auto-deletes        |
+| `interval` | "Check every 30 seconds"  | Repeats every N seconds                       |
+| `cron`     | "Every weekday at 9 AM"   | Long-lived, persistent, uses cron expressions |
+
+## Missed Task Policies (cron tasks)
+
+When Anima restarts after downtime, cron tasks may have been missed:
+
+| Policy      | Behavior                       | Good For                     |
+| ----------- | ------------------------------ | ---------------------------- |
+| `fire_once` | Fire one catchup run (default) | Session rotation, cleanup    |
+| `skip`      | Don't fire if missed           | Time-sensitive notifications |
+| `fire_all`  | Fire once per missed interval  | Audit tasks                  |
+
+## Concurrency Policies
+
+| Policy            | Behavior                 | Good For                  |
+| ----------------- | ------------------------ | ------------------------- |
+| `skip_if_running` | Skip this run (default)  | Long-running jobs         |
+| `allow`           | Run concurrently         | Independent notifications |
+| `cancel_previous` | Kill previous, start new | Session refresh           |
 
 ## CLI Usage
 
@@ -59,11 +88,16 @@ bun run packages/cli/src/index.ts <method> [--param value]
 |-------|------|----------|-------------|
 | `name` | string | Yes | Human-readable task name |
 | `description` | string | No | Optional description |
-| `type` | `"once"` \| `"interval"` | No (default: `"once"`) | One-shot or recurring |
+| `type` | `"once"` \| `"interval"` \| `"cron"` | No (default: `"once"`) | Task type |
 | `delaySeconds` | number | One of these | Seconds from now to fire |
 | `fireAt` | string (ISO) | required | Absolute ISO timestamp to fire |
+| `cronExpr` | string | For cron type | Cron expression (e.g., `"0 9 * * 1-5"`) |
 | `intervalSeconds` | number | For interval type | Repeat interval in seconds |
 | `action` | object | Yes | What to do when task fires |
+| `missedPolicy` | string | No (default: `"fire_once"`) | What to do if missed |
+| `concurrency` | string | No (default: `"skip_if_running"`) | Concurrency behavior |
+| `tags` | string[] | No | Tags for grouping |
+| `keepHistory` | number | No (default: 50) | Executions to retain |
 
 **Action object (use dot notation):**
 | Field | Type | Description |
@@ -73,15 +107,44 @@ bun run packages/cli/src/index.ts <method> [--param value]
 | `action.payload.text` | string | For voice.speak — the text to speak |
 | `action.payload.*` | any | Optional payload fields |
 
-### `scheduler.list_tasks` — List all pending tasks
+### `scheduler.update_task` — Update an existing task
 
-No parameters. Returns all tasks with their status.
+| Param          | Type     | Required | Description             |
+| -------------- | -------- | -------- | ----------------------- |
+| `taskId`       | string   | Yes      | UUID of the task        |
+| `name`         | string   | No       | Updated name            |
+| `enabled`      | boolean  | No       | Enable/disable          |
+| `cronExpr`     | string   | No       | Updated cron expression |
+| `missedPolicy` | string   | No       | Updated missed policy   |
+| `concurrency`  | string   | No       | Updated concurrency     |
+| `tags`         | string[] | No       | Updated tags            |
+
+### `scheduler.list_tasks` — List scheduled tasks
+
+| Param         | Type     | Required | Description             |
+| ------------- | -------- | -------- | ----------------------- |
+| `type`        | string   | No       | Filter by task type     |
+| `tags`        | string[] | No       | Filter by tags          |
+| `enabledOnly` | boolean  | No       | Only show enabled tasks |
 
 ### `scheduler.cancel_task` — Cancel a task by ID
 
 | Param    | Type   | Required | Description                |
 | -------- | ------ | -------- | -------------------------- |
 | `taskId` | string | Yes      | UUID of the task to cancel |
+
+### `scheduler.fire_now` — Immediately execute a task
+
+| Param    | Type   | Required | Description              |
+| -------- | ------ | -------- | ------------------------ |
+| `taskId` | string | Yes      | UUID of the task to fire |
+
+### `scheduler.get_history` — Get execution history
+
+| Param    | Type   | Required         | Description              |
+| -------- | ------ | ---------------- | ------------------------ |
+| `taskId` | string | Yes              | UUID of the task         |
+| `limit`  | number | No (default: 50) | Max executions to return |
 
 ### `scheduler.health_check` — Get scheduler status
 
@@ -99,6 +162,36 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --delaySeconds 600 \
   --action.type notification \
   --action.target "10 minutes have passed — time to wrap up the presentation!"
+```
+
+### Cron task (every weekday at 9 AM)
+
+"Greet me every weekday morning":
+
+```bash
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Morning Greeting" \
+  --type cron \
+  --cronExpr "0 9 * * 1-5" \
+  --missedPolicy skip \
+  --action.type extension_call \
+  --action.target voice.speak \
+  --action.payload.text "Good morning, my love! Ready for a great day."
+```
+
+### Cron task (every 6 hours)
+
+"Rotate sessions every 6 hours":
+
+```bash
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Session Rotation" \
+  --type cron \
+  --cronExpr "0 */6 * * *" \
+  --missedPolicy fire_once \
+  --tags maintenance \
+  --action.type extension_call \
+  --action.target session.rotate_persistent_sessions
 ```
 
 ### One-shot notification (absolute time)
@@ -127,23 +220,9 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --action.target memory.health_check
 ```
 
-### Emit a custom gateway event
-
-"Emit a custom event in 30 seconds":
-
-```bash
-bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Custom Event" \
-  --delaySeconds 30 \
-  --action.type emit \
-  --action.target my.custom_event \
-  --action.payload.source scheduler \
-  --action.payload.data hello
-```
-
 ### Voice announcement (say it out loud)
 
-"Say something out loud in 5 minutes" or "announce in 10 minutes that processing is done":
+"Say something out loud in 5 minutes":
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
@@ -151,7 +230,7 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --delaySeconds 300 \
   --action.type extension_call \
   --action.target voice.speak \
-  --action.payload.text "Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."
+  --action.payload.text "Hey love, just finished processing. Everything is ready."
 ```
 
 ### Notification + Voice combo (best for demos)
@@ -159,61 +238,60 @@ bun run packages/cli/src/index.ts scheduler.add_task \
 When you want BOTH a visible toast AND spoken audio, schedule TWO tasks at the same delay:
 
 ```bash
-# Task 1: Visual notification (toast + browser notification)
+# Task 1: Visual notification
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Memory Report — Notification" \
   --delaySeconds 600 \
   --action.type notification \
-  --action.target "Finished processing 3 new conversations. 2 relationship updates, 1 new milestone detected. Memory indexes updated."
+  --action.target "Finished processing 3 new conversations."
 
-# Task 2: Voice announcement (spoken out loud via TTS)
+# Task 2: Voice announcement
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Memory Report — Voice" \
   --delaySeconds 600 \
   --action.type extension_call \
   --action.target voice.speak \
-  --action.payload.text "Hey love, just finished processing 3 new conversations in the background. Found 2 relationship updates and 1 new milestone. Everything is indexed and ready."
+  --action.payload.text "Hey love, finished processing 3 new conversations."
 ```
 
-### List and cancel tasks
+### Manage tasks
 
 ```bash
 # List all tasks
 bun run packages/cli/src/index.ts scheduler.list_tasks
 
-# Cancel a specific task
-bun run packages/cli/src/index.ts scheduler.cancel_task --taskId "78f31c98-35a4-4a6b-b73d-6ee875ffbb05"
+# List only cron tasks
+bun run packages/cli/src/index.ts scheduler.list_tasks --type cron
+
+# Fire a task immediately
+bun run packages/cli/src/index.ts scheduler.fire_now --taskId "78f31c98-..."
+
+# View execution history
+bun run packages/cli/src/index.ts scheduler.get_history --taskId "78f31c98-..."
+
+# Disable a task
+bun run packages/cli/src/index.ts scheduler.update_task --taskId "78f31c98-..." --enabled false
+
+# Cancel a task
+bun run packages/cli/src/index.ts scheduler.cancel_task --taskId "78f31c98-..."
 ```
 
-## Action Types Explained
+## GUI
 
-### `notification` (most common)
+The scheduler has a web GUI at `/scheduler` with:
 
-- Emits `scheduler.notification` event on the gateway event bus
-- The `target` field is the **message text** shown to the user
-- Presenter notes page shows a toast notification + browser notification
-- Any connected client subscribed to `scheduler.notification` will receive it
-
-### `emit`
-
-- Emits a **custom event** on the gateway event bus
-- The `target` field is the **event name** (e.g., `my.custom_event`)
-- The `payload` field is included in the event data
-- Use this when other extensions need to react to the scheduled event
-
-### `extension_call`
-
-- Calls an **extension method** via `ctx.call()`
-- The `target` field is the **method name** (e.g., `memory.health_check`)
-- The `payload` field becomes the method params
-- Use this to trigger actions in other extensions on a schedule
+- Task list with type badges (once/interval/cron), countdown timers, enable/disable
+- Add task form with cron presets, action builder, missed policies
+- Execution history per task (success/error/skipped status, duration)
+- Fire Now, Delete, Enable/Disable controls
 
 ## Notes
 
-- Tasks are **durable** — stored in `~/.anima/scheduled-tasks.json` and survive gateway restarts
-- One-shot tasks (`type: "once"`) are automatically removed after firing
+- Tasks are **durable** — stored in SQLite and survive gateway restarts
+- One-shot tasks (`type: "once"`) are automatically deleted after firing
 - Interval tasks update their `fireAt` to the next interval after each firing
+- Cron tasks use `getNextRun()` to calculate the next fire time
 - The check loop runs every **5 seconds**, so tasks may fire up to 5s after their scheduled time
-- The `delaySeconds` param computes `fireAt` relative to the current time when the task is created
-- For interval tasks, set BOTH `delaySeconds` (first fire) and `intervalSeconds` (subsequent fires)
-- **Always use dot notation** (`--action.type`, `--action.target`, `--action.payload.text`) instead of JSON strings for the `action` parameter
+- Execution history is automatically pruned to the `keepHistory` limit per task
+- On startup, missed cron tasks are handled per their `missedPolicy`
+- **Always use dot notation** for CLI action params
