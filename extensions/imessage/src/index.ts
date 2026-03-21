@@ -520,16 +520,16 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
 
       ctx.log.info("iMessage extension started");
 
-      // Catch up on missed messages in the background (after registration completes)
+      // Catch up on missed messages once all extensions are ready
       if (cfg.catchupEnabled !== false && chats.length > 0) {
         const chatsCopy = [...chats];
-        setTimeout(async () => {
+        ctx.on("gateway.extensions_ready", async () => {
           try {
             await catchupOnStartup(chatsCopy);
           } catch (err) {
             ctx?.log.error(`Catchup failed: ${err}`);
           }
-        }, 2000); // Brief delay to ensure session extension is ready
+        });
       }
     },
 

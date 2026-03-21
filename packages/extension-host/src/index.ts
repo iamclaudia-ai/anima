@@ -227,11 +227,9 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       store: createExtensionStore(ext.id),
     };
 
-    await ext.start(ctx);
-
-    hostLog.info("Extension started", { id: ext.id });
-
-    // Send registration message — tells gateway what we provide
+    // Register first — makes methods available to other extensions immediately.
+    // start() runs after, so extensions can set up ctx.on() handlers for
+    // gateway.extensions_ready without worrying about load order.
     const methods = ext.methods.map((m) => {
       let inputSchema: unknown;
       try {
@@ -252,6 +250,12 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         sourceRoutes: ext.sourceRoutes || [],
       },
     });
+
+    hostLog.info("Extension registered", { id: ext.id });
+
+    await ext.start(ctx);
+
+    hostLog.info("Extension started", { id: ext.id });
 
     return ext;
   }

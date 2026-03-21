@@ -250,6 +250,17 @@ async function spawnOutOfProcessExtension(
             GATEWAY_INSTANCE_ID,
             generationToken ?? host.getGenerationToken() ?? null,
           );
+
+          // If this is a re-registration (HMR restart), send extensions_ready
+          // so the extension can re-run its startup work
+          if (startedExtensions.has(id)) {
+            host.sendEvent({
+              type: "gateway.extensions_ready",
+              payload: { extensions: Array.from(runningExtensions.keys()), restart: true },
+              timestamp: Date.now(),
+              source: "gateway",
+            });
+          }
         },
         onCall,
         hot,
@@ -279,8 +290,10 @@ async function spawnOutOfProcessExtension(
 
 /**
  * Load configured extensions from config.
- * Session loads first (other extensions depend on it via ctx.call),
- * then everything else spawns in parallel.
+ * All extensions spawn in parallel — registration happens before start(),
+ * so methods are available immediately. After all settle, the gateway
+ * broadcasts gateway.extensions_ready so extensions can do startup work
+ * that depends on other extensions (e.g., ctx.call).
  */
 async function loadExtensions(): Promise<void> {
   const enabledExtensions = getEnabledExtensions();
@@ -294,33 +307,16 @@ async function loadExtensions(): Promise<void> {
     extensions: enabledExtensions.map(([id]) => id),
   });
 
-  // Phase 1: Load session first — it's a dependency for other extensions
-  const sessionExt = enabledExtensions.find(([id]) => id === "session");
-  if (sessionExt) {
-    try {
-      await spawnOutOfProcessExtension(
-        sessionExt[0],
-        sessionExt[1].config,
-        sessionExt[1].sourceRoutes,
-        sessionExt[1].hot !== false,
-      );
-    } catch (error) {
-      log.error("Failed to load session extension", { error: String(error) });
-    }
-  }
-
-  // Phase 2: Load remaining extensions in parallel
-  const remaining = enabledExtensions.filter(([id]) => id !== "session");
   const results = await Promise.allSettled(
-    remaining.map(([id, ext]) =>
+    enabledExtensions.map(([id, ext]) =>
       spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot !== false),
     ),
   );
 
   const failed = results
-    .map((r, i) => (r.status === "rejected" ? remaining[i][0] : null))
+    .map((r, i) => (r.status === "rejected" ? enabledExtensions[i][0] : null))
     .filter(Boolean);
-  const succeeded = results.filter((r) => r.status === "fulfilled").length + (sessionExt ? 1 : 0);
+  const succeeded = results.filter((r) => r.status === "fulfilled").length;
 
   if (failed.length > 0) {
     log.error("Some extensions failed to load", { failed });
@@ -353,6 +349,17 @@ async function startExtension(id: string, extensionConfig: ExtensionConfig): Pro
       extensionConfig.hot !== false,
     );
     log.info("Extension started successfully", { id });
+
+    // Send extensions_ready to this late-joining extension so it can do startup work
+    const host = runningExtensions.get(id);
+    if (host) {
+      host.sendEvent({
+        type: "gateway.extensions_ready",
+        payload: { extensions: Array.from(runningExtensions.keys()), late: true },
+        timestamp: Date.now(),
+        source: "gateway",
+      });
+    }
   } catch (error) {
     log.error("Failed to start extension", { id, error: String(error) });
   }
@@ -556,6 +563,18 @@ killOrphanExtensionHosts()
   .then(async () => {
     // Initial extension load
     await loadExtensions();
+
+    // Signal all extensions that the platform is ready — extensions that need
+    // other extensions (e.g., iMessage calling session.send_prompt for catchup)
+    // should listen for this event in their start() method via ctx.on().
+    const loadedExtensions = Array.from(runningExtensions.keys());
+    log.info("Broadcasting gateway.extensions_ready", { extensions: loadedExtensions });
+    extensions.broadcast({
+      type: "gateway.extensions_ready",
+      payload: { extensions: loadedExtensions },
+      timestamp: Date.now(),
+      source: "gateway",
+    });
 
     // Start config file watcher for dynamic extension management
     startConfigWatcher();
