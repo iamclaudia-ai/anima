@@ -30,11 +30,13 @@ class AppState {
     let browser = BrowserManager()
 
     init() {
-        gatewayHost = GatewayWireProtocol.loadGatewayHost()
-        workspaceCwd = GatewayWireProtocol.loadGatewayCwd()
+        let initialGatewayHost = GatewayWireProtocol.loadGatewayHost()
+        let initialWorkspaceCwd = GatewayWireProtocol.loadGatewayCwd()
+        gatewayHost = initialGatewayHost
+        workspaceCwd = initialWorkspaceCwd
         gateway = GatewayClient(
-            url: GatewayWireProtocol.buildGatewayURL(host: gatewayHost),
-            cwd: workspaceCwd
+            url: GatewayWireProtocol.buildGatewayURL(host: initialGatewayHost),
+            cwd: initialWorkspaceCwd
         )
 
         // Inject shared audio manager into speech + player
