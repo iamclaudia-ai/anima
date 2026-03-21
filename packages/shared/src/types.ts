@@ -19,6 +19,7 @@ export interface Workspace {
   id: string; // TypeID: ws_<ulid>
   name: string;
   cwd: string;
+  general: boolean;
   activeSessionId: string | null;
   createdAt: string;
   updatedAt: string;

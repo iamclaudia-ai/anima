@@ -34,10 +34,11 @@ describe("workspace db", () => {
 
   it("creates, fetches, and lists workspaces", () => {
     const cwd = join(dataDir, "repo", "a");
-    const created = createWorkspace({ name: "project-a", cwd });
+    const created = createWorkspace({ name: "project-a", cwd, general: true });
     expect(created.id).toMatch(/^ws_/);
     expect(created.name).toBe("project-a");
     expect(created.cwd).toBe(cwd);
+    expect(created.general).toBe(true);
 
     const byId = getWorkspace(created.id);
     expect(byId).toEqual(created);
@@ -52,20 +53,23 @@ describe("workspace db", () => {
 
   it("getOrCreateWorkspace is idempotent per cwd", () => {
     const cwd = join(dataDir, "repo", "b");
-    const first = getOrCreateWorkspace(cwd, "project-b");
+    const first = getOrCreateWorkspace(cwd, "project-b", true);
     expect(first.created).toBe(true);
     expect(first.workspace.name).toBe("project-b");
+    expect(first.workspace.general).toBe(true);
 
-    const second = getOrCreateWorkspace(cwd, "ignored-name");
+    const second = getOrCreateWorkspace(cwd, "ignored-name", false);
     expect(second.created).toBe(false);
     expect(second.workspace.id).toBe(first.workspace.id);
     expect(second.workspace.name).toBe("project-b");
+    expect(second.workspace.general).toBe(true);
   });
 
   it("derives workspace name from cwd basename when name is omitted", () => {
     const result = getOrCreateWorkspace(join(dataDir, "repo", "my-folder"));
     expect(result.created).toBe(true);
     expect(result.workspace.name).toBe("my-folder");
+    expect(result.workspace.general).toBe(false);
   });
 
   it("expands tilde paths and creates directories recursively", () => {

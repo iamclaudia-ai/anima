@@ -156,6 +156,7 @@ describe("session extension", () => {
         id: "ws-1",
         name: "project",
         cwd: "/repo/project",
+        general: false,
         cwdDisplay: "/repo/project",
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",
@@ -165,6 +166,7 @@ describe("session extension", () => {
       id: "ws-1",
       name: "project",
       cwd: "/repo/project",
+      general: false,
       cwdDisplay: "/repo/project",
       createdAt: "2026-02-22T00:00:00.000Z",
       updatedAt: "2026-02-22T00:00:00.000Z",
@@ -174,6 +176,7 @@ describe("session extension", () => {
         id: "ws-2",
         name: "new-project",
         cwd: "/repo/new-project",
+        general: false,
         cwdDisplay: "/repo/new-project",
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",
@@ -412,6 +415,79 @@ describe("session extension", () => {
       thinking: true,
       effort: "high",
     });
+
+    await ext.stop();
+  });
+
+  it("requests global archived summaries only for general workspaces", async () => {
+    const memoryCalls: Array<Record<string, unknown>> = [];
+    const workspacesByCwd = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        cwd: string;
+        general: boolean;
+        cwdDisplay: string;
+        createdAt: string;
+        updatedAt: string;
+      }
+    >();
+    getOrCreateWorkspaceSpy.mockImplementation((cwd: string, name?: string, general?: boolean) => {
+      const existing = workspacesByCwd.get(cwd);
+      if (existing) {
+        return { workspace: existing, created: false };
+      }
+
+      const workspace = {
+        id: cwd === "/repo/general" ? "ws-general" : "ws-project",
+        name: name || cwd.split("/").pop() || "workspace",
+        cwd,
+        general: general === true,
+        cwdDisplay: cwd,
+        createdAt: "2026-02-22T00:00:00.000Z",
+        updatedAt: "2026-02-22T00:00:00.000Z",
+      };
+      workspacesByCwd.set(cwd, workspace);
+      return { workspace, created: true };
+    });
+
+    const ext = createSessionExtension();
+    await ext.start(
+      createTestContext({
+        async call(method, params) {
+          if (method === "memory.transition_conversation") return { transitioned: 0 };
+          if (method === "memory.get_session_context") {
+            memoryCalls.push(params || {});
+            return { recentMessages: [], recentSummaries: [] };
+          }
+          return null;
+        },
+      }),
+    );
+
+    await ext.handleMethod("session.get_or_create_workspace", {
+      cwd: "/repo/general",
+      name: "General",
+      general: true,
+    });
+    await ext.handleMethod("session.create_session", {
+      cwd: "/repo/general",
+    });
+
+    await ext.handleMethod("session.get_or_create_workspace", {
+      cwd: "/repo/project",
+      name: "Project",
+      general: false,
+    });
+    await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    });
+
+    expect(memoryCalls).toEqual([
+      { cwd: "/repo/general", includeAllSummaries: true },
+      { cwd: "/repo/project", includeAllSummaries: false },
+    ]);
 
     await ext.stop();
   });
@@ -679,6 +755,7 @@ describe("session extension", () => {
           id: "ws-1",
           name: "project",
           cwd: "/repo/project",
+          general: false,
           cwdDisplay: "/repo/project",
           createdAt: "2026-02-22T00:00:00.000Z",
           updatedAt: "2026-02-22T00:00:00.000Z",
@@ -693,6 +770,7 @@ describe("session extension", () => {
         id: "ws-1",
         name: "project",
         cwd: "/repo/project",
+        general: false,
         cwdDisplay: "/repo/project",
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",
@@ -703,12 +781,17 @@ describe("session extension", () => {
       cwd: "/repo/new-project",
       name: "new-project",
     });
-    expect(getOrCreateWorkspaceSpy).toHaveBeenCalledWith("/repo/new-project", "new-project");
+    expect(getOrCreateWorkspaceSpy).toHaveBeenCalledWith(
+      "/repo/new-project",
+      "new-project",
+      undefined,
+    );
     expect(created).toEqual({
       workspace: {
         id: "ws-2",
         name: "new-project",
         cwd: "/repo/new-project",
+        general: false,
         cwdDisplay: "/repo/new-project",
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",

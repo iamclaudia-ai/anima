@@ -22,6 +22,7 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  general: boolean;
   cwdDisplay: string; // Normalized path with ~ for display
   createdAt: string;
   updatedAt: string;
@@ -32,6 +33,7 @@ interface WorkspaceRow {
   id: string;
   name: string;
   cwd: string;
+  general: number;
   active_session_id: string | null; // Still in schema but we ignore it
   created_at: string;
   updated_at: string;
@@ -54,6 +56,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     id: row.id,
     name: row.name,
     cwd: row.cwd, // Keep full path for operations
+    general: row.general === 1,
     cwdDisplay: normalizePathForDisplay(row.cwd), // Normalized for display
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -86,11 +89,17 @@ function getDb(): Database {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       cwd TEXT NOT NULL UNIQUE,
+      general INTEGER NOT NULL DEFAULT 0,
       active_session_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  const columns = db.query("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "general")) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN general INTEGER NOT NULL DEFAULT 0");
+  }
 
   log.info("Opened workspace database", { path: dbPath });
   return db;
@@ -198,11 +207,15 @@ export function getWorkspaceByCwd(cwd: string): Workspace | null {
   return row ? toWorkspace(row) : null;
 }
 
-export function createWorkspace(params: { name: string; cwd: string }): Workspace {
+export function createWorkspace(params: {
+  name: string;
+  cwd: string;
+  general?: boolean;
+}): Workspace {
   const id = generateWorkspaceId();
   getDb()
-    .query("INSERT INTO workspaces (id, name, cwd) VALUES (?, ?, ?)")
-    .run(id, params.name, params.cwd);
+    .query("INSERT INTO workspaces (id, name, cwd, general) VALUES (?, ?, ?, ?)")
+    .run(id, params.name, params.cwd, params.general ? 1 : 0);
 
   return getWorkspace(id)!;
 }
@@ -210,6 +223,7 @@ export function createWorkspace(params: { name: string; cwd: string }): Workspac
 export function getOrCreateWorkspace(
   cwd: string,
   name?: string,
+  general?: boolean,
 ): { workspace: Workspace; created: boolean } {
   // Expand ~ to home directory
   let expandedCwd = cwd;
@@ -252,7 +266,7 @@ export function getOrCreateWorkspace(
 
   // Derive name from last path segment if not provided
   const derivedName = name || basename(expandedCwd);
-  const workspace = createWorkspace({ name: derivedName, cwd: expandedCwd });
+  const workspace = createWorkspace({ name: derivedName, cwd: expandedCwd, general });
   return { workspace, created: true };
 }
 

@@ -39,6 +39,7 @@ import {
 import {
   listWorkspaces,
   getWorkspace,
+  getWorkspaceByCwd,
   getOrCreateWorkspace,
   deleteWorkspace,
   closeDb,
@@ -1023,6 +1024,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       inputSchema: z.object({
         cwd: z.string().describe("Working directory"),
         name: z.string().optional().describe("Workspace name"),
+        general: z
+          .boolean()
+          .optional()
+          .describe("Mark workspace as general so archived summaries span all workspaces"),
       }),
     },
     {
@@ -1145,7 +1150,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         // Inject recent memory context into system prompt for continuity
         try {
           const memoryContext = (await Promise.race([
-            ctx.call("memory.get_session_context", { cwd }),
+            ctx.call("memory.get_session_context", {
+              cwd,
+              includeAllSummaries: workspaceResult.workspace.general,
+            }),
             new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
           ])) as {
             recentMessages: Array<{ role: string; content: string; timestamp: string }>;
@@ -1812,10 +1820,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
       case "session.get_or_create_workspace": {
         const cwd = params.cwd as string;
-        const result = getOrCreateWorkspace(cwd, params.name as string | undefined);
+        const result = getOrCreateWorkspace(
+          cwd,
+          params.name as string | undefined,
+          params.general as boolean | undefined,
+        );
         log.info("Get/create workspace", {
           cwd,
           created: (result as { created: boolean }).created,
+          general: result.workspace.general,
         });
         return result;
       }
@@ -1862,10 +1875,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
       case "session.get_memory_context": {
         const cwd = (params.cwd as string | undefined) || process.cwd();
+        const workspace = getWorkspaceByCwd(cwd);
 
         try {
           const memoryContext = (await ctx.call("memory.get_session_context", {
             cwd,
+            includeAllSummaries: workspace?.general === true,
           })) as MemoryContextResult | null;
 
           if (!memoryContext) {

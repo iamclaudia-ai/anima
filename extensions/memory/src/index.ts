@@ -310,6 +310,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           "Get recent conversation context for session continuity. Returns the last N transcript entries across all sessions in the workspace plus recent archived summaries.",
         inputSchema: z.object({
           cwd: z.string().describe("Workspace directory to scope lookup"),
+          includeAllSummaries: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("When true, archived summaries are drawn across all workspaces"),
           maxRecentMessages: z
             .number()
             .optional()
@@ -946,15 +951,17 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
         case "memory.get_session_context": {
           const cwd = params.cwd as string;
+          const includeAllSummaries = (params.includeAllSummaries as boolean | undefined) ?? false;
           const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
           const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
 
           // Recent transcript entries — query by cwd column (absolute path)
           const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
 
-          // Archived summaries — query by source_file pattern (encoded CWD)
-          const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
-          const pattern = `%${encodedCwd}%`;
+          // Archived summaries are either workspace-scoped or global, depending on workspace mode.
+          const pattern = includeAllSummaries
+            ? "%"
+            : `%${cwd.replace(/\//g, "-").replace(/^-/, "")}%`;
           const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
           return { recentMessages, recentSummaries };

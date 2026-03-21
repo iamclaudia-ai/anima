@@ -9,7 +9,7 @@ import {
 interface CreateWorkspaceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (cwd: string, name?: string) => void;
+  onSubmit: (cwd: string, name?: string, general?: boolean) => void;
   onGetDirectories: (path: string) => Promise<{ path: string; directories: string[] }>;
   isCreating: boolean;
 }
@@ -25,6 +25,7 @@ export function CreateWorkspaceModal({
   const [directories, setDirectories] = useState<string[]>([]);
   const [newFolderName, setNewFolderName] = useState("");
   const [name, setName] = useState("");
+  const [general, setGeneral] = useState(false);
   const [isLoadingDirs, setIsLoadingDirs] = useState(false);
 
   // Load directories when path changes
@@ -50,6 +51,7 @@ export function CreateWorkspaceModal({
       setCurrentPath("~/Projects");
       setNewFolderName("");
       setName("");
+      setGeneral(false);
     }
   }, [isOpen]);
 
@@ -57,7 +59,7 @@ export function CreateWorkspaceModal({
 
   const handleSubmit = () => {
     const finalPath = buildWorkspacePath(currentPath, newFolderName);
-    onSubmit(finalPath, name.trim() || undefined);
+    onSubmit(finalPath, name.trim() || undefined, general);
   };
 
   const handleNavigateToDir = (dirName: string) => {
@@ -165,6 +167,24 @@ export function CreateWorkspaceModal({
             />
             <p className="mt-1 text-xs text-gray-500">Defaults to folder name if not provided</p>
           </div>
+
+          <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50">
+            <input
+              type="checkbox"
+              checked={general}
+              onChange={(e) => setGeneral(e.target.checked)}
+              onKeyDown={handleKeyDown}
+              disabled={isCreating}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div>
+              <div className="text-sm font-medium text-gray-800">General workspace</div>
+              <p className="mt-1 text-xs text-gray-500">
+                Archived summaries will be injected across all workspaces. Recent unsummarized
+                messages still stay scoped to this folder.
+              </p>
+            </div>
+          </label>
         </div>
 
         {/* Footer */}

@@ -250,13 +250,13 @@ export function MainPage({ workspaceId, sessionId }: { workspaceId?: string; ses
   );
 
   const handleCreateWorkspace = useCallback(
-    async (cwd: string, name?: string) => {
+    async (cwd: string, name?: string, general?: boolean) => {
       setIsCreatingWorkspace(true);
       try {
         // Create workspace (will create directory if it doesn't exist)
         const wsResult = await callGateway<{ workspace: WorkspaceInfo; created: boolean }>(
           "session.get_or_create_workspace",
-          { cwd, name },
+          { cwd, name, general },
         );
         if (!wsResult?.workspace) {
           setIsCreatingWorkspace(false);

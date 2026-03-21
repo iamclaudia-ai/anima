@@ -26,6 +26,7 @@ export interface WorkspaceInfo {
   id: string;
   name: string;
   cwd: string;
+  general: boolean;
   cwdDisplay: string; // Normalized path with ~ for display
   createdAt: string;
   updatedAt: string;

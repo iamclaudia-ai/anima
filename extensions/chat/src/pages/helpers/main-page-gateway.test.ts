@@ -14,8 +14,8 @@ describe("main-page-gateway", () => {
       if (method === "session.list_workspaces") {
         return {
           workspaces: [
-            { id: "ws_1", name: "One", cwd: "/one" },
-            { id: "ws_2", name: "Two", cwd: "/two" },
+            { id: "ws_1", name: "One", cwd: "/one", general: false },
+            { id: "ws_2", name: "Two", cwd: "/two", general: true },
           ],
         } as unknown;
       }

@@ -110,11 +110,19 @@ function ensureSessionTable(currentDb: Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       cwd TEXT NOT NULL UNIQUE,
+      general INTEGER NOT NULL DEFAULT 0,
       active_session_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  const workspaceColumns = currentDb.query("PRAGMA table_info(workspaces)").all() as Array<{
+    name: string;
+  }>;
+  if (!workspaceColumns.some((column) => column.name === "general")) {
+    currentDb.exec("ALTER TABLE workspaces ADD COLUMN general INTEGER NOT NULL DEFAULT 0");
+  }
 
   currentDb.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
