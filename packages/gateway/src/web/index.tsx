@@ -10,6 +10,7 @@ import { controlRoutes } from "@anima/ext-control/routes";
 import { memoryRoutes } from "@anima/memory/routes";
 import { audiobooksRoutes } from "@anima/ext-audiobooks/routes";
 import { presenterRoutes } from "@anima/ext-presenter/routes";
+import { schedulerRoutes } from "@anima/ext-scheduler/routes";
 // Editor panel disabled — code-server iframe not yet configured for embedding.
 // import { editorPanels } from "@anima/ext-editor/routes";
 
@@ -44,6 +45,7 @@ const allRoutes = [
   ...presenterRoutes,
   ...chatRoutes,
   ...audiobooksRoutes,
+  ...schedulerRoutes,
 ];
 
 // ── Build panel registry from all extensions ────────────────

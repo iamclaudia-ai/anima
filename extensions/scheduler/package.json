@@ -4,16 +4,18 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./routes": "./src/routes.ts"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun",
+    "build": "bun build src/index.ts src/routes.ts --outdir dist --target bun",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
+    "@anima/ui": "workspace:*",
     "zod": "^3.25.76"
   }
 }

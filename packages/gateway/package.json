@@ -18,6 +18,7 @@
     "@anima/ext-editor": "workspace:*",
     "@anima/ext-imessage": "workspace:*",
     "@anima/ext-presenter": "workspace:*",
+    "@anima/ext-scheduler": "workspace:*",
     "@anima/memory": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",

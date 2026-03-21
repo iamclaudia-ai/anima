@@ -20,7 +20,8 @@
     "clients/*/src/**/*.ts",
     "clients/*/src/**/*.tsx",
     "hooks/**/*.ts",
-    "extensions/*/src/**/*.ts"
+    "extensions/*/src/**/*.ts",
+    "extensions/*/src/**/*.tsx"
   ],
   "exclude": ["node_modules", "**/dist/**", "clients/dominatrix/**"]
 }
