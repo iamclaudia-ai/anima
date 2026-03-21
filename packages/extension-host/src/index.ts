@@ -18,6 +18,7 @@ import { createLogger, matchesEventPattern } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { createExtensionStore } from "./store";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -222,6 +223,8 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       config,
 
       log: createLogger(ext.id, join(homedir(), ".anima", "logs", `${ext.id}.log`)),
+
+      store: createExtensionStore(ext.id),
     };
 
     await ext.start(ctx);

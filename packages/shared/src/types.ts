@@ -165,6 +165,14 @@ export interface ExtensionContext {
     warn(msg: string, meta?: unknown): void;
     error(msg: string, meta?: unknown): void;
   };
+  /** Persistent key-value store at ~/.anima/<extensionId>/store.json.
+   *  Supports dot notation for nested access. Persists on every set/delete. */
+  store: {
+    get<T = unknown>(key: string): T | undefined;
+    set(key: string, value: unknown): void;
+    delete(key: string): boolean;
+    all(): Record<string, unknown>;
+  };
 }
 
 /**

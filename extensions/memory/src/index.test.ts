@@ -58,6 +58,20 @@ function createTestContext(): ExtensionContext {
     connectionId: null,
     tags: null,
     config: {},
+    store: (() => {
+      const _data: Record<string, unknown> = {};
+      return {
+        get: <T = unknown>(key: string): T | undefined => _data[key] as T | undefined,
+        set: (key: string, value: unknown) => {
+          _data[key] = value;
+        },
+        delete: (key: string) => {
+          delete _data[key];
+          return true;
+        },
+        all: () => _data,
+      };
+    })(),
     log: {
       info() {},
       warn() {},
