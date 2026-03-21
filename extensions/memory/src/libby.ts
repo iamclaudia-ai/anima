@@ -130,12 +130,31 @@ class LibbySession {
 
   /**
    * Create workspace + session, send system prompt.
+   * Cleans up any orphaned sessions from previous runs first.
    */
   async open(): Promise<void> {
-    await this.close(); // Clean up any existing session
+    await this.close(); // Clean up any existing session we know about
 
     // Get or create Libby's workspace
     await this.ctx.call("session.get_or_create_workspace", { cwd: LIBBY_CWD });
+
+    // Clean up orphaned sessions from previous runs (e.g. killed by HMR/restart)
+    try {
+      const sessions = (await this.ctx.call("session.list_sessions", { cwd: LIBBY_CWD })) as {
+        sessions: Array<{ id: string }>;
+      };
+      if (sessions?.sessions?.length) {
+        for (const s of sessions.sessions) {
+          try {
+            await this.ctx.call("session.close_session", { sessionId: s.id });
+          } catch {
+            // Already closed or gone
+          }
+        }
+      }
+    } catch {
+      // list_sessions may fail if workspace doesn't exist yet — fine
+    }
 
     // Create a session
     const result = (await this.ctx.call("session.create_session", {

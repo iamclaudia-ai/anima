@@ -279,7 +279,7 @@ async function spawnOutOfProcessExtension(
 
 /**
  * Load configured extensions from config.
- * Extensions run out-of-process by default.
+ * Extensions spawn in parallel so one hanging extension can't block others.
  */
 async function loadExtensions(): Promise<void> {
   const enabledExtensions = getEnabledExtensions();
@@ -293,13 +293,21 @@ async function loadExtensions(): Promise<void> {
     extensions: enabledExtensions.map(([id]) => id),
   });
 
-  for (const [id, ext] of enabledExtensions) {
-    try {
-      await spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot !== false);
-    } catch (error) {
-      log.error("Failed to load extension", { id, error: String(error) });
-    }
+  const results = await Promise.allSettled(
+    enabledExtensions.map(([id, ext]) =>
+      spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot !== false),
+    ),
+  );
+
+  const failed = results
+    .map((r, i) => (r.status === "rejected" ? enabledExtensions[i][0] : null))
+    .filter(Boolean);
+  const succeeded = results.filter((r) => r.status === "fulfilled").length;
+
+  if (failed.length > 0) {
+    log.error("Some extensions failed to load", { failed });
   }
+  log.info("Extension loading complete", { succeeded, failed: failed.length });
 }
 
 /**

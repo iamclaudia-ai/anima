@@ -703,14 +703,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       const reqCtx = requestContexts.get(sessionId);
       const primaryCtx = primaryContexts.get(sessionId);
 
-      // Log streaming events for debugging (Michael requested this)
       const shortSessionId = sessionId.slice(0, 8);
-      const eventSize = JSON.stringify(payload).length;
-      log.info(`[Stream] ${eventName} → session.${shortSessionId} (${eventSize}b)`, {
-        eventName,
-        sessionId: shortSessionId,
-        payloadKeys: Object.keys(payload),
-      });
 
       // Emit stream events with envelope context restored from requestContexts.
       // We store connectionId/tags at prompt time because the extension host's
