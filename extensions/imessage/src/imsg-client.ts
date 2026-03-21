@@ -309,12 +309,17 @@ export class ImsgRpcClient extends EventEmitter {
   /**
    * Get message history for a chat
    */
-  async getHistory(chatId: number, limit = 50, attachments = false): Promise<ImsgMessage[]> {
-    const result = await this.request<{ messages: ImsgMessage[] }>("messages.history", {
+  async getHistory(
+    chatId: number,
+    opts: { limit?: number; attachments?: boolean; start?: string } = {},
+  ): Promise<ImsgMessage[]> {
+    const params: Record<string, unknown> = {
       chat_id: chatId,
-      limit,
-      attachments,
-    });
+      limit: opts.limit ?? 50,
+      attachments: opts.attachments ?? false,
+    };
+    if (opts.start) params.start = opts.start;
+    const result = await this.request<{ messages: ImsgMessage[] }>("messages.history", params);
     return result.messages;
   }
 

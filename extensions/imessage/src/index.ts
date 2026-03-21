@@ -62,6 +62,12 @@ export interface IMessageConfig {
   historyLimit?: number;
   /** Workspace CWD for session management (default: process.cwd()) */
   workspaceCwd?: string;
+  /** Catch up on missed messages at startup (default: true) */
+  catchupEnabled?: boolean;
+  /** Max age of missed messages to respond to, in hours (default: 24) */
+  catchupWindowHours?: number;
+  /** Max unanswered messages to process per chat (default: 20) */
+  catchupMaxMessages?: number;
 }
 
 const DEFAULT_CONFIG: IMessageConfig = {
@@ -326,6 +332,103 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     }
   }
 
+  /**
+   * Catch up on unanswered messages received while the extension was offline.
+   * Checks each allowed-sender chat for messages we haven't replied to within
+   * the catchup window. Stateless — uses imsg history as the source of truth.
+   */
+  async function catchupOnStartup(chats: Array<{ id: number; identifier: string }>): Promise<void> {
+    const windowHours = cfg.catchupWindowHours ?? 24;
+    const maxMessages = cfg.catchupMaxMessages ?? 20;
+    const start = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+
+    for (const chat of chats) {
+      if (!isAllowedSenderForConfig(chat.identifier)) continue;
+
+      try {
+        const messages = await client!.getHistory(chat.id, {
+          start,
+          limit: maxMessages + 10, // Extra buffer to find our last reply
+          attachments: cfg.includeAttachments,
+        });
+
+        if (!messages.length) continue;
+
+        // Messages come in reverse chronological order.
+        // Walk backward until we find our last reply (is_from_me: true).
+        const unanswered: typeof messages = [];
+        for (const msg of messages) {
+          if (msg.is_from_me) break;
+          // Skip empty messages and reactions
+          if (!msg.text?.trim() && !msg.attachments?.length) continue;
+          unanswered.push(msg);
+        }
+
+        if (!unanswered.length) {
+          ctx?.log.info(`Catchup: ${chat.identifier} — all caught up`);
+          continue;
+        }
+
+        // Cap at maxMessages
+        if (unanswered.length > maxMessages) {
+          unanswered.length = maxMessages;
+        }
+
+        // Reverse to chronological order
+        unanswered.reverse();
+
+        ctx?.log.info(`Catchup: ${chat.identifier} — ${unanswered.length} unanswered message(s)`);
+
+        // Build a single prompt with all missed messages for context
+        const lines = unanswered.map((msg) => {
+          const time = new Date(msg.created_at).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          return `[${time}] ${msg.text || "(attachment)"}`;
+        });
+
+        const catchupPrompt =
+          unanswered.length === 1
+            ? unanswered[0].text || "(attachment)"
+            : `[Catching up on ${unanswered.length} messages received while I was offline]\n\n${lines.join("\n")}`;
+
+        // Build content blocks (include attachments from the most recent message)
+        const lastMsg = unanswered[unanswered.length - 1];
+        const contentBlocks = await buildContentBlocks({
+          ...lastMsg,
+          text: catchupPrompt,
+        });
+
+        if (!contentBlocks.length) continue;
+
+        const content =
+          contentBlocks.length === 1 && contentBlocks[0].type === "text"
+            ? (contentBlocks[0] as TextContentBlock).text
+            : contentBlocks;
+
+        const source = buildSource(chat.id);
+        const cwd = cfg.workspaceCwd || process.cwd();
+
+        const result = (await ctx!.call("session.send_prompt", {
+          sessionId: PERSISTENT_SESSION_ID,
+          content,
+          cwd,
+          streaming: false,
+          source,
+        })) as { text: string; sessionId: string };
+
+        const replyText = result.text?.trim();
+        if (replyText) {
+          ctx?.log.info(`Catchup reply to chat ${chat.id}: "${replyText.substring(0, 50)}..."`);
+          await client?.send({ chatId: chat.id, text: replyText });
+        }
+      } catch (err) {
+        ctx?.log.error(`Catchup failed for ${chat.identifier}: ${err}`);
+      }
+    }
+  }
+
   return {
     id: "imessage",
     name: "iMessage",
@@ -392,16 +495,26 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       await client.start();
 
       // List chats to verify connection
+      let chats: Awaited<ReturnType<ImsgRpcClient["listChats"]>> = [];
       try {
-        const chats = await client.listChats(5);
+        chats = await client.listChats(20);
         ctx.log.info(`Connected! Found ${chats.length} recent chats`);
-        for (const chat of chats) {
+        for (const chat of chats.slice(0, 5)) {
           ctx.log.info(
             `  [${chat.id}] ${chat.name || chat.identifier} (${chat.participants.join(", ")})`,
           );
         }
       } catch (err) {
         ctx.log.error(`Failed to list chats: ${err}`);
+      }
+
+      // Catch up on missed messages before subscribing to watch
+      if (cfg.catchupEnabled !== false && chats.length > 0) {
+        try {
+          await catchupOnStartup(chats);
+        } catch (err) {
+          ctx.log.error(`Catchup failed: ${err}`);
+        }
       }
 
       // Subscribe to watch for new messages
