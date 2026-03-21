@@ -45,6 +45,11 @@ interface DocumentContentBlock {
 
 type ContentBlock = TextContentBlock | ImageContentBlock | DocumentContentBlock;
 
+interface SessionPromptResult {
+  text: string;
+  sessionId: string;
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -243,6 +248,40 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     return `imessage/${chatId}`;
   }
 
+  function toSessionContent(contentBlocks: ContentBlock[]): string | ContentBlock[] {
+    return contentBlocks.length === 1 && contentBlocks[0].type === "text"
+      ? (contentBlocks[0] as TextContentBlock).text
+      : contentBlocks;
+  }
+
+  async function requestSessionReply(
+    source: string,
+    contentBlocks: ContentBlock[],
+  ): Promise<SessionPromptResult | null> {
+    if (!contentBlocks.length) {
+      ctx?.log.warn("No valid content blocks to send");
+      return null;
+    }
+
+    const cwd = cfg.workspaceCwd || process.cwd();
+    return (await ctx!.call("session.send_prompt", {
+      sessionId: PERSISTENT_SESSION_ID,
+      content: toSessionContent(contentBlocks),
+      cwd,
+      streaming: false,
+      source,
+    })) as SessionPromptResult;
+  }
+
+  async function sendReply(chatId: number, replyText: string, logPrefix: string): Promise<boolean> {
+    const trimmed = replyText.trim();
+    if (!trimmed) return false;
+
+    ctx?.log.info(`${logPrefix} "${trimmed.substring(0, 50)}..."`);
+    await client?.send({ chatId, text: trimmed });
+    return true;
+  }
+
   /**
    * Handle an incoming message
    */
@@ -300,30 +339,17 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       participants: message.participants,
     });
 
-    // Build content — string for simple text, blocks array for multimodal
-    const content =
-      contentBlocks.length === 1 && contentBlocks[0].type === "text"
-        ? (contentBlocks[0] as TextContentBlock).text
-        : contentBlocks;
-
-    // Send prompt via session extension — persistent session handles lifecycle
     try {
-      const cwd = cfg.workspaceCwd || process.cwd();
-      const result = (await ctx!.call("session.send_prompt", {
-        sessionId: PERSISTENT_SESSION_ID,
-        content,
-        cwd,
-        streaming: false,
-        source,
-      })) as { text: string; sessionId: string };
+      const result = await requestSessionReply(source, contentBlocks);
 
-      // Send reply back to iMessage
-      const replyText = result.text?.trim();
-      if (replyText) {
-        ctx?.log.info(
-          `Sending reply to chat ${message.chat_id}: "${replyText.substring(0, 50)}..."`,
-        );
-        await client?.send({ chatId: message.chat_id, text: replyText });
+      if (
+        result &&
+        (await sendReply(
+          message.chat_id,
+          result.text || "",
+          `Sending reply to chat ${message.chat_id}:`,
+        ))
+      ) {
         ctx?.emit("imessage.sent", { chatId: message.chat_id, text: result.text });
       }
     } catch (err) {
@@ -400,28 +426,11 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
           text: catchupPrompt,
         });
 
-        if (!contentBlocks.length) continue;
-
-        const content =
-          contentBlocks.length === 1 && contentBlocks[0].type === "text"
-            ? (contentBlocks[0] as TextContentBlock).text
-            : contentBlocks;
-
         const source = buildSource(chat.id);
-        const cwd = cfg.workspaceCwd || process.cwd();
+        const result = await requestSessionReply(source, contentBlocks);
 
-        const result = (await ctx!.call("session.send_prompt", {
-          sessionId: PERSISTENT_SESSION_ID,
-          content,
-          cwd,
-          streaming: false,
-          source,
-        })) as { text: string; sessionId: string };
-
-        const replyText = result.text?.trim();
-        if (replyText) {
-          ctx?.log.info(`Catchup reply to chat ${chat.id}: "${replyText.substring(0, 50)}..."`);
-          await client?.send({ chatId: chat.id, text: replyText });
+        if (result) {
+          await sendReply(chat.id, result.text || "", `Catchup reply to chat ${chat.id}:`);
         }
       } catch (err) {
         ctx?.log.error(`Catchup failed for ${chat.identifier}: ${err}`);
