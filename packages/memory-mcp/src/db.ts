@@ -195,7 +195,11 @@ export function searchFts(
       .query(
         `SELECT
           content, source_type AS sourceType, source_id AS sourceId,
-          cwd, timestamp, category, rank
+          cwd, timestamp, category,
+          CASE
+            WHEN source_id LIKE '%/index.md' THEN rank * 2.0
+            ELSE rank
+          END AS rank
         FROM memory_search_fts
         WHERE ${whereClause}
         ORDER BY rank
