@@ -664,10 +664,53 @@ function commitMemoryChanges(
       encoding: "utf-8",
     }).trim();
     log("INFO", `Libby: Git committed ${filesWritten.length} files (${commitHash})`);
+
+    // Push to remote (rebase first to handle concurrent writes from other nodes)
+    pushMemoryChanges(log);
+
     return filesWritten;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log("ERROR", `Libby: Git commit failed: ${msg}`);
     return [];
+  }
+}
+
+/**
+ * Pull with rebase then push ~/memory/ to remote.
+ * Best-effort — network failures are logged but don't block processing.
+ */
+function pushMemoryChanges(log: (level: string, msg: string) => void): void {
+  try {
+    // Rebase local commits on top of remote to keep history linear
+    const pullResult = Bun.spawnSync(["git", "pull", "--rebase"], {
+      cwd: MEMORY_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (pullResult.exitCode !== 0) {
+      const stderr = pullResult.stderr?.toString().trim() || "unknown error";
+      // If rebase fails (conflict), abort and log — don't push stale state
+      Bun.spawnSync(["git", "rebase", "--abort"], {
+        cwd: MEMORY_ROOT,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      log("ERROR", `Libby: Git pull --rebase failed (aborted): ${stderr}`);
+      return;
+    }
+
+    const pushResult = Bun.spawnSync(["git", "push"], {
+      cwd: MEMORY_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (pushResult.exitCode !== 0) {
+      const stderr = pushResult.stderr?.toString().trim() || "unknown error";
+      log("ERROR", `Libby: Git push failed: ${stderr}`);
+      return;
+    }
+
+    log("INFO", "Libby: Git pushed to remote");
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log("ERROR", `Libby: Git push failed: ${msg}`);
   }
 }
