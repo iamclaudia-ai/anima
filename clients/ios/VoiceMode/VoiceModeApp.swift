@@ -14,6 +14,8 @@ class AppState {
     var isConnected = false
     var statusText = "Connecting..."
     var micAvailable = true
+    var gatewayHost: String
+    var workspaceCwd: String
     private var isRecoveringMic = false
     private var postSpeechRecoveryWorkItem: DispatchWorkItem?
 
@@ -27,12 +29,13 @@ class AppState {
     /// In-app browser for viewing web pages during voice conversations
     let browser = BrowserManager()
 
-    // Gateway URL — reverse proxy with TLS
-    private static let defaultURL = "wss://claudia.kiliman.dev/ws"
-
     init() {
-        let url = UserDefaults.standard.string(forKey: "gatewayURL") ?? Self.defaultURL
-        gateway = GatewayClient(url: url)
+        gatewayHost = GatewayWireProtocol.loadGatewayHost()
+        workspaceCwd = GatewayWireProtocol.loadGatewayCwd()
+        gateway = GatewayClient(
+            url: GatewayWireProtocol.buildGatewayURL(host: gatewayHost),
+            cwd: workspaceCwd
+        )
 
         // Inject shared audio manager into speech + player
         speechRecognizer.configure(audioManager: audioManager)
@@ -226,6 +229,27 @@ class AppState {
         gateway.sendInterrupt()
         gateway.sendVoiceStop()
         resumeListeningAfterSpeech()
+    }
+
+    func saveGatewaySettings(host: String, cwd: String) {
+        let normalizedHost = GatewayWireProtocol.normalizeGatewayHost(host)
+        let normalizedCwd = cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? GatewayWireProtocol.defaultGatewayCwd
+            : cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        UserDefaults.standard.set(normalizedHost, forKey: GatewayWireProtocol.gatewayHostDefaultsKey)
+        UserDefaults.standard.set(normalizedCwd, forKey: GatewayWireProtocol.gatewayCwdDefaultsKey)
+
+        gatewayHost = normalizedHost
+        workspaceCwd = normalizedCwd
+        isConnected = false
+        voiceState = .idle
+        statusText = "Reconnecting..."
+        speechRecognizer.stopListening()
+        gateway.updateConfiguration(
+            url: GatewayWireProtocol.buildGatewayURL(host: normalizedHost),
+            cwd: normalizedCwd
+        )
     }
 
     func toggleListening() {

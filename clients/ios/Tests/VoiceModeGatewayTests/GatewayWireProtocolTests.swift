@@ -70,4 +70,29 @@ final class GatewayWireProtocolTests: XCTestCase {
         XCTAssertNil(GatewayWireProtocol.parse("{not-json"))
         XCTAssertNil(GatewayWireProtocol.parse(#"{"type":"res"}"#))
     }
+
+    func testBuildGatewayURLAlwaysUsesWSSAndWSPath() {
+        XCTAssertEqual(
+            GatewayWireProtocol.buildGatewayURL(host: "gateway.anima-sedes.com"),
+            "wss://gateway.anima-sedes.com/ws"
+        )
+        XCTAssertEqual(
+            GatewayWireProtocol.buildGatewayURL(host: "https://gateway.anima-sedes.com/custom"),
+            "wss://gateway.anima-sedes.com/ws"
+        )
+        XCTAssertEqual(
+            GatewayWireProtocol.buildGatewayURL(host: "gateway.anima-sedes.com:3443/ws"),
+            "wss://gateway.anima-sedes.com:3443/ws"
+        )
+    }
+
+    func testLoadGatewayHostFallsBackToLegacyGatewayURL() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set("wss://legacy.anima.example/ws", forKey: "gatewayURL")
+
+        XCTAssertEqual(
+            GatewayWireProtocol.loadGatewayHost(defaults: defaults),
+            "legacy.anima.example"
+        )
+    }
 }

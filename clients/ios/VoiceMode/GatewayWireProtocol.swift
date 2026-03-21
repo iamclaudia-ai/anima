@@ -7,6 +7,57 @@ enum GatewayInboundMessage {
 }
 
 enum GatewayWireProtocol {
+    static let defaultGatewayHost = "gateway.anima-sedes.com"
+    static let defaultGatewayCwd = "/Users/claudia/chat"
+    static let gatewayHostDefaultsKey = "gatewayHost"
+    static let gatewayCwdDefaultsKey = "gatewayCwd"
+
+    static func normalizeGatewayHost(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return defaultGatewayHost
+        }
+
+        if let url = URL(string: trimmed), let scheme = url.scheme, !scheme.isEmpty, let host = url.host {
+            if let port = url.port {
+                return "\(host):\(port)"
+            }
+            return host
+        }
+
+        var normalized = trimmed
+            .replacingOccurrences(of: #"^\/*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
+
+        if let slashIndex = normalized.firstIndex(of: "/") {
+            normalized = String(normalized[..<slashIndex])
+        }
+
+        return normalized.isEmpty ? defaultGatewayHost : normalized
+    }
+
+    static func buildGatewayURL(host: String) -> String {
+        "wss://\(normalizeGatewayHost(host))/ws"
+    }
+
+    static func loadGatewayHost(defaults: UserDefaults = .standard) -> String {
+        if let host = defaults.string(forKey: gatewayHostDefaultsKey) {
+            return normalizeGatewayHost(host)
+        }
+
+        if let legacyURL = defaults.string(forKey: "gatewayURL") {
+            return normalizeGatewayHost(legacyURL)
+        }
+
+        return defaultGatewayHost
+    }
+
+    static func loadGatewayCwd(defaults: UserDefaults = .standard) -> String {
+        let cwd = defaults.string(forKey: gatewayCwdDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cwd?.isEmpty == false) ? cwd! : defaultGatewayCwd
+    }
+
     static func makeRequest(
         id: String,
         method: String,

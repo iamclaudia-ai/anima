@@ -9,6 +9,7 @@ struct VoiceModeView: View {
 
     // Browser sheet
     @State private var showBrowser = false
+    @State private var showSettings = false
 
     // Claudia's purple
     private let accentColor = Color(red: 0.533, green: 0.4, blue: 0.867)
@@ -19,7 +20,7 @@ struct VoiceModeView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 32) {
-                // Top bar: connection indicator + browser button
+                // Top bar: connection indicator + actions
                 HStack {
                     // Connection indicator
                     HStack(spacing: 8) {
@@ -32,6 +33,12 @@ struct VoiceModeView: View {
                     }
 
                     Spacer()
+
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 20))
+                            .foregroundColor(accentColor)
+                    }
 
                     // Browser button
                     Button(action: { showBrowser = true }) {
@@ -123,6 +130,9 @@ struct VoiceModeView: View {
         .sheet(isPresented: $showBrowser) {
             BrowserView(browser: appState.browser)
         }
+        .sheet(isPresented: $showSettings) {
+            VoiceSettingsView(appState: appState)
+        }
     }
 
     private var buttonColor: Color {
@@ -148,6 +158,60 @@ struct VoiceModeView: View {
             return "ellipsis"
         case .speaking:
             return "stop.fill"
+        }
+    }
+}
+
+private struct VoiceSettingsView: View {
+    let appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var host: String
+    @State private var cwd: String
+
+    init(appState: AppState) {
+        self.appState = appState
+        _host = State(initialValue: appState.gatewayHost)
+        _cwd = State(initialValue: appState.workspaceCwd)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Gateway") {
+                    TextField("gateway.anima-sedes.com", text: $host)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Text("The app always connects using wss://<host>/ws.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Workspace") {
+                    TextField("/Users/claudia/chat", text: $cwd)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Text("Voice Mode marks this workspace as general so archived summaries can span all workspaces.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        appState.saveGatewaySettings(host: host, cwd: cwd)
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }

@@ -15,12 +15,12 @@ class GatewayClient: NSObject, @unchecked Sendable {
     private var isConnecting = false
     private var shouldReconnect = true
 
-    private let gatewayURL: URL
+    private var gatewayURL: URL
     private var pendingRequests: [String: (Result<Any, Error>) -> Void] = [:]
     private var connectionId: String?
 
     // Working directory for voice mode sessions
-    private let cwd: String
+    private var cwd: String
     private var activeSessionId: String?
 
     // Callbacks — set by AppState
@@ -32,7 +32,7 @@ class GatewayClient: NSObject, @unchecked Sendable {
     var onError: ((String) -> Void)?
     var onSessionResolved: ((_ message: String) -> Void)?
 
-    init(url: String, cwd: String = "/Users/michael/claudia/chat") {
+    init(url: String, cwd: String = GatewayWireProtocol.defaultGatewayCwd) {
         self.gatewayURL = URL(string: url)!
         // Use server path directly (no expansion needed)
         self.cwd = cwd
@@ -54,7 +54,22 @@ class GatewayClient: NSObject, @unchecked Sendable {
         shouldReconnect = false
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
+        activeSessionId = nil
         DispatchQueue.main.async { self.onDisconnected?() }
+    }
+
+    func updateConfiguration(url: String, cwd: String) {
+        gatewayURL = URL(string: url)!
+        self.cwd = cwd
+        activeSessionId = nil
+        pendingRequests.removeAll()
+
+        let wasActive = webSocket != nil || isConnecting
+        if wasActive {
+            disconnect()
+        }
+
+        connect()
     }
 
     var isConnected: Bool {
@@ -68,7 +83,7 @@ class GatewayClient: NSObject, @unchecked Sendable {
         print("[Gateway] Initializing voice mode session (cwd: \(cwd))")
 
         // 1) Ensure workspace exists for voice mode cwd
-        sendRequest(method: "session.get_or_create_workspace", params: ["cwd": cwd, "name": "Voice Mode"]) { [weak self] result in
+        sendRequest(method: "session.get_or_create_workspace", params: ["cwd": cwd, "name": "Voice Mode", "general": true]) { [weak self] result in
             guard let self = self else { return }
             switch result {
             case .success(let payload):
