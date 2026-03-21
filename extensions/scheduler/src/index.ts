@@ -2,166 +2,278 @@
 /**
  * Scheduler Extension — Autonomous Task Scheduling
  *
- * Durable one-shot and recurring task scheduling with JSON file persistence.
+ * Durable task scheduling with SQLite persistence and execution history.
  * Tasks survive gateway restarts. A 5-second check loop fires due tasks
  * and emits events through the gateway event bus.
  *
  * Task types:
  *   - "once"     — Fire at a specific ISO timestamp (or delay from now)
  *   - "interval" — Fire every N seconds (e.g. "300" for 5 minutes)
- *   - "cron"     — Fire on cron schedule (future, not needed for demo)
+ *   - "cron"     — Fire on cron schedule ("0 9 * * 1-5" for weekdays at 9 AM)
  *
  * Actions:
  *   - "emit"           — Emit a gateway event with payload
  *   - "extension_call" — Call an extension method via ctx.call()
  *   - "notification"   — Emit scheduler.notification event (convenience)
+ *
+ * Policies (cron tasks):
+ *   - missedPolicy:  "fire_once" | "skip" | "fire_all"
+ *   - concurrency:   "allow" | "skip_if_running" | "cancel_previous"
  */
 
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
+import {
+  type LegacyTask,
+  type ScheduledTask,
+  closeDb,
+  completeExecution,
+  deleteTask,
+  getAllTasks,
+  getEnabledDueTasks,
+  getExecutionsForTask,
+  getTaskById,
+  insertExecution,
+  insertTask,
+  migrateLegacyTasks,
+  pruneExecutions,
+  setTaskEnabled,
+  setupSchema,
+  updateTask,
+  updateTaskAfterFire,
+} from "./db.js";
+import { cronParser } from "./cronParser.js";
 
-// ── Types ────────────────────────────────────────────────────
+// ── JSON migration ──────────────────────────────────────────
 
-interface ScheduledTask {
-  id: string;
-  name: string;
-  description?: string;
-  type: "once" | "interval";
-  /** ISO timestamp when this task should next fire */
-  fireAt: string;
-  /** For interval tasks: repeat interval in seconds */
-  intervalSeconds?: number;
-  action: {
-    type: "emit" | "extension_call" | "notification";
-    /** Event name (for emit/notification) or method name (for extension_call) */
-    target: string;
-    /** Payload to include */
-    payload?: Record<string, unknown>;
-  };
-  enabled: boolean;
-  createdAt: string;
-  firedCount: number;
-}
+const LEGACY_STORE_PATH = join(homedir(), ".anima", "scheduled-tasks.json");
 
-interface TaskStore {
-  tasks: ScheduledTask[];
-}
+function migrateLegacyJsonStore(log: ExtensionContext["log"]): void {
+  if (!existsSync(LEGACY_STORE_PATH)) return;
 
-// ── Persistence ──────────────────────────────────────────────
-
-const STORE_DIR = join(homedir(), ".anima");
-const STORE_PATH = join(STORE_DIR, "scheduled-tasks.json");
-
-function loadStore(): TaskStore {
   try {
-    if (!existsSync(STORE_PATH)) return { tasks: [] };
-    const raw = readFileSync(STORE_PATH, "utf-8");
-    return JSON.parse(raw) as TaskStore;
-  } catch {
-    return { tasks: [] };
+    const raw = readFileSync(LEGACY_STORE_PATH, "utf-8");
+    const store = JSON.parse(raw) as { tasks: LegacyTask[] };
+
+    if (store.tasks.length > 0) {
+      const count = migrateLegacyTasks(store.tasks);
+      log.info(`Migrated ${count} task(s) from JSON to SQLite`);
+    }
+
+    // Rename so we don't migrate again
+    renameSync(LEGACY_STORE_PATH, LEGACY_STORE_PATH + ".migrated");
+    log.info("Renamed scheduled-tasks.json → scheduled-tasks.json.migrated");
+  } catch (error) {
+    log.error("Failed to migrate legacy JSON tasks", { error: String(error) });
   }
 }
 
-function saveStore(store: TaskStore): void {
-  if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
-  writeFileSync(STORE_PATH, JSON.stringify(store, null, 2), "utf-8");
+// ── Catchup logic ───────────────────────────────────────────
+
+function handleMissedTasks(log: ExtensionContext["log"]): { catchup: ScheduledTask[] } {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const dueTasks = getEnabledDueTasks(nowIso);
+  const catchup: ScheduledTask[] = [];
+
+  for (const task of dueTasks) {
+    if (task.type !== "cron") {
+      // Once/interval tasks always fire when due — no policy needed
+      catchup.push(task);
+      continue;
+    }
+
+    const missedBy = now.getTime() - new Date(task.fireAt).getTime();
+    const deadlineMs = (task.startDeadlineSeconds ?? 3600) * 1000;
+
+    if (missedBy > deadlineMs) {
+      // Missed by too long — skip regardless of policy
+      log.info(`Skipping missed cron task (past deadline): ${task.name}`, {
+        id: task.id,
+        missedByMs: missedBy,
+      });
+      insertExecution({
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        firedAt: nowIso,
+        status: "skipped",
+      });
+      // Advance to next cron occurrence
+      const nextFire = cronParser.getNextRun(task.cronExpr!, now);
+      if (nextFire) {
+        updateTaskAfterFire(task.id, nextFire, task.firedCount, nowIso);
+      }
+      continue;
+    }
+
+    switch (task.missedPolicy) {
+      case "skip":
+        log.info(`Skipping missed cron task (policy=skip): ${task.name}`, { id: task.id });
+        insertExecution({
+          id: crypto.randomUUID(),
+          taskId: task.id,
+          firedAt: nowIso,
+          status: "skipped",
+        });
+        // Advance to next occurrence
+        {
+          const nextFire = cronParser.getNextRun(task.cronExpr!, now);
+          if (nextFire) {
+            updateTaskAfterFire(task.id, nextFire, task.firedCount, nowIso);
+          }
+        }
+        break;
+
+      case "fire_once":
+        log.info(`Catchup firing missed cron task (policy=fire_once): ${task.name}`, {
+          id: task.id,
+        });
+        catchup.push(task);
+        break;
+
+      case "fire_all":
+        // For fire_all, we still just fire once — we don't queue N missed runs
+        // The distinction matters for history (all intervals are logged as skipped except last)
+        log.info(`Catchup firing missed cron task (policy=fire_all): ${task.name}`, {
+          id: task.id,
+        });
+        catchup.push(task);
+        break;
+    }
+  }
+
+  return { catchup };
 }
 
 // ── Extension Factory ────────────────────────────────────────
 
-export function createSchedulerExtension(config: Record<string, unknown> = {}): AnimaExtension {
+export function createSchedulerExtension(_config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext | null = null;
   let checkInterval: ReturnType<typeof setInterval> | null = null;
-  const CHECK_INTERVAL_MS = 5_000; // Check every 5 seconds
+  const CHECK_INTERVAL_MS = 5_000;
 
-  // ── Task check loop ──────────────────────────────────────
+  // Track running tasks for concurrency control
+  const runningTasks = new Set<string>();
+
+  // ── Fire a single task ─────────────────────────────────────
+
+  async function fireTask(task: ScheduledTask): Promise<void> {
+    if (!ctx) return;
+
+    // Concurrency check
+    if (task.concurrency === "skip_if_running" && runningTasks.has(task.id)) {
+      ctx.log.info(`Skipping task (already running): ${task.name}`, { id: task.id });
+      insertExecution({
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        firedAt: new Date().toISOString(),
+        status: "skipped",
+      });
+      return;
+    }
+
+    const execId = crypto.randomUUID();
+    const firedAt = new Date().toISOString();
+    const startMs = performance.now();
+
+    runningTasks.add(task.id);
+    insertExecution({ id: execId, taskId: task.id, firedAt, status: "running" });
+
+    ctx.log.info(`Firing scheduled task: ${task.name}`, { id: task.id, action: task.action });
+
+    try {
+      switch (task.action.type) {
+        case "emit":
+          ctx.emit(task.action.target, {
+            taskId: task.id,
+            taskName: task.name,
+            ...task.action.payload,
+          });
+          break;
+
+        case "notification":
+          ctx.emit("scheduler.notification", {
+            taskId: task.id,
+            taskName: task.name,
+            message: task.action.target,
+            ...task.action.payload,
+          });
+          break;
+
+        case "extension_call":
+          await ctx.call(task.action.target, task.action.payload ?? {});
+          break;
+      }
+
+      const durationMs = Math.round(performance.now() - startMs);
+      completeExecution(execId, "success", durationMs);
+
+      // Emit generic task_fired event
+      ctx.emit("scheduler.task_fired", {
+        taskId: task.id,
+        taskName: task.name,
+        action: task.action,
+        firedAt,
+        durationMs,
+      });
+    } catch (error) {
+      const durationMs = Math.round(performance.now() - startMs);
+      completeExecution(execId, "error", durationMs, String(error));
+      ctx.log.error(`Failed to fire task: ${task.name}`, { id: task.id, error: String(error) });
+    } finally {
+      runningTasks.delete(task.id);
+    }
+
+    // Update task state
+    const now = new Date();
+    const newFiredCount = task.firedCount + 1;
+
+    if (task.type === "once") {
+      deleteTask(task.id);
+    } else if (task.type === "interval" && task.intervalSeconds) {
+      const nextFire = new Date(now.getTime() + task.intervalSeconds * 1000).toISOString();
+      updateTaskAfterFire(task.id, nextFire, newFiredCount, firedAt);
+    } else if (task.type === "cron" && task.cronExpr) {
+      const nextFire = cronParser.getNextRun(task.cronExpr, now);
+      if (nextFire) {
+        updateTaskAfterFire(task.id, nextFire, newFiredCount, firedAt);
+      } else {
+        ctx.log.warn(`No next cron run found for task: ${task.name}`, { id: task.id });
+        setTaskEnabled(task.id, false);
+      }
+    }
+
+    // Prune old execution history
+    pruneExecutions(task.id, task.keepHistory);
+  }
+
+  // ── Task check loop ────────────────────────────────────────
 
   async function checkAndFireTasks(): Promise<void> {
     if (!ctx) return;
 
-    const store = loadStore();
-    const now = Date.now();
-    let changed = false;
-    const toRemove: string[] = [];
+    const nowIso = new Date().toISOString();
+    const dueTasks = getEnabledDueTasks(nowIso);
 
-    for (const task of store.tasks) {
-      if (!task.enabled) continue;
-
-      const fireTime = new Date(task.fireAt).getTime();
-      if (isNaN(fireTime) || fireTime > now) continue;
-
-      // Task is due — fire it!
-      ctx.log.info(`Firing scheduled task: ${task.name}`, { id: task.id, action: task.action });
-      task.firedCount++;
-      changed = true;
-
-      try {
-        switch (task.action.type) {
-          case "emit":
-            ctx.emit(task.action.target, {
-              taskId: task.id,
-              taskName: task.name,
-              ...task.action.payload,
-            });
-            break;
-
-          case "notification":
-            ctx.emit("scheduler.notification", {
-              taskId: task.id,
-              taskName: task.name,
-              message: task.action.target,
-              ...task.action.payload,
-            });
-            break;
-
-          case "extension_call":
-            await ctx.call(task.action.target, task.action.payload ?? {});
-            break;
-        }
-
-        // Also emit a generic task_fired event for any listeners
-        ctx.emit("scheduler.task_fired", {
-          taskId: task.id,
-          taskName: task.name,
-          action: task.action,
-          firedAt: new Date().toISOString(),
-        });
-      } catch (error) {
-        ctx.log.error(`Failed to fire task: ${task.name}`, { id: task.id, error: String(error) });
-      }
-
-      // Handle task lifecycle
-      if (task.type === "once") {
-        toRemove.push(task.id);
-      } else if (task.type === "interval" && task.intervalSeconds) {
-        // Schedule next run
-        task.fireAt = new Date(now + task.intervalSeconds * 1000).toISOString();
-      }
+    for (const task of dueTasks) {
+      await fireTask(task);
     }
-
-    // Remove completed one-shot tasks
-    if (toRemove.length > 0) {
-      store.tasks = store.tasks.filter((t) => !toRemove.includes(t.id));
-      changed = true;
-    }
-
-    if (changed) saveStore(store);
   }
 
-  // ── Method definitions ───────────────────────────────────
+  // ── Method definitions ─────────────────────────────────────
 
   const methods = [
     {
       name: "scheduler.add_task",
       description:
-        "Schedule a new task. Use delaySeconds for relative timing or fireAt for absolute.",
+        "Schedule a new task. Use delaySeconds for relative timing, fireAt for absolute, or cronExpr for recurring.",
       inputSchema: z.object({
         name: z.string().describe("Human-readable task name"),
         description: z.string().optional(),
-        type: z.enum(["once", "interval"]).default("once"),
+        type: z.enum(["once", "interval", "cron"]).default("once"),
         fireAt: z.string().optional().describe("ISO timestamp when task should fire"),
         delaySeconds: z
           .number()
@@ -171,17 +283,51 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
           .number()
           .optional()
           .describe("For interval tasks: repeat every N seconds"),
+        cronExpr: z
+          .string()
+          .optional()
+          .describe('For cron tasks: cron expression (e.g. "0 9 * * 1-5")'),
         action: z.object({
           type: z.enum(["emit", "extension_call", "notification"]).default("notification"),
           target: z.string().describe("Event name, method name, or notification message"),
           payload: z.record(z.unknown()).optional(),
         }),
+        missedPolicy: z.enum(["fire_once", "skip", "fire_all"]).default("fire_once"),
+        concurrency: z
+          .enum(["allow", "skip_if_running", "cancel_previous"])
+          .default("skip_if_running"),
+        startDeadlineSeconds: z
+          .number()
+          .optional()
+          .describe("Skip if missed by more than N seconds"),
+        tags: z.array(z.string()).optional().describe("Tags for grouping/filtering"),
+        keepHistory: z.number().default(50).describe("Number of executions to retain"),
+      }),
+    },
+    {
+      name: "scheduler.update_task",
+      description: "Update an existing task's configuration",
+      inputSchema: z.object({
+        taskId: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        cronExpr: z.string().optional(),
+        missedPolicy: z.enum(["fire_once", "skip", "fire_all"]).optional(),
+        concurrency: z.enum(["allow", "skip_if_running", "cancel_previous"]).optional(),
+        startDeadlineSeconds: z.number().optional(),
+        tags: z.array(z.string()).optional(),
+        keepHistory: z.number().optional(),
+        enabled: z.boolean().optional(),
       }),
     },
     {
       name: "scheduler.list_tasks",
-      description: "List all scheduled tasks",
-      inputSchema: z.object({}),
+      description: "List all scheduled tasks, optionally filtered by type or tags",
+      inputSchema: z.object({
+        type: z.enum(["once", "interval", "cron"]).optional(),
+        tags: z.array(z.string()).optional(),
+        enabledOnly: z.boolean().optional(),
+      }),
     },
     {
       name: "scheduler.cancel_task",
@@ -191,13 +337,28 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
       }),
     },
     {
+      name: "scheduler.fire_now",
+      description: "Immediately execute a task (ignoring its schedule)",
+      inputSchema: z.object({
+        taskId: z.string(),
+      }),
+    },
+    {
+      name: "scheduler.get_history",
+      description: "Get execution history for a task",
+      inputSchema: z.object({
+        taskId: z.string(),
+        limit: z.number().default(50),
+      }),
+    },
+    {
       name: "scheduler.health_check",
       description: "Return scheduler health and stats",
       inputSchema: z.object({}),
     },
   ];
 
-  // ── Method handlers ──────────────────────────────────────
+  // ── Method handlers ────────────────────────────────────────
 
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
@@ -209,29 +370,48 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
           fireAt,
           delaySeconds,
           intervalSeconds,
+          cronExpr,
           action,
+          missedPolicy = "fire_once",
+          concurrency = "skip_if_running",
+          startDeadlineSeconds,
+          tags,
+          keepHistory = 50,
         } = params as {
           name: string;
           description?: string;
-          type?: "once" | "interval";
+          type?: "once" | "interval" | "cron";
           fireAt?: string;
           delaySeconds?: number;
           intervalSeconds?: number;
+          cronExpr?: string;
           action: {
             type: "emit" | "extension_call" | "notification";
             target: string;
             payload?: Record<string, unknown>;
           };
+          missedPolicy?: "fire_once" | "skip" | "fire_all";
+          concurrency?: "allow" | "skip_if_running" | "cancel_previous";
+          startDeadlineSeconds?: number;
+          tags?: string[];
+          keepHistory?: number;
         };
 
         // Compute fire time
         let computedFireAt: string;
-        if (delaySeconds !== undefined) {
+        if (type === "cron") {
+          if (!cronExpr) throw new Error("cronExpr is required for cron tasks");
+          if (!cronParser.isValid(cronExpr))
+            throw new Error(`Invalid cron expression: ${cronExpr}`);
+          const nextRun = cronParser.getNextRun(cronExpr);
+          if (!nextRun) throw new Error(`No upcoming run found for cron: ${cronExpr}`);
+          computedFireAt = nextRun;
+        } else if (delaySeconds !== undefined) {
           computedFireAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
         } else if (fireAt) {
           computedFireAt = fireAt;
         } else {
-          throw new Error("Either fireAt or delaySeconds is required");
+          throw new Error("Either fireAt, delaySeconds, or cronExpr is required");
         }
 
         const task: ScheduledTask = {
@@ -241,15 +421,19 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
           type,
           fireAt: computedFireAt,
           intervalSeconds: type === "interval" ? intervalSeconds : undefined,
+          cronExpr: type === "cron" ? cronExpr : undefined,
           action,
+          missedPolicy,
+          concurrency,
+          startDeadlineSeconds,
           enabled: true,
+          tags,
           createdAt: new Date().toISOString(),
           firedCount: 0,
+          keepHistory,
         };
 
-        const store = loadStore();
-        store.tasks.push(task);
-        saveStore(store);
+        insertTask(task);
 
         ctx?.log.info(`Task scheduled: ${name}`, {
           id: task.id,
@@ -264,56 +448,138 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
           name,
           fireAt: computedFireAt,
           type,
+          ...(type === "cron" && cronExpr
+            ? { cronDescription: cronParser.describe(cronExpr) }
+            : {}),
         };
       }
 
+      case "scheduler.update_task": {
+        const { taskId, enabled, ...updates } = params as {
+          taskId: string;
+          enabled?: boolean;
+          name?: string;
+          description?: string;
+          cronExpr?: string;
+          missedPolicy?: "fire_once" | "skip" | "fire_all";
+          concurrency?: "allow" | "skip_if_running" | "cancel_previous";
+          startDeadlineSeconds?: number;
+          tags?: string[];
+          keepHistory?: number;
+        };
+
+        const existing = getTaskById(taskId);
+        if (!existing) throw new Error(`Task not found: ${taskId}`);
+
+        // If updating cron expression, recalculate next fire time
+        let newFireAt: string | undefined;
+        if (updates.cronExpr) {
+          if (!cronParser.isValid(updates.cronExpr))
+            throw new Error(`Invalid cron expression: ${updates.cronExpr}`);
+          const nextRun = cronParser.getNextRun(updates.cronExpr);
+          if (nextRun) newFireAt = nextRun;
+        }
+
+        updateTask(taskId, { ...updates, ...(newFireAt ? { fireAt: newFireAt } : {}) });
+        if (enabled !== undefined) setTaskEnabled(taskId, enabled);
+
+        ctx?.log.info(`Task updated: ${taskId}`);
+        return { ok: true, taskId };
+      }
+
       case "scheduler.list_tasks": {
-        const store = loadStore();
+        const {
+          type,
+          tags: filterTags,
+          enabledOnly,
+        } = params as {
+          type?: string;
+          tags?: string[];
+          enabledOnly?: boolean;
+        };
+
+        let tasks = getAllTasks();
+
+        if (type) tasks = tasks.filter((t) => t.type === type);
+        if (enabledOnly) tasks = tasks.filter((t) => t.enabled);
+        if (filterTags && filterTags.length > 0) {
+          tasks = tasks.filter((t) => t.tags && filterTags.some((ft) => t.tags!.includes(ft)));
+        }
+
         return {
-          tasks: store.tasks.map((t) => ({
+          tasks: tasks.map((t) => ({
             id: t.id,
             name: t.name,
             description: t.description,
             type: t.type,
             fireAt: t.fireAt,
+            cronExpr: t.cronExpr,
+            cronDescription: t.cronExpr ? cronParser.describe(t.cronExpr) : undefined,
             enabled: t.enabled,
             firedCount: t.firedCount,
+            lastFiredAt: t.lastFiredAt,
             action: t.action,
+            missedPolicy: t.missedPolicy,
+            concurrency: t.concurrency,
+            tags: t.tags,
             createdAt: t.createdAt,
           })),
-          count: store.tasks.length,
+          count: tasks.length,
         };
       }
 
       case "scheduler.cancel_task": {
         const { taskId } = params as { taskId: string };
-        const store = loadStore();
-        const before = store.tasks.length;
-        store.tasks = store.tasks.filter((t) => t.id !== taskId);
-        saveStore(store);
-
-        const removed = before - store.tasks.length;
+        const removed = deleteTask(taskId);
         ctx?.log.info(`Task cancelled: ${taskId}`, { removed });
-
         return { ok: true, taskId, removed };
       }
 
+      case "scheduler.fire_now": {
+        const { taskId } = params as { taskId: string };
+        const task = getTaskById(taskId);
+        if (!task) throw new Error(`Task not found: ${taskId}`);
+
+        await fireTask(task);
+        return { ok: true, taskId, firedAt: new Date().toISOString() };
+      }
+
+      case "scheduler.get_history": {
+        const { taskId, limit = 50 } = params as { taskId: string; limit?: number };
+        const task = getTaskById(taskId);
+        if (!task) throw new Error(`Task not found: ${taskId}`);
+
+        const executions = getExecutionsForTask(taskId, limit);
+        return {
+          taskId,
+          taskName: task.name,
+          executions: executions.map((e) => ({
+            id: e.id,
+            firedAt: e.fired_at,
+            completedAt: e.completed_at,
+            status: e.status,
+            durationMs: e.duration_ms,
+            error: e.error,
+          })),
+          count: executions.length,
+        };
+      }
+
       case "scheduler.health_check": {
-        const store = loadStore();
+        const tasks = getAllTasks();
         const now = Date.now();
-        const pending = store.tasks.filter(
-          (t) => t.enabled && new Date(t.fireAt).getTime() > now,
-        ).length;
-        const overdue = store.tasks.filter(
-          (t) => t.enabled && new Date(t.fireAt).getTime() <= now,
-        ).length;
+        const enabled = tasks.filter((t) => t.enabled);
+        const pending = enabled.filter((t) => new Date(t.fireAt).getTime() > now).length;
+        const overdue = enabled.filter((t) => new Date(t.fireAt).getTime() <= now).length;
+        const cronCount = tasks.filter((t) => t.type === "cron").length;
 
         return {
           ok: true,
           status: "healthy",
           label: "Scheduler",
           metrics: [
-            { label: "Total Tasks", value: store.tasks.length },
+            { label: "Total Tasks", value: tasks.length },
+            { label: "Cron Jobs", value: cronCount },
             { label: "Pending", value: pending },
             { label: "Overdue", value: overdue },
           ],
@@ -325,7 +591,7 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
     }
   }
 
-  // ── Extension lifecycle ──────────────────────────────────
+  // ── Extension lifecycle ────────────────────────────────────
 
   return {
     id: "scheduler",
@@ -336,9 +602,25 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
     async start(context: ExtensionContext): Promise<void> {
       ctx = context;
 
-      // Load existing tasks and log status
-      const store = loadStore();
-      ctx.log.info(`Scheduler started — ${store.tasks.length} task(s) loaded`);
+      // Initialize database
+      setupSchema();
+      ctx.log.info("Scheduler database initialized");
+
+      // Migrate legacy JSON store if present
+      migrateLegacyJsonStore(ctx.log);
+
+      // Handle missed tasks on startup
+      const { catchup } = handleMissedTasks(ctx.log);
+      if (catchup.length > 0) {
+        ctx.log.info(`Firing ${catchup.length} catchup task(s)`);
+        for (const task of catchup) {
+          await fireTask(task);
+        }
+      }
+
+      const tasks = getAllTasks();
+      const cronCount = tasks.filter((t) => t.type === "cron").length;
+      ctx.log.info(`Scheduler started — ${tasks.length} task(s) loaded (${cronCount} cron)`);
 
       // Start the check loop
       checkInterval = setInterval(() => {
@@ -355,6 +637,7 @@ export function createSchedulerExtension(config: Record<string, unknown> = {}): 
         clearInterval(checkInterval);
         checkInterval = null;
       }
+      closeDb();
       ctx?.log.info("Scheduler stopped");
       ctx = null;
     },
