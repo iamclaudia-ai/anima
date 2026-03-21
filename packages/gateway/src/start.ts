@@ -279,7 +279,8 @@ async function spawnOutOfProcessExtension(
 
 /**
  * Load configured extensions from config.
- * Extensions spawn in parallel so one hanging extension can't block others.
+ * Session loads first (other extensions depend on it via ctx.call),
+ * then everything else spawns in parallel.
  */
 async function loadExtensions(): Promise<void> {
   const enabledExtensions = getEnabledExtensions();
@@ -293,16 +294,33 @@ async function loadExtensions(): Promise<void> {
     extensions: enabledExtensions.map(([id]) => id),
   });
 
+  // Phase 1: Load session first — it's a dependency for other extensions
+  const sessionExt = enabledExtensions.find(([id]) => id === "session");
+  if (sessionExt) {
+    try {
+      await spawnOutOfProcessExtension(
+        sessionExt[0],
+        sessionExt[1].config,
+        sessionExt[1].sourceRoutes,
+        sessionExt[1].hot !== false,
+      );
+    } catch (error) {
+      log.error("Failed to load session extension", { error: String(error) });
+    }
+  }
+
+  // Phase 2: Load remaining extensions in parallel
+  const remaining = enabledExtensions.filter(([id]) => id !== "session");
   const results = await Promise.allSettled(
-    enabledExtensions.map(([id, ext]) =>
+    remaining.map(([id, ext]) =>
       spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot !== false),
     ),
   );
 
   const failed = results
-    .map((r, i) => (r.status === "rejected" ? enabledExtensions[i][0] : null))
+    .map((r, i) => (r.status === "rejected" ? remaining[i][0] : null))
     .filter(Boolean);
-  const succeeded = results.filter((r) => r.status === "fulfilled").length;
+  const succeeded = results.filter((r) => r.status === "fulfilled").length + (sessionExt ? 1 : 0);
 
   if (failed.length > 0) {
     log.error("Some extensions failed to load", { failed });

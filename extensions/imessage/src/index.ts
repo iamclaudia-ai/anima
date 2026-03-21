@@ -508,16 +508,7 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
         ctx.log.error(`Failed to list chats: ${err}`);
       }
 
-      // Catch up on missed messages before subscribing to watch
-      if (cfg.catchupEnabled !== false && chats.length > 0) {
-        try {
-          await catchupOnStartup(chats);
-        } catch (err) {
-          ctx.log.error(`Catchup failed: ${err}`);
-        }
-      }
-
-      // Subscribe to watch for new messages
+      // Subscribe to watch for new messages first (don't miss anything during catchup)
       try {
         const subId = await client.subscribe({
           attachments: cfg.includeAttachments,
@@ -528,6 +519,18 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       }
 
       ctx.log.info("iMessage extension started");
+
+      // Catch up on missed messages in the background (after registration completes)
+      if (cfg.catchupEnabled !== false && chats.length > 0) {
+        const chatsCopy = [...chats];
+        setTimeout(async () => {
+          try {
+            await catchupOnStartup(chatsCopy);
+          } catch (err) {
+            ctx?.log.error(`Catchup failed: ${err}`);
+          }
+        }, 2000); // Brief delay to ensure session extension is ready
+      }
     },
 
     async stop() {
