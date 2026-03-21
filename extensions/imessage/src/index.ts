@@ -347,11 +347,12 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       }
 
       // Send reply back to iMessage
-      if (result.text?.trim()) {
+      const replyText = result.text?.trim();
+      if (replyText) {
         ctx?.log.info(
-          `Sending reply to chat ${message.chat_id}: "${result.text.substring(0, 50)}..."`,
+          `Sending reply to chat ${message.chat_id}: "${replyText.substring(0, 50)}..."`,
         );
-        await client?.send({ chatId: message.chat_id, text: result.text });
+        await client?.send({ chatId: message.chat_id, text: replyText });
         ctx?.emit("imessage.sent", { chatId: message.chat_id, text: result.text });
       }
     } catch (err) {
