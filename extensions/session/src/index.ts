@@ -17,7 +17,7 @@ import type {
   ExtensionMethodDefinition,
   HealthCheckResponse,
 } from "@anima/shared";
-import { createLogger, loadConfig } from "@anima/shared";
+import { createLogger, loadConfig, PERSISTENT_SESSION_ID } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -519,6 +519,63 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   };
   const agentHostConfig = globalConfig.agentHost;
 
+  // ── Persistent Sessions ──────────────────────────────────────
+  // Extensions like iMessage and Voice Mode pass PERSISTENT_SESSION_ID as
+  // the sessionId. We resolve the real sessionId from ctx.store, keyed by cwd.
+  // If no session exists for that cwd, we create one. If the stored session
+  // is stale/dead, we replace it. Rotation is handled externally by the
+  // scheduler calling session.rotate_persistent_sessions.
+
+  interface PersistentSessionEntry {
+    sessionId: string;
+    messageCount: number;
+    createdAt: string;
+  }
+
+  async function resolvePersistentSession(cwd: string): Promise<string> {
+    const sessions =
+      ctx.store.get<Record<string, PersistentSessionEntry>>("persistentSessions") || {};
+    const entry = sessions[cwd];
+
+    if (entry?.sessionId) {
+      // Check if session is still alive in agent-host
+      const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
+      const alive = activeSessions.find((s) => s.id === entry.sessionId);
+
+      if (alive) {
+        // Increment message count
+        entry.messageCount = (entry.messageCount || 0) + 1;
+        ctx.store.set("persistentSessions", sessions);
+        return entry.sessionId;
+      }
+
+      // Session is gone — check if it can be resumed (exists on disk)
+      log.info("Persistent session not in agent-host, will resume or create", {
+        cwd,
+        sessionId: sid(entry.sessionId),
+      });
+
+      // Try to resume — send_prompt with cwd will auto-resume
+      return entry.sessionId;
+    }
+
+    // No session for this cwd — create one via the normal create_session flow
+    // which handles memory injection, workspace setup, etc.
+    log.info("Creating new persistent session", { cwd });
+    const result = (await handleMethod("session.create_session", { cwd })) as {
+      sessionId: string;
+    };
+
+    sessions[cwd] = {
+      sessionId: result.sessionId,
+      messageCount: 1,
+      createdAt: new Date().toISOString(),
+    };
+    ctx.store.set("persistentSessions", sessions);
+
+    return result.sessionId;
+  }
+
   // Connect to agent-host via WebSocket for SDK process isolation.
   // SDK processes (Claude query()) run in the agent-host server and survive
   // gateway/extension restarts. Session extension is a thin RPC client.
@@ -1018,6 +1075,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       inputSchema: z.object({}),
     },
     {
+      name: "session.rotate_persistent_sessions",
+      description:
+        "Check persistent sessions against rotation policy (maxMessages/maxAgeHours) and clear stale ones. Called by scheduler on a cron.",
+      inputSchema: z.object({}),
+    },
+    {
       name: "session.get_memory_context",
       description:
         "Preview the memory context that would be injected into a new session. Returns the raw formatted block and the underlying data. If cwd is omitted, uses the caller's working directory.",
@@ -1048,7 +1111,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       method === "session.list_sessions" ||
       method === "session.list_workspaces" ||
       method === "session.get_workspace" ||
-      method === "session.health_check";
+      method === "session.health_check" ||
+      method === "session.rotate_persistent_sessions";
     if (!isRead) {
       log.info(
         `→ ${method}`,
@@ -1159,13 +1223,20 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.send_prompt": {
-        const sessionId = params.sessionId as string;
+        let sessionId = params.sessionId as string;
         const content = params.content as string | unknown[];
         const cwd = params.cwd as string | undefined;
         const model = params.model as string | undefined;
         const agent = (params.agent as string | undefined) || "claude";
         const streaming = params.streaming !== false;
         const source = params.source as string | undefined;
+
+        // Resolve persistent session sentinel → real sessionId
+        if (sessionId === PERSISTENT_SESSION_ID) {
+          if (!cwd) throw new Error("cwd is required for persistent sessions");
+          sessionId = await resolvePersistentSession(cwd);
+          log.info("Resolved persistent session", { cwd, sessionId: sid(sessionId) });
+        }
 
         log.info("Sending prompt", {
           agent,
@@ -1793,6 +1864,45 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
       case "session.health_check": {
         return healthCheckDetailed();
+      }
+
+      case "session.rotate_persistent_sessions": {
+        const rotationConfig = (config.persistentSessionRotation as {
+          maxMessages?: number;
+          maxAgeHours?: number;
+        }) || { maxMessages: 200, maxAgeHours: 24 };
+        const maxMessages = rotationConfig.maxMessages ?? 200;
+        const maxAgeHours = rotationConfig.maxAgeHours ?? 24;
+        const now = Date.now();
+
+        const sessions =
+          ctx.store.get<Record<string, PersistentSessionEntry>>("persistentSessions") || {};
+        const rotated: string[] = [];
+
+        for (const [cwd, entry] of Object.entries(sessions)) {
+          const ageHours = (now - new Date(entry.createdAt).getTime()) / (1000 * 60 * 60);
+          const needsRotation =
+            (maxMessages > 0 && entry.messageCount >= maxMessages) ||
+            (maxAgeHours > 0 && ageHours >= maxAgeHours);
+
+          if (needsRotation) {
+            log.info("Rotating persistent session", {
+              cwd,
+              sessionId: sid(entry.sessionId),
+              messageCount: entry.messageCount,
+              ageHours: Math.round(ageHours),
+            });
+            // Clear the entry — next send_prompt will create a fresh session
+            delete sessions[cwd];
+            rotated.push(cwd);
+          }
+        }
+
+        if (rotated.length > 0) {
+          ctx.store.set("persistentSessions", sessions);
+        }
+
+        return { rotated, checked: Object.keys(sessions).length + rotated.length };
       }
 
       case "session.get_memory_context": {

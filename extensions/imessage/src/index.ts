@@ -12,6 +12,7 @@
  */
 
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
+import { PERSISTENT_SESSION_ID } from "@anima/shared";
 import { ImsgRpcClient, type ImsgMessage, type ImsgAttachment } from "./imsg-client";
 import { z } from "zod";
 
@@ -112,7 +113,6 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
   let client: ImsgRpcClient | null = null;
   let ctx: ExtensionContext | null = null;
   let lastRowId: number | null = null;
-  let currentSessionId: string | null = null;
 
   /**
    * Convert an attachment to a content block
@@ -238,18 +238,6 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
   }
 
   /**
-   * Ensure we have a live session, creating one if needed.
-   */
-  async function ensureSession(cwd: string): Promise<void> {
-    await ctx!.call("session.get_or_create_workspace", { cwd });
-    const created = (await ctx!.call("session.create_session", { cwd })) as {
-      sessionId: string;
-    };
-    currentSessionId = created.sessionId;
-    ctx?.log.info(`Created new iMessage session: ${currentSessionId}`);
-  }
-
-  /**
    * Handle an incoming message
    */
   async function handleMessage(message: ImsgMessage): Promise<void> {
@@ -312,39 +300,16 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
         ? (contentBlocks[0] as TextContentBlock).text
         : contentBlocks;
 
-    // Send prompt via session extension (non-streaming — await completion)
+    // Send prompt via session extension — persistent session handles lifecycle
     try {
-      // Ensure we have a valid session (create fresh if missing or stale)
       const cwd = cfg.workspaceCwd || process.cwd();
-      if (!currentSessionId) {
-        await ensureSession(cwd);
-      }
-
-      let result: { text: string; sessionId: string };
-      try {
-        result = (await ctx!.call("session.send_prompt", {
-          sessionId: currentSessionId,
-          content,
-          streaming: false,
-          source,
-        })) as { text: string; sessionId: string };
-      } catch (promptErr) {
-        // Session may have been lost after a restart — create a new one and retry
-        const errMsg = String(promptErr);
-        if (errMsg.includes("not found") || errMsg.includes("not_found")) {
-          ctx?.log.warn(`Session ${currentSessionId} gone, creating new one`);
-          currentSessionId = null;
-          await ensureSession(cwd);
-          result = (await ctx!.call("session.send_prompt", {
-            sessionId: currentSessionId,
-            content,
-            streaming: false,
-            source,
-          })) as { text: string; sessionId: string };
-        } else {
-          throw promptErr;
-        }
-      }
+      const result = (await ctx!.call("session.send_prompt", {
+        sessionId: PERSISTENT_SESSION_ID,
+        content,
+        cwd,
+        streaming: false,
+        source,
+      })) as { text: string; sessionId: string };
 
       // Send reply back to iMessage
       const replyText = result.text?.trim();
