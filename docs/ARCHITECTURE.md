@@ -255,6 +255,14 @@ The context provided to each extension at startup:
 - `call(method, params)` — inter-extension RPC via the gateway hub
 - `config` — extension configuration
 - `log` — scoped logger
+- `store` — persistent JSON-backed key/value state at `~/.anima/<extensionId>/store.json`
+
+Extensions now use a two-phase startup model:
+
+1. register metadata immediately so methods are callable during startup
+2. finish cross-extension startup work only after the gateway broadcasts `gateway.extensions_ready`
+
+This is the pattern used by iMessage startup catchup and other features that need `ctx.call()` to peers during initialization.
 
 ### ctx.call() Hub
 
@@ -525,7 +533,7 @@ clients/
   vscode/               # VS Code extension with sidebar chat
 
 scripts/
-  smoke.ts              # Quick smoke test (health + method.list)
+  smoke.ts              # Quick smoke test (health + gateway.list_methods)
   e2e-smoke.ts          # Full E2E test with model call
 
 skills/                 # Claude Code skills (meditation, stories, TTS tools)

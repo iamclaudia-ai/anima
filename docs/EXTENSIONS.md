@@ -144,7 +144,7 @@ The `hot` flag controls whether the extension runs with `bun --hot` (live HMR on
 
 ```bash
 # Check it loaded
-bun run packages/cli/src/index.ts method.list | grep my-feature
+bun run packages/cli/src/index.ts gateway.list_methods | grep my-feature
 
 # Call a method
 bun run packages/cli/src/index.ts my-feature.do_thing --input "hello"
@@ -222,7 +222,24 @@ interface ExtensionContext {
     warn(msg: string, meta?: unknown): void;
     error(msg: string, meta?: unknown): void;
   };
+  /** Persistent JSON-backed store at ~/.anima/<extensionId>/store.json */
+  store: {
+    get<T = unknown>(key: string): T | undefined;
+    set(key: string, value: unknown): void;
+    delete(key: string): boolean;
+    all(): Record<string, unknown>;
+  };
 }
+```
+
+`ctx.store` persists immediately and supports dot notation, so it is the right place for state that must survive HMR or gateway restarts:
+
+```typescript
+ctx.store.set("persistentSessions./repo/general", {
+  sessionId: "abc-123",
+  messageCount: 1,
+  createdAt: new Date().toISOString(),
+});
 ```
 
 ### ctx.call() — Cross-Extension Calls
@@ -266,7 +283,7 @@ Every method declares a Zod input schema. The gateway validates at the boundary 
 }
 ```
 
-Methods are discoverable via `method.list` and auto-generate CLI help.
+Methods are discoverable via `gateway.list_methods` and auto-generate CLI help.
 
 Naming rule: Multi-word method segments must use snake_case (for example `workspace.get_or_create`, `session.tool_result`).
 
@@ -377,20 +394,17 @@ interface HealthCheckResponse {
 
 ### Source Routing
 
-For extensions bridging external systems (iMessage, Slack, etc.), source routing enables round-trip responses:
+For extensions bridging external systems, the most common pattern is to call another extension directly and keep any durable routing state in `ctx.store`.
 
-1. Set `sourceRoutes: ["imessage"]` on the extension
-2. Implement `handleSourceResponse(source, event)`
-3. When an external message arrives, emit a `prompt_request` event with `source: "imessage/chatId"`
-4. The gateway routes the response back via `handleSourceResponse`
+The current iMessage flow is a good example:
 
-```
-External message -> extension -> prompt_request event
-  -> session.prompt(content, source="imessage/2329")
-  -> Claude responds -> message_stop
-  -> routeToSource("imessage/2329", response)
-  -> extension.handleSourceResponse() -> sends reply
-```
+1. iMessage receives an external message
+2. The extension builds `source: "imessage/<chatId>"`
+3. It calls `ctx.call("session.send_prompt", { sessionId: PERSISTENT_SESSION_ID, cwd, content, source })`
+4. The session extension resolves the real shared session for that `cwd`
+5. The iMessage extension sends the returned text back over iMessage
+
+`sourceRoutes` and `handleSourceResponse()` are still available when an extension truly needs gateway-level response routing, but they are not required for the common iMessage-style request/reply path anymore.
 
 ---
 
@@ -429,7 +443,8 @@ Extension config lives in `~/.anima/anima.json` (JSON5 format):
   -> spawns: bun --hot extensions/<id>/src/index.ts <config-json>
   -> extension calls runExtensionHost(factory) -> factory(config)
   -> host sends register message with metadata (methods, events, sourceRoutes)
-  -> gateway registers the remote extension
+  -> gateway registers the remote extension before start() finishes
+  -> extension start() can subscribe to gateway.extensions_ready for startup work that depends on other extensions
 ```
 
 **Important**: Don't read `process.env` in your extension defaults. The config object passed to your factory already has interpolated values. Reading `process.env` directly breaks out-of-process mode because the child process may not have the same environment.
@@ -482,9 +497,10 @@ Each extension is directly executable. The gateway:
 1. Reads enabled extensions from config
 2. Resolves each entrypoint as `extensions/<id>/src/index.ts`
 3. Spawns `bun --hot extensions/<id>/src/index.ts <config-json>`
-4. The extension's `runExtensionHost(factory)` call boots the NDJSON protocol, creates the extension via `factory(config)`, and calls `extension.start(ctx)`
-5. The host sends a `register` message with extension metadata (methods, events, sourceRoutes)
-6. Gateway registers the remote extension — methods, events, and source routing work transparently
+4. The extension host creates the extension via `factory(config)` and immediately sends a `register` message with method/event metadata
+5. Gateway registers the remote extension so other extensions can call it during startup
+6. The host then runs `extension.start(ctx)`
+7. After all enabled extensions have registered, the gateway broadcasts `gateway.extensions_ready`
 
 There is no generic host shim or dynamic import layer. The extension IS the process entry point. `runExtensionHost()` (from `@anima/extension-host`) handles the stdio protocol, console redirection, event bus bridging, parent liveness detection, and HMR lifecycle.
 
@@ -539,6 +555,7 @@ When extension code changes:
 4. Stdio connection to gateway is unbroken (the process stays alive)
 5. New `register` message sent with updated metadata
 6. Gateway re-registers the extension (old registration is cleaned up automatically)
+7. Gateway sends `gateway.extensions_ready` again to that extension so it can re-run startup work that depends on peers
 
 The `runExtensionHost()` implementation tracks stdin binding across HMR cycles via `import.meta.hot.data` to avoid duplicate listeners.
 

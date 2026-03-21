@@ -1,6 +1,6 @@
 # Testing Strategy
 
-Last updated: 2026-02-12
+Last updated: 2026-03-21
 
 ## Goals
 
@@ -45,7 +45,7 @@ Last updated: 2026-02-12
 Checks:
 
 - `GET /health`
-- `method.list` over gateway WebSocket
+- `gateway.list_methods` over gateway WebSocket
 
 Env:
 
@@ -58,9 +58,9 @@ Env:
 
 Checks:
 
-- `workspace.get_or_create`
-- `workspace.create_session`
-- `session.prompt` streaming completion + expected output marker
+- `session.get_or_create_workspace`
+- `session.create_session`
+- `session.send_prompt` streaming completion + expected output marker
 
 Env:
 
@@ -72,6 +72,7 @@ Env:
 
 ## Notes
 
-- E2E smoke intentionally uses explicit `workspaceId/sessionId/model/thinking/effort` APIs.
+- E2E smoke intentionally uses the current explicit `cwd/sessionId/model/thinking/effort` APIs.
 - For local development, run `bun run test:smoke-all` before big refactors.
 - Add new tests next to changed packages (`*.test.ts` for unit, `*.integration.test.ts` for integration).
+- Recent hot paths worth covering directly: `ctx.store`, persistent session resolution/rotation, and `gateway.extensions_ready` startup work.

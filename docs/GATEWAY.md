@@ -66,7 +66,9 @@ For each extension in config where enabled=true:
   2. Spawn: bun --hot (or bun run if hot:false) extensions/<id>/src/index.ts <config-json>
   3. Wait for "register" message on stdout (10s timeout)
   4. Call extensions.registerRemote(registration, host)
-  5. Renew lock heartbeat while host is running
+  5. Let extension finish start(ctx)
+  6. After all enabled extensions settle, broadcast gateway.extensions_ready
+  7. Renew lock heartbeat while host is running
 ```
 
 Lock semantics:
@@ -83,6 +85,13 @@ Each extension process runs directly with `bun --hot` (native HMR) by default. E
 - Console redirect (console.log -> stderr, stdout reserved for protocol)
 - HMR via `bun --hot` (process stays alive, module reloads)
 - Parent liveness check (exits if reparented to PID 1)
+
+The important startup nuance is that registration happens before `start()` completes. That gives extensions a two-phase lifecycle:
+
+1. register methods/events/source routes immediately
+2. do dependent startup work only after `gateway.extensions_ready`
+
+This is how extensions like iMessage can safely call `session.send_prompt` during catchup without depending on load order.
 
 ---
 
