@@ -100,22 +100,59 @@ Template variables are expanded in exec `target`, `args`, `cwd`, and notificatio
 
 ### Built-in Variables
 
-| Variable              | Example Output             | Description                      |
-| --------------------- | -------------------------- | -------------------------------- |
-| `{{date}}`            | `2026-03-22`               | Current date (default: %Y-%m-%d) |
-| `{{date:%Y%m%d}}`     | `20260322`                 | Custom strftime format           |
-| `{{time}}`            | `14:30:00`                 | Current time (default: %H:%M:%S) |
-| `{{datetime}}`        | `2026-03-22_143000`        | Date+time combo                  |
-| `{{timestamp}}`       | `2026-03-22T14:30:00.000Z` | ISO 8601                         |
-| `{{epoch}}`           | `1742658600`               | Unix seconds                     |
-| `{{epoch.ms}}`        | `1742658600000`            | Unix milliseconds                |
-| `{{hostname}}`        | `anima-sedes`              | Machine hostname                 |
-| `{{uuid}}`            | `a1b2c3d4-e5f6-...`        | Fresh random UUID                |
-| `{{$HOME}}`           | `/Users/michael`           | Environment variable             |
-| `{{$USER}}`           | `michael`                  | Environment variable             |
-| `{{task.name}}`       | `nightly-backup`           | Task's own name                  |
-| `{{task.id}}`         | `78f31c98-...`             | Task's UUID                      |
-| `{{task.firedCount}}` | `42`                       | How many times task has fired    |
+| Variable              | Example Output                           | Description                      |
+| --------------------- | ---------------------------------------- | -------------------------------- |
+| `{{date}}`            | `2026-03-22`                             | Current date (default: %Y-%m-%d) |
+| `{{date:%Y%m%d}}`     | `20260322`                               | Custom strftime format           |
+| `{{time}}`            | `14:30:00`                               | Current time (default: %H:%M:%S) |
+| `{{datetime}}`        | `2026-03-22_143000`                      | Date+time combo                  |
+| `{{timestamp}}`       | `2026-03-22T14:30:00.000Z`               | ISO 8601                         |
+| `{{epoch}}`           | `1742658600`                             | Unix seconds                     |
+| `{{epoch.ms}}`        | `1742658600000`                          | Unix milliseconds                |
+| `{{hostname}}`        | `anima-sedes`                            | Machine hostname                 |
+| `{{uuid}}`            | `a1b2c3d4-e5f6-...`                      | Fresh random UUID                |
+| `{{$HOME}}`           | `/Users/michael`                         | Environment variable             |
+| `{{$USER}}`           | `michael`                                | Environment variable             |
+| `{{task.name}}`       | `nightly-backup`                         | Task's own name                  |
+| `{{task.id}}`         | `78f31c98-...`                           | Task's UUID                      |
+| `{{task.firedCount}}` | `42`                                     | How many times task has fired    |
+| `{{task.output_dir}}` | `~/.anima/tasks/nightly-backup/2026/03/` | Auto-created output directory    |
+
+### Output Directory (`{{task.output_dir}}`)
+
+When a task uses `{{task.output_dir}}` in its command, args, or cwd, the scheduler resolves a directory path and **auto-creates it** before execution. This is opt-in — the directory is only created when the variable is referenced.
+
+**Default pattern**: `~/.anima/tasks/<task-slug>/YYYY/MM/`
+
+**Custom pattern**: Set `outputDir` on the task with template variables:
+
+```json
+{
+  "outputDir": "{{$HOME}}/backups/{{date:%Y}}/{{date:%m}}"
+}
+```
+
+The pattern itself supports all template variables (`{{date}}`, `{{$HOME}}`, `{{task.name}}`, etc.) — they're resolved before the directory is created. This avoids repeating date patterns across multiple args.
+
+**Example — organized backups:**
+
+```json
+{
+  "name": "Nightly DB Backup",
+  "type": "cron",
+  "cronExpr": "0 0 * * *",
+  "outputDir": "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}",
+  "action": {
+    "type": "exec",
+    "target": "sqlite3",
+    "payload": {
+      "args": ["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]
+    }
+  }
+}
+```
+
+This creates `~/.anima/backups/2026/03/anima-20260322.db` with the directory structure auto-created.
 
 ### Strftime Tokens
 
@@ -207,7 +244,7 @@ Available at `/scheduler` with:
 
 ## Examples
 
-### Database backup (nightly at 2 AM)
+### Database backup (nightly at 2 AM, organized by year/month)
 
 ```json
 {
@@ -215,11 +252,12 @@ Available at `/scheduler` with:
   "type": "cron",
   "cronExpr": "0 2 * * *",
   "missedPolicy": "fire_once",
+  "outputDir": "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}",
   "action": {
     "type": "exec",
     "target": "sqlite3",
     "payload": {
-      "args": ["{{$HOME}}/.anima/anima.db", ".backup {{$HOME}}/backups/anima-{{date:%Y%m%d}}.db"]
+      "args": ["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]
     }
   }
 }
@@ -255,18 +293,22 @@ Available at `/scheduler` with:
 }
 ```
 
-### Log rotation with timestamp
+### Log rotation with auto-organized archive
 
 ```json
 {
   "name": "Rotate Logs",
   "type": "cron",
   "cronExpr": "0 0 * * 0",
+  "outputDir": "{{$HOME}}/.anima/logs/archive/{{date:%Y}}/{{date:%m}}",
   "action": {
     "type": "exec",
     "target": "mv",
     "payload": {
-      "args": ["{{$HOME}}/.anima/gateway.log", "{{$HOME}}/.anima/logs/gateway-{{date:%Y%m%d}}.log"]
+      "args": [
+        "{{$HOME}}/.anima/logs/gateway.log",
+        "{{task.output_dir}}/gateway-{{date:%Y%m%d}}.log"
+      ]
     }
   }
 }
@@ -274,7 +316,7 @@ Available at `/scheduler` with:
 
 ## Database Schema
 
-Tables are created by gateway migration `018-scheduler-tables.sql`.
+Tables are created by gateway migration `018-scheduler-tables.sql` + `019-scheduler-output-dir.sql`.
 
 ### `scheduler_tasks`
 
@@ -299,6 +341,7 @@ Tables are created by gateway migration `018-scheduler-tables.sql`.
 | `fired_count`            | INTEGER | Total executions                                 |
 | `last_fired_at`          | TEXT    | Last execution time                              |
 | `keep_history`           | INTEGER | Max execution records to retain                  |
+| `output_dir`             | TEXT    | Output dir pattern for `{{task.output_dir}}`     |
 
 ### `scheduler_task_executions`
 

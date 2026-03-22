@@ -92,7 +92,31 @@ Template variables are expanded in exec `target`, `args`, `cwd`, and notificatio
 {{task.name}}         → the task's own name
 {{task.id}}           → the task's UUID
 {{task.firedCount}}   → how many times fired
+{{task.output_dir}}   → auto-created output directory (opt-in)
 ```
+
+### Output Directory (`{{task.output_dir}}`)
+
+When a task uses `{{task.output_dir}}`, the scheduler resolves a directory path and **auto-creates it** before execution. This is opt-in — the directory is only created when the variable is referenced.
+
+- **Default**: `~/.anima/tasks/<task-slug>/YYYY/MM/`
+- **Custom**: Set `outputDir` on the task: `--outputDir "{{$HOME}}/backups/{{date:%Y}}/{{date:%m}}"`
+- The `outputDir` pattern itself supports template variables
+
+**Example — organized backups:**
+
+```bash
+bun run packages/cli/src/index.ts scheduler.add_task \
+  --name "Nightly DB Backup" \
+  --type cron \
+  --cronExpr "0 0 * * *" \
+  --outputDir "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
+  --action.type exec \
+  --action.target sqlite3 \
+  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
+```
+
+Creates `~/.anima/backups/2026/03/anima-20260322.db` with the directory structure auto-created. No `mkdir -p` needed.
 
 Adding new variables: add an entry to `VARIABLES` in `extensions/scheduler/src/template.ts`.
 
@@ -135,20 +159,21 @@ bun run packages/cli/src/index.ts <method> [--param value]
 
 ### `scheduler.add_task`
 
-| Param             | Type     | Required                        | Description                |
-| ----------------- | -------- | ------------------------------- | -------------------------- |
-| `name`            | string   | Yes                             | Human-readable task name   |
-| `description`     | string   | No                              | Optional description       |
-| `type`            | string   | No (default: `once`)            | `once`, `interval`, `cron` |
-| `delaySeconds`    | number   | One of these required           | Seconds from now to fire   |
-| `fireAt`          | string   |                                 | Absolute ISO timestamp     |
-| `cronExpr`        | string   | For cron type                   | Cron expression            |
-| `intervalSeconds` | number   | For interval type               | Repeat interval            |
-| `action`          | object   | Yes                             | What to do when task fires |
-| `missedPolicy`    | string   | No (default: `fire_once`)       | Missed task behavior       |
-| `concurrency`     | string   | No (default: `skip_if_running`) | Concurrency behavior       |
-| `tags`            | string[] | No                              | Tags for grouping          |
-| `keepHistory`     | number   | No (default: 50)                | Executions to retain       |
+| Param             | Type     | Required                        | Description                                  |
+| ----------------- | -------- | ------------------------------- | -------------------------------------------- |
+| `name`            | string   | Yes                             | Human-readable task name                     |
+| `description`     | string   | No                              | Optional description                         |
+| `type`            | string   | No (default: `once`)            | `once`, `interval`, `cron`                   |
+| `delaySeconds`    | number   | One of these required           | Seconds from now to fire                     |
+| `fireAt`          | string   |                                 | Absolute ISO timestamp                       |
+| `cronExpr`        | string   | For cron type                   | Cron expression                              |
+| `intervalSeconds` | number   | For interval type               | Repeat interval                              |
+| `action`          | object   | Yes                             | What to do when task fires                   |
+| `missedPolicy`    | string   | No (default: `fire_once`)       | Missed task behavior                         |
+| `concurrency`     | string   | No (default: `skip_if_running`) | Concurrency behavior                         |
+| `tags`            | string[] | No                              | Tags for grouping                            |
+| `keepHistory`     | number   | No (default: 50)                | Executions to retain                         |
+| `outputDir`       | string   | No                              | Output dir pattern for `{{task.output_dir}}` |
 
 ### `scheduler.update_task`
 
@@ -207,7 +232,7 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --action.payload.text "Good morning, my love! Ready for a great day."
 ```
 
-### Nightly database backup with template variables
+### Nightly database backup with auto-organized directories
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
@@ -215,10 +240,13 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --type cron \
   --cronExpr "0 2 * * *" \
   --missedPolicy fire_once \
+  --outputDir "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
   --action.type exec \
   --action.target sqlite3 \
-  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{$HOME}}/backups/anima-{{date:%Y%m%d}}.db"]'
+  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
 ```
+
+Creates `~/.anima/backups/2026/03/anima-20260322.db` — directory auto-created, no `mkdir -p` needed.
 
 ### Run a script weekly
 
