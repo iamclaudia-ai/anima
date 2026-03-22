@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "predev": "lsof -ti:30086 | xargs kill -9 2>/dev/null || true",
-    "dev": "bun run --watch src/start.ts",
+    "dev": "bun run src/start.ts",
     "start": "bun run src/start.ts",
     "build": "bun build src/start.ts --outdir dist --target bun",
     "test": "bun test",
