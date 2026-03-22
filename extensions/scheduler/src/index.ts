@@ -46,6 +46,7 @@ import {
   updateTaskAfterFire,
 } from "./db.js";
 import { cronParser } from "./cronParser.js";
+import { interpolate, interpolateAll } from "./template.js";
 
 // ── JSON migration ──────────────────────────────────────────
 
@@ -200,7 +201,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           ctx.emit("scheduler.notification", {
             taskId: task.id,
             taskName: task.name,
-            message: task.action.target,
+            message: interpolate(task.action.target, task),
             ...task.action.payload,
           });
           break;
@@ -211,14 +212,17 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
         case "exec": {
           const payload = task.action.payload ?? {};
-          const args = (payload.args as string[]) ?? [];
+          const rawArgs = (payload.args as string[]) ?? [];
           const useShell = (payload.shell as boolean) ?? false;
-          const cwd = (payload.cwd as string) ?? undefined;
+          const rawCwd = (payload.cwd as string) ?? undefined;
           const timeoutMs = (payload.timeoutMs as number) ?? 60_000;
 
-          const cmd = useShell
-            ? ["sh", "-c", [task.action.target, ...args].join(" ")]
-            : [task.action.target, ...args];
+          // Interpolate template variables in command, args, and cwd
+          const target = interpolate(task.action.target, task);
+          const args = interpolateAll(rawArgs, task);
+          const cwd = rawCwd ? interpolate(rawCwd, task) : undefined;
+
+          const cmd = useShell ? ["sh", "-c", [target, ...args].join(" ")] : [target, ...args];
 
           ctx.log.info(`Exec: ${cmd.join(" ")}`, { cwd, timeoutMs });
 
