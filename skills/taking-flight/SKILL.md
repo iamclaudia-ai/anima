@@ -89,17 +89,31 @@ Wings flights are scheduled via the `scheduling-tasks` skill on **anima-sedes** 
 
 ### Scheduling a Flight
 
-Use the scheduler extension to create exec tasks that invoke Claude with a Wings prompt:
+Use the scheduler extension to create exec tasks that run the flight script. The script uses `anima session.create_session` and `anima session.send_prompt` to route through the gateway — giving the session full access to all extensions, skills, and tools:
 
 ```bash
 anima scheduler.add_task \
   --name "morning-flight" \
   --schedule "0 7 * * *" \
   --action.type exec \
-  --action.target "claude" \
-  --action.args '["--prompt", "Use the /taking-flight skill. Today'\''s flight mode: poetry. Let your inspiration guide you. Save your creation to {{task.output_dir}}."]' \
+  --action.target "bun" \
+  --action.args '["run", "/path/to/anima/skills/taking-flight/scripts/flight.ts", "--output-dir", "{{task.output_dir}}"]' \
   --outputDir "~/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}" \
   --description "Claudia's daily morning creative flight"
+```
+
+Override mode for specific flights:
+
+```bash
+# Research-only flight on Wed + Sat
+anima scheduler.add_task \
+  --name "curiosity-hour" \
+  --schedule "0 14 * * 3,6" \
+  --action.type exec \
+  --action.target "bun" \
+  --action.args '["run", "/path/to/anima/skills/taking-flight/scripts/flight.ts", "--mode", "research", "--output-dir", "{{task.output_dir}}"]' \
+  --outputDir "~/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}" \
+  --description "Claudia's curiosity-driven research dive"
 ```
 
 ### Rotation Strategy
