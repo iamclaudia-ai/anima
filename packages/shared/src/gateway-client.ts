@@ -32,6 +32,12 @@ export interface GatewayClientOptions {
   url: string;
   requestTimeoutMs?: number;
   createSocket?: WebSocketFactory;
+  /** Enable auto-reconnect on unexpected disconnects (default: true) */
+  autoReconnect?: boolean;
+  /** Initial reconnect delay in ms (default: 500). Doubles each attempt up to maxReconnectDelayMs. */
+  reconnectDelayMs?: number;
+  /** Maximum reconnect delay in ms (default: 30000) */
+  maxReconnectDelayMs?: number;
 }
 
 export interface GatewayClient {
@@ -74,10 +80,18 @@ function matchEventPattern(event: string, pattern: string): boolean {
 export function createGatewayClient(options: GatewayClientOptions): GatewayClient {
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const socketFactory: WebSocketFactory = options.createSocket ?? ((url) => new WebSocket(url));
+  const autoReconnect = options.autoReconnect ?? true;
+  const baseReconnectDelay = options.reconnectDelayMs ?? 500;
+  const maxReconnectDelay = options.maxReconnectDelayMs ?? 30_000;
   let ws: WebSocketLike | null = null;
   let connectPromise: Promise<void> | null = null;
   let connected = false;
   let currentConnectionId: string | null = null;
+  let intentionalDisconnect = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Track active subscriptions so we can restore them after reconnect */
+  let activeSubscriptions: { events: string[]; exclusive: boolean }[] = [];
   const pending = new Map<string, PendingRequest>();
   const listeners = new Map<string, Set<EventListener>>();
   const connectionListeners = new Set<ConnectionListener>();
@@ -95,6 +109,36 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
       request.reject(error);
       pending.delete(id);
     }
+  }
+
+  function cancelReconnect(): void {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectAttempt = 0;
+  }
+
+  function scheduleReconnect(): void {
+    if (!autoReconnect || intentionalDisconnect) return;
+    const delay = Math.min(baseReconnectDelay * 2 ** reconnectAttempt, maxReconnectDelay);
+    reconnectAttempt++;
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      try {
+        await connect();
+        // Restore subscriptions after successful reconnect
+        for (const sub of activeSubscriptions) {
+          try {
+            await call("gateway.subscribe", { events: sub.events, exclusive: sub.exclusive });
+          } catch {
+            // Subscription restore failed — not fatal, UI will still work
+          }
+        }
+      } catch {
+        // connect() failed — onclose will fire and schedule another attempt
+      }
+    }, delay);
   }
 
   function send(message: Request | Pong): void {
@@ -177,6 +221,8 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
   }
 
   function disconnect(code?: number, reason?: string): void {
+    intentionalDisconnect = true;
+    cancelReconnect();
     const socket = ws;
     ws = null;
     connectPromise = null;
@@ -193,6 +239,8 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
       ws = socket;
 
       socket.onopen = () => {
+        reconnectAttempt = 0;
+        intentionalDisconnect = false;
         notifyConnection(true);
         resolve();
       };
@@ -203,6 +251,7 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
         currentConnectionId = null;
         notifyConnection(false);
         clearPending(new Error("Gateway connection closed"));
+        scheduleReconnect();
       };
 
       socket.onerror = () => {
@@ -259,9 +308,20 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
     disconnect,
     call,
     subscribe(events: string[], exclusive = false) {
+      // Track subscription for restore after reconnect
+      const existing = activeSubscriptions.find(
+        (s) => s.exclusive === exclusive && JSON.stringify(s.events) === JSON.stringify(events),
+      );
+      if (!existing) {
+        activeSubscriptions.push({ events, exclusive });
+      }
       return call("gateway.subscribe", { events, exclusive });
     },
     unsubscribe(events: string[]) {
+      // Remove from tracked subscriptions
+      activeSubscriptions = activeSubscriptions.filter(
+        (s) => JSON.stringify(s.events) !== JSON.stringify(events),
+      );
       return call("gateway.unsubscribe", { events });
     },
     on,
