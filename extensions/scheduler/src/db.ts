@@ -69,7 +69,8 @@ export function setupSchemaForTests(): void {
       created_at             TEXT NOT NULL,
       fired_count            INTEGER NOT NULL DEFAULT 0,
       last_fired_at          TEXT,
-      keep_history           INTEGER NOT NULL DEFAULT 50
+      keep_history           INTEGER NOT NULL DEFAULT 50,
+      output_dir             TEXT
     )
   `);
 
@@ -117,6 +118,7 @@ export interface TaskRow {
   fired_count: number;
   last_fired_at: string | null;
   keep_history: number;
+  output_dir: string | null;
 }
 
 export interface ExecutionRow {
@@ -154,6 +156,8 @@ export interface ScheduledTask {
   firedCount: number;
   lastFiredAt?: string;
   keepHistory: number;
+  /** Output directory pattern with template variables. Resolved and auto-created via {{task.output_dir}}. */
+  outputDir?: string;
 }
 
 // ── Row ↔ Task conversion ───────────────────────────────────
@@ -181,6 +185,7 @@ function rowToTask(row: TaskRow): ScheduledTask {
     firedCount: row.fired_count,
     lastFiredAt: row.last_fired_at ?? undefined,
     keepHistory: row.keep_history,
+    outputDir: row.output_dir ?? undefined,
   };
 }
 
@@ -193,8 +198,8 @@ export function insertTask(task: ScheduledTask): void {
        (id, name, description, type, fire_at, interval_seconds, cron_expr,
         action_type, action_target, action_payload,
         missed_policy, concurrency, start_deadline_seconds,
-        enabled, tags, created_at, fired_count, last_fired_at, keep_history)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        enabled, tags, created_at, fired_count, last_fired_at, keep_history, output_dir)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
@@ -216,6 +221,7 @@ export function insertTask(task: ScheduledTask): void {
       task.firedCount,
       task.lastFiredAt ?? null,
       task.keepHistory,
+      task.outputDir ?? null,
     );
 }
 
@@ -277,6 +283,7 @@ export function updateTask(
       | "startDeadlineSeconds"
       | "tags"
       | "keepHistory"
+      | "outputDir"
     >
   >,
 ): void {
@@ -322,6 +329,10 @@ export function updateTask(
   if (updates.keepHistory !== undefined) {
     setClauses.push("keep_history = ?");
     values.push(updates.keepHistory);
+  }
+  if (updates.outputDir !== undefined) {
+    setClauses.push("output_dir = ?");
+    values.push(updates.outputDir);
   }
 
   if (setClauses.length === 0) return;
@@ -417,8 +428,8 @@ export function migrateLegacyTasks(legacyTasks: LegacyTask[]): number {
      (id, name, description, type, fire_at, interval_seconds, cron_expr,
       action_type, action_target, action_payload,
       missed_policy, concurrency, start_deadline_seconds,
-      enabled, tags, created_at, fired_count, last_fired_at, keep_history)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      enabled, tags, created_at, fired_count, last_fired_at, keep_history, output_dir)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   for (const task of legacyTasks) {
@@ -442,6 +453,7 @@ export function migrateLegacyTasks(legacyTasks: LegacyTask[]): number {
       task.firedCount,
       null, // last_fired_at
       50, // keep_history default
+      null, // output_dir
     );
     if (result.changes > 0) count++;
   }

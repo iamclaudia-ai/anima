@@ -80,6 +80,31 @@ describe("template interpolation", () => {
     expect(interpolate("{{task.type}}", mockTask)).toBe("cron");
   });
 
+  it("resolves {{task.output_dir}} with default pattern and creates directory", () => {
+    const result = interpolate("{{task.output_dir}}", mockTask);
+    const now = new Date();
+    const year = String(now.getFullYear());
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    expect(result).toContain("/.anima/tasks/nightly-backup/");
+    expect(result).toContain(`/${year}/${month}`);
+    // Directory should exist
+    const { existsSync } = require("node:fs");
+    expect(existsSync(result)).toBe(true);
+  });
+
+  it("resolves {{task.output_dir}} with custom outputDir pattern", () => {
+    const customTask = {
+      ...mockTask,
+      outputDir: "{{$HOME}}/my-backups/{{date:%Y}}/{{task.name}}",
+    };
+    const result = interpolate("{{task.output_dir}}", customTask);
+    expect(result).toBe(
+      `${process.env.HOME}/my-backups/${new Date().getFullYear()}/nightly-backup`,
+    );
+    const { existsSync } = require("node:fs");
+    expect(existsSync(result)).toBe(true);
+  });
+
   it("leaves unknown task fields as-is", () => {
     expect(interpolate("{{task.bogus}}", mockTask)).toBe("{{task.bogus}}");
   });

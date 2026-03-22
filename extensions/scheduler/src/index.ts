@@ -358,6 +358,12 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           .describe("Skip if missed by more than N seconds"),
         tags: z.array(z.string()).optional().describe("Tags for grouping/filtering"),
         keepHistory: z.number().default(50).describe("Number of executions to retain"),
+        outputDir: z
+          .string()
+          .optional()
+          .describe(
+            "Output directory pattern for {{task.output_dir}}. Supports template variables. Default: ~/.anima/tasks/<slug>/YYYY/MM/",
+          ),
       }),
     },
     {
@@ -373,6 +379,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         startDeadlineSeconds: z.number().optional(),
         tags: z.array(z.string()).optional(),
         keepHistory: z.number().optional(),
+        outputDir: z.string().optional(),
         enabled: z.boolean().optional(),
       }),
     },
@@ -433,6 +440,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           startDeadlineSeconds,
           tags,
           keepHistory = 50,
+          outputDir,
         } = params as {
           name: string;
           description?: string;
@@ -451,6 +459,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           startDeadlineSeconds?: number;
           tags?: string[];
           keepHistory?: number;
+          outputDir?: string;
         };
 
         // Compute fire time
@@ -487,6 +496,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           createdAt: new Date().toISOString(),
           firedCount: 0,
           keepHistory,
+          outputDir,
         };
 
         insertTask(task);
@@ -522,6 +532,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           startDeadlineSeconds?: number;
           tags?: string[];
           keepHistory?: number;
+          outputDir?: string;
         };
 
         const existing = getTaskById(taskId);

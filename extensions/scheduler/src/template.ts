@@ -11,6 +11,9 @@
  *   {{task.field}}     — task self-reference (e.g. {{task.name}}, {{task.id}})
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { ScheduledTask } from "./db.js";
 
 // ── Variable Definitions ─────────────────────────────────────
@@ -174,9 +177,67 @@ function resolveTaskField(task: ScheduledTask, field: string): string | undefine
       return String(task.firedCount);
     case "lastFiredAt":
       return task.lastFiredAt;
+    case "output_dir":
+      return resolveOutputDir(task);
     default:
       return undefined;
   }
+}
+
+// ── Output Directory ──────────────────────────────────────────
+
+/** Slugify a task name for use as a directory name */
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Resolve the output directory for a task.
+ * Uses the task's `outputDir` pattern if set, otherwise a default.
+ * Interpolates template variables within the pattern (excluding task.output_dir to avoid recursion).
+ * Auto-creates the directory.
+ */
+function resolveOutputDir(task: ScheduledTask): string {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const slug = slugify(task.name);
+
+  const defaultPattern = join(homedir(), ".anima", "tasks", slug, year, month);
+  const pattern = task.outputDir ?? defaultPattern;
+
+  // Interpolate variables within the pattern itself (but skip task.output_dir to avoid recursion)
+  const resolved = pattern.replace(TEMPLATE_RE, (_match, expr: string) => {
+    const trimmed = expr.trim();
+    if (trimmed === "task.output_dir") return _match; // prevent recursion
+
+    // Env vars
+    if (trimmed.startsWith("$")) {
+      return process.env[trimmed.slice(1)] ?? _match;
+    }
+
+    // Task fields (except output_dir)
+    if (trimmed.startsWith("task.")) {
+      const f = trimmed.slice(5);
+      if (f === "output_dir") return _match;
+      return resolveTaskField(task, f) ?? _match;
+    }
+
+    // Built-in variables
+    const colonIdx = trimmed.indexOf(":");
+    const name = colonIdx >= 0 ? trimmed.slice(0, colonIdx) : trimmed;
+    const arg = colonIdx >= 0 ? trimmed.slice(colonIdx + 1) : undefined;
+    const def = VARIABLES[name];
+    return def ? def.resolve(arg, task) : _match;
+  });
+
+  // Auto-create the directory
+  mkdirSync(resolved, { recursive: true });
+
+  return resolved;
 }
 
 // ── Exports for Discovery ────────────────────────────────────
@@ -193,7 +254,12 @@ export function listVariables(): Array<{ name: string; description: string }> {
     {
       name: "{{task.*}}",
       description:
-        "Task fields: id, name, description, type, fireAt, cronExpr, createdAt, firedCount, lastFiredAt",
+        "Task fields: id, name, description, type, fireAt, cronExpr, createdAt, firedCount, lastFiredAt, output_dir",
+    },
+    {
+      name: "{{task.output_dir}}",
+      description:
+        "Auto-created output directory. Default: ~/.anima/tasks/<task-slug>/YYYY/MM/. Customizable via outputDir on the task.",
     },
   );
 

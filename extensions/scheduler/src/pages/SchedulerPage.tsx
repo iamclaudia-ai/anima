@@ -11,7 +11,7 @@ import { useGatewayClient } from "@anima/ui";
 // ── Types ────────────────────────────────────────────────────
 
 interface TaskAction {
-  type: "emit" | "extension_call" | "notification";
+  type: "emit" | "extension_call" | "notification" | "exec";
   target: string;
   payload?: Record<string, unknown>;
 }
@@ -441,11 +441,78 @@ function TaskCard({ task, onFire, onCancel, onToggle, onViewHistory }: TaskCardP
       </div>
 
       {/* Action info */}
-      <div className="mt-2 text-xs text-zinc-500">
-        <span className="text-zinc-600">{task.action.type}:</span>{" "}
-        <span className="text-zinc-400">{task.action.target}</span>
-        {task.firedCount > 0 && <span className="ml-2">· fired {task.firedCount}×</span>}
-        {task.lastFiredAt && <span className="ml-1">· last {formatTime(task.lastFiredAt)}</span>}
+      <div className="mt-2 space-y-1">
+        <div className="text-xs text-zinc-500">
+          <span className="text-zinc-600">{task.action.type}:</span>{" "}
+          <span className="text-zinc-400 font-mono">{task.action.target}</span>
+          {task.firedCount > 0 && <span className="ml-2">· fired {task.firedCount}×</span>}
+          {task.lastFiredAt && <span className="ml-1">· last {formatTime(task.lastFiredAt)}</span>}
+        </div>
+
+        {/* Exec details */}
+        {task.action.type === "exec" && task.action.payload && (
+          <div className="text-xs space-y-0.5 pl-2 border-l-2 border-zinc-700/50">
+            {Array.isArray(task.action.payload.args) &&
+              (task.action.payload.args as string[]).length > 0 && (
+                <div>
+                  <span className="text-zinc-600">args: </span>
+                  <span className="text-zinc-400 font-mono">
+                    {(task.action.payload.args as string[]).join(" ")}
+                  </span>
+                </div>
+              )}
+            {typeof task.action.payload.cwd === "string" && (
+              <div>
+                <span className="text-zinc-600">cwd: </span>
+                <span className="text-zinc-400 font-mono">{task.action.payload.cwd}</span>
+              </div>
+            )}
+            {task.action.payload.shell === true && (
+              <span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                shell
+              </span>
+            )}
+            {typeof task.action.payload.timeoutMs === "number" && (
+              <div>
+                <span className="text-zinc-600">timeout: </span>
+                <span className="text-zinc-400">
+                  {formatDuration(task.action.payload.timeoutMs)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Extension call payload */}
+        {task.action.type === "extension_call" && task.action.payload && (
+          <div className="text-xs pl-2 border-l-2 border-zinc-700/50">
+            {Object.entries(task.action.payload).map(([key, val]) => (
+              <div key={key}>
+                <span className="text-zinc-600">{key}: </span>
+                <span className="text-zinc-400">
+                  {typeof val === "string" ? val : JSON.stringify(val)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Description */}
+        {task.description && <div className="text-xs text-zinc-600 italic">{task.description}</div>}
+
+        {/* Policies */}
+        <div className="flex gap-2 text-xs">
+          {task.missedPolicy && task.missedPolicy !== "fire_once" && (
+            <span className="text-zinc-600">
+              missed: <span className="text-zinc-500">{task.missedPolicy}</span>
+            </span>
+          )}
+          {task.concurrency && task.concurrency !== "skip_if_running" && (
+            <span className="text-zinc-600">
+              concurrency: <span className="text-zinc-500">{task.concurrency}</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Actions row */}
@@ -504,37 +571,36 @@ function HistoryPanel({ taskName, executions, onClose }: HistoryPanelProps) {
       {executions.length === 0 ? (
         <p className="text-xs text-zinc-500">No executions yet.</p>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {executions.map((exec) => (
-            <div
-              key={exec.id}
-              className="flex items-center gap-3 text-xs py-1.5 border-b border-zinc-800 last:border-0"
-            >
-              <span className="w-5 text-center">{STATUS_ICONS[exec.status] || "?"}</span>
-              <span className="text-zinc-400 w-36">{formatTime(exec.firedAt)}</span>
-              <span className="text-zinc-500 w-16 text-right">
-                {exec.durationMs != null ? formatDuration(exec.durationMs) : "—"}
-              </span>
-              <span
-                className={`${
-                  exec.status === "success"
-                    ? "text-emerald-400"
-                    : exec.status === "error"
-                      ? "text-red-400"
-                      : exec.status === "skipped"
-                        ? "text-amber-400"
-                        : "text-zinc-400"
-                }`}
-              >
-                {exec.status}
-              </span>
-              {exec.error && <span className="text-red-400/70 truncate ml-2">{exec.error}</span>}
+            <div key={exec.id} className="border-b border-zinc-800 last:border-0 py-1.5">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="w-5 text-center">{STATUS_ICONS[exec.status] || "?"}</span>
+                <span className="text-zinc-400 w-36">{formatTime(exec.firedAt)}</span>
+                <span className="text-zinc-500 w-16 text-right">
+                  {exec.durationMs != null ? formatDuration(exec.durationMs) : "—"}
+                </span>
+                <span
+                  className={`${
+                    exec.status === "success"
+                      ? "text-emerald-400"
+                      : exec.status === "error"
+                        ? "text-red-400"
+                        : exec.status === "skipped"
+                          ? "text-amber-400"
+                          : "text-zinc-400"
+                  }`}
+                >
+                  {exec.status}
+                </span>
+              </div>
+              {exec.error && <div className="mt-1 ml-8 text-xs text-red-400/70">{exec.error}</div>}
               {exec.output && (
-                <details className="ml-2">
-                  <summary className="text-zinc-500 cursor-pointer hover:text-zinc-400">
-                    output
+                <details className="mt-1 ml-8">
+                  <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400">
+                    📋 output ({exec.output.length} chars)
                   </summary>
-                  <pre className="mt-1 p-2 bg-zinc-900 rounded text-xs text-zinc-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                  <pre className="mt-1 p-2 bg-zinc-900 rounded text-xs text-zinc-400 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto border border-zinc-800">
                     {exec.output}
                   </pre>
                 </details>
