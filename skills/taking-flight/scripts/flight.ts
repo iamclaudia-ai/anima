@@ -351,7 +351,6 @@ async function main() {
     options: {
       mode: { type: "string", short: "m" },
       "output-dir": { type: "string", short: "o" },
-      "session-id": { type: "string", short: "s" },
     },
   });
 
@@ -371,35 +370,13 @@ async function main() {
 
   const { prompt } = buildPrompt(mode, outputDir);
 
-  // Get or create a session
-  let sessionId = values["session-id"] || "";
-
-  if (!sessionId) {
-    console.log(`🔧  Creating session...`);
-    const result = await animaCall("session.create_session", {
-      cwd: outputDir,
-    });
-    // Parse sessionId from JSON response
-    try {
-      const parsed = JSON.parse(result);
-      sessionId = parsed.sessionId;
-    } catch {
-      // If not JSON, try to extract sessionId
-      const match = result.match(/sessionId["\s:]+["']?([^"'\s,}]+)/);
-      sessionId = match?.[1] ?? "";
-    }
-    if (!sessionId) {
-      throw new Error(`Failed to create session. Response: ${result}`);
-    }
-    console.log(`✅  Session: ${sessionId}`);
-  }
-
   // Send the creative prompt through the gateway
-  console.log(`🚀  Sending prompt to session...`);
+  // send_prompt auto-creates a session if one doesn't exist for the cwd
+  console.log(`🚀  Sending prompt...`);
 
   await animaCall("session.send_prompt", {
-    sessionId,
     content: prompt,
+    cwd: outputDir,
   });
 
   console.log(`✅  Flight complete! Output saved to: ${outputDir}`);
