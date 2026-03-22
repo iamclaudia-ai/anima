@@ -136,7 +136,7 @@ async function spawnOutOfProcessExtension(
   id: string,
   config: Record<string, unknown>,
   sourceRoutes?: string[],
-  hot: boolean = true,
+  hot: boolean = false,
 ): Promise<void> {
   // Check if already started
   if (startedExtensions.has(id)) {
@@ -309,7 +309,7 @@ async function loadExtensions(): Promise<void> {
 
   const results = await Promise.allSettled(
     enabledExtensions.map(([id, ext]) =>
-      spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot !== false),
+      spawnOutOfProcessExtension(id, ext.config, ext.sourceRoutes, ext.hot === true),
     ),
   );
 
@@ -346,7 +346,7 @@ async function startExtension(id: string, extensionConfig: ExtensionConfig): Pro
       id,
       extensionConfig.config,
       extensionConfig.sourceRoutes,
-      extensionConfig.hot !== false,
+      extensionConfig.hot === true,
     );
     log.info("Extension started successfully", { id });
 

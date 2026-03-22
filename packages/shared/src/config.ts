@@ -59,8 +59,8 @@ export interface ExtensionConfig {
   enabled: boolean;
   /** Source prefixes this extension handles for routing (e.g., ["imessage"]) */
   sourceRoutes?: string[];
-  /** Enable Bun --hot for live reloading (default: true). Set false for extensions
-   *  that manage long-lived processes (e.g. session) where HMR would be disruptive. */
+  /** Enable Bun --hot for live reloading (default: false). Set true explicitly
+   *  for rapid iteration when developing an extension. */
   hot?: boolean;
   config: Record<string, unknown>;
 }

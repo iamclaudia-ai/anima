@@ -85,7 +85,7 @@ export class ExtensionHostProcess {
     ) => void,
     private onRegister: (registration: ExtensionRegistration, generationToken?: string) => void,
     private onCall?: OnCallCallback,
-    private hot: boolean = true,
+    private hot: boolean = false,
   ) {}
 
   /**
