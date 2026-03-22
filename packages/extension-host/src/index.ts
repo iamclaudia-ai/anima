@@ -376,30 +376,34 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
   // ── Stdin Reading ───────────────────────────────────────────
   // IMPORTANT: Only attach listeners once — they persist across HMR reloads
-  // since process.stdin is the same object. We track this via import.meta.hot.data
-  // which survives across HMR cycles (unlike module-level variables which re-init).
-
-  const stdinAlreadyBound = import.meta.hot?.data?.stdinBound === true;
+  // since process.stdin is the same object. We defensively remove all existing
+  // listeners before attaching to prevent stacking across HMR cycles.
 
   function readStdin(): void {
-    if (stdinAlreadyBound) {
-      hostLog.info("Stdin already bound, skipping listener setup (HMR reload)");
-      return;
-    }
-    if (import.meta.hot) {
-      import.meta.hot.data.stdinBound = true;
-    }
+    // Defensively remove ALL existing listeners to prevent stacking.
+    // HMR reloads can cause multiple registrations if the guard flag
+    // doesn't survive properly — belt AND suspenders.
+    process.stdin.removeAllListeners("data");
+    process.stdin.removeAllListeners("end");
+    process.stdin.removeAllListeners("error");
 
-    let buffer = "";
+    // Preserve buffer across HMR reloads so partial lines aren't lost
+    let buffer = import.meta.hot?.data?.stdinBuffer ?? "";
 
     process.stdin.setEncoding("utf-8");
     process.stdin.on("data", async (chunk: string) => {
       buffer += chunk;
+      if (import.meta.hot) {
+        import.meta.hot.data.stdinBuffer = buffer;
+      }
 
       let newlineIndex: number;
       while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, newlineIndex).trim();
         buffer = buffer.slice(newlineIndex + 1);
+        if (import.meta.hot) {
+          import.meta.hot.data.stdinBuffer = buffer;
+        }
 
         if (line.length > 0) {
           // Use latest handler from hot data (survives HMR reloads)
@@ -432,11 +436,15 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     if (import.meta.hot) {
       import.meta.hot.data.extension = extension;
     }
-    if (stdinAlreadyBound) {
+    const isHmrReload = import.meta.hot?.data?.stdinInitialized === true;
+    if (isHmrReload) {
       hostLog.info("Extension hot-reloaded successfully", {
         id: extension.id,
         name: extension.name,
       });
+    }
+    if (import.meta.hot) {
+      import.meta.hot.data.stdinInitialized = true;
     }
     readStdin();
   } catch (error) {
