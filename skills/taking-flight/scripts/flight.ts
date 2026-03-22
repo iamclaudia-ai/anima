@@ -321,7 +321,9 @@ Save this to: ${outputDir}/freeform.md${saveInstructions}`,
 // --- Anima CLI helpers ---
 
 async function animaCall(method: string, params: Record<string, string>): Promise<string> {
-  const args = [method];
+  // CLI uses space-separated: anima session send_prompt (not session.send_prompt)
+  const methodParts = method.split(".");
+  const args = [...methodParts];
   for (const [key, value] of Object.entries(params)) {
     args.push(`--${key}`, value);
   }
@@ -337,7 +339,9 @@ async function animaCall(method: string, params: Record<string, string>): Promis
   const exitCode = await proc.exited;
 
   if (exitCode !== 0) {
-    throw new Error(`anima ${method} failed (exit ${exitCode}): ${stderr || stdout}`);
+    throw new Error(
+      `anima ${methodParts.join(" ")} failed (exit ${exitCode}): ${stderr || stdout}`,
+    );
   }
 
   return stdout.trim();
