@@ -63,7 +63,17 @@ describe("template interpolation", () => {
     expect(result).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
-  it("interpolates {{$ENV}} from environment", () => {
+  it("interpolates {{env.HOME}} from environment", () => {
+    const result = interpolate("{{env.HOME}}", mockTask);
+    expect(result).toBe(process.env.HOME!);
+  });
+
+  it("leaves unknown {{env.*}} as-is", () => {
+    const result = interpolate("{{env.DEFINITELY_NOT_SET_12345}}", mockTask);
+    expect(result).toBe("{{env.DEFINITELY_NOT_SET_12345}}");
+  });
+
+  it("interpolates legacy {{$ENV}} from environment", () => {
     const result = interpolate("{{$HOME}}", mockTask);
     expect(result).toBe(process.env.HOME!);
   });
@@ -92,10 +102,10 @@ describe("template interpolation", () => {
     expect(existsSync(result)).toBe(true);
   });
 
-  it("resolves {{task.output_dir}} with custom outputDir pattern", () => {
+  it("resolves {{task.output_dir}} with custom outputDir pattern using env.*", () => {
     const customTask = {
       ...mockTask,
-      outputDir: "{{$HOME}}/my-backups/{{date:%Y}}/{{task.name}}",
+      outputDir: "{{env.HOME}}/my-backups/{{date:%Y}}/{{task.name}}",
     };
     const result = interpolate("{{task.output_dir}}", customTask);
     expect(result).toBe(
@@ -138,6 +148,7 @@ describe("listVariables", () => {
     expect(names).toContain("{{timestamp}}");
     expect(names).toContain("{{epoch}}");
     expect(names).toContain("{{uuid}}");
+    expect(names).toContain("{{env.*}}");
     expect(names).toContain("{{$ENV_VAR}}");
     expect(names).toContain("{{task.*}}");
   });

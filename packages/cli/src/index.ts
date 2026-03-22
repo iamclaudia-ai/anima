@@ -117,8 +117,8 @@ export function coerceValue(value: string): unknown {
   }
 
   if (
-    (value.startsWith("{") && value.endsWith("}")) ||
-    (value.startsWith("[") && value.endsWith("]"))
+    (value.startsWith("[") && value.endsWith("]")) ||
+    (value.startsWith("{") && value.endsWith("}") && !value.startsWith("{{"))
   ) {
     try {
       return JSON.parse(value);

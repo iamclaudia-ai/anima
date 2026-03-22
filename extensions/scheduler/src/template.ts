@@ -7,7 +7,8 @@
  * Syntax:
  *   {{name}}           — basic variable (e.g. {{timestamp}}, {{epoch}})
  *   {{name:format}}    — variable with format arg (e.g. {{date:%Y-%m-%d}})
- *   {{$ENV_VAR}}       — environment variable (e.g. {{$HOME}}, {{$USER}})
+ *   {{env.NAME}}       — environment variable (e.g. {{env.HOME}}, {{env.USER}})
+ *   {{$ENV_VAR}}       — legacy env syntax (e.g. {{$HOME}}) — avoid in CLI, shell expands $
  *   {{task.field}}     — task self-reference (e.g. {{task.name}}, {{task.id}})
  */
 
@@ -124,7 +125,13 @@ export function interpolate(input: string, task: ScheduledTask): string {
   return input.replace(TEMPLATE_RE, (_match, expr: string) => {
     const trimmed = expr.trim();
 
-    // Environment variable: {{$HOME}}, {{$USER}}
+    // Environment variable: {{env.HOME}}, {{env.USER}} (preferred)
+    if (trimmed.startsWith("env.")) {
+      const envName = trimmed.slice(4);
+      return process.env[envName] ?? _match;
+    }
+
+    // Legacy env syntax: {{$HOME}}, {{$USER}} (works but shell can expand $)
     if (trimmed.startsWith("$")) {
       const envName = trimmed.slice(1);
       return process.env[envName] ?? _match;
@@ -214,7 +221,10 @@ function resolveOutputDir(task: ScheduledTask): string {
     const trimmed = expr.trim();
     if (trimmed === "task.output_dir") return _match; // prevent recursion
 
-    // Env vars
+    // Env vars: {{env.HOME}} (preferred) or {{$HOME}} (legacy)
+    if (trimmed.startsWith("env.")) {
+      return process.env[trimmed.slice(4)] ?? _match;
+    }
     if (trimmed.startsWith("$")) {
       return process.env[trimmed.slice(1)] ?? _match;
     }
@@ -250,7 +260,16 @@ export function listVariables(): Array<{ name: string; description: string }> {
   }));
 
   vars.push(
-    { name: "{{$ENV_VAR}}", description: "Any environment variable (e.g. {{$HOME}}, {{$USER}})" },
+    {
+      name: "{{env.*}}",
+      description:
+        "Environment variable (e.g. {{env.HOME}}, {{env.USER}}). Preferred over {{$VAR}} which conflicts with shell expansion.",
+    },
+    {
+      name: "{{$ENV_VAR}}",
+      description:
+        "Legacy env variable syntax (e.g. {{$HOME}}). Use {{env.*}} from CLI to avoid shell expansion.",
+    },
     {
       name: "{{task.*}}",
       description:
