@@ -15,6 +15,7 @@
  *   - "emit"           — Emit a gateway event with payload
  *   - "extension_call" — Call an extension method via ctx.call()
  *   - "notification"   — Emit scheduler.notification event (convenience)
+ *   - "exec"           — Spawn a shell command (target = binary, payload.args/shell/cwd/timeoutMs)
  *
  * Policies (cron tasks):
  *   - missedPolicy:  "fire_once" | "skip" | "fire_all"
@@ -184,6 +185,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
     ctx.log.info(`Firing scheduled task: ${task.name}`, { id: task.id, action: task.action });
 
+    let execOutput: string | undefined;
+
     try {
       switch (task.action.type) {
         case "emit":
@@ -206,10 +209,60 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         case "extension_call":
           await ctx.call(task.action.target, task.action.payload ?? {});
           break;
+
+        case "exec": {
+          const payload = task.action.payload ?? {};
+          const args = (payload.args as string[]) ?? [];
+          const useShell = (payload.shell as boolean) ?? false;
+          const cwd = (payload.cwd as string) ?? undefined;
+          const timeoutMs = (payload.timeoutMs as number) ?? 60_000;
+
+          const cmd = useShell
+            ? ["sh", "-c", [task.action.target, ...args].join(" ")]
+            : [task.action.target, ...args];
+
+          ctx.log.info(`Exec: ${cmd.join(" ")}`, { cwd, timeoutMs });
+
+          const proc = Bun.spawn(cmd, {
+            cwd,
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+
+          // Race against timeout
+          const timeoutPromise = new Promise<"timeout">((resolve) =>
+            setTimeout(() => resolve("timeout"), timeoutMs),
+          );
+          const exitPromise = proc.exited.then((code) => ({ code }));
+          const result = await Promise.race([exitPromise, timeoutPromise]);
+
+          if (result === "timeout") {
+            proc.kill();
+            throw new Error(`Process timed out after ${timeoutMs}ms`);
+          }
+
+          const stdout = await new Response(proc.stdout).text();
+          const stderr = await new Response(proc.stderr).text();
+          const exitCode = result.code;
+
+          // Capture output for execution history (truncate to 4KB)
+          const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n---\n");
+          if (combined) execOutput = combined.slice(0, 4096);
+
+          if (exitCode !== 0) {
+            throw new Error(
+              `Process exited with code ${exitCode}${stderr ? `\n${stderr.slice(0, 500)}` : ""}`,
+            );
+          }
+
+          if (stdout.trim()) ctx.log.info(`[exec stdout] ${stdout.trim().slice(0, 200)}`);
+          if (stderr.trim()) ctx.log.info(`[exec stderr] ${stderr.trim().slice(0, 200)}`);
+          break;
+        }
       }
 
       const durationMs = Math.round(performance.now() - startMs);
-      completeExecution(execId, "success", durationMs);
+      completeExecution(execId, "success", durationMs, undefined, execOutput);
 
       // Emit generic task_fired event
       ctx.emit("scheduler.task_fired", {
@@ -288,7 +341,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           .optional()
           .describe('For cron tasks: cron expression (e.g. "0 9 * * 1-5")'),
         action: z.object({
-          type: z.enum(["emit", "extension_call", "notification"]).default("notification"),
+          type: z.enum(["emit", "extension_call", "notification", "exec"]).default("notification"),
           target: z.string().describe("Event name, method name, or notification message"),
           payload: z.record(z.unknown()).optional(),
         }),
@@ -386,7 +439,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           intervalSeconds?: number;
           cronExpr?: string;
           action: {
-            type: "emit" | "extension_call" | "notification";
+            type: "emit" | "extension_call" | "notification" | "exec";
             target: string;
             payload?: Record<string, unknown>;
           };
@@ -560,6 +613,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
             status: e.status,
             durationMs: e.duration_ms,
             error: e.error,
+            output: e.output,
           })),
           count: executions.length,
         };

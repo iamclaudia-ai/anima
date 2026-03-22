@@ -56,7 +56,7 @@ export function setupSchema(): void {
       fire_at                TEXT NOT NULL,
       interval_seconds       INTEGER,
       cron_expr              TEXT,
-      action_type            TEXT NOT NULL CHECK(action_type IN ('emit', 'extension_call', 'notification')),
+      action_type            TEXT NOT NULL CHECK(action_type IN ('emit', 'extension_call', 'notification', 'exec')),
       action_target          TEXT NOT NULL,
       action_payload         TEXT,
       missed_policy          TEXT NOT NULL DEFAULT 'fire_once' CHECK(missed_policy IN ('fire_once', 'skip', 'fire_all')),
@@ -80,6 +80,7 @@ export function setupSchema(): void {
       status       TEXT NOT NULL CHECK(status IN ('running', 'success', 'error', 'skipped', 'cancelled')),
       duration_ms  INTEGER,
       error        TEXT,
+      output       TEXT,
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -87,9 +88,55 @@ export function setupSchema(): void {
   d.exec(
     `CREATE INDEX IF NOT EXISTS idx_sched_exec_task ON scheduler_task_executions(task_id, fired_at DESC)`,
   );
+
+  // Migration: add output column to existing execution tables
+  try {
+    d.exec(`ALTER TABLE scheduler_task_executions ADD COLUMN output TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
   d.exec(
     `CREATE INDEX IF NOT EXISTS idx_sched_tasks_fire ON scheduler_tasks(fire_at) WHERE enabled = 1`,
   );
+
+  // Migration: add 'exec' to action_type CHECK constraint for existing databases.
+  // SQLite doesn't support ALTER CHECK, so we recreate the table if the old constraint exists.
+  const tableInfo = d
+    .query(`SELECT sql FROM sqlite_master WHERE name = 'scheduler_tasks'`)
+    .get() as {
+    sql: string;
+  } | null;
+  if (tableInfo?.sql && !tableInfo.sql.includes("'exec'")) {
+    d.exec(`
+      CREATE TABLE scheduler_tasks_new (
+        id                     TEXT PRIMARY KEY,
+        name                   TEXT NOT NULL,
+        description            TEXT,
+        type                   TEXT NOT NULL CHECK(type IN ('once', 'interval', 'cron')),
+        fire_at                TEXT NOT NULL,
+        interval_seconds       INTEGER,
+        cron_expr              TEXT,
+        action_type            TEXT NOT NULL CHECK(action_type IN ('emit', 'extension_call', 'notification', 'exec')),
+        action_target          TEXT NOT NULL,
+        action_payload         TEXT,
+        missed_policy          TEXT NOT NULL DEFAULT 'fire_once' CHECK(missed_policy IN ('fire_once', 'skip', 'fire_all')),
+        concurrency            TEXT NOT NULL DEFAULT 'skip_if_running' CHECK(concurrency IN ('allow', 'skip_if_running', 'cancel_previous')),
+        start_deadline_seconds INTEGER,
+        enabled                INTEGER NOT NULL DEFAULT 1,
+        tags                   TEXT,
+        created_at             TEXT NOT NULL,
+        fired_count            INTEGER NOT NULL DEFAULT 0,
+        last_fired_at          TEXT,
+        keep_history           INTEGER NOT NULL DEFAULT 50
+      )
+    `);
+    d.exec(`INSERT INTO scheduler_tasks_new SELECT * FROM scheduler_tasks`);
+    d.exec(`DROP TABLE scheduler_tasks`);
+    d.exec(`ALTER TABLE scheduler_tasks_new RENAME TO scheduler_tasks`);
+    d.exec(
+      `CREATE INDEX IF NOT EXISTS idx_sched_tasks_fire ON scheduler_tasks(fire_at) WHERE enabled = 1`,
+    );
+  }
 }
 
 // ── Types ───────────────────────────────────────────────────
@@ -102,7 +149,7 @@ export interface TaskRow {
   fire_at: string;
   interval_seconds: number | null;
   cron_expr: string | null;
-  action_type: "emit" | "extension_call" | "notification";
+  action_type: "emit" | "extension_call" | "notification" | "exec";
   action_target: string;
   action_payload: string | null;
   missed_policy: "fire_once" | "skip" | "fire_all";
@@ -124,6 +171,7 @@ export interface ExecutionRow {
   status: "running" | "success" | "error" | "skipped" | "cancelled";
   duration_ms: number | null;
   error: string | null;
+  output: string | null;
   created_at: string;
 }
 
@@ -137,7 +185,7 @@ export interface ScheduledTask {
   intervalSeconds?: number;
   cronExpr?: string;
   action: {
-    type: "emit" | "extension_call" | "notification";
+    type: "emit" | "extension_call" | "notification" | "exec";
     target: string;
     payload?: Record<string, unknown>;
   };
@@ -349,14 +397,15 @@ export function completeExecution(
   status: "success" | "error",
   durationMs: number,
   error?: string,
+  output?: string,
 ): void {
   getDb()
     .query(
       `UPDATE scheduler_task_executions
-       SET status = ?, completed_at = ?, duration_ms = ?, error = ?
+       SET status = ?, completed_at = ?, duration_ms = ?, error = ?, output = ?
        WHERE id = ?`,
     )
-    .run(status, new Date().toISOString(), durationMs, error ?? null, id);
+    .run(status, new Date().toISOString(), durationMs, error ?? null, output ?? null, id);
 }
 
 export function getExecutionsForTask(taskId: string, limit = 50): ExecutionRow[] {
@@ -394,7 +443,7 @@ export interface LegacyTask {
   fireAt: string;
   intervalSeconds?: number;
   action: {
-    type: "emit" | "extension_call" | "notification";
+    type: "emit" | "extension_call" | "notification" | "exec";
     target: string;
     payload?: Record<string, unknown>;
   };

@@ -41,6 +41,7 @@ interface Execution {
   status: "running" | "success" | "error" | "skipped" | "cancelled";
   durationMs?: number;
   error?: string;
+  output?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -90,7 +91,7 @@ const STATUS_ICONS: Record<string, string> = {
 
 // ── Add Task Form ────────────────────────────────────────────
 
-type ActionType = "notification" | "extension_call" | "emit";
+type ActionType = "notification" | "extension_call" | "emit" | "exec";
 
 interface AddTaskFormProps {
   onSubmit: (task: Record<string, unknown>) => void;
@@ -105,15 +106,28 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
   const [cronExpr, setCronExpr] = useState("0 9 * * *");
   const [actionType, setActionType] = useState<ActionType>("notification");
   const [actionTarget, setActionTarget] = useState("");
+  const [execArgs, setExecArgs] = useState("");
+  const [execShell, setExecShell] = useState(false);
+  const [execCwd, setExecCwd] = useState("");
   const [missedPolicy, setMissedPolicy] = useState("fire_once");
   const [tags, setTags] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const actionPayload: Record<string, unknown> = {};
+    if (actionType === "exec") {
+      if (execArgs.trim()) actionPayload.args = execArgs.split(" ");
+      if (execShell) actionPayload.shell = true;
+      if (execCwd.trim()) actionPayload.cwd = execCwd;
+    }
     const task: Record<string, unknown> = {
       name: name || `${type} task`,
       type,
-      action: { type: actionType, target: actionTarget },
+      action: {
+        type: actionType,
+        target: actionTarget,
+        ...(Object.keys(actionPayload).length > 0 ? { payload: actionPayload } : {}),
+      },
       missedPolicy,
       ...(tags.trim() ? { tags: tags.split(",").map((t) => t.trim()) } : {}),
     };
@@ -239,7 +253,7 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
       <div>
         <label className="block text-xs text-zinc-400 mb-1">Action</label>
         <div className="flex gap-2 mb-2">
-          {(["notification", "extension_call", "emit"] as const).map((a) => (
+          {(["notification", "extension_call", "emit", "exec"] as const).map((a) => (
             <button
               key={a}
               type="button"
@@ -250,7 +264,7 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
                   : "border-zinc-700 text-zinc-400 hover:text-zinc-300"
               }`}
             >
-              {a === "extension_call" ? "method call" : a}
+              {a === "extension_call" ? "method call" : a === "exec" ? "command" : a}
             </button>
           ))}
         </div>
@@ -263,11 +277,48 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
               ? "Notification message..."
               : actionType === "extension_call"
                 ? "voice.speak"
-                : "event.name"
+                : actionType === "exec"
+                  ? "/usr/bin/sqlite3"
+                  : "event.name"
           }
           className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500"
         />
       </div>
+
+      {/* Exec options */}
+      {actionType === "exec" && (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Arguments (space-separated)</label>
+            <input
+              type="text"
+              value={execArgs}
+              onChange={(e) => setExecArgs(e.target.value)}
+              placeholder="~/.anima/anima.db .backup ~/.anima/backups/anima.db"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Working directory (optional)</label>
+            <input
+              type="text"
+              value={execCwd}
+              onChange={(e) => setExecCwd(e.target.value)}
+              placeholder="/Users/michael/.anima"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={execShell}
+              onChange={(e) => setExecShell(e.target.checked)}
+              className="rounded border-zinc-600"
+            />
+            Run through shell (sh -c) — enables pipes, globs, $(date)
+          </label>
+        </div>
+      )}
 
       {/* Missed policy (cron only) */}
       {type === "cron" && (
@@ -478,6 +529,16 @@ function HistoryPanel({ taskName, executions, onClose }: HistoryPanelProps) {
                 {exec.status}
               </span>
               {exec.error && <span className="text-red-400/70 truncate ml-2">{exec.error}</span>}
+              {exec.output && (
+                <details className="ml-2">
+                  <summary className="text-zinc-500 cursor-pointer hover:text-zinc-400">
+                    output
+                  </summary>
+                  <pre className="mt-1 p-2 bg-zinc-900 rounded text-xs text-zinc-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                    {exec.output}
+                  </pre>
+                </details>
+              )}
             </div>
           ))}
         </div>
