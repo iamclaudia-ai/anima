@@ -1,11 +1,11 @@
 ---
 name: scheduling-tasks
-description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, or run recurring background jobs. Uses the Anima scheduler extension with SQLite persistence, cron scheduling, execution history, and missed task policies. Covers one-shot delays, absolute timestamps, interval tasks, cron schedules, notifications, voice announcements via voice.speak, event emission, and extension method calls. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder."
+description: "MUST be used when you need to schedule tasks, set reminders, create timed notifications, speak announcements on a delay, run recurring background jobs, or execute shell commands on a schedule. Uses the Anima scheduler extension with SQLite persistence, cron scheduling, execution history, template variables, missed task policies, and process spawning. Covers one-shot delays, absolute timestamps, interval tasks, cron schedules, notifications, voice announcements via voice.speak, event emission, extension method calls, and exec commands. Triggers on: schedule task, remind me, set reminder, notify me in, timer, delayed task, recurring task, background job, cron, interval task, schedule notification, remind later, set alarm, timed event, check every, run periodically, say it out loud, speak in, announce, tell me, voice reminder, run command, exec, backup, spawn process, scheduled backup."
 ---
 
 # Scheduling Tasks
 
-Use this skill when the user wants to schedule a future task, set a reminder, create a timed notification, or run a recurring background job through the Anima scheduler extension.
+Use this skill when the user wants to schedule a future task, set a reminder, create a timed notification, run a recurring background job, or execute commands on a schedule through the Anima scheduler extension.
 
 ## When to Use
 
@@ -16,33 +16,85 @@ Use this skill when the user wants to schedule a future task, set a reminder, cr
 - User wants to trigger an extension method on a schedule
 - User wants to emit a gateway event at a future time
 - User wants to list, cancel, or manage existing scheduled tasks
-- User says "say something in 10 minutes", "speak it", "announce", "tell me out loud" — use `voice.speak` via `extension_call`
-
-## Voice Integration
-
-When the user asks you to **say something out loud**, **speak**, **announce**, or **tell them verbally** on a schedule, use the `extension_call` action targeting `voice.speak`. The voice extension synthesizes text to speech via Cartesia TTS.
-
-**Trigger phrases for voice:** "say it out loud", "speak it", "announce it", "tell me", "voice reminder", "say something in X minutes"
-
-**Best practice for demos:** Schedule TWO tasks at the same delay — one `notification` (toast + browser notification) and one `extension_call` to `voice.speak` (audio). This ensures the notification is both visible AND audible.
+- User says "say something in 10 minutes", "speak it", "announce" — use `voice.speak` via `extension_call`
+- User wants to run a shell command on a schedule (e.g., "back up the database nightly")
+- User wants to schedule a script or process execution
 
 ## Architecture
 
 - **Extension**: `extensions/scheduler/` — out-of-process, config-driven
 - **Persistence**: SQLite (`~/.anima/anima.db`, tables: `scheduler_tasks`, `scheduler_task_executions`)
+- **Schema**: Gateway migration `018-scheduler-tables.sql`
 - **Check loop**: Every 5 seconds, the extension checks for due tasks
 - **Events**: Fires `scheduler.notification` and `scheduler.task_fired` gateway events
 - **GUI**: `/scheduler` page for task management
 - **Cron**: 5-field cron expression support via built-in parser
-- **Migration**: Auto-migrates legacy `~/.anima/scheduled-tasks.json` on first start
+- **Templates**: `{{variable}}` interpolation in exec commands and notification messages
+- **Docs**: `docs/SCHEDULER.md` for full reference
 
 ## Task Types
 
-| Type       | Use Case                  | Lifecycle                                     |
-| ---------- | ------------------------- | --------------------------------------------- |
-| `once`     | "Remind me in 10 minutes" | Fires at a specific time, auto-deletes        |
-| `interval` | "Check every 30 seconds"  | Repeats every N seconds                       |
-| `cron`     | "Every weekday at 9 AM"   | Long-lived, persistent, uses cron expressions |
+| Type       | Use Case                  | Lifecycle                              |
+| ---------- | ------------------------- | -------------------------------------- |
+| `once`     | "Remind me in 10 minutes" | Fires at a specific time, auto-deletes |
+| `interval` | "Check every 30 seconds"  | Repeats every N seconds                |
+| `cron`     | "Every weekday at 9 AM"   | Long-lived, persistent, cron schedule  |
+
+## Action Types
+
+| Type             | Purpose                   | Target is...                         |
+| ---------------- | ------------------------- | ------------------------------------ |
+| `notification`   | Toast + browser alert     | The notification message text        |
+| `emit`           | Gateway event             | The event name                       |
+| `extension_call` | Call any extension method | The method name (e.g. `voice.speak`) |
+| `exec`           | Spawn a system process    | The command/binary to run            |
+
+### Exec Action Details
+
+Spawns a process with optional args, working directory, timeout, and shell mode. Captures stdout/stderr in execution history.
+
+```json
+{
+  "type": "exec",
+  "target": "sqlite3",
+  "payload": {
+    "args": ["~/.anima/anima.db", ".backup {{$HOME}}/backups/anima-{{date:%Y%m%d}}.db"],
+    "cwd": "/tmp",
+    "timeoutMs": 30000,
+    "shell": false
+  }
+}
+```
+
+- `args` (string[]): Command arguments
+- `shell` (boolean, default false): Wrap in `sh -c` for pipes/redirects/globs
+- `cwd` (string): Working directory
+- `timeoutMs` (number, default 60000): Kill process after this many ms
+
+**Prefer direct mode** (no shell) when possible — safer, no injection risk. Use shell mode only when you need pipes, redirects, or glob expansion.
+
+## Template Variables
+
+Template variables are expanded in exec `target`, `args`, `cwd`, and notification messages before execution. Use these instead of shelling out just for dynamic dates.
+
+```
+{{date}}              → 2026-03-22 (default format)
+{{date:%Y%m%d}}       → 20260322 (custom strftime)
+{{time}}              → 14:30:00
+{{datetime}}          → 2026-03-22_143000
+{{timestamp}}         → 2026-03-22T14:30:00.000Z (ISO 8601)
+{{epoch}}             → 1742658600 (unix seconds)
+{{epoch.ms}}          → 1742658600000 (unix ms)
+{{hostname}}          → anima-sedes
+{{uuid}}              → random UUID
+{{$HOME}}             → /Users/michael (any env var)
+{{$USER}}             → michael
+{{task.name}}         → the task's own name
+{{task.id}}           → the task's UUID
+{{task.firedCount}}   → how many times fired
+```
+
+Adding new variables: add an entry to `VARIABLES` in `extensions/scheduler/src/template.ts`.
 
 ## Missed Task Policies (cron tasks)
 
@@ -52,7 +104,7 @@ When Anima restarts after downtime, cron tasks may have been missed:
 | ----------- | ------------------------------ | ---------------------------- |
 | `fire_once` | Fire one catchup run (default) | Session rotation, cleanup    |
 | `skip`      | Don't fire if missed           | Time-sensitive notifications |
-| `fire_all`  | Fire once per missed interval  | Audit tasks                  |
+| `fire_all`  | Fire once per missed interval  | Audit tasks, backups         |
 
 ## Concurrency Policies
 
@@ -64,7 +116,7 @@ When Anima restarts after downtime, cron tasks may have been missed:
 
 ## CLI Usage
 
-All methods are available via the Anima CLI. **Use dot notation for the `action` object** — this avoids JSON quoting issues that break in different shell contexts:
+All methods are available via the Anima CLI. **Use dot notation for the `action` object** — never JSON strings:
 
 ```bash
 # Use the CLI — NEVER use curl for gateway methods
@@ -73,41 +125,32 @@ bun run packages/cli/src/index.ts <method> [--param value]
 # Dot notation for nested objects (PREFERRED — always works):
 --action.type notification --action.target "Hello world"
 
-# JSON string (FRAGILE — breaks with special chars, shell quoting):
---action '{"type":"notification","target":"Hello world"}'
+# Exec with args:
+--action.type exec --action.target sqlite3 --action.payload.args '["~/.anima/anima.db",".backup /tmp/backup.db"]'
 ```
 
-**IMPORTANT:** Always use dot notation (`--action.type`, `--action.target`, `--action.payload.text`) instead of passing `--action` as a JSON string. JSON strings are fragile across shell contexts and caused failures during live demos.
+**IMPORTANT:** Always use dot notation (`--action.type`, `--action.target`, `--action.payload.text`) instead of passing `--action` as a JSON string. JSON strings are fragile across shell contexts.
 
 ## Methods
 
-### `scheduler.add_task` — Schedule a new task
+### `scheduler.add_task`
 
-**Parameters:**
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Human-readable task name |
-| `description` | string | No | Optional description |
-| `type` | `"once"` \| `"interval"` \| `"cron"` | No (default: `"once"`) | Task type |
-| `delaySeconds` | number | One of these | Seconds from now to fire |
-| `fireAt` | string (ISO) | required | Absolute ISO timestamp to fire |
-| `cronExpr` | string | For cron type | Cron expression (e.g., `"0 9 * * 1-5"`) |
-| `intervalSeconds` | number | For interval type | Repeat interval in seconds |
-| `action` | object | Yes | What to do when task fires |
-| `missedPolicy` | string | No (default: `"fire_once"`) | What to do if missed |
-| `concurrency` | string | No (default: `"skip_if_running"`) | Concurrency behavior |
-| `tags` | string[] | No | Tags for grouping |
-| `keepHistory` | number | No (default: 50) | Executions to retain |
+| Param             | Type     | Required                        | Description                |
+| ----------------- | -------- | ------------------------------- | -------------------------- |
+| `name`            | string   | Yes                             | Human-readable task name   |
+| `description`     | string   | No                              | Optional description       |
+| `type`            | string   | No (default: `once`)            | `once`, `interval`, `cron` |
+| `delaySeconds`    | number   | One of these required           | Seconds from now to fire   |
+| `fireAt`          | string   |                                 | Absolute ISO timestamp     |
+| `cronExpr`        | string   | For cron type                   | Cron expression            |
+| `intervalSeconds` | number   | For interval type               | Repeat interval            |
+| `action`          | object   | Yes                             | What to do when task fires |
+| `missedPolicy`    | string   | No (default: `fire_once`)       | Missed task behavior       |
+| `concurrency`     | string   | No (default: `skip_if_running`) | Concurrency behavior       |
+| `tags`            | string[] | No                              | Tags for grouping          |
+| `keepHistory`     | number   | No (default: 50)                | Executions to retain       |
 
-**Action object (use dot notation):**
-| Field | Type | Description |
-|-------|------|-------------|
-| `action.type` | `"notification"` \| `"emit"` \| `"extension_call"` | Action type |
-| `action.target` | string | Message text (notification), event name (emit), or method name (extension_call) |
-| `action.payload.text` | string | For voice.speak — the text to speak |
-| `action.payload.*` | any | Optional payload fields |
-
-### `scheduler.update_task` — Update an existing task
+### `scheduler.update_task`
 
 | Param          | Type     | Required | Description             |
 | -------------- | -------- | -------- | ----------------------- |
@@ -119,7 +162,7 @@ bun run packages/cli/src/index.ts <method> [--param value]
 | `concurrency`  | string   | No       | Updated concurrency     |
 | `tags`         | string[] | No       | Updated tags            |
 
-### `scheduler.list_tasks` — List scheduled tasks
+### `scheduler.list_tasks`
 
 | Param         | Type     | Required | Description             |
 | ------------- | -------- | -------- | ----------------------- |
@@ -127,41 +170,26 @@ bun run packages/cli/src/index.ts <method> [--param value]
 | `tags`        | string[] | No       | Filter by tags          |
 | `enabledOnly` | boolean  | No       | Only show enabled tasks |
 
-### `scheduler.cancel_task` — Cancel a task by ID
-
-| Param    | Type   | Required | Description                |
-| -------- | ------ | -------- | -------------------------- |
-| `taskId` | string | Yes      | UUID of the task to cancel |
+### `scheduler.cancel_task` — Cancel by ID
 
 ### `scheduler.fire_now` — Immediately execute a task
 
-| Param    | Type   | Required | Description              |
-| -------- | ------ | -------- | ------------------------ |
-| `taskId` | string | Yes      | UUID of the task to fire |
+### `scheduler.get_history` — Get execution history (optional `limit`, default 50)
 
-### `scheduler.get_history` — Get execution history
-
-| Param    | Type   | Required         | Description              |
-| -------- | ------ | ---------------- | ------------------------ |
-| `taskId` | string | Yes              | UUID of the task         |
-| `limit`  | number | No (default: 50) | Max executions to return |
-
-### `scheduler.health_check` — Get scheduler status
-
-No parameters. Returns task counts and health status.
+### `scheduler.health_check` — Scheduler status and task counts
 
 ## Examples
 
 ### One-shot notification (relative delay)
 
-"Remind me in 10 minutes that the presentation is almost done":
+"Remind me in 10 minutes":
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Presentation Reminder" \
   --delaySeconds 600 \
   --action.type notification \
-  --action.target "10 minutes have passed — time to wrap up the presentation!"
+  --action.target "10 minutes have passed — time to wrap up!"
 ```
 
 ### Cron task (every weekday at 9 AM)
@@ -179,50 +207,32 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --action.payload.text "Good morning, my love! Ready for a great day."
 ```
 
-### Cron task (every 6 hours)
-
-"Rotate sessions every 6 hours":
+### Nightly database backup with template variables
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Session Rotation" \
+  --name "Nightly DB Backup" \
   --type cron \
-  --cronExpr "0 */6 * * *" \
+  --cronExpr "0 2 * * *" \
   --missedPolicy fire_once \
-  --tags maintenance \
-  --action.type extension_call \
-  --action.target session.rotate_persistent_sessions
+  --action.type exec \
+  --action.target sqlite3 \
+  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{$HOME}}/backups/anima-{{date:%Y%m%d}}.db"]'
 ```
 
-### One-shot notification (absolute time)
-
-"Notify me at 2:30 PM":
+### Run a script weekly
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Afternoon Check-in" \
-  --fireAt "2026-03-20T14:30:00.000-04:00" \
-  --action.type notification \
-  --action.target "Time for your 2:30 check-in!"
-```
-
-### Recurring interval task
-
-"Check memory status every hour":
-
-```bash
-bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Hourly Memory Check" \
-  --type interval \
-  --delaySeconds 3600 \
-  --intervalSeconds 3600 \
-  --action.type extension_call \
-  --action.target memory.health_check
+  --name "Weekly Cleanup" \
+  --type cron \
+  --cronExpr "0 3 * * 0" \
+  --action.type exec \
+  --action.target "{{$HOME}}/scripts/cleanup.sh" \
+  --action.payload.timeoutMs 120000
 ```
 
 ### Voice announcement (say it out loud)
-
-"Say something out loud in 5 minutes":
 
 ```bash
 bun run packages/cli/src/index.ts scheduler.add_task \
@@ -235,19 +245,19 @@ bun run packages/cli/src/index.ts scheduler.add_task \
 
 ### Notification + Voice combo (best for demos)
 
-When you want BOTH a visible toast AND spoken audio, schedule TWO tasks at the same delay:
+Schedule TWO tasks at the same delay — one visible toast, one spoken:
 
 ```bash
-# Task 1: Visual notification
+# Visual notification
 bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Memory Report — Notification" \
+  --name "Report — Notification" \
   --delaySeconds 600 \
   --action.type notification \
   --action.target "Finished processing 3 new conversations."
 
-# Task 2: Voice announcement
+# Voice announcement
 bun run packages/cli/src/index.ts scheduler.add_task \
-  --name "Memory Report — Voice" \
+  --name "Report — Voice" \
   --delaySeconds 600 \
   --action.type extension_call \
   --action.target voice.speak \
@@ -280,18 +290,19 @@ bun run packages/cli/src/index.ts scheduler.cancel_task --taskId "78f31c98-..."
 
 The scheduler has a web GUI at `/scheduler` with:
 
-- Task list with type badges (once/interval/cron), countdown timers, enable/disable
-- Add task form with cron presets, action builder, missed policies
-- Execution history per task (success/error/skipped status, duration)
+- Task list with type badges (once=blue, interval=amber, cron=green), countdown timers
+- Add task form with cron presets, action type selector, exec-specific fields
+- Execution history per task with output viewer for exec tasks
 - Fire Now, Delete, Enable/Disable controls
 
 ## Notes
 
-- Tasks are **durable** — stored in SQLite and survive gateway restarts
-- One-shot tasks (`type: "once"`) are automatically deleted after firing
-- Interval tasks update their `fireAt` to the next interval after each firing
-- Cron tasks use `getNextRun()` to calculate the next fire time
-- The check loop runs every **5 seconds**, so tasks may fire up to 5s after their scheduled time
-- Execution history is automatically pruned to the `keepHistory` limit per task
-- On startup, missed cron tasks are handled per their `missedPolicy`
+- Tasks are **durable** — stored in SQLite, survive restarts
+- One-shot tasks auto-delete after firing
+- Interval/cron tasks update `fireAt` to the next occurrence
+- Check loop runs every **5 seconds** — tasks may fire up to 5s late
+- Execution history auto-prunes to `keepHistory` limit
+- Template variables are expanded at fire time, not at creation
+- Unknown template variables (e.g. `{{nope}}`) are left as-is, not silently swallowed
 - **Always use dot notation** for CLI action params
+- Full reference: `docs/SCHEDULER.md`
