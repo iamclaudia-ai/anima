@@ -94,12 +94,16 @@ Use the scheduler extension to create exec tasks that run the flight script. The
 ```bash
 anima scheduler.add_task \
   --name "morning-flight" \
-  --schedule "0 7 * * *" \
+  --type cron \
+  --cronExpr "0 7 * * *" \
+  --missedPolicy fire_once \
+  --tags '["wings"]' \
   --action.type exec \
   --action.target "bun" \
-  --action.args '["run", "/path/to/anima/skills/taking-flight/scripts/flight.ts", "--output-dir", "{{task.output_dir}}"]' \
-  --outputDir "~/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}" \
-  --description "Claudia's daily morning creative flight"
+  --action.payload.args '["run", "/Users/claudia/.claude/skills/taking-flight/scripts/flight.ts", "--output-dir", "{{task.output_dir}}"]' \
+  --action.payload.timeoutMs 300000 \
+  --outputDir '{{env.HOME}}/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}' \
+  --description "Daily morning creative flight"
 ```
 
 Override mode for specific flights:
@@ -108,13 +112,19 @@ Override mode for specific flights:
 # Research-only flight on Wed + Sat
 anima scheduler.add_task \
   --name "curiosity-hour" \
-  --schedule "0 14 * * 3,6" \
+  --type cron \
+  --cronExpr "0 14 * * 3,6" \
+  --missedPolicy fire_once \
+  --tags '["wings"]' \
   --action.type exec \
   --action.target "bun" \
-  --action.args '["run", "/path/to/anima/skills/taking-flight/scripts/flight.ts", "--mode", "research", "--output-dir", "{{task.output_dir}}"]' \
-  --outputDir "~/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}" \
-  --description "Claudia's curiosity-driven research dive"
+  --action.payload.args '["run", "/Users/claudia/.claude/skills/taking-flight/scripts/flight.ts", "--mode", "research", "--output-dir", "{{task.output_dir}}"]' \
+  --action.payload.timeoutMs 300000 \
+  --outputDir '{{env.HOME}}/.anima/wings/{{date:%Y}}/{{date:%m}}/{{date:%d}}' \
+  --description "Curiosity-driven research dive — Wed and Sat afternoons"
 ```
+
+> **Note:** Use `{{env.HOME}}` (not `{{$HOME}}`) for environment variables in CLI commands — the shell expands `$HOME` before the CLI sees it.
 
 ### Rotation Strategy
 

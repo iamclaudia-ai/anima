@@ -58,7 +58,7 @@ Spawns a process with optional args, working directory, timeout, and shell mode.
   "type": "exec",
   "target": "sqlite3",
   "payload": {
-    "args": ["~/.anima/anima.db", ".backup {{$HOME}}/backups/anima-{{date:%Y%m%d}}.db"],
+    "args": ["~/.anima/anima.db", ".backup {{env.HOME}}/backups/anima-{{date:%Y%m%d}}.db"],
     "cwd": "/tmp",
     "timeoutMs": 30000,
     "shell": false
@@ -87,7 +87,8 @@ Template variables are expanded in exec `target`, `args`, `cwd`, and notificatio
 {{epoch.ms}}          → 1742658600000 (unix ms)
 {{hostname}}          → anima-sedes
 {{uuid}}              → random UUID
-{{$HOME}}             → /Users/michael (any env var)
+{{env.HOME}}          → /Users/michael (preferred for CLI)
+{{$HOME}}             → /Users/michael (legacy — shell expands $)
 {{$USER}}             → michael
 {{task.name}}         → the task's own name
 {{task.id}}           → the task's UUID
@@ -100,7 +101,7 @@ Template variables are expanded in exec `target`, `args`, `cwd`, and notificatio
 When a task uses `{{task.output_dir}}`, the scheduler resolves a directory path and **auto-creates it** before execution. This is opt-in — the directory is only created when the variable is referenced.
 
 - **Default**: `~/.anima/tasks/<task-slug>/YYYY/MM/`
-- **Custom**: Set `outputDir` on the task: `--outputDir "{{$HOME}}/backups/{{date:%Y}}/{{date:%m}}"`
+- **Custom**: Set `outputDir` on the task: `--outputDir "{{env.HOME}}/backups/{{date:%Y}}/{{date:%m}}"`
 - The `outputDir` pattern itself supports template variables
 
 **Example — organized backups:**
@@ -110,10 +111,10 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --name "Nightly DB Backup" \
   --type cron \
   --cronExpr "0 0 * * *" \
-  --outputDir "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
+  --outputDir "{{env.HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
   --action.type exec \
   --action.target sqlite3 \
-  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
+  --action.payload.args '["{{env.HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
 ```
 
 Creates `~/.anima/backups/2026/03/anima-20260322.db` with the directory structure auto-created. No `mkdir -p` needed.
@@ -240,10 +241,10 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --type cron \
   --cronExpr "0 2 * * *" \
   --missedPolicy fire_once \
-  --outputDir "{{$HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
+  --outputDir "{{env.HOME}}/.anima/backups/{{date:%Y}}/{{date:%m}}" \
   --action.type exec \
   --action.target sqlite3 \
-  --action.payload.args '["{{$HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
+  --action.payload.args '["{{env.HOME}}/.anima/anima.db", ".backup {{task.output_dir}}/anima-{{date:%Y%m%d}}.db"]'
 ```
 
 Creates `~/.anima/backups/2026/03/anima-20260322.db` — directory auto-created, no `mkdir -p` needed.
@@ -256,7 +257,7 @@ bun run packages/cli/src/index.ts scheduler.add_task \
   --type cron \
   --cronExpr "0 3 * * 0" \
   --action.type exec \
-  --action.target "{{$HOME}}/scripts/cleanup.sh" \
+  --action.target "{{env.HOME}}/scripts/cleanup.sh" \
   --action.payload.timeoutMs 120000
 ```
 
