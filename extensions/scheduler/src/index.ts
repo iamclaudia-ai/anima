@@ -42,7 +42,6 @@ import {
   migrateLegacyTasks,
   pruneExecutions,
   setTaskEnabled,
-  setupSchema,
   updateTask,
   updateTaskAfterFire,
 } from "./db.js";
@@ -656,9 +655,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     async start(context: ExtensionContext): Promise<void> {
       ctx = context;
 
-      // Initialize database
-      setupSchema();
-      ctx.log.info("Scheduler database initialized");
+      // Tables created by gateway migration 018-scheduler-tables.sql
+      ctx.log.info("Scheduler database ready");
 
       // Migrate legacy JSON store if present
       migrateLegacyJsonStore(ctx.log);
