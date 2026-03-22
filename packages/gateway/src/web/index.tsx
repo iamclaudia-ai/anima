@@ -31,7 +31,7 @@ appleTouchIcon.rel = "apple-touch-icon";
 appleTouchIcon.href = "/icons/icon-180x180.png";
 document.head.appendChild(appleTouchIcon);
 
-if (import.meta.env.DEV) {
+if (import.meta.env?.DEV) {
   const script = document.createElement("script");
   script.src = "https://unpkg.com/react-grab/dist/index.global.js";
   script.crossOrigin = "anonymous";
@@ -79,7 +79,7 @@ createRoot(document.getElementById("root")!).render(
 // ── Service Worker ──────────────────────────────────────────
 // Register service worker for PWA functionality.
 // Skip SW in dev to avoid reload loops during active local rebuilds.
-if ("serviceWorker" in navigator && !import.meta.env.DEV) {
+if ("serviceWorker" in navigator && !import.meta.env?.DEV) {
   let reloadedForUpdate = false;
 
   window.addEventListener("load", () => {

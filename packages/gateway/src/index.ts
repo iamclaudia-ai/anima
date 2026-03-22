@@ -738,7 +738,7 @@ const server = Bun.serve<ClientState>({
     },
   },
   development: {
-    hmr: true,
+    hmr: false,
     console: true,
   },
 });
