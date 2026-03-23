@@ -278,6 +278,7 @@ export function updateTask(
       | "fireAt"
       | "intervalSeconds"
       | "cronExpr"
+      | "action"
       | "missedPolicy"
       | "concurrency"
       | "startDeadlineSeconds"
@@ -309,6 +310,14 @@ export function updateTask(
   if (updates.cronExpr !== undefined) {
     setClauses.push("cron_expr = ?");
     values.push(updates.cronExpr);
+  }
+  if (updates.action !== undefined) {
+    setClauses.push("action_type = ?");
+    values.push(updates.action.type);
+    setClauses.push("action_target = ?");
+    values.push(updates.action.target);
+    setClauses.push("action_payload = ?");
+    values.push(updates.action.payload ? JSON.stringify(updates.action.payload) : null);
   }
   if (updates.missedPolicy !== undefined) {
     setClauses.push("missed_policy = ?");

@@ -116,6 +116,7 @@ export function coerceValue(value: string): unknown {
     if (Number.isFinite(num)) return num;
   }
 
+  // Template variables like {{date}} start with {{ — don't try to parse as JSON
   if (
     (value.startsWith("[") && value.endsWith("]")) ||
     (value.startsWith("{") && value.endsWith("}") && !value.startsWith("{{"))

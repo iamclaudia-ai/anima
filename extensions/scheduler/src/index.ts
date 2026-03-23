@@ -374,6 +374,13 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         name: z.string().optional(),
         description: z.string().optional(),
         cronExpr: z.string().optional(),
+        action: z
+          .object({
+            type: z.enum(["emit", "extension_call", "notification", "exec"]),
+            target: z.string(),
+            payload: z.record(z.unknown()).optional(),
+          })
+          .optional(),
         missedPolicy: z.enum(["fire_once", "skip", "fire_all"]).optional(),
         concurrency: z.enum(["allow", "skip_if_running", "cancel_previous"]).optional(),
         startDeadlineSeconds: z.number().optional(),
@@ -521,9 +528,14 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
       }
 
       case "scheduler.update_task": {
-        const { taskId, enabled, ...updates } = params as {
+        const { taskId, enabled, action, ...updates } = params as {
           taskId: string;
           enabled?: boolean;
+          action?: {
+            type: "emit" | "extension_call" | "notification" | "exec";
+            target: string;
+            payload?: Record<string, unknown>;
+          };
           name?: string;
           description?: string;
           cronExpr?: string;
@@ -547,7 +559,11 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           if (nextRun) newFireAt = nextRun;
         }
 
-        updateTask(taskId, { ...updates, ...(newFireAt ? { fireAt: newFireAt } : {}) });
+        updateTask(taskId, {
+          ...updates,
+          ...(newFireAt ? { fireAt: newFireAt } : {}),
+          ...(action ? { action } : {}),
+        });
         if (enabled !== undefined) setTaskEnabled(taskId, enabled);
 
         ctx?.log.info(`Task updated: ${taskId}`);
