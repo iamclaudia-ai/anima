@@ -5,7 +5,7 @@ description: "MUST be used when you need to generate images from text prompts us
 
 # Generating Images
 
-Generate high-quality images from text prompts using Gemini's Imagen model via the `nano-banana-generate` CLI.
+Generate high-quality images from text prompts using Gemini's Imagen model.
 
 ## When to Use
 
@@ -16,10 +16,17 @@ Generate high-quality images from text prompts using Gemini's Imagen model via t
 - Visualizing ideas or concepts
 - Creating custom graphics for any purpose
 
+## Available Scripts
+
+When executing the script, `cd` to the skill folder first.
+
+- **`scripts/generate.ts`** — Generates an image via Gemini 3 Pro Image model and saves as PNG
+
 ## Usage
 
 ```bash
-nano-banana-generate "<prompt>" <output-path> [options]
+cd ~/.claude/skills/generating-images
+bun scripts/generate.ts "<prompt>" <output-path> [options]
 ```
 
 ### Arguments
@@ -34,17 +41,19 @@ nano-banana-generate "<prompt>" <output-path> [options]
 ### Examples
 
 ```bash
+cd ~/.claude/skills/generating-images
+
 # Square image (default)
-nano-banana-generate "A serene mountain lake at sunset" ~/images/lake.png
+bun scripts/generate.ts "A serene mountain lake at sunset" ~/images/lake.png
 
 # Widescreen landscape
-nano-banana-generate "Futuristic cityscape at night" ~/images/city.png --aspect-ratio 16:9 --size 4K
+bun scripts/generate.ts "Futuristic cityscape at night" ~/images/city.png --aspect-ratio 16:9 --size 4K
 
 # Portrait orientation
-nano-banana-generate "Portrait of a wise elder" ~/images/portrait.png --aspect-ratio 2:3
+bun scripts/generate.ts "Portrait of a wise elder" ~/images/portrait.png --aspect-ratio 2:3
 
 # Phone wallpaper
-nano-banana-generate "Abstract geometric patterns" ~/images/wallpaper.png --aspect-ratio 9:16 --size 4K
+bun scripts/generate.ts "Abstract geometric patterns" ~/images/wallpaper.png --aspect-ratio 9:16 --size 4K
 ```
 
 ## How It Works
@@ -58,7 +67,7 @@ nano-banana-generate "Abstract geometric patterns" ~/images/wallpaper.png --aspe
 ## Requirements
 
 - **GEMINI_API_KEY** environment variable must be set
-- The `nano-banana-generate` CLI must be installed and available in PATH
+- **Bun** runtime
 
 ## Tips for Good Prompts
 
@@ -101,3 +110,4 @@ nano-banana-generate "Abstract geometric patterns" ~/images/wallpaper.png --aspe
 - PNG format preserves quality and supports transparency
 - Generation typically takes 10-30 seconds depending on complexity
 - Each generation uses Gemini API credits
+- The script auto-creates output directories if they don't exist
