@@ -1,12 +1,15 @@
 import Foundation
 
 /**
- * WebSocket client for Claudia Gateway
+ * WebSocket client for Anima Gateway
  *
  * Connects to ws://localhost:30086/ws and handles the JSON protocol:
  * - Sends: { type: "req", id, method, params }
  * - Receives: { type: "res", id, ok, payload/error }
  * - Receives: { type: "event", event, payload }
+ *
+ * Also acts as the native bridge endpoint — listens for native.exec events
+ * from the gateway and dispatches them to NativeHandlerRegistry.
  */
 class GatewayClient: NSObject {
     private var webSocket: URLSessionWebSocketTask?
@@ -16,7 +19,7 @@ class GatewayClient: NSObject {
     // Gateway URL - can be overridden for Tailscale access
     private let gatewayURL: URL
 
-    // Callbacks
+    // Callbacks — voice/chat
     var onConnected: (() -> Void)?
     var onDisconnected: (() -> Void)?
     var onResponse: ((String) -> Void)?
@@ -24,10 +27,13 @@ class GatewayClient: NSObject {
     var onAudio: ((Data) -> Void)?
     var onError: ((String) -> Void)?
 
+    // Callback — native bridge commands from gateway
+    var onNativeCommand: ((_ command: String, _ params: [String: Any], _ requestId: String) -> Void)?
+
     // Pending requests
     private var pendingRequests: [String: (Result<Any, Error>) -> Void] = [:]
     private var sessionRecordId: String?
-    private let model = "claude-opus-4-6"
+    private let model = "claude-sonnet-4-20250514"
     private let thinking = true
     private let effort = "medium"
     private let cwd = "/Users/michael/claudia/chat"
@@ -63,16 +69,14 @@ class GatewayClient: NSObject {
         onDisconnected?()
     }
 
+    // MARK: - Chat / Voice
+
     /**
      * Send a prompt to Claudia with optional voice response
      */
     func sendPrompt(_ content: String, withVoice: Bool = true) {
         responseText = ""
 
-        // Subscribe to events first
-        sendRequest(method: "subscribe", params: ["events": ["session.*", "voice.*"]]) { _ in }
-
-        // Send the prompt with speakResponse flag for voice extension
         guard let sessionRecordId else {
             onError?("No session initialized yet")
             return
@@ -88,7 +92,7 @@ class GatewayClient: NSObject {
             params["speakResponse"] = true
         }
 
-        sendRequest(method: "session.prompt", params: params) { [weak self] result in
+        sendRequest(method: "session.send_prompt", params: params) { [weak self] result in
             if case .failure(let error) = result {
                 self?.onError?(error.localizedDescription)
             }
@@ -106,18 +110,42 @@ class GatewayClient: NSObject {
         }
     }
 
-    private func sendRequest(method: String, params: [String: Any], completion: @escaping (Result<Any, Error>) -> Void) {
+    // MARK: - Native Bridge
+
+    /**
+     * Send the result of a native command back to the gateway.
+     * Called by NativeBridgeDispatcher after executing a handler.
+     */
+    func sendNativeResult(requestId: String, ok: Bool, result: [String: Any]?, error: String?) {
+        var params: [String: Any] = [
+            "requestId": requestId,
+            "ok": ok,
+        ]
+        if let result = result {
+            params["result"] = result
+        }
+        if let error = error {
+            params["error"] = error
+        }
+
+        sendRequest(method: "native.result", params: params) { _ in }
+    }
+
+    // MARK: - WebSocket transport
+
+    func sendRequest(method: String, params: [String: Any], completion: @escaping (Result<Any, Error>) -> Void) {
         let id = UUID().uuidString
 
         let message: [String: Any] = [
             "type": "req",
             "id": id,
             "method": method,
-            "params": params
+            "params": params,
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: message),
-              let jsonString = String(data: data, encoding: .utf8) else {
+              let jsonString = String(data: data, encoding: .utf8)
+        else {
             completion(.failure(GatewayError.serializationFailed))
             return
         }
@@ -159,7 +187,8 @@ class GatewayClient: NSObject {
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else {
+              let type = json["type"] as? String
+        else {
             return
         }
 
@@ -175,22 +204,25 @@ class GatewayClient: NSObject {
 
     private func handleResponse(_ json: [String: Any]) {
         guard let id = json["id"] as? String,
-              let completion = pendingRequests.removeValue(forKey: id) else {
+              let completion = pendingRequests.removeValue(forKey: id)
+        else {
             return
         }
 
         if json["ok"] as? Bool == true {
             if let payload = json["payload"] as? [String: Any],
                let session = payload["session"] as? [String: Any],
-               let sid = session["id"] as? String {
+               let sid = session["id"] as? String
+            {
                 sessionRecordId = sid
             } else if let payload = json["payload"] as? [String: Any],
                       let workspace = payload["workspace"] as? [String: Any],
-                      let wsId = workspace["id"] as? String {
+                      let wsId = workspace["id"] as? String
+            {
                 if let active = workspace["activeSessionId"] as? String {
                     sessionRecordId = active
                 } else {
-                    sendRequest(method: "workspace.create_session", params: [
+                    sendRequest(method: "session.create_session", params: [
                         "workspaceId": wsId,
                         "model": model,
                         "thinking": thinking,
@@ -207,7 +239,8 @@ class GatewayClient: NSObject {
 
     private func handleEvent(_ json: [String: Any]) {
         guard let event = json["event"] as? String,
-              let payload = json["payload"] as? [String: Any] else {
+              let payload = json["payload"] as? [String: Any]
+        else {
             return
         }
 
@@ -215,20 +248,22 @@ class GatewayClient: NSObject {
         case "session.content_block_delta":
             // Streaming text
             if let delta = payload["delta"] as? [String: Any],
-               let text = delta["text"] as? String {
+               let text = delta["text"] as? String
+            {
                 responseText += text
                 onResponse?(responseText)
             }
 
         case "session.message_stop":
-            // Response complete - notify so app can restart wake word if no audio coming
+            // Response complete
             print("[Gateway] Response complete")
             onResponseComplete?()
 
         case "voice.audio":
-            // Audio data received - play it!
+            // Audio data received
             if let audioBase64 = payload["data"] as? String,
-               let audioData = Data(base64Encoded: audioBase64) {
+               let audioData = Data(base64Encoded: audioBase64)
+            {
                 onAudio?(audioData)
             }
 
@@ -243,8 +278,17 @@ class GatewayClient: NSObject {
                 onError?("Voice error: \(error)")
             }
 
+        case "native.exec":
+            // Native bridge command from gateway
+            if let command = payload["command"] as? String,
+               let requestId = payload["requestId"] as? String
+            {
+                let params = payload["params"] as? [String: Any] ?? [:]
+                print("[Gateway] Native command: \(command) (req: \(requestId))")
+                onNativeCommand?(command, params, requestId)
+            }
+
         default:
-            // Ignore other events
             break
         }
     }
@@ -262,15 +306,21 @@ class GatewayClient: NSObject {
 }
 
 extension GatewayClient: URLSessionWebSocketDelegate {
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+    func urlSession(_: URLSession, webSocketTask _: URLSessionWebSocketTask, didOpenWithProtocol _: String?) {
         print("[Gateway] Connected!")
         isConnecting = false
-        sendRequest(method: "workspace.get_or_create", params: ["cwd": cwd, "name": "Voice Mode"]) { _ in }
+
+        // Subscribe to session, voice, AND native events
+        sendRequest(method: "gateway.subscribe", params: ["events": ["session.*", "voice.*", "native.*"]]) { _ in }
+
+        // Get or create workspace
+        sendRequest(method: "session.get_or_create_workspace", params: ["cwd": cwd, "name": "Voice Mode"]) { _ in }
+
         onConnected?()
         receiveMessage()
     }
 
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+    func urlSession(_: URLSession, webSocketTask _: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason _: Data?) {
         print("[Gateway] Disconnected: \(closeCode)")
         handleDisconnect()
     }

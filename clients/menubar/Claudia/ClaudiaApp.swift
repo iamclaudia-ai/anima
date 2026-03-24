@@ -8,6 +8,7 @@ import Combine
  * - "Hey babe" wake word detection
  * - Voice input via speech recognition
  * - Text responses with TTS playback
+ * - Native macOS bridge for the Anima gateway
  *
  * Icon: 💋 (when idle), 🎤 (when listening), 💬 (when speaking)
  */
@@ -43,6 +44,7 @@ class AppState: ObservableObject {
     let gateway = GatewayClient()
     let speechRecognizer = SpeechRecognizer()
     let audioPlayer = AudioPlayer()
+    let nativeRegistry = NativeHandlerRegistry()
 
     var statusIcon: String {
         switch status {
@@ -55,9 +57,23 @@ class AppState: ObservableObject {
     }
 
     init() {
+        registerNativeHandlers()
         setupGateway()
         setupSpeechRecognizer()
     }
+
+    // MARK: - Native Bridge
+
+    private func registerNativeHandlers() {
+        nativeRegistry.register(NotificationHandler.self)
+        nativeRegistry.register(ClipboardHandler.self)
+        nativeRegistry.register(AppleScriptHandler.self)
+        nativeRegistry.register(OpenHandler.self)
+        nativeRegistry.register(SystemInfoHandler.self)
+        nativeRegistry.register(ShellHandler.self)
+    }
+
+    // MARK: - Gateway
 
     private func setupGateway() {
         gateway.onConnected = { [weak self] in
@@ -119,9 +135,27 @@ class AppState: ObservableObject {
             }
         }
 
+        // Native bridge: dispatch incoming commands to handlers
+        gateway.onNativeCommand = { [weak self] command, params, requestId in
+            guard let self = self else { return }
+            // Strip "native." prefix if present
+            let cmd = command.hasPrefix("native.") ? String(command.dropFirst(7)) : command
+
+            self.nativeRegistry.dispatch(command: cmd, params: params) { [weak self] result in
+                switch result {
+                case .success(let resultDict):
+                    self?.gateway.sendNativeResult(requestId: requestId, ok: true, result: resultDict, error: nil)
+                case .failure(let error):
+                    self?.gateway.sendNativeResult(requestId: requestId, ok: false, result: nil, error: error.localizedDescription)
+                }
+            }
+        }
+
         // Connect to gateway
         gateway.connect()
     }
+
+    // MARK: - Speech
 
     private func setupSpeechRecognizer() {
         speechRecognizer.onWakeWord = { [weak self] in
