@@ -13,7 +13,7 @@ struct MenuBarView: View {
         VStack(spacing: 12) {
             // Header with status
             HStack {
-                Text("💋 Claudia")
+                Text("💋 Anima")
                     .font(.headline)
                 Spacer()
                 StatusIndicator(status: appState.status, isConnected: appState.isConnected)
@@ -98,7 +98,7 @@ struct MenuBarView: View {
                         appState.gateway.connect()
                     }
                     Divider()
-                    Button("Quit Claudia") {
+                    Button("Quit Anima") {
                         NSApplication.shared.terminate(nil)
                     }
                 } label: {

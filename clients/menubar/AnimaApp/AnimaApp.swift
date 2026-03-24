@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 /**
- * Claudia Menubar App
+ * AnimaApp — Anima Menubar App
  *
  * A lightweight menubar app that provides:
  * - "Hey babe" wake word detection
@@ -13,7 +13,7 @@ import Combine
  * Icon: 💋 (when idle), 🎤 (when listening), 💬 (when speaking)
  */
 @main
-struct ClaudiaApp: App {
+struct AnimaApp: App {
     @StateObject private var appState = AppState()
 
     var body: some Scene {

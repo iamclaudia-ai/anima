@@ -2,10 +2,11 @@
   "name": "@anima/menubar",
   "version": "0.1.0",
   "private": true,
-  "description": "macOS menubar app - 💋 Hey babe wake word activation",
+  "description": "AnimaApp — macOS menubar app with native bridge, voice, and wake word activation",
   "keywords": [
     "macos",
     "menubar",
+    "native-bridge",
     "swiftui",
     "tts",
     "voice"
@@ -14,9 +15,9 @@
     "darwin"
   ],
   "scripts": {
-    "open": "open Claudia.xcodeproj || open -a Xcode Claudia/",
-    "build": "xcodebuild -project Claudia.xcodeproj -scheme Claudia -configuration Release build",
-    "run": "open -a Claudia",
+    "open": "open AnimaApp.xcodeproj || open -a Xcode AnimaApp/",
+    "build": "xcodebuild -project AnimaApp.xcodeproj -scheme AnimaApp -configuration Release build",
+    "run": "open -a AnimaApp",
     "typecheck": "echo \"No TypeScript typecheck for menubar client\""
   }
 }
