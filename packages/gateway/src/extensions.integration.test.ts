@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { ExtensionManager } from "./extensions";
-import type { ExtensionHostProcess } from "./extension-host";
+import type { ExtensionHost } from "./extension-host";
 import type { GatewayEvent } from "@anima/shared";
 
 describe("ExtensionManager integration", () => {
@@ -10,20 +10,32 @@ describe("ExtensionManager integration", () => {
     const allEvents: GatewayEvent[] = [];
     const voiceEvents: GatewayEvent[] = [];
 
-    const allHost = {
+    const allHost: ExtensionHost = {
       sendEvent(event: GatewayEvent) {
         allEvents.push(event);
       },
       async callMethod() {},
       async routeToSource() {},
+      async health() {
+        return { ok: true };
+      },
+      getRegistration() {
+        return null;
+      },
+      getGenerationToken() {
+        return null;
+      },
       isRunning() {
         return true;
       },
       async kill() {},
       forceKill() {},
-    } as unknown as ExtensionHostProcess;
+      async restart() {
+        throw new Error("Not supported");
+      },
+    };
 
-    const voiceHost = {
+    const voiceHost: ExtensionHost = {
       sendEvent(event: GatewayEvent) {
         if (event.type.startsWith("voice.")) {
           voiceEvents.push(event);
@@ -31,12 +43,24 @@ describe("ExtensionManager integration", () => {
       },
       async callMethod() {},
       async routeToSource() {},
+      async health() {
+        return { ok: true };
+      },
+      getRegistration() {
+        return null;
+      },
+      getGenerationToken() {
+        return null;
+      },
       isRunning() {
         return true;
       },
       async kill() {},
       forceKill() {},
-    } as unknown as ExtensionHostProcess;
+      async restart() {
+        throw new Error("Not supported");
+      },
+    };
 
     manager.registerRemote(
       {

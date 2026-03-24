@@ -46,6 +46,30 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
       extension: z.string().describe("Extension ID to restart (e.g. session, memory, voice)"),
     }),
   },
+  {
+    method: "gateway.register_extension",
+    description:
+      "Register this WebSocket connection as an extension host. " +
+      "Allows native apps to expose methods and emit events via the gateway.",
+    inputSchema: z.object({
+      id: z.string().describe("Extension ID (e.g. 'menubar', 'ios')"),
+      name: z.string().describe("Human-readable extension name"),
+      methods: z
+        .array(
+          z.object({
+            name: z.string().describe("Fully-qualified method name (e.g. 'menubar.notify')"),
+            description: z.string().describe("Short description for CLI/help output"),
+            inputSchema: z
+              .record(z.unknown())
+              .optional()
+              .describe("JSON Schema for input validation"),
+          }),
+        )
+        .default([]),
+      events: z.array(z.string()).default([]).describe("Events this extension emits"),
+      sourceRoutes: z.array(z.string()).default([]).describe("Source routing prefixes"),
+    }),
+  },
 ];
 
 export const BUILTIN_METHODS_BY_NAME = new Map(BUILTIN_METHODS.map((m) => [m.method, m] as const));

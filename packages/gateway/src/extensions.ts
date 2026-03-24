@@ -9,7 +9,7 @@ import type { ExtensionMethodDefinition, GatewayEvent } from "@anima/shared";
 import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionHostProcess, ExtensionRegistration } from "./extension-host";
+import type { ExtensionHost, ExtensionRegistration } from "./extension-host";
 
 const log = createLogger("ExtensionManager", join(homedir(), ".anima", "logs", "gateway.log"));
 
@@ -17,10 +17,10 @@ export class ExtensionManager {
   // Source routing: maps source prefix -> extension ID
   private sourceRoutes = new Map<string, string>();
 
-  // Out-of-process extensions
-  private remoteHosts = new Map<string, ExtensionHostProcess>();
+  // Extension hosts (NDJSON child processes or WebSocket-connected apps)
+  private remoteHosts = new Map<string, ExtensionHost>();
   private remoteRegistrations = new Map<string, ExtensionRegistration>();
-  private remoteSourceRoutes = new Map<string, ExtensionHostProcess>();
+  private remoteSourceRoutes = new Map<string, ExtensionHost>();
   private remoteGenerations = new Map<string, string | null>();
 
   /**
@@ -29,7 +29,7 @@ export class ExtensionManager {
    */
   registerRemote(
     registration: ExtensionRegistration,
-    host: ExtensionHostProcess,
+    host: ExtensionHost,
     generationToken?: string,
   ): void {
     // Clean up old routes if re-registering (HMR reload)
@@ -45,12 +45,10 @@ export class ExtensionManager {
 
     this.remoteHosts.set(registration.id, host);
     this.remoteRegistrations.set(registration.id, registration);
-    const hostGeneration =
-      typeof (host as { getGenerationToken?: () => string | null }).getGenerationToken ===
-      "function"
-        ? host.getGenerationToken()
-        : null;
-    this.remoteGenerations.set(registration.id, generationToken ?? hostGeneration ?? null);
+    this.remoteGenerations.set(
+      registration.id,
+      generationToken ?? host.getGenerationToken() ?? null,
+    );
 
     // Register source routes for remote extension
     for (const prefix of registration.sourceRoutes) {
@@ -99,7 +97,7 @@ export class ExtensionManager {
   /**
    * Get a remote extension host by ID.
    */
-  getHost(extensionId: string): ExtensionHostProcess | undefined {
+  getHost(extensionId: string): ExtensionHost | undefined {
     return this.remoteHosts.get(extensionId);
   }
 

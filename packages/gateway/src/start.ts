@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
   ExtensionHostProcess,
+  type ExtensionHost,
   type ExtensionRegistration,
   type OnCallCallback,
 } from "./extension-host";

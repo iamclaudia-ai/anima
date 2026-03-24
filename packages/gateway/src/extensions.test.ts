@@ -1,21 +1,33 @@
 import { describe, expect, it } from "bun:test";
 import { ExtensionManager } from "./extensions";
 import type { GatewayEvent } from "@anima/shared";
-import type { ExtensionHostProcess, ExtensionRegistration } from "./extension-host";
+import type { ExtensionHost, ExtensionRegistration } from "./extension-host";
 
-function createRemoteHostMock(overrides: Partial<ExtensionHostProcess> = {}): ExtensionHostProcess {
-  const host = {
+function createRemoteHostMock(overrides: Partial<ExtensionHost> = {}): ExtensionHost {
+  const host: ExtensionHost = {
     async callMethod() {
       return { ok: true };
     },
     sendEvent() {},
     async routeToSource() {},
+    async health() {
+      return { ok: true };
+    },
+    getRegistration() {
+      return null;
+    },
+    getGenerationToken() {
+      return null;
+    },
     isRunning() {
       return true;
     },
     async kill() {},
     forceKill() {},
-  } as unknown as ExtensionHostProcess;
+    async restart() {
+      throw new Error("Not supported in test");
+    },
+  };
 
   return Object.assign(host, overrides);
 }

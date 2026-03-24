@@ -31,6 +31,41 @@ export interface ExtensionRegistration {
   sourceRoutes: string[];
 }
 
+/**
+ * Transport-agnostic interface for extension hosts.
+ *
+ * Both NDJSON (child process) and WebSocket hosts implement this.
+ * The ExtensionManager routes through this interface — it doesn't
+ * care whether the extension is a local Bun process or a remote
+ * native app connected over WebSocket.
+ */
+export interface ExtensionHost {
+  callMethod(
+    method: string,
+    params: Record<string, unknown>,
+    connectionId?: string,
+    meta?: { traceId?: string; depth?: number; deadlineMs?: number; tags?: string[] },
+  ): Promise<unknown>;
+
+  sendEvent(event: GatewayEvent): void;
+
+  routeToSource(source: string, event: GatewayEvent): Promise<void>;
+
+  health(): Promise<{ ok: boolean; details?: Record<string, unknown> }>;
+
+  getRegistration(): ExtensionRegistration | null;
+
+  getGenerationToken(): string | null;
+
+  isRunning(): boolean;
+
+  kill(): Promise<void>;
+
+  forceKill(): void;
+
+  restart(): Promise<ExtensionRegistration>;
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -55,7 +90,7 @@ export type OnCallCallback = (
   },
 ) => Promise<{ ok: true; payload: unknown } | { ok: false; error: string }>;
 
-export class ExtensionHostProcess {
+export class ExtensionHostProcess implements ExtensionHost {
   private proc: Subprocess | null = null;
   private stdoutBuffer = "";
   private pendingRequests = new Map<string, PendingRequest>();

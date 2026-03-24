@@ -26,6 +26,8 @@ import { getExtensionProcessLocks } from "./db/extension-locks";
 import { homedir } from "node:os";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
+import { WebSocketExtensionHost } from "./ws-extension-host";
+import type { ExtensionRegistration, OnCallCallback } from "./extension-host";
 
 // Web UI — served as SPA fallback for all non-WS routes
 import index from "./web/index.html";
@@ -73,6 +75,11 @@ const clients = new Map<ServerWebSocket<ClientState>, ClientState>();
 // Exclusive subscriptions: pattern → WebSocket. Last subscriber wins.
 // Used by dominatrix Chrome extensions so only the focused profile handles commands.
 const exclusiveSubscribers = new Map<string, ServerWebSocket<ClientState>>();
+
+// WebSocket extension hosts: maps a WS connection to its extension host.
+// When a client calls gateway.register_extension, the connection becomes both
+// a regular client AND an extension host.
+const wsExtensionHosts = new Map<ServerWebSocket<ClientState>, WebSocketExtensionHost>();
 
 // ── Client Health Beacon ─────────────────────────────────────
 // Tracks client-side errors and heartbeats for the watchdog.
@@ -255,6 +262,15 @@ function handleMessage(ws: ServerWebSocket<ClientState>, data: string): void {
       return;
     }
 
+    // If this WS is a registered extension host, route non-req messages
+    // (res, event, call) to the host handler. Req messages still flow
+    // through normal handleRequest so the extension can also call methods.
+    const wsHost = wsExtensionHosts.get(ws);
+    if (wsHost && message.type !== "req") {
+      wsHost.handleMessage(message as unknown as Record<string, unknown>);
+      return;
+    }
+
     if (message.type === "req") {
       // Stamp connectionId on the envelope — flows through the entire pipeline
       message.connectionId = ws.data.id;
@@ -302,6 +318,9 @@ function handleRequest(ws: ServerWebSocket<ClientState>, req: Request): void {
       break;
     case "gateway.restart_extension":
       handleRestartExtension(ws, req);
+      break;
+    case "gateway.register_extension":
+      handleRegisterExtension(ws, req);
       break;
     default:
       // Everything else routes through extensions
@@ -453,6 +472,101 @@ async function handleRestartExtension(
     log.error("Failed to restart extension", { extensionId, error: String(error) });
     sendError(ws, req.id, `Failed to restart ${extensionId}: ${error}`);
   }
+}
+
+/**
+ * gateway.register_extension — register this WebSocket connection as an extension host.
+ * After registration, the connection can receive method calls, emit events,
+ * and use ctx.call() to invoke other extensions — same protocol as NDJSON hosts.
+ */
+function handleRegisterExtension(ws: ServerWebSocket<ClientState>, req: Request): void {
+  const params = req.params as {
+    id: string;
+    name: string;
+    methods: Array<{ name: string; description: string; inputSchema?: Record<string, unknown> }>;
+    events: string[];
+    sourceRoutes: string[];
+  };
+
+  // Prevent collision with existing extensions
+  if (extensions.getHost(params.id)) {
+    sendError(
+      ws,
+      req.id,
+      `Extension "${params.id}" is already registered. Disconnect the existing host first.`,
+    );
+    return;
+  }
+
+  // Prevent double-registration on the same WebSocket
+  if (wsExtensionHosts.has(ws)) {
+    const existing = wsExtensionHosts.get(ws)!;
+    sendError(
+      ws,
+      req.id,
+      `This connection is already registered as extension "${existing.getRegistration()?.id}".`,
+    );
+    return;
+  }
+
+  const registration: ExtensionRegistration = {
+    id: params.id,
+    name: params.name,
+    methods: params.methods.map((m) => ({ name: m.name, description: m.description })),
+    events: params.events,
+    sourceRoutes: params.sourceRoutes,
+  };
+
+  // ctx.call handler: route calls from this extension through the gateway hub
+  const onCall: OnCallCallback = async (callerExtensionId, method, callParams, meta) => {
+    try {
+      const result = await extensions.handleMethod(
+        method,
+        callParams,
+        meta.connectionId,
+        {
+          traceId: meta.traceId,
+          depth: meta.depth,
+          deadlineMs: meta.deadlineMs,
+        },
+        meta.tags,
+      );
+      return { ok: true as const, payload: result };
+    } catch (error) {
+      return { ok: false as const, error: String(error) };
+    }
+  };
+
+  const wsHost = new WebSocketExtensionHost(
+    params.id,
+    ws,
+    registration,
+    (type, payload, source, connectionId, tags, generationToken) =>
+      handleExtensionEvent(type, payload, source || `extension:${params.id}`, connectionId, tags, {
+        extensionId: params.id,
+        generationToken,
+      }),
+    onCall,
+  );
+
+  // Register with the extension manager
+  extensions.registerRemote(registration, wsHost);
+
+  // Track the WS → host mapping for message routing and cleanup
+  wsExtensionHosts.set(ws, wsHost);
+
+  log.info("WebSocket extension registered", {
+    extensionId: params.id,
+    methods: registration.methods.map((m) => m.name),
+    connectionId: ws.data.id,
+  });
+
+  sendResponse(ws, req.id, {
+    ok: true,
+    extensionId: params.id,
+    methods: registration.methods.map((m) => m.name),
+    generationToken: wsHost.getGenerationToken(),
+  });
 }
 
 /**
@@ -724,6 +838,18 @@ const server = Bun.serve<ClientState>({
         if (exclusiveWs === ws) exclusiveSubscribers.delete(pattern);
       }
 
+      // Clean up WebSocket extension host if this was a registered extension
+      const wsHost = wsExtensionHosts.get(ws);
+      if (wsHost) {
+        const extensionId = wsHost.getRegistration()?.id;
+        wsHost.handleDisconnect();
+        wsExtensionHosts.delete(ws);
+        if (extensionId) {
+          extensions.unregisterRemote(extensionId);
+          log.info("WebSocket extension unregistered on disconnect", { extensionId });
+        }
+      }
+
       // Notify extensions that this client disconnected (connectionId on envelope)
       broadcastEvent("client.disconnected", {}, undefined, ws.data.id);
       extensions.broadcast({
@@ -776,6 +902,18 @@ function pruneClient(ws: ServerWebSocket<ClientState>): void {
   // Clean up exclusive subscriptions
   for (const [pattern, exclusiveWs] of exclusiveSubscribers) {
     if (exclusiveWs === ws) exclusiveSubscribers.delete(pattern);
+  }
+
+  // Clean up WebSocket extension host
+  const wsHost = wsExtensionHosts.get(ws);
+  if (wsHost) {
+    const extensionId = wsHost.getRegistration()?.id;
+    wsHost.handleDisconnect();
+    wsExtensionHosts.delete(ws);
+    if (extensionId) {
+      extensions.unregisterRemote(extensionId);
+      log.info("WebSocket extension unregistered on prune", { extensionId });
+    }
   }
 
   // Notify extensions
