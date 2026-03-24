@@ -33,10 +33,18 @@ class GatewayClient: NSObject {
     // Pending requests
     private var pendingRequests: [String: (Result<Any, Error>) -> Void] = [:]
     private var sessionRecordId: String?
-    private let model = "claude-sonnet-4-20250514"
+
+    // Configurable via UserDefaults (Settings UI) or environment variables
+    var model: String {
+        UserDefaults.standard.string(forKey: "model") ?? "claude-sonnet-4-20250514"
+    }
+    var cwd: String {
+        UserDefaults.standard.string(forKey: "cwd")
+            ?? ProcessInfo.processInfo.environment["ANIMA_CWD"]
+            ?? NSHomeDirectory()
+    }
     private let thinking = true
     private let effort = "medium"
-    private let cwd = "/Users/michael/claudia/chat"
 
     // Response accumulator
     private var responseText = ""

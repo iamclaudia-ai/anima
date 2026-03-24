@@ -57,6 +57,14 @@ class AppState: ObservableObject {
     }
 
     init() {
+        // Register default values so UserDefaults.bool works before Settings is opened
+        UserDefaults.standard.register(defaults: [
+            "gatewayURL": "ws://localhost:30086/ws",
+            "model": "claude-sonnet-4-20250514",
+            "wakeWordEnabled": true,
+            "autoSpeak": true,
+        ])
+
         registerNativeHandlers()
         setupGateway()
         setupSpeechRecognizer()
@@ -202,12 +210,14 @@ class AppState: ObservableObject {
         isListening = false
 
         // Send to gateway with voice response
-        gateway.sendPrompt(transcript, withVoice: true)
+        let autoSpeak = UserDefaults.standard.bool(forKey: "autoSpeak")
+        gateway.sendPrompt(transcript, withVoice: autoSpeak)
     }
 
     func sendTextPrompt(_ text: String) {
         status = .processing
-        gateway.sendPrompt(text, withVoice: true)
+        let autoSpeak = UserDefaults.standard.bool(forKey: "autoSpeak")
+        gateway.sendPrompt(text, withVoice: autoSpeak)
     }
 
     func interruptSpeaking() {

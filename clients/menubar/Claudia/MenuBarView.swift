@@ -6,6 +6,7 @@ import SwiftUI
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
     @State private var inputText = ""
+    @State private var showSettings = false
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -89,10 +90,11 @@ struct MenuBarView: View {
 
                 // Settings menu
                 Menu {
-                    Toggle("Wake Word Detection", isOn: .constant(true))
-                    Toggle("Auto-speak Responses", isOn: .constant(true))
-                    Divider()
+                    Button("Settings...") {
+                        showSettings = true
+                    }
                     Button("Reconnect") {
+                        appState.gateway.disconnect()
                         appState.gateway.connect()
                     }
                     Divider()
@@ -114,6 +116,9 @@ struct MenuBarView: View {
         }
         .padding()
         .frame(width: 320)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
         .onAppear {
             // Start wake word detection when menu opens
             if appState.status == .idle && !appState.isListening {
