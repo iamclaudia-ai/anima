@@ -366,7 +366,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
     async start(context: ExtensionContext) {
       ctx = context;
-      traceLog = ctx.createLogger({ component: "trace" });
+      traceLog = ctx.createLogger({ component: "trace", fileName: "memory-trace.log" });
       fileLog(
         "INFO",
         `Memory extension starting (watchPath=${basePath}, gap=${cfg.conversationGapMinutes}min)`,

@@ -41,6 +41,12 @@ function fileLog(level: string, msg: string): void {
   else traceLog.info(msg);
 }
 
+function connectionFileLog(cs: ConnectionVoiceState, level: string, msg: string): void {
+  if (level === "ERROR") cs.traceLog.error(msg);
+  else if (level === "WARN") cs.traceLog.warn(msg);
+  else cs.traceLog.info(msg);
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -280,6 +286,7 @@ interface QueueEntry {
 /** All mutable voice state scoped to a single client connection (tab). */
 interface ConnectionVoiceState {
   connectionId: string;
+  traceLog: LoggerLike;
   currentChunker: SentenceChunker | null;
   currentStreamId: string | null;
   currentSessionId: string | null;
@@ -297,9 +304,10 @@ interface ConnectionVoiceState {
   streamingFilter: StreamingSpeechFilter;
 }
 
-function createConnectionState(connectionId: string): ConnectionVoiceState {
+function createConnectionState(connectionId: string, traceLog: LoggerLike): ConnectionVoiceState {
   return {
     connectionId,
+    traceLog,
     currentChunker: null,
     currentStreamId: null,
     currentSessionId: null,
@@ -336,9 +344,14 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
   function getOrCreateConnection(connectionId: string): ConnectionVoiceState {
     let state = connections.get(connectionId);
     if (!state) {
-      state = createConnectionState(connectionId);
+      const connectionTraceLog =
+        ctx?.createLogger({
+          component: `conn:${connectionId.slice(0, 8)}`,
+          fileName: `voice-${connectionId}.log`,
+        }) ?? traceLog;
+      state = createConnectionState(connectionId, connectionTraceLog);
       connections.set(connectionId, state);
-      fileLog("INFO", `Created voice state for connection=${connectionId}`);
+      connectionFileLog(state, "INFO", `Created voice state for connection=${connectionId}`);
     }
     return state;
   }
@@ -392,7 +405,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
         dictionaryId: cfg.dictionaryId,
         emotions: cfg.emotions,
         speed: cfg.speed,
-        log: fileLog,
+        log: (level, msg) => connectionFileLog(cs, level, msg),
         onAudioChunk: ({ audio }) => {
           if (cs.abortRequested) return;
 
@@ -411,7 +424,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
           lastError = error;
         },
         onDone: () => {
-          fileLog(
+          connectionFileLog(
+            cs,
             "INFO",
             `Sentence done: stream=${streamId}, conn=${connectionId}, queued=${cs.sentenceQueue.length}`,
           );
@@ -438,7 +452,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       }
 
       if (attempt < 2) {
-        fileLog(
+        connectionFileLog(
+          cs,
           "WARN",
           `Sentence send failed, retrying (attempt=${attempt + 1}): ${sentence.substring(0, 80)}`,
         );
@@ -447,7 +462,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
 
     const err = lastError ?? new Error("Failed to send sentence to Cartesia");
     ctx?.emit("voice.error", { error: err.message, streamId }, callerEmitOptions(connectionId));
-    fileLog("ERROR", `Dropped sentence after retries: ${err.message}`);
+    connectionFileLog(cs, "ERROR", `Dropped sentence after retries: ${err.message}`);
   }
 
   async function processSentenceQueue(cs: ConnectionVoiceState): Promise<void> {
@@ -484,7 +499,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
 
   async function startStream(cs: ConnectionVoiceState, sessionId: string): Promise<void> {
     if (!cfg.apiKey) {
-      fileLog("WARN", "startStream called but no apiKey");
+      connectionFileLog(cs, "WARN", "startStream called but no apiKey");
       return;
     }
 
@@ -506,7 +521,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       if (remaining) {
         const cleaned = cleanForSpeech(remaining);
         if (cleaned) {
-          fileLog(
+          connectionFileLog(
+            cs,
             "INFO",
             `startStream: flushing previous stream text before new stream: "${cleaned.substring(0, 80)}"`,
           );
@@ -532,7 +548,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     cs.streamGeneration++;
     cs.abortRequested = false;
 
-    fileLog(
+    connectionFileLog(
+      cs,
       "INFO",
       `startStream: session=${sessionId}, stream=${streamId}, connection=${cs.connectionId}`,
     );
@@ -549,7 +566,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
   async function feedStreamingText(cs: ConnectionVoiceState, text: string): Promise<void> {
     if (!cs.currentChunker || !cs.currentStreamId) return;
 
-    fileLog("INFO", `FEEDING TEXT [conn=${cs.connectionId}]: "${text}"`);
+    connectionFileLog(cs, "INFO", `FEEDING TEXT [conn=${cs.connectionId}]: "${text}"`);
     const filtered = cs.streamingFilter.feed(text);
     if (!filtered) return;
 
@@ -557,7 +574,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     for (const sentence of sentences) {
       const cleaned = cleanForSpeech(sentence);
       if (cleaned) {
-        fileLog("INFO", `SPEAKING SENTENCE [conn=${cs.connectionId}]: "${cleaned}"`);
+        connectionFileLog(cs, "INFO", `SPEAKING SENTENCE [conn=${cs.connectionId}]: "${cleaned}"`);
         enqueueSentence(cs, cleaned);
       }
     }
@@ -578,7 +595,11 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       for (const sentence of trailingSentences) {
         const cleaned = cleanForSpeech(sentence);
         if (cleaned) {
-          fileLog("INFO", `endStream: flushing trailing text: "${cleaned.substring(0, 80)}"`);
+          connectionFileLog(
+            cs,
+            "INFO",
+            `endStream: flushing trailing text: "${cleaned.substring(0, 80)}"`,
+          );
           enqueueSentence(cs, cleaned);
         }
       }
@@ -589,22 +610,32 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     if (remaining) {
       const cleaned = cleanForSpeech(remaining);
       if (cleaned) {
-        fileLog("INFO", `endStream: flushing remaining text: "${cleaned.substring(0, 80)}"`);
+        connectionFileLog(
+          cs,
+          "INFO",
+          `endStream: flushing remaining text: "${cleaned.substring(0, 80)}"`,
+        );
         enqueueSentence(cs, cleaned);
       }
     }
 
     // Wait until all queued sentences are synthesized.
-    fileLog(
+    connectionFileLog(
+      cs,
       "INFO",
       `endStream: waiting for sentence queue drain (stream=${streamId}, conn=${cs.connectionId})`,
     );
     await waitForQueueDrain(cs);
-    fileLog("INFO", `endStream: session ended (stream=${streamId}, conn=${cs.connectionId})`);
+    connectionFileLog(
+      cs,
+      "INFO",
+      `endStream: session ended (stream=${streamId}, conn=${cs.connectionId})`,
+    );
 
     // If a new stream started while we were waiting, don't touch current state.
     if (cs.streamGeneration !== generation) {
-      fileLog(
+      connectionFileLog(
+        cs,
         "INFO",
         `endStream: stale generation (${generation} != ${cs.streamGeneration}), skipping state reset`,
       );
@@ -649,13 +680,17 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     // Clean up connection state if fully idle
     if (!cs.processingQueue && cs.sentenceQueue.length === 0) {
       connections.delete(cs.connectionId);
-      fileLog("INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
+      connectionFileLog(cs, "INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
     }
   }
 
   function abortStream(cs: ConnectionVoiceState): void {
     const streamId = cs.currentStreamId;
-    fileLog("INFO", `Aborting stream: stream=${streamId || "none"}, conn=${cs.connectionId}`);
+    connectionFileLog(
+      cs,
+      "INFO",
+      `Aborting stream: stream=${streamId || "none"}, conn=${cs.connectionId}`,
+    );
 
     // Signal abort to clients
     if (streamId) {
@@ -683,7 +718,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     cs.streamingFilter.reset();
 
     connections.delete(cs.connectionId);
-    fileLog("INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
+    connectionFileLog(cs, "INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
   }
 
   /** Abort all active connections (used on extension stop) */
@@ -773,7 +808,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
 
     async start(context: ExtensionContext) {
       ctx = context;
-      traceLog = ctx.createLogger({ component: "trace" });
+      traceLog = ctx.createLogger({ component: "trace", fileName: "voice-trace.log" });
       fileLog(
         "INFO",
         `Voice extension starting (streaming=${cfg.streaming}, apiKey=${!!cfg.apiKey}, voice=${cfg.voiceId}, dictionaryId=${cfg.dictionaryId || "none"})`,
@@ -809,7 +844,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
           const cs = getOrCreateConnection(event.connectionId);
           cs.currentBlockType = blockType;
 
-          fileLog(
+          connectionFileLog(
+            cs,
             "INFO",
             `content_block_start: type=${blockType}, conn=${event.connectionId}, session=${payload.sessionId || event.sessionId || "?"}`,
           );
@@ -845,7 +881,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
             // Stream text to Cartesia in real-time
             if (cfg.streaming && cs.currentStreamId) {
               feedStreamingText(cs, deltaText).catch((err) => {
-                fileLog("ERROR", `feedStreamingText error: ${err.message}`);
+                connectionFileLog(cs, "ERROR", `feedStreamingText error: ${err.message}`);
               });
             }
           }
@@ -861,7 +897,8 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
           const cs = connections.get(event.connectionId);
           if (!cs) return;
 
-          fileLog(
+          connectionFileLog(
+            cs,
             "INFO",
             `message_stop: conn=${cs.connectionId}, hasActiveStream=${!!cs.currentStreamId}, textBuffer=${cs.textBuffer.length} chars`,
           );

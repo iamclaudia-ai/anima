@@ -8,7 +8,12 @@
  * `dominatrix.command` events, and respond via `dominatrix.response` method calls.
  */
 
-import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
+import type {
+  AnimaExtension,
+  ExtensionContext,
+  HealthCheckResponse,
+  LoggerLike,
+} from "@anima/shared";
 import { z } from "zod";
 
 // ============================================================================
@@ -33,6 +38,12 @@ interface PendingRequest {
 // ============================================================================
 
 const COMMAND_TIMEOUT_MS = 15_000;
+const noopLogger: LoggerLike = {
+  info() {},
+  warn() {},
+  error() {},
+  child: () => noopLogger,
+};
 
 // ============================================================================
 // Schemas
@@ -215,6 +226,7 @@ const responseParam = z.object({
 
 export function createDominatrixExtension(): AnimaExtension {
   let ctx: ExtensionContext;
+  let traceLog: LoggerLike = noopLogger;
   const clients = new Map<string, ChromeClient>();
   const pendingRequests = new Map<string, PendingRequest>();
 
@@ -225,10 +237,24 @@ export function createDominatrixExtension(): AnimaExtension {
   // Command dispatch — sends command event and waits for response
   // --------------------------------------------------------------------------
 
+  function summarizeParams(params: Record<string, unknown>): Record<string, unknown> {
+    const summary: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === "string") {
+        summary[key] = value.length > 120 ? `${value.slice(0, 120)}…` : value;
+      } else if (Array.isArray(value)) {
+        summary[key] = `[array:${value.length}]`;
+      } else if (value && typeof value === "object") {
+        summary[key] = "[object]";
+      } else {
+        summary[key] = value;
+      }
+    }
+    return summary;
+  }
+
   function sendCommand(action: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    ctx.log.info(
-      `sendCommand: action=${action}, clients=${clients.size}, params=${JSON.stringify(params)}`,
-    );
+    ctx.log.info(`Dispatching browser command: ${action}`, { clients: clients.size });
 
     if (clients.size === 0) {
       return Promise.reject(new Error("No Chrome extension clients connected"));
@@ -239,6 +265,11 @@ export function createDominatrixExtension(): AnimaExtension {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         ctx.log.warn(`Command timed out: action=${action}, requestId=${requestId}`);
+        traceLog.warn("Command timed out", {
+          action,
+          requestId,
+          params: summarizeParams(params),
+        });
         pendingRequests.delete(requestId);
         reject(new Error(`Command '${action}' timed out after ${COMMAND_TIMEOUT_MS}ms`));
       }, COMMAND_TIMEOUT_MS);
@@ -246,6 +277,11 @@ export function createDominatrixExtension(): AnimaExtension {
       pendingRequests.set(requestId, { resolve, reject, timer });
 
       ctx.log.info(`Emitting dominatrix.command: requestId=${requestId}, action=${action}`);
+      traceLog.info("Command payload", {
+        requestId,
+        action,
+        params: summarizeParams(params),
+      });
       ctx.emit("dominatrix.command", {
         requestId,
         action,
@@ -332,9 +368,11 @@ export function createDominatrixExtension(): AnimaExtension {
       );
       const pending = pendingRequests.get(requestId);
       if (!pending) {
-        ctx.log.warn(
-          `Response for unknown request: requestId=${requestId}, pendingKeys=[${Array.from(pendingRequests.keys()).join(",")}]`,
-        );
+        ctx.log.warn(`Response for unknown request: requestId=${requestId}`);
+        traceLog.warn("Unknown response received", {
+          requestId,
+          pendingCount: pendingRequests.size,
+        });
         return { ok: false };
       }
 
@@ -343,9 +381,11 @@ export function createDominatrixExtension(): AnimaExtension {
 
       if (p.success) {
         ctx.log.info(`Resolving request: requestId=${requestId}`);
+        traceLog.info("Command succeeded", { requestId });
         pending.resolve(p.data);
       } else {
         ctx.log.warn(`Rejecting request: requestId=${requestId}, error=${p.error}`);
+        traceLog.warn("Command failed", { requestId, error: p.error });
         pending.reject(new Error((p.error as string) || "Command failed"));
       }
 
@@ -558,6 +598,7 @@ export function createDominatrixExtension(): AnimaExtension {
 
     async start(extensionCtx) {
       ctx = extensionCtx;
+      traceLog = ctx.createLogger({ component: "trace", fileName: "dominatrix-trace.log" });
 
       // Listen for client disconnects — remove stale Chrome extension clients
       ctx.on("client.disconnected", (event) => {
@@ -585,6 +626,7 @@ export function createDominatrixExtension(): AnimaExtension {
       clients.clear();
       connectionMap.clear();
       ctx.log.info("DOMINATRIX extension stopped");
+      traceLog = noopLogger;
     },
 
     async handleMethod(method, params) {

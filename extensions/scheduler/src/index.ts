@@ -163,6 +163,10 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
   async function fireTask(task: ScheduledTask): Promise<void> {
     if (!ctx) return;
+    const taskLog = ctx.createLogger({
+      component: `task:${task.id.slice(0, 8)}`,
+      fileName: `scheduler-task-${task.id}.log`,
+    });
 
     // Concurrency check
     if (task.concurrency === "skip_if_running" && runningTasks.has(task.id)) {
@@ -183,7 +187,10 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     runningTasks.add(task.id);
     insertExecution({ id: execId, taskId: task.id, firedAt, status: "running" });
 
-    ctx.log.info(`Firing scheduled task: ${task.name}`, { id: task.id, action: task.action });
+    ctx.log.info(`Firing scheduled task: ${task.name}`, {
+      id: task.id,
+      actionType: task.action.type,
+    });
 
     let execOutput: string | undefined;
 
@@ -224,7 +231,12 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
           const cmd = useShell ? ["sh", "-c", [target, ...args].join(" ")] : [target, ...args];
 
-          ctx.log.info(`Exec: ${cmd.join(" ")}`, { cwd, timeoutMs });
+          ctx.log.info(`Exec task started: ${task.name}`, { id: task.id, cwd, timeoutMs });
+          taskLog.info("Exec command", {
+            command: cmd.join(" "),
+            cwd,
+            timeoutMs,
+          });
 
           const proc = Bun.spawn(cmd, {
             cwd,
@@ -258,14 +270,23 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
             );
           }
 
-          if (stdout.trim()) ctx.log.info(`[exec stdout] ${stdout.trim().slice(0, 200)}`);
-          if (stderr.trim()) ctx.log.info(`[exec stderr] ${stderr.trim().slice(0, 200)}`);
+          if (stdout.trim()) taskLog.info("exec stdout", { text: stdout.trim().slice(0, 4000) });
+          if (stderr.trim()) taskLog.warn("exec stderr", { text: stderr.trim().slice(0, 4000) });
           break;
         }
       }
 
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "success", durationMs, undefined, execOutput);
+      ctx.log.info(`Scheduled task completed: ${task.name}`, {
+        id: task.id,
+        durationMs,
+        status: "success",
+      });
+      taskLog.info("Task completed", {
+        durationMs,
+        status: "success",
+      });
 
       // Emit generic task_fired event
       ctx.emit("scheduler.task_fired", {
@@ -279,6 +300,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "error", durationMs, String(error));
       ctx.log.error(`Failed to fire task: ${task.name}`, { id: task.id, error: String(error) });
+      taskLog.error("Task failed", { durationMs, error: String(error) });
     } finally {
       runningTasks.delete(task.id);
     }

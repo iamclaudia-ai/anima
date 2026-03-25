@@ -16,6 +16,8 @@ const LOGS_DIR = join(homedir(), ".anima", "logs");
 
 export function createControlExtension(): AnimaExtension {
   let ctx: ExtensionContext | null = null;
+  const isSupportedLogFile = (fileName: string): boolean =>
+    fileName.endsWith(".log") || fileName.endsWith(".jsonl");
 
   return {
     id: "control",
@@ -49,6 +51,7 @@ export function createControlExtension(): AnimaExtension {
     },
 
     async stop() {
+      ctx?.log.info("Control extension stopped");
       ctx = null;
     },
 
@@ -70,7 +73,7 @@ export function createControlExtension(): AnimaExtension {
         case "control.log_list": {
           try {
             const files = readdirSync(LOGS_DIR)
-              .filter((f) => f.endsWith(".log"))
+              .filter(isSupportedLogFile)
               .map((f) => {
                 const fullPath = join(LOGS_DIR, f);
                 const stat = statSync(fullPath);
@@ -94,7 +97,8 @@ export function createControlExtension(): AnimaExtension {
 
           // Sanitize filename — only allow log files from the logs dir
           const sanitized = basename(fileName);
-          if (!sanitized.endsWith(".log")) {
+          if (!isSupportedLogFile(sanitized)) {
+            ctx?.log.warn("Rejected invalid log_tail request", { file: fileName });
             throw new Error("Invalid log file name");
           }
           const filePath = join(LOGS_DIR, sanitized);
