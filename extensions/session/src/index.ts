@@ -79,6 +79,9 @@ interface SessionRuntimeConfig {
   systemPrompt: string | null;
 }
 
+const MEMORY_TRANSITION_TIMEOUT_MS = 1500;
+const MEMORY_CONTEXT_TIMEOUT_MS = 2000;
+
 // ── Session Discovery ────────────────────────────────────────
 
 interface SessionIndexEntry {
@@ -260,6 +263,23 @@ function discoverSessions(cwd: string): SessionIndexEntry[] {
   }
 
   return sessions;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
@@ -1139,7 +1159,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
         // Transition ALL active conversations for this workspace to 'ready' for Libby
         try {
-          await ctx.call("memory.transition_conversation", { cwd });
+          await withTimeout(
+            ctx.call("memory.transition_conversation", { cwd }),
+            MEMORY_TRANSITION_TIMEOUT_MS,
+            "memory.transition_conversation",
+          );
         } catch (err) {
           log.warn("Failed to transition previous conversations (non-fatal)", {
             cwd,
@@ -1149,13 +1173,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
         // Inject recent memory context into system prompt for continuity
         try {
-          const memoryContext = (await Promise.race([
+          const memoryContext = (await withTimeout(
             ctx.call("memory.get_session_context", {
               cwd,
               includeAllSummaries: workspaceResult.workspace.general,
             }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
-          ])) as {
+            MEMORY_CONTEXT_TIMEOUT_MS,
+            "memory.get_session_context",
+          )) as {
             recentMessages: Array<{ role: string; content: string; timestamp: string }>;
             recentSummaries: Array<{
               summary: string;
@@ -1464,7 +1489,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
         // Transition ALL active conversations for this workspace to 'ready' for Libby
         try {
-          await ctx.call("memory.transition_conversation", { cwd });
+          await withTimeout(
+            ctx.call("memory.transition_conversation", { cwd }),
+            MEMORY_TRANSITION_TIMEOUT_MS,
+            "memory.transition_conversation",
+          );
         } catch (err) {
           log.warn("Failed to transition previous conversations (non-fatal)", {
             cwd,
@@ -1515,7 +1544,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
         // Transition ALL active conversations for this workspace to 'ready' for Libby
         try {
-          await ctx.call("memory.transition_conversation", { cwd });
+          await withTimeout(
+            ctx.call("memory.transition_conversation", { cwd }),
+            MEMORY_TRANSITION_TIMEOUT_MS,
+            "memory.transition_conversation",
+          );
         } catch (err) {
           log.warn("Failed to transition previous conversations (non-fatal)", {
             cwd,

@@ -492,6 +492,51 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("fails open when memory transition hangs during session creation", async () => {
+    const timeoutCallbacks: Array<() => void> = [];
+    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
+      cb: (...args: unknown[]) => void,
+    ) => {
+      timeoutCallbacks.push(() => cb());
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+    const clearSpy = spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
+
+    const ext = createSessionExtension();
+    await ext.start(
+      createTestContext({
+        async call(method) {
+          if (method === "memory.transition_conversation") {
+            return new Promise(() => undefined);
+          }
+          if (method === "memory.get_session_context") {
+            return { recentMessages: [], recentSummaries: [] };
+          }
+          return null;
+        },
+      }),
+    );
+
+    const pending = ext.handleMethod("session.create_session", { cwd: "/repo/project" });
+    await Promise.resolve();
+    expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
+    timeoutCallbacks[0]?.();
+
+    await expect(pending).resolves.toEqual({ sessionId: "created-session-1" });
+    expect(createSpy).toHaveBeenCalledWith({
+      agent: "claude",
+      cwd: "/repo/project",
+      model: "claude-opus-4-6",
+      systemPrompt: undefined,
+      thinking: false,
+      effort: "medium",
+    });
+
+    await ext.stop();
+    timeoutSpy.mockRestore();
+    clearSpy.mockRestore();
+  });
+
   it("starts codex-backed tasks via session.start_task and remaps events", async () => {
     const emitted: Array<{
       eventName: string;
