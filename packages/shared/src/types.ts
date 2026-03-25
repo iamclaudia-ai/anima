@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import type { LoggerFactoryOptions, LoggerLike } from "./logger";
 
 /**
  * Core types for Claudia
@@ -161,11 +162,9 @@ export interface ExtensionContext {
   /** Extension configuration */
   config: Record<string, unknown>;
   /** Logger — writes to console + file at ~/.anima/logs/{extensionId}.log */
-  log: {
-    info(msg: string, meta?: unknown): void;
-    warn(msg: string, meta?: unknown): void;
-    error(msg: string, meta?: unknown): void;
-  };
+  log: LoggerLike;
+  /** Create scoped or dedicated loggers using the shared logging backend */
+  createLogger(options?: LoggerFactoryOptions): LoggerLike;
   /** Persistent key-value store at ~/.anima/<extensionId>/store.json.
    *  Supports dot notation for nested access. Persists on every set/delete. */
   store: {
@@ -352,9 +351,5 @@ export interface HookContext {
   /** Current session ID (if available) */
   sessionId: string | null;
   /** Logger */
-  log: {
-    info(msg: string, meta?: unknown): void;
-    warn(msg: string, meta?: unknown): void;
-    error(msg: string, meta?: unknown): void;
-  };
+  log: LoggerLike;
 }

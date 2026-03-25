@@ -2,19 +2,34 @@
  * Claudia Unified Logger
  *
  * Structured logger that writes to both console AND file.
- * Modeled after the voice extension's gold-standard file logging pattern.
  *
  * Features:
  * - Timestamped, leveled log entries
  * - Console output with component prefix
  * - File output with JSON metadata
+ * - Buffered async file writes
  * - Simple size-based rotation (configurable, default 10MB, keep 2 old)
  */
 
-import { existsSync, mkdirSync, appendFileSync, statSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, renameSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR";
+
+export interface LoggerLike {
+  info(msg: string, meta?: unknown): void;
+  warn(msg: string, meta?: unknown): void;
+  error(msg: string, meta?: unknown): void;
+  child(component: string): LoggerLike;
+}
+
+export interface LoggerFactoryOptions {
+  /** Optional child component suffix (e.g. "trace" => "memory:trace") */
+  component?: string;
+  /** Optional log file name under ~/.anima/logs (default: keep parent file) */
+  fileName?: string;
+}
 
 export interface LoggerOptions {
   /** Component name shown in log prefix */
@@ -29,6 +44,15 @@ export interface LoggerOptions {
 
 const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const DEFAULT_MAX_FILES = 2;
+
+interface FileBufferState {
+  pending: string;
+  flushing: boolean;
+  maxFileSize: number;
+  maxFiles: number;
+}
+
+const fileBuffers = new Map<string, FileBufferState>();
 
 /**
  * Rotate a log file if it exceeds the size limit.
@@ -57,7 +81,7 @@ function rotateIfNeeded(filePath: string, maxSize: number, maxFiles: number): vo
   }
 }
 
-export class Logger {
+export class Logger implements LoggerLike {
   private component: string;
   private filePath: string | null;
   private maxFileSize: number;
@@ -90,6 +114,15 @@ export class Logger {
     this.write("ERROR", msg, meta);
   }
 
+  child(component: string): LoggerLike {
+    return new Logger({
+      component: `${this.component}:${component}`,
+      filePath: this.filePath ?? undefined,
+      maxFileSize: this.maxFileSize,
+      maxFiles: this.maxFiles,
+    });
+  }
+
   private write(level: LogLevel, msg: string, meta?: unknown): void {
     const tag = `[${this.component}]`;
 
@@ -109,15 +142,72 @@ export class Logger {
     // File output (structured, machine-parseable)
     if (this.filePath) {
       try {
-        rotateIfNeeded(this.filePath, this.maxFileSize, this.maxFiles);
         const ts = new Date().toISOString();
         const metaStr = meta
           ? ` ${typeof meta === "object" ? JSON.stringify(meta) : String(meta)}`
           : "";
-        appendFileSync(this.filePath, `[${ts}] [${level}] [${this.component}] ${msg}${metaStr}\n`);
+        enqueueFileWrite(
+          this.filePath,
+          `[${ts}] [${level}] [${this.component}] ${msg}${metaStr}\n`,
+          this.maxFileSize,
+          this.maxFiles,
+        );
       } catch {
         // Never let file logging break the application
       }
+    }
+  }
+}
+
+function enqueueFileWrite(
+  filePath: string,
+  line: string,
+  maxFileSize: number,
+  maxFiles: number,
+): void {
+  const state = fileBuffers.get(filePath) ?? {
+    pending: "",
+    flushing: false,
+    maxFileSize,
+    maxFiles,
+  };
+  state.pending += line;
+  state.maxFileSize = maxFileSize;
+  state.maxFiles = maxFiles;
+  fileBuffers.set(filePath, state);
+
+  if (!state.flushing) {
+    state.flushing = true;
+    queueMicrotask(() => {
+      void flushFileBuffer(filePath);
+    });
+  }
+}
+
+async function flushFileBuffer(filePath: string): Promise<void> {
+  const state = fileBuffers.get(filePath);
+  if (!state) return;
+
+  const chunk = state.pending;
+  if (!chunk) {
+    state.flushing = false;
+    return;
+  }
+
+  state.pending = "";
+
+  try {
+    rotateIfNeeded(filePath, state.maxFileSize, state.maxFiles);
+    await appendFile(filePath, chunk, "utf-8");
+  } catch {
+    // Ignore file logging failures
+  } finally {
+    if (state.pending) {
+      queueMicrotask(() => {
+        void flushFileBuffer(filePath);
+      });
+    } else {
+      state.flushing = false;
     }
   }
 }

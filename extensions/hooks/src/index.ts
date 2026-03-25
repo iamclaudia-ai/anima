@@ -224,17 +224,22 @@ export function createHooksExtension(config: HooksConfig = {}): AnimaExtension {
    * Create a HookContext for a specific hook.
    */
   function createHookContext(hookId: string): HookContext {
+    const hookLog = ctx?.log.child(hookId) ?? {
+      info() {},
+      warn() {},
+      error() {},
+      child() {
+        return this;
+      },
+    };
+
     return {
       emit(event: string, payload: unknown) {
         ctx?.emit(`hook.${hookId}.${event}`, payload);
       },
       workspace: currentWorkspaceCwd ? { cwd: currentWorkspaceCwd } : null,
       sessionId: currentSessionId,
-      log: {
-        info: (msg, meta) => ctx?.log.info(`[${hookId}] ${msg}`, meta),
-        warn: (msg, meta) => ctx?.log.warn(`[${hookId}] ${msg}`, meta),
-        error: (msg, meta) => ctx?.log.error(`[${hookId}] ${msg}`, meta),
-      },
+      log: hookLog,
     };
   }
 

@@ -22,11 +22,11 @@ import type {
   ExtensionContext,
   HealthCheckResponse,
   HealthItem,
+  LoggerLike,
 } from "@anima/shared";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { createActor, type ActorRefFrom, type SnapshotFrom } from "xstate";
 import {
@@ -63,51 +63,19 @@ import { memoryExtensionMachine } from "./state-machine";
 import { ingestMemoryDocument, scanAndIngestMemoryDirCooperative } from "./document-ingest";
 import { DocumentWatcher } from "./document-watcher";
 
-// ============================================================================
-// File Logging (tail -f ~/.anima/logs/memory.log)
-// ============================================================================
+const noopLogger: LoggerLike = {
+  info() {},
+  warn() {},
+  error() {},
+  child: () => noopLogger,
+};
 
-const LOG_DIR = join(homedir(), ".anima", "logs");
-if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
-const LOG_FILE = join(LOG_DIR, "memory.log");
-let pendingLogChunk = "";
-let logFlushScheduled = false;
-
-async function flushLogBuffer(): Promise<void> {
-  if (!pendingLogChunk) {
-    logFlushScheduled = false;
-    return;
-  }
-
-  const chunk = pendingLogChunk;
-  pendingLogChunk = "";
-
-  try {
-    await appendFile(LOG_FILE, chunk, "utf-8");
-  } catch {
-    // Ignore log write errors
-  } finally {
-    if (pendingLogChunk) {
-      void flushLogBuffer();
-    } else {
-      logFlushScheduled = false;
-    }
-  }
-}
+let traceLog: LoggerLike = noopLogger;
 
 function fileLog(level: string, msg: string): void {
-  try {
-    const ts = new Date().toISOString();
-    pendingLogChunk += `[${ts}] [${level}] ${msg}\n`;
-    if (!logFlushScheduled) {
-      logFlushScheduled = true;
-      queueMicrotask(() => {
-        void flushLogBuffer();
-      });
-    }
-  } catch {
-    // Ignore log write errors
-  }
+  if (level === "ERROR") traceLog.error(msg);
+  else if (level === "WARN") traceLog.warn(msg);
+  else traceLog.info(msg);
 }
 
 // ============================================================================
@@ -398,6 +366,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
     async start(context: ExtensionContext) {
       ctx = context;
+      traceLog = ctx.createLogger({ component: "trace" });
       fileLog(
         "INFO",
         `Memory extension starting (watchPath=${basePath}, gap=${cfg.conversationGapMinutes}min)`,
@@ -624,6 +593,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
       closeDb();
       ctx = null;
+      traceLog = noopLogger;
     },
 
     async handleMethod(method: string, params: Record<string, unknown>) {

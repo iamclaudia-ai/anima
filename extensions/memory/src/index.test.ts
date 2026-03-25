@@ -76,6 +76,26 @@ function createTestContext(): ExtensionContext {
       info() {},
       warn() {},
       error() {},
+      child() {
+        return {
+          info() {},
+          warn() {},
+          error() {},
+          child() {
+            throw new Error("not implemented");
+          },
+        };
+      },
+    },
+    createLogger() {
+      return {
+        info() {},
+        warn() {},
+        error() {},
+        child() {
+          return this;
+        },
+      };
     },
   };
 }

@@ -19,30 +19,26 @@ import type {
   ExtensionContext,
   GatewayEvent,
   HealthCheckResponse,
+  LoggerLike,
 } from "@anima/shared";
-import { existsSync, mkdirSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { z } from "zod";
 import { CartesiaStream } from "./cartesia-stream";
 import { SentenceChunker } from "./sentence-chunker";
 import { saveAudio, getAudioPath, pcmToWav } from "./audio-store";
 
-// ============================================================================
-// File Logging (tail -f ~/.anima/logs/voice.log)
-// ============================================================================
+const noopLogger: LoggerLike = {
+  info() {},
+  warn() {},
+  error() {},
+  child: () => noopLogger,
+};
 
-const LOG_DIR = join(homedir(), ".anima", "logs");
-if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
-const LOG_FILE = join(LOG_DIR, "voice.log");
+let traceLog: LoggerLike = noopLogger;
 
 function fileLog(level: string, msg: string): void {
-  try {
-    const ts = new Date().toISOString();
-    appendFileSync(LOG_FILE, `[${ts}] [${level}] ${msg}\n`);
-  } catch {
-    // Ignore log write errors
-  }
+  if (level === "ERROR") traceLog.error(msg);
+  else if (level === "WARN") traceLog.warn(msg);
+  else traceLog.info(msg);
 }
 
 // ============================================================================
@@ -777,6 +773,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
 
     async start(context: ExtensionContext) {
       ctx = context;
+      traceLog = ctx.createLogger({ component: "trace" });
       fileLog(
         "INFO",
         `Voice extension starting (streaming=${cfg.streaming}, apiKey=${!!cfg.apiKey}, voice=${cfg.voiceId}, dictionaryId=${cfg.dictionaryId || "none"})`,
@@ -898,6 +895,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       }
       unsubscribers = [];
       ctx = null;
+      traceLog = noopLogger;
     },
 
     async handleMethod(method: string, params: Record<string, unknown>) {

@@ -24,7 +24,27 @@ function createTestContext(overrides: Partial<ExtensionContext> = {}): Extension
     connectionId: null,
     tags: null,
     config: {},
-    log: { info: () => {}, warn: () => {}, error: () => {} },
+    log: {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      child: () => ({
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        child: () => {
+          throw new Error("not implemented");
+        },
+      }),
+    },
+    createLogger: () => ({
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      child() {
+        return this;
+      },
+    }),
     store: (() => {
       const _data: Record<string, unknown> = {};
       return {

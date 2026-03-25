@@ -148,6 +148,8 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
   async function loadAndStart(): Promise<AnimaExtension> {
     const config = JSON.parse(configJson);
     const ext = factory(config);
+    const defaultLogFile = join(homedir(), ".anima", "logs", `${ext.id}.log`);
+    const extensionLog = createLogger(ext.id, defaultLogFile);
 
     hostLog.info("Starting extension", { id: ext.id, name: ext.name });
 
@@ -222,7 +224,15 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
       config,
 
-      log: createLogger(ext.id, join(homedir(), ".anima", "logs", `${ext.id}.log`)),
+      log: extensionLog,
+
+      createLogger(options = {}) {
+        const component = options.component ? `${ext.id}:${options.component}` : ext.id;
+        const filePath = options.fileName
+          ? join(homedir(), ".anima", "logs", options.fileName)
+          : defaultLogFile;
+        return createLogger(component, filePath);
+      },
 
       store: createExtensionStore(ext.id),
     };
