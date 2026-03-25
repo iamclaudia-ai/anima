@@ -249,9 +249,11 @@ export function MissionControlPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshInFlightRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (!connected) return;
+    if (!connected || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
 
     try {
       // Step 1: Discover extensions
@@ -290,6 +292,7 @@ export function MissionControlPage() {
     } catch (error) {
       console.error("[MissionControl] Refresh failed:", error);
     } finally {
+      refreshInFlightRef.current = false;
       setLoading(false);
     }
   }, [connected, request]);

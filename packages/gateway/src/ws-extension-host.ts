@@ -104,19 +104,26 @@ export class WebSocketExtensionHost implements ExtensionHost {
     method: string,
     params: Record<string, unknown>,
     connectionId?: string,
-    meta?: { traceId?: string; depth?: number; deadlineMs?: number; tags?: string[] },
+    meta?: {
+      traceId?: string;
+      depth?: number;
+      deadlineMs?: number;
+      timeoutMs?: number;
+      tags?: string[];
+    },
   ): Promise<unknown> {
     if (this.closed) {
       throw new Error(`WebSocket extension ${this.extensionId} is disconnected`);
     }
 
     const id = randomUUID();
+    const timeoutMs = meta?.timeoutMs ?? REQUEST_TIMEOUT;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request ${method} timed out after ${REQUEST_TIMEOUT}ms`));
-      }, REQUEST_TIMEOUT);
+        reject(new Error(`Request ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       this.pendingRequests.set(id, { resolve, reject, timer });
 
@@ -129,6 +136,7 @@ export class WebSocketExtensionHost implements ExtensionHost {
         traceId: meta?.traceId,
         depth: meta?.depth,
         deadlineMs: meta?.deadlineMs,
+        timeoutMs: meta?.timeoutMs,
         tags: meta?.tags,
       });
     });

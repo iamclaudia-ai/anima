@@ -209,6 +209,18 @@ describe("ExtensionHostProcess protocol", () => {
     await expect(callPromise).rejects.toThrow("bad request");
   });
 
+  it("uses per-call timeout overrides", () => {
+    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+      ((_cb: (...args: unknown[]) => void, _ms?: number) => 1) as unknown as typeof setTimeout,
+    );
+    const { host } = createHostHarness();
+
+    void host.callMethod("memory.health_check", {}, undefined, { timeoutMs: 1234 });
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1234);
+    setTimeoutSpy.mockRestore();
+  });
+
   it("enforces ctx.call guardrails and returns call_res errors", async () => {
     const { host, writes } = createHostHarness();
     const handleCall = (

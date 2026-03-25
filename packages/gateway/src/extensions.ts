@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import type { ExtensionHost, ExtensionRegistration } from "./extension-host";
 
 const log = createLogger("ExtensionManager", join(homedir(), ".anima", "logs", "gateway.log"));
+const HEALTH_CHECK_TIMEOUT_MS = 15_000;
 
 export class ExtensionManager {
   // Source routing: maps source prefix -> extension ID
@@ -136,7 +137,8 @@ export class ExtensionManager {
     if (!remoteHost) {
       throw new Error(`No extension found for method: ${method}`);
     }
-    return remoteHost.callMethod(method, params ?? {}, connectionId, { ...meta, tags });
+    const timeoutMs = method.endsWith(".health_check") ? HEALTH_CHECK_TIMEOUT_MS : undefined;
+    return remoteHost.callMethod(method, params ?? {}, connectionId, { ...meta, timeoutMs, tags });
   }
 
   /**

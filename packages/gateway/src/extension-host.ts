@@ -44,7 +44,13 @@ export interface ExtensionHost {
     method: string,
     params: Record<string, unknown>,
     connectionId?: string,
-    meta?: { traceId?: string; depth?: number; deadlineMs?: number; tags?: string[] },
+    meta?: {
+      traceId?: string;
+      depth?: number;
+      deadlineMs?: number;
+      timeoutMs?: number;
+      tags?: string[];
+    },
   ): Promise<unknown>;
 
   sendEvent(event: GatewayEvent): void;
@@ -185,7 +191,13 @@ export class ExtensionHostProcess implements ExtensionHost {
     method: string,
     params: Record<string, unknown>,
     connectionId?: string,
-    meta?: { traceId?: string; depth?: number; deadlineMs?: number; tags?: string[] },
+    meta?: {
+      traceId?: string;
+      depth?: number;
+      deadlineMs?: number;
+      timeoutMs?: number;
+      tags?: string[];
+    },
   ): Promise<unknown> {
     return this.sendRequest(method, params, connectionId, meta);
   }
@@ -317,19 +329,26 @@ export class ExtensionHostProcess implements ExtensionHost {
     method: string,
     params: Record<string, unknown>,
     connectionId?: string,
-    meta?: { traceId?: string; depth?: number; deadlineMs?: number; tags?: string[] },
+    meta?: {
+      traceId?: string;
+      depth?: number;
+      deadlineMs?: number;
+      timeoutMs?: number;
+      tags?: string[];
+    },
   ): Promise<unknown> {
     if (!this.proc) {
       throw new Error(`Extension host ${this.extensionId} is not running`);
     }
 
     const id = randomUUID();
+    const timeoutMs = meta?.timeoutMs ?? REQUEST_TIMEOUT;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request ${method} timed out after ${REQUEST_TIMEOUT}ms`));
-      }, REQUEST_TIMEOUT);
+        reject(new Error(`Request ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       this.pendingRequests.set(id, { resolve, reject, timer });
 
