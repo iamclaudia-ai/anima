@@ -23,7 +23,8 @@ import type {
   HealthCheckResponse,
   HealthItem,
 } from "@anima/shared";
-import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
@@ -69,11 +70,41 @@ import { DocumentWatcher } from "./document-watcher";
 const LOG_DIR = join(homedir(), ".anima", "logs");
 if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
 const LOG_FILE = join(LOG_DIR, "memory.log");
+let pendingLogChunk = "";
+let logFlushScheduled = false;
+
+async function flushLogBuffer(): Promise<void> {
+  if (!pendingLogChunk) {
+    logFlushScheduled = false;
+    return;
+  }
+
+  const chunk = pendingLogChunk;
+  pendingLogChunk = "";
+
+  try {
+    await appendFile(LOG_FILE, chunk, "utf-8");
+  } catch {
+    // Ignore log write errors
+  } finally {
+    if (pendingLogChunk) {
+      void flushLogBuffer();
+    } else {
+      logFlushScheduled = false;
+    }
+  }
+}
 
 function fileLog(level: string, msg: string): void {
   try {
     const ts = new Date().toISOString();
-    appendFileSync(LOG_FILE, `[${ts}] [${level}] ${msg}\n`);
+    pendingLogChunk += `[${ts}] [${level}] ${msg}\n`;
+    if (!logFlushScheduled) {
+      logFlushScheduled = true;
+      queueMicrotask(() => {
+        void flushLogBuffer();
+      });
+    }
   } catch {
     // Ignore log write errors
   }
@@ -598,6 +629,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
     async handleMethod(method: string, params: Record<string, unknown>) {
       switch (method) {
         case "memory.health_check": {
+          const startedAt = Date.now();
           const stats = getStats();
           const s = stats.conversationsByStatus;
           const workItems = getActiveWorkItems();
@@ -696,6 +728,13 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             ],
             items,
           };
+          ctx?.log.info("[memory] health_check completed", {
+            elapsedMs: Date.now() - startedAt,
+            actorState,
+            fileCount: stats.fileCount,
+            queued: s.queued || 0,
+            processing: s.processing || 0,
+          });
           return response;
         }
 
@@ -709,6 +748,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           }
 
           if (file) {
+            const startedAt = Date.now();
             const expanded = expandPath(file);
             // Determine base path: if file is under a known directory, use that as base
             // Otherwise, use the file's parent directory
@@ -721,16 +761,29 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               forceReimport: reimport,
               exclude: cfg.exclude,
             });
+            ctx?.log.info("[memory] ingest file completed", {
+              elapsedMs: Date.now() - startedAt,
+              file: expanded,
+              filesProcessed: result.filesProcessed,
+              entriesInserted: result.entriesInserted,
+            });
             ctx?.emit("memory.ingested", result);
             return result;
           }
 
           if (dir) {
+            const startedAt = Date.now();
             const expanded = expandPath(dir);
             fileLog("INFO", `Manual ingest: dir=${expanded}, reimport=${!!reimport}`);
             const result = await ingestDirectoryCooperative(expanded, cfg.conversationGapMinutes, {
               forceReimport: reimport,
               exclude: cfg.exclude,
+            });
+            ctx?.log.info("[memory] ingest dir completed", {
+              elapsedMs: Date.now() - startedAt,
+              dir: expanded,
+              filesProcessed: result.filesProcessed,
+              entriesInserted: result.entriesInserted,
             });
             ctx?.emit("memory.ingested", result);
             return result;
@@ -914,6 +967,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         }
 
         case "memory.transition_conversation": {
+          const startedAt = Date.now();
           const cwd = params.cwd as string;
           const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
           const pattern = `%${encodedCwd}%`;
@@ -928,6 +982,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             worker?.wake();
           }
 
+          ctx?.log.info("[memory] transition_conversation completed", {
+            elapsedMs: Date.now() - startedAt,
+            cwd,
+            transitioned: changed,
+          });
           return { cwd, transitioned: changed };
         }
 
@@ -951,6 +1010,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         }
 
         case "memory.get_session_context": {
+          const startedAt = Date.now();
           const cwd = params.cwd as string;
           const includeAllSummaries = (params.includeAllSummaries as boolean | undefined) ?? false;
           const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
@@ -965,6 +1025,13 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             : `%${cwd.replace(/\//g, "-").replace(/^-/, "")}%`;
           const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
+          ctx?.log.info("[memory] get_session_context completed", {
+            elapsedMs: Date.now() - startedAt,
+            cwd,
+            includeAllSummaries,
+            recentMessages: recentMessages.length,
+            recentSummaries: recentSummaries.length,
+          });
           return { recentMessages, recentSummaries };
         }
 

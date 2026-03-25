@@ -23,7 +23,7 @@
  */
 
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionContext } from "@anima/shared";
@@ -461,10 +461,15 @@ ${transcript.text}`;
         this.log("INFO", `Libby: [${conv.id}] Skipped in ${elapsed}s — ${result.summary}`);
       } else {
         // Git commit the memory changes
-        const filesWritten = commitMemoryChanges(conv.id, result.summary, this.log);
+        const filesWritten = await commitMemoryChanges(conv.id, result.summary, this.log);
 
         // Verification: flag for review if something looks wrong
-        const reviewReason = verifyProcessing(conv.id, result.summary, filesWritten, this.log);
+        const reviewReason = await verifyProcessing(
+          conv.id,
+          result.summary,
+          filesWritten,
+          this.log,
+        );
 
         if (reviewReason) {
           updateConversationProcessed(conv.id, "review", result.summary, filesWritten);
@@ -570,12 +575,12 @@ const MIN_MEANINGFUL_SUMMARY_LENGTH = 50;
  * 1. Long summary but 0 files written → Libby understood but didn't write
  * 2. Reasoning log planned writes that don't match actual files → mismatch
  */
-function verifyProcessing(
+async function verifyProcessing(
   conversationId: number,
   summary: string,
   filesWritten: string[],
   log: (level: string, msg: string) => void,
-): string | null {
+): Promise<string | null> {
   // Check 1: Meaningful summary but no files written
   // Filter out the log file itself from the count — only count memory files
   const memoryFiles = filesWritten.filter((f) => !f.includes("libby/logs/"));
@@ -593,7 +598,7 @@ function verifyProcessing(
   const logExists = existsSync(logPath) || filesWritten.some((f) => f.includes("libby/logs/"));
   if (logExists && existsSync(logPath)) {
     try {
-      const logContent = readFileSync(logPath, "utf-8");
+      const logContent = await readFile(logPath, "utf-8");
       const plannedPaths = parseLogPlannedFiles(logContent);
 
       if (plannedPaths.length > 0 && memoryFiles.length === 0) {
@@ -633,6 +638,28 @@ function parseLogPlannedFiles(logContent: string): string[] {
   return paths;
 }
 
+async function runCommand(
+  cmd: string[],
+  cwd: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(cmd, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+
+  return {
+    exitCode,
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+  };
+}
+
 // ============================================================================
 // Post-Processing
 // ============================================================================
@@ -641,51 +668,61 @@ function parseLogPlannedFiles(logContent: string): string[] {
  * Git add and commit all changes in ~/memory/.
  * Returns list of files that were changed (from git diff).
  */
-function commitMemoryChanges(
+async function commitMemoryChanges(
   conversationId: number,
   summary: string,
   log: (level: string, msg: string) => void,
-): string[] {
+): Promise<string[]> {
   try {
     // Stage all changes
-    execSync("git add -A", { cwd: MEMORY_ROOT, stdio: "ignore" });
+    const addResult = await runCommand(["git", "add", "-A"], MEMORY_ROOT);
+    if (addResult.exitCode !== 0) {
+      throw new Error(`git add exited with code ${addResult.exitCode}: ${addResult.stderr}`);
+    }
 
     // Check if there are staged changes
-    try {
-      execSync("git diff --cached --quiet", { cwd: MEMORY_ROOT, stdio: "ignore" });
-      // No changes — nothing to commit
+    const quietDiff = await runCommand(["git", "diff", "--cached", "--quiet"], MEMORY_ROOT);
+    if (quietDiff.exitCode === 0) {
       return [];
-    } catch {
-      // Exit code 1 = there ARE changes — proceed with commit
+    }
+    if (quietDiff.exitCode !== 1) {
+      throw new Error(
+        `git diff --cached --quiet exited with code ${quietDiff.exitCode}: ${quietDiff.stderr}`,
+      );
     }
 
     // Get list of changed files before committing
-    const diffOutput = execSync("git diff --cached --name-only", {
-      cwd: MEMORY_ROOT,
-      encoding: "utf-8",
-    }).trim();
-    const filesWritten = diffOutput ? diffOutput.split("\n").map((f) => join(MEMORY_ROOT, f)) : [];
+    const diffResult = await runCommand(["git", "diff", "--cached", "--name-only"], MEMORY_ROOT);
+    if (diffResult.exitCode !== 0) {
+      throw new Error(
+        `git diff --cached --name-only exited with code ${diffResult.exitCode}: ${diffResult.stderr}`,
+      );
+    }
+    const filesWritten = diffResult.stdout
+      ? diffResult.stdout.split("\n").map((f) => join(MEMORY_ROOT, f))
+      : [];
 
-    // Commit with summary — use spawnSync to avoid shell quoting issues
+    // Commit with summary
     const commitMsg = `libby(${conversationId}): ${summary.slice(0, 100)}`;
-    const commitResult = Bun.spawnSync(["git", "commit", "-m", commitMsg], {
-      cwd: MEMORY_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const commitResult = await runCommand(["git", "commit", "-m", commitMsg], MEMORY_ROOT);
     if (commitResult.exitCode !== 0) {
-      const stderr = commitResult.stderr?.toString().trim() || "unknown error";
-      throw new Error(`git commit exited with code ${commitResult.exitCode}: ${stderr}`);
+      throw new Error(
+        `git commit exited with code ${commitResult.exitCode}: ${commitResult.stderr}`,
+      );
     }
 
     // Log the actual commit hash to verify it really committed
-    const commitHash = execSync("git rev-parse --short HEAD", {
-      cwd: MEMORY_ROOT,
-      encoding: "utf-8",
-    }).trim();
+    const commitHashResult = await runCommand(["git", "rev-parse", "--short", "HEAD"], MEMORY_ROOT);
+    if (commitHashResult.exitCode !== 0) {
+      throw new Error(
+        `git rev-parse exited with code ${commitHashResult.exitCode}: ${commitHashResult.stderr}`,
+      );
+    }
+    const commitHash = commitHashResult.stdout;
     log("INFO", `Libby: Git committed ${filesWritten.length} files (${commitHash})`);
 
     // Push to remote (rebase first to handle concurrent writes from other nodes)
-    pushMemoryChanges(log);
+    await pushMemoryChanges(log);
 
     return filesWritten;
   } catch (error) {
@@ -699,31 +736,20 @@ function commitMemoryChanges(
  * Pull with rebase then push ~/memory/ to remote.
  * Best-effort — network failures are logged but don't block processing.
  */
-function pushMemoryChanges(log: (level: string, msg: string) => void): void {
+async function pushMemoryChanges(log: (level: string, msg: string) => void): Promise<void> {
   try {
     // Rebase local commits on top of remote to keep history linear
-    const pullResult = Bun.spawnSync(["git", "pull", "--rebase"], {
-      cwd: MEMORY_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const pullResult = await runCommand(["git", "pull", "--rebase"], MEMORY_ROOT);
     if (pullResult.exitCode !== 0) {
-      const stderr = pullResult.stderr?.toString().trim() || "unknown error";
       // If rebase fails (conflict), abort and log — don't push stale state
-      Bun.spawnSync(["git", "rebase", "--abort"], {
-        cwd: MEMORY_ROOT,
-        stdio: ["ignore", "ignore", "ignore"],
-      });
-      log("ERROR", `Libby: Git pull --rebase failed (aborted): ${stderr}`);
+      await runCommand(["git", "rebase", "--abort"], MEMORY_ROOT);
+      log("ERROR", `Libby: Git pull --rebase failed (aborted): ${pullResult.stderr}`);
       return;
     }
 
-    const pushResult = Bun.spawnSync(["git", "push"], {
-      cwd: MEMORY_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const pushResult = await runCommand(["git", "push"], MEMORY_ROOT);
     if (pushResult.exitCode !== 0) {
-      const stderr = pushResult.stderr?.toString().trim() || "unknown error";
-      log("ERROR", `Libby: Git push failed: ${stderr}`);
+      log("ERROR", `Libby: Git push failed: ${pushResult.stderr}`);
       return;
     }
 
