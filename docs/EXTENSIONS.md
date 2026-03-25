@@ -217,11 +217,12 @@ interface ExtensionContext {
   /** Extension configuration */
   config: Record<string, unknown>;
   /** Logger — writes to console + file at ~/.anima/logs/{extensionId}.log */
-  log: {
-    info(msg: string, meta?: unknown): void;
-    warn(msg: string, meta?: unknown): void;
-    error(msg: string, meta?: unknown): void;
-  };
+  log: LoggerLike;
+  /** Create scoped or dedicated loggers using the shared logging backend */
+  createLogger(options?: {
+    component?: string; // e.g. "trace" -> component "my-feature:trace"
+    fileName?: string; // e.g. "session-ses_123.log"
+  }): LoggerLike;
   /** Persistent JSON-backed store at ~/.anima/<extensionId>/store.json */
   store: {
     get<T = unknown>(key: string): T | undefined;
@@ -241,6 +242,36 @@ ctx.store.set("persistentSessions./repo/general", {
   createdAt: new Date().toISOString(),
 });
 ```
+
+### Logging
+
+Use the logger from the extension context. Do not create ad hoc file loggers in module scope.
+
+```typescript
+async start(ctx: ExtensionContext) {
+  ctx.log.info("My Feature started");
+
+  const traceLog = ctx.createLogger({ component: "trace" });
+  traceLog.info("Background worker initialized");
+
+  const sessionLog = ctx.createLogger({
+    component: "session",
+    fileName: "session-ses_123.log",
+  });
+  sessionLog.info("Opened scoped session trace");
+}
+```
+
+Rules:
+
+- Use `ctx.log` for lifecycle, health, startup, shutdown, and coarse operator-visible state changes.
+- Use `ctx.log.child("...")` or `ctx.createLogger({ component })` for subcomponents inside one extension.
+- Use `ctx.createLogger({ fileName })` for high-frequency or high-cardinality logs that should not flood the main extension log.
+- Do not write per-token, per-stream-chunk, or per-message hot-path traces into the main extension log.
+- Prefer correlation-scoped files for noisy traces, for example per-session, per-connection, or per-job logs.
+- Do not use `appendFileSync`, `console.log`, or custom buffering/rotation for normal extension logging. The shared logger already handles file writes and console routing.
+
+For system-wide policy and log topology, see [LOGGING.md](./LOGGING.md).
 
 ### ctx.call() — Cross-Extension Calls
 

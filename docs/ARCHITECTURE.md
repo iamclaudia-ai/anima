@@ -255,6 +255,7 @@ The context provided to each extension at startup:
 - `call(method, params)` — inter-extension RPC via the gateway hub
 - `config` — extension configuration
 - `log` — scoped logger
+- `createLogger(...)` — shared logger factory for scoped or dedicated trace files
 - `store` — persistent JSON-backed key/value state at `~/.anima/<extensionId>/store.json`
 
 Extensions now use a two-phase startup model:

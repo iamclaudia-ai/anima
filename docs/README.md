@@ -11,6 +11,7 @@ For a high-level overview, see the [project README](../README.md). For dev setup
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system architecture — gateway hub, extension system, session lifecycle, data flow       |
 | [GATEWAY.md](./GATEWAY.md)           | Gateway internals — WebSocket protocol, method routing, event broadcasting, ctx.call() hub   |
 | [EXTENSIONS.md](./EXTENSIONS.md)     | Extension system — authoring guide, direct execution, HMR, ctx.call(), hooks, source routing |
+| [LOGGING.md](./LOGGING.md)           | Logging policy — main vs scoped logs, logger API usage, and best practices                   |
 | [skills.md](./skills.md)             | Agent skills — discovery, prompt integration, and `SKILL.md` structure                       |
 
 ## API & Contracts
