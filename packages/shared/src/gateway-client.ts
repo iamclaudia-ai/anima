@@ -121,6 +121,8 @@ export function createGatewayClient(options: GatewayClientOptions): GatewayClien
 
   function scheduleReconnect(): void {
     if (!autoReconnect || intentionalDisconnect) return;
+    // Guard against duplicate timers (e.g. onerror + onclose both firing)
+    if (reconnectTimer !== null) return;
     const delay = Math.min(baseReconnectDelay * 2 ** reconnectAttempt, maxReconnectDelay);
     reconnectAttempt++;
     reconnectTimer = setTimeout(async () => {

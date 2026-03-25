@@ -322,23 +322,22 @@ export function useChatGateway(
   );
 
   // Subscribe to session-scoped streaming events when we learn the sessionId
+  // Uses client.subscribe()/unsubscribe() so subscriptions are tracked for reconnect restoration
   const subscribeToSession = useCallback(
     (sid: string) => {
       if (subscribedSessionRef.current === sid) return;
 
       // Unsubscribe from old session's stream if any
       if (subscribedSessionRef.current) {
-        sendRequest("gateway.unsubscribe", {
-          events: [`session.${subscribedSessionRef.current}.*`],
-        });
+        void client?.unsubscribe([`session.${subscribedSessionRef.current}.*`]).catch(() => {});
       }
 
       // Subscribe to this session's stream events
-      sendRequest("gateway.subscribe", { events: [`session.${sid}.*`] });
+      void client?.subscribe([`session.${sid}.*`]).catch(() => {});
       subscribedSessionRef.current = sid;
       console.log(`[WS] Subscribed to session: session.${sid.slice(0, 8)}...*`);
     },
-    [sendRequest],
+    [client],
   );
 
   // ── Message mutation helpers ────────────────────────────────
@@ -1062,6 +1061,13 @@ export function useChatGateway(
     return () => unsubscribe();
   }, [client, handleGatewayEvent]);
 
+  // Reset subscription tracking on disconnect so reconnect re-subscribes properly
+  useEffect(() => {
+    if (!isConnected) {
+      subscribedSessionRef.current = null;
+    }
+  }, [isConnected]);
+
   useEffect(() => {
     if (!isConnected) {
       console.log("Disconnected from Gateway");
@@ -1071,7 +1077,8 @@ export function useChatGateway(
     console.log("Connected to Anima Gateway");
 
     // Subscribe to voice and hook events (global, not session-scoped)
-    sendRequest("gateway.subscribe", { events: [...GLOBAL_EVENT_SUBSCRIPTIONS] });
+    // Use client.subscribe() so these are tracked for automatic reconnect restoration
+    void client?.subscribe([...GLOBAL_EVENT_SUBSCRIPTIONS]).catch(() => {});
 
     const opts = optionsRef.current;
 
@@ -1095,7 +1102,7 @@ export function useChatGateway(
       // Just get basic info
       sendRequest("session.get_info");
     }
-  }, [isConnected, sendRequest, subscribeToSession]);
+  }, [client, isConnected, sendRequest, subscribeToSession]);
 
   useEffect(() => {
     return () => {
@@ -1104,11 +1111,11 @@ export function useChatGateway(
         events.push(`session.${subscribedSessionRef.current}.*`);
         subscribedSessionRef.current = null;
       }
-      void call("gateway.unsubscribe", { events }).catch(() => {
+      void client?.unsubscribe(events).catch(() => {
         // Ignore cleanup unsubscribe failures during route transitions/shutdown.
       });
     };
-  }, [call]);
+  }, [client]);
 
   useEffect(() => {
     return () => {
@@ -1233,15 +1240,13 @@ export function useChatGateway(
     (_title?: string) => {
       if (!workspace?.cwd) return;
       if (subscribedSessionRef.current) {
-        sendRequest("gateway.unsubscribe", {
-          events: [`session.${subscribedSessionRef.current}.*`],
-        });
+        void client?.unsubscribe([`session.${subscribedSessionRef.current}.*`]).catch(() => {});
         subscribedSessionRef.current = null;
       }
       setTasks(() => []);
       sendRequest("session.create_session", { cwd: workspace.cwd });
     },
-    [sendRequest, workspace?.cwd],
+    [client, sendRequest, workspace?.cwd],
   );
 
   const switchSession = useCallback(
