@@ -9,7 +9,7 @@
  */
 
 import { watch, type FSWatcher } from "chokidar";
-import { ingestFile } from "./ingest";
+import { ingestFile, yieldToEventLoop } from "./ingest";
 
 export interface WatcherConfig {
   /** Absolute path to the directory to watch */
@@ -114,10 +114,10 @@ export class MemoryWatcher {
     if (!this.queue.includes(filePath)) {
       this.queue.push(filePath);
     }
-    this.processQueue();
+    void this.processQueue();
   }
 
-  private processQueue(): void {
+  private async processQueue(): Promise<void> {
     if (this.processing || this.queue.length === 0) return;
 
     this.processing = true;
@@ -148,6 +148,10 @@ export class MemoryWatcher {
         this.diagnostics.lastErrorAt = new Date().toISOString();
         this.diagnostics.lastError = message;
         this.log("ERROR", `Failed to process ${filePath}: ${message}`);
+      }
+
+      if (this.queue.length > 0) {
+        await yieldToEventLoop();
       }
     }
 

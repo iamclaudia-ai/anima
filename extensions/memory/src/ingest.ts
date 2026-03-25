@@ -48,6 +48,10 @@ export interface IngestOptions {
   exclude?: string[];
 }
 
+export interface CooperativeIngestOptions extends IngestOptions {
+  yieldEvery?: number;
+}
+
 function emptyResult(): IngestResult {
   return {
     filesProcessed: 0,
@@ -56,6 +60,10 @@ function emptyResult(): IngestResult {
     conversationsUpdated: 0,
     errors: [],
   };
+}
+
+export async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 /**
@@ -326,6 +334,42 @@ export function ingestDirectory(
   return result;
 }
 
+export async function ingestDirectoryCooperative(
+  dirPath: string,
+  gapMinutes: number,
+  options: CooperativeIngestOptions = {},
+): Promise<IngestResult> {
+  const result = emptyResult();
+
+  if (!existsSync(dirPath)) {
+    result.errors.push(`Directory not found: ${dirPath}`);
+    return result;
+  }
+
+  const yieldEvery = Math.max(1, options.yieldEvery ?? 10);
+  const files = await findJsonlFilesCooperative(dirPath, yieldEvery);
+
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
+    try {
+      const fileResult = ingestFile(file, dirPath, gapMinutes, options);
+      result.filesProcessed += fileResult.filesProcessed;
+      result.entriesInserted += fileResult.entriesInserted;
+      result.entriesDeleted += fileResult.entriesDeleted;
+      result.conversationsUpdated += fileResult.conversationsUpdated;
+      result.errors.push(...fileResult.errors);
+    } catch (error) {
+      result.errors.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if ((index + 1) % yieldEvery === 0) {
+      await yieldToEventLoop();
+    }
+  }
+
+  return result;
+}
+
 /**
  * Recursively find all .jsonl files in a directory.
  */
@@ -339,6 +383,34 @@ function findJsonlFiles(dirPath: string): string[] {
       files.push(...findJsonlFiles(fullPath));
     } else if (entry.name.endsWith(".jsonl")) {
       files.push(fullPath);
+    }
+  }
+
+  return files;
+}
+
+async function findJsonlFilesCooperative(dirPath: string, yieldEvery: number): Promise<string[]> {
+  const files: string[] = [];
+  const pendingDirs = [dirPath];
+  let visitedDirs = 0;
+
+  while (pendingDirs.length > 0) {
+    const currentDir = pendingDirs.pop();
+    if (!currentDir) continue;
+
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirs.push(fullPath);
+      } else if (entry.name.endsWith(".jsonl")) {
+        files.push(fullPath);
+      }
+    }
+
+    visitedDirs++;
+    if (visitedDirs % yieldEvery === 0) {
+      await yieldToEventLoop();
     }
   }
 

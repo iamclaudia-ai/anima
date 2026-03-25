@@ -12,6 +12,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join, relative, basename, extname } from "node:path";
 import { Glob } from "bun";
 import { upsertMemoryDocument, deleteMemoryDocument, getMemoryDocumentMtime } from "./db";
+import { yieldToEventLoop } from "./ingest";
 
 // ============================================================================
 // Category Extraction
@@ -181,6 +182,45 @@ export function scanAndIngestMemoryDir(
     const fullPath = join(memoryRoot, match);
     if (ingestMemoryDocument(fullPath, memoryRoot, log)) {
       count++;
+    }
+  }
+
+  log?.(
+    "INFO",
+    `DocumentIngest: Scan complete — ${scanned} files checked, ${count} indexed, ${scanned - count} unchanged, ${skippedDir} skipped (ignored dirs)`,
+  );
+
+  return count;
+}
+
+export async function scanAndIngestMemoryDirCooperative(
+  memoryRoot: string,
+  log?: (level: string, msg: string) => void,
+  yieldEvery: number = 10,
+): Promise<number> {
+  let count = 0;
+  let scanned = 0;
+  let skippedDir = 0;
+  const effectiveYieldEvery = Math.max(1, yieldEvery);
+
+  const glob = new Glob("**/*.md");
+  for (const match of glob.scanSync({ cwd: memoryRoot, absolute: false })) {
+    const firstSegment = match.split("/")[0];
+    if (IGNORED_DIRS.has(firstSegment)) {
+      skippedDir++;
+      continue;
+    }
+
+    if (match.startsWith(".") || match.includes("/.")) continue;
+
+    scanned++;
+    const fullPath = join(memoryRoot, match);
+    if (ingestMemoryDocument(fullPath, memoryRoot, log)) {
+      count++;
+    }
+
+    if (scanned % effectiveYieldEvery === 0) {
+      await yieldToEventLoop();
     }
   }
 

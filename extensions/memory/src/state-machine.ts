@@ -26,7 +26,7 @@ import {
   queueConversations,
   markConversationsReady,
 } from "./db";
-import { recoverStuckFiles, ingestDirectory, type IngestResult } from "./ingest";
+import { recoverStuckFiles, ingestDirectoryCooperative, type IngestResult } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import type { MemoryConfig } from "./index";
 
@@ -142,11 +142,12 @@ export const memoryExtensionMachine = setup({
         }
 
         context.fileLog("INFO", `Startup scan: ${context.basePath}`);
-        const scanResult = ingestDirectory(
+        const scanResult = await ingestDirectoryCooperative(
           context.basePath,
           context.config.conversationGapMinutes,
           {
             exclude: context.config.exclude,
+            yieldEvery: 10,
           },
         );
 
@@ -193,10 +194,10 @@ export const memoryExtensionMachine = setup({
       // Close the scan→watcher gap: run one incremental catch-up pass after
       // watcher startup so writes that landed between startup scan completion
       // and watcher readiness are picked up.
-      const catchUpResult = ingestDirectory(
+      const catchUpResult = await ingestDirectoryCooperative(
         context.basePath,
         context.config.conversationGapMinutes,
-        { exclude: context.config.exclude },
+        { exclude: context.config.exclude, yieldEvery: 10 },
       );
       if (catchUpResult.entriesInserted > 0 || catchUpResult.filesProcessed > 0) {
         context.fileLog(

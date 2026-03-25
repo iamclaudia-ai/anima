@@ -54,12 +54,12 @@ import {
   getDayConversations,
   getMonthRange,
 } from "./db";
-import { ingestFile, ingestDirectory, recoverStuckFiles } from "./ingest";
+import { ingestFile, ingestDirectoryCooperative } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import { formatTranscript } from "./transcript-formatter";
 import { LibbyWorker, type LibbyConfig } from "./libby";
 import { memoryExtensionMachine } from "./state-machine";
-import { ingestMemoryDocument, scanAndIngestMemoryDir } from "./document-ingest";
+import { ingestMemoryDocument, scanAndIngestMemoryDirCooperative } from "./document-ingest";
 import { DocumentWatcher } from "./document-watcher";
 
 // ============================================================================
@@ -467,7 +467,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         // Do not block extension registration on startup scan/watcher initialization.
         // Register immediately, then start Libby's worker once the state machine reaches "running".
         const actor = extensionActor;
-        const startWorkerWhenRunning = () => {
+        const startWorkerWhenRunning = async () => {
           if (!ctx || worker) return;
           if (actor.getSnapshot().value !== "running") return;
           try {
@@ -476,7 +476,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             if (ftsTableExists()) {
               fileLog("INFO", "FTS: Index available, running document scan...");
               try {
-                const indexedDocs = scanAndIngestMemoryDir(memoryRoot, fileLog);
+                const indexedDocs = await scanAndIngestMemoryDirCooperative(memoryRoot, fileLog);
                 fileLog(
                   "INFO",
                   `FTS: Document scan complete — ${indexedDocs} new/updated documents`,
@@ -492,8 +492,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               try {
                 docWatcher = new DocumentWatcher(
                   memoryRoot,
-                  (filePath) =>
-                    ingestMemoryDocument(filePath, memoryRoot, fileLog, { force: true }),
+                  async (filePath) => {
+                    ingestMemoryDocument(filePath, memoryRoot, fileLog, { force: true });
+                  },
                   fileLog,
                 );
                 docWatcher.start();
@@ -533,11 +534,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         };
 
         // Fast path for already-running snapshots and slow path for async transition completion.
-        startWorkerWhenRunning();
+        void startWorkerWhenRunning();
         const runningSubscription = actor.subscribe((snapshot) => {
           if (snapshot.value !== "running") return;
           runningSubscription.unsubscribe();
-          startWorkerWhenRunning();
+          void startWorkerWhenRunning();
         });
       } catch (error) {
         fileLog(
@@ -727,7 +728,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           if (dir) {
             const expanded = expandPath(dir);
             fileLog("INFO", `Manual ingest: dir=${expanded}, reimport=${!!reimport}`);
-            const result = ingestDirectory(expanded, cfg.conversationGapMinutes, {
+            const result = await ingestDirectoryCooperative(expanded, cfg.conversationGapMinutes, {
               forceReimport: reimport,
               exclude: cfg.exclude,
             });

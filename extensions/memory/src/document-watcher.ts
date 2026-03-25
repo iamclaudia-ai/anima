@@ -21,6 +21,8 @@ export interface DocumentWatcherDiagnostics {
 export class DocumentWatcher {
   private watcher: FSWatcher | null = null;
   private ready = false;
+  private queue: string[] = [];
+  private processing = false;
   private diagnostics: DocumentWatcherDiagnostics = {
     ready: false,
     lastChangedAt: null,
@@ -29,12 +31,12 @@ export class DocumentWatcher {
   };
 
   private log: (level: string, msg: string) => void;
-  private onFileChanged: (filePath: string) => void;
+  private onFileChanged: (filePath: string) => void | Promise<void>;
   private memoryRoot: string;
 
   constructor(
     memoryRoot: string,
-    onFileChanged: (filePath: string) => void,
+    onFileChanged: (filePath: string) => void | Promise<void>,
     log: (level: string, msg: string) => void,
   ) {
     this.memoryRoot = memoryRoot;
@@ -107,12 +109,33 @@ export class DocumentWatcher {
     this.diagnostics.lastChangedAt = new Date().toISOString();
     this.diagnostics.lastChangedFile = filePath;
 
-    try {
-      this.onFileChanged(filePath);
-      this.diagnostics.filesIndexed++;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.log("ERROR", `DocumentWatcher: Failed to process ${filePath}: ${msg}`);
+    if (!this.queue.includes(filePath)) {
+      this.queue.push(filePath);
     }
+    void this.processQueue();
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing || this.queue.length === 0) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const filePath = this.queue.shift();
+      if (!filePath) continue;
+
+      try {
+        await this.onFileChanged(filePath);
+        this.diagnostics.filesIndexed++;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.log("ERROR", `DocumentWatcher: Failed to process ${filePath}: ${msg}`);
+      }
+
+      if (this.queue.length > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    this.processing = false;
   }
 }
