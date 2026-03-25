@@ -46,6 +46,7 @@ interface AudiobookChapter {
 
 let ctx: ExtensionContext;
 let config: { paths: string[] } = { paths: ["~/romance-novels"] };
+const warnedMissingPaths = new Set<string>();
 
 /**
  * Scan configured paths for audiobook directories
@@ -57,9 +58,14 @@ async function listBooks(): Promise<AudiobookMetadata[]> {
     const basePath = configPath.replace(/^~/, homedir());
 
     if (!existsSync(basePath)) {
-      ctx.log.warn(`Audiobooks path does not exist`, { path: basePath });
+      if (!warnedMissingPaths.has(basePath)) {
+        warnedMissingPaths.add(basePath);
+        ctx.log.warn(`Audiobooks path does not exist`, { path: basePath });
+      }
       continue;
     }
+
+    warnedMissingPaths.delete(basePath);
 
     try {
       const entries = await readdir(basePath, { withFileTypes: true });
@@ -187,6 +193,7 @@ export default function createAudiobooksExtension(): AnimaExtension {
 
     async stop() {
       ctx.log.info("Audiobooks extension stopped");
+      warnedMissingPaths.clear();
     },
 
     async handleMethod(method, params) {

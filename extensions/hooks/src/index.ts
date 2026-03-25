@@ -311,6 +311,7 @@ export function createHooksExtension(config: HooksConfig = {}): AnimaExtension {
     },
 
     async stop() {
+      ctx?.log.info("Hooks extension stopped", { hooks: hooks.length });
       for (const unsub of unsubscribers) {
         unsub();
       }

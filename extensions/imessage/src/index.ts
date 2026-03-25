@@ -485,9 +485,9 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
         Object.assign(cfg, context.config);
       }
 
-      ctx.log.info(
-        `Allowed senders: ${cfg.allowedSenders?.join(", ") || "(none - will ignore all messages)"}`,
-      );
+      ctx.log.info("Allowed senders configured", {
+        count: cfg.allowedSenders?.length || 0,
+      });
 
       // Create and start the imsg client
       client = new ImsgRpcClient({
@@ -508,11 +508,6 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       try {
         chats = await client.listChats(20);
         ctx.log.info(`Connected! Found ${chats.length} recent chats`);
-        for (const chat of chats.slice(0, 5)) {
-          ctx.log.info(
-            `  [${chat.id}] ${chat.name || chat.identifier} (${chat.participants.join(", ")})`,
-          );
-        }
       } catch (err) {
         ctx.log.error(`Failed to list chats: ${err}`);
       }

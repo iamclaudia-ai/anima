@@ -22,6 +22,7 @@ export function createChatExtension(): AnimaExtension {
     },
 
     async stop() {
+      ctx?.log.info("Chat extension stopped");
       ctx = null;
     },
 

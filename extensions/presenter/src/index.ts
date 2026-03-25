@@ -132,6 +132,7 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
     },
 
     async stop() {
+      ctx?.log.info("Presenter extension stopped");
       ctx = null;
     },
 
@@ -163,6 +164,7 @@ export function createPresenterExtension(config: Record<string, unknown> = {}): 
             slide: number;
             scale?: number;
           };
+          ctx?.log.info("Presenter sync broadcast", { presentationId, slide, scale: scale ?? 1 });
           ctx?.emit("presenter.slide_changed", { presentationId, slide, scale });
           return { ok: true, slide, scale };
         }
