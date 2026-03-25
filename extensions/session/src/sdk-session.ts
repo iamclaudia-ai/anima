@@ -237,7 +237,7 @@ export class SDKSession extends EventEmitter {
     this.id = id;
     this.logger = createLogger(
       `SDKSession:${id.slice(0, 8)}`,
-      join(homedir(), ".anima", "logs", "session.log"),
+      join(homedir(), ".anima", "logs", `session-${id}.log`),
     );
     if (!options.model || !options.model.trim()) {
       throw new Error(

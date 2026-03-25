@@ -1093,11 +1093,33 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   /** Short session ID for logging */
   const sid = (id: string) => id.slice(0, 8);
 
-  /** Truncate prompt content for logging */
-  const truncate = (content: string | unknown[], maxLen = 80): string => {
-    if (typeof content === "string")
-      return content.length > maxLen ? content.slice(0, maxLen) + "…" : content;
-    return `[${(content as unknown[]).length} blocks]`;
+  /** Summarize prompt shape for logging without storing user content */
+  const summarizePrompt = (content: string | unknown[]) => {
+    if (typeof content === "string") {
+      return {
+        kind: "text",
+        chars: content.length,
+      };
+    }
+
+    const blocks = content as Array<Record<string, unknown>>;
+    let textBlocks = 0;
+    let imageBlocks = 0;
+    let otherBlocks = 0;
+
+    for (const block of blocks) {
+      if (block?.type === "text") textBlocks++;
+      else if (block?.type === "image") imageBlocks++;
+      else otherBlocks++;
+    }
+
+    return {
+      kind: "blocks",
+      blocks: blocks.length,
+      textBlocks,
+      imageBlocks,
+      otherBlocks,
+    };
   };
 
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -1246,7 +1268,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           sessionId: sid(sessionId),
           streaming,
           source: source || "web",
-          prompt: truncate(content),
+          content: summarizePrompt(content),
         });
 
         const existing = getStoredSession(sessionId);
@@ -1832,7 +1854,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         const sessionId = params.sessionId as string;
         const text = params.text as string;
 
-        log.info("Sending notification", { sessionId: sid(sessionId), text: truncate(text) });
+        log.info("Sending notification", {
+          sessionId: sid(sessionId),
+          content: { kind: "text", chars: text.length },
+        });
 
         await sendSessionNotification(sessionId, text, {
           connectionId: ctx.connectionId,
