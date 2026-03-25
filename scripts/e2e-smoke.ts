@@ -38,6 +38,7 @@ async function runE2E(): Promise<void> {
 
   let accumulated = "";
   let gotStop = false;
+  let activeSessionId: string | null = null;
 
   await new Promise<void>((resolveOpen, rejectOpen) => {
     ws.onopen = () => resolveOpen();
@@ -59,13 +60,13 @@ async function runE2E(): Promise<void> {
       }
 
       if (msg.type !== "event") return;
-      if (msg.event === "session.content_block_delta") {
+      if (activeSessionId && msg.event === `session.${activeSessionId}.content_block_delta`) {
         const payload = (msg.payload ?? {}) as { delta?: { type?: string; text?: string } };
         if (payload.delta?.type === "text_delta" && payload.delta.text) {
           accumulated += payload.delta.text;
         }
       }
-      if (msg.event === "session.message_stop") {
+      if (activeSessionId && msg.event === `session.${activeSessionId}.message_stop`) {
         gotStop = true;
       }
     };
@@ -80,19 +81,17 @@ async function runE2E(): Promise<void> {
       workspace?: { id: string };
     };
 
-    const workspaceId = wsResult.workspace?.id;
-    if (!workspaceId) throw new Error("session.get_or_create_workspace returned no workspace id");
-
     const sessionResult = (await request("session.create_session", {
-      workspaceId,
+      cwd: process.cwd(),
       model,
       thinking,
       effort,
       title: "E2E Smoke Session",
-    })) as { session?: { id: string } };
+    })) as { sessionId?: string };
 
-    const sessionId = sessionResult.session?.id;
+    const sessionId = sessionResult.sessionId;
     if (!sessionId) throw new Error("session.create_session returned no session id");
+    activeSessionId = sessionId;
 
     await request("session.send_prompt", {
       sessionId,
