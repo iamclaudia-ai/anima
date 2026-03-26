@@ -1,26 +1,22 @@
-# Session System
+# Session Extension
 
-The session extension owns Anima's conversational runtime: workspace/session identity, Claude session bootstrapping, prompt orchestration, session discovery, delegated task coordination, and event routing between the gateway and agent-host.
+The session extension is the brain of the operation. It sits between the gateway (a pure message hub) and the agent-host (which owns the actual SDK processes), orchestrating everything in between: workspace identity, session bootstrapping, prompt dispatch, memory continuity, task delegation, and async event routing.
 
-This doc reflects the current post-refactor structure, where lifecycle workflows are explicit modules rather than being embedded in one large `handleMethod` switch.
-
-## Overview
-
-At a high level, the session system sits between the gateway and the agent-host:
+If the gateway is the nervous system, this extension is the cortex.
 
 ```text
 Client
   │  gateway req/res + event stream
   ▼
-Gateway
+Gateway (pure hub)
   │  ctx.call / extension host protocol
   ▼
 Session Extension
   │
-  ├─ Session store / workspace DB
+  ├─ Session store + workspace DB (SQLite)
   ├─ Claude project discovery (~/.claude/projects)
   ├─ Memory integration (memory.*)
-  └─ AgentHostClient
+  └─ AgentHostClient (WebSocket)
         │
         ▼
     Agent Host
@@ -28,361 +24,257 @@ Session Extension
       └─ TaskHost (Codex tasks)
 ```
 
-The key design principle is: the gateway is just a hub, the agent-host owns the SDK processes, and the session extension owns the domain workflow that turns user intents into session lifecycle operations.
+## What It Owns (and What It Doesn't)
 
-## Responsibilities
+**Owns:**
 
-The session extension is responsible for:
+- Draft session creation (fast, no SDK call)
+- Lazy bootstrapping on first prompt (memory context, system prompt injection)
+- Workspace ↔ session mapping
+- Session discovery from Claude's JSONL transcript files
+- Session switching/resetting with memory continuity
+- Delegated task coordination and completion notifications
+- The entire `session.*` API surface
 
-- creating draft sessions quickly
-- bootstrapping real Claude sessions on first prompt
-- restoring and routing async stream events
-- mapping workspaces to active sessions
-- discovering transcript history from Claude JSONL files
-- switching/resetting sessions with memory continuity
-- coordinating delegated tasks and task notifications
-- exposing the session API surface to the rest of the system
+**Doesn't own:**
 
-It is not responsible for:
+- The Claude SDK runtime process (that's agent-host)
+- The WebSocket client protocol (that's gateway)
+- Memory ingestion into SQLite (that's the memory extension)
 
-- owning the actual Claude SDK runtime process
-- owning the WebSocket client protocol
-- ingesting transcript memory into SQLite
+Clean boundaries. Each system does one thing well.
 
-Those belong to the agent-host, gateway, and memory extension respectively.
+## Architecture: The Pull Model
+
+Every lifecycle module in the session extension follows a **pull-based runtime pattern**. Instead of receiving dependencies at construction time (push), modules reach into a shared runtime singleton when they need something:
+
+```text
+index.ts                          lifecycle modules
+  │                                    │
+  │  initRuntime({                     │
+  │    ctx, agentClient,               │
+  │    sessionConfig, ...              │
+  │  })                                │
+  │         │                          │
+  │         ▼                          │
+  │    ┌─────────────┐                 │
+  │    │  runtime.ts  │◄───────────────│  getRuntime()
+  │    │  (singleton) │                │
+  │    └─────────────┘                 │
+  │                                    │
+```
+
+`runtime.ts` is ~50 lines: `initRuntime()`, `getRuntime()`, `resetRuntime()`. It holds the extension context, agent-host client, session config, and shared state maps (request contexts, task cache, etc.).
+
+This means lifecycle modules are **plain exported functions** — no factories, no interfaces, no DI wiring. They just call `getRuntime()` at execution time and get what they need. The result is an `index.ts` that's ~170 lines of config + init + extension interface, instead of a 790-line monolith.
+
+### The Circular Dependency Trick
+
+One subtlety: `prompt-lifecycle` needs to call `session.create_session` (when a persistent session doesn't exist yet), and `session.create_session` lives in `session-dispatch`, which also calls `prompt-lifecycle` for `session.send_prompt`. Classic circular dependency.
+
+The solution is a **late-bound `dispatchMethod`** reference on the runtime — essentially the session extension's own version of `ctx.call()`. It's set after everything is initialized, and modules access it at execution time through `getRuntime().dispatchMethod`. The runtime acts as an indirection layer that breaks the cycle at construction time while allowing it at call time.
 
 ## Core Model
 
-There are three related but distinct concepts:
+Three related but distinct concepts:
 
-### 1. Draft session
+### 1. Draft Session
 
-A draft session is created by `session.create_session` and stored immediately in the session DB. It has a UUID and metadata, but it may not yet have a Claude JSONL transcript or active SDK runtime.
+Created by `session.create_session`. Gets a UUID and metadata row in the session DB instantly — no SDK call, no memory fetch, no blocking. This makes session creation feel immediate and eliminates UI double-click races.
 
-This makes session creation fast and avoids UI double-click races.
+### 2. Materialized Session
 
-### 2. Materialized session
+A draft becomes materialized when the agent-host creates or resumes the actual Claude SDK session for that UUID. This happens **lazily on first prompt** — the expensive work only runs when the user is already waiting for model output.
 
-A materialized session exists once the agent-host has created or resumed the underlying Claude SDK session for that UUID.
+### 3. Persistent Session Alias
 
-Materialization happens lazily on first prompt.
-
-### 3. Persistent session alias
-
-Some callers use the sentinel `PERSISTENT_SESSION_ID`. The session extension resolves that alias to a real per-workspace session ID before continuing normal prompt flow.
-
-## Create vs First Prompt
-
-The most important lifecycle decision is that session creation is now intentionally cheap.
-
-### Create session
-
-`session.create_session` now does:
-
-1. resolve or create workspace
-2. generate session UUID
-3. persist a draft session row
-4. persist bootstrap metadata
-5. set the workspace's active session
-6. return immediately
-
-It does not:
-
-- call memory continuity APIs
-- create the Claude SDK runtime
-- inject memory context
-
-### First prompt
-
-The expensive bootstrapping work moved to `session.send_prompt`:
-
-```text
-send_prompt
-  │
-  ├─ resolve persistent alias if needed
-  ├─ resolve workspace / stored session / effective cwd
-  ├─ detect whether Claude session file/runtime exists
-  ├─ if first real prompt:
-  │    ├─ transition previous conversation
-  │    ├─ fetch memory context
-  │    ├─ build bootstrap system prompt
-  │    └─ create Claude session using the pre-generated UUID
-  ├─ attach request/stream context
-  └─ dispatch prompt
-```
-
-This matches the actual cost profile better: "create" is instant, "send prompt" absorbs setup overhead while the user is already waiting for model output.
+Some callers (like iMessage) use the sentinel `PERSISTENT_SESSION_ID` instead of a real UUID. The prompt lifecycle resolves this to a per-workspace session ID before continuing normal flow. The mapping lives in the extension's persistent store and supports rotation based on message count or age.
 
 ## Prompt Lifecycle
 
-The prompt flow is implemented in [`extensions/session/src/lifecycle/prompt-lifecycle.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/prompt-lifecycle.ts).
-
-It uses a prewired runner with three dependency groups:
-
-- `session`: operations that apply to a draft or real session
-- `request`: per-call envelope state like `connectionId`, `tags`, and request context maps
-- `services`: config, logging, and prompt summarization helpers
-
-### Prompt pipeline
+The heart of the extension. Lives in `lifecycle/prompt-lifecycle.ts`.
 
 ```text
 runPromptLifecycle(input, request)
   │
   ├─ resolveSessionStage
-  │    resolve persistent alias
-  │    load stored session
-  │    infer cwd/workspace/model
+  │    resolve persistent alias → real session ID
+  │    load stored session from DB
+  │    infer cwd / workspace / model
   │
   ├─ prepareRuntimeStage
-  │    ensure request context maps
-  │    detect model drift
-  │    recycle runtime if needed
+  │    detect model drift (running model ≠ desired model)
+  │    recycle SDK runtime if needed
+  │    upsert draft session if new
   │
   ├─ bootstrapSessionStage
-  │    if no Claude session exists yet:
-  │      transition conversation
-  │      load memory context
-  │      create/resume session with explicit sessionId
+  │    skip if Claude session file already exists
+  │    transition previous conversation (memory)
+  │    fetch memory context for system prompt
+  │    create Claude session via agent-host
   │
   ├─ attachRequestContextStage
   │    install primary/transient stream routing state
+  │    preserve primary context for concurrent callers
   │
   └─ dispatchPromptStage
-       stream or await completion
+       streaming: fire-and-forget + turn listener
+       non-streaming: await turn_stop with 5min timeout
 ```
 
-### Why this matters
+The key insight is the **create vs first-prompt split**: `session.create_session` is cheap (just a DB row), and `session.send_prompt` absorbs the bootstrapping cost. The user is already waiting for model output, so the overhead is invisible.
 
-Before the refactor, prompt flow logic was spread across `index.ts`. Now the lifecycle is explicit, easier to reason about, and easier to evolve without turning `send_prompt` into an orchestration sink.
+This module also owns `resolvePersistentSession`, `ensureSessionBootstrapped`, and `buildBootstrapSystemPrompt` — they're internal helpers that only the prompt lifecycle needs, so they live here rather than floating around in `index.ts`.
 
-## Session Activation Lifecycle
+## Session Activation
 
-Session switching and resetting have their own workflow runner in [`extensions/session/src/lifecycle/session-activation.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-activation.ts).
+Lives in `lifecycle/session-activation.ts`. Two flows:
 
-### Switch session
+**Switch session** — resume an existing session in a workspace:
 
 ```text
-switch_session
-  │
+switchSession({ sessionId, cwd, model? })
   ├─ resolve/create workspace
-  ├─ transition previous conversation in memory
-  ├─ determine resume model
-  ├─ recycle runtime if running model != desired model
+  ├─ transition previous conversation (memory continuity)
+  ├─ recycle runtime if model drift detected
   ├─ prompt empty string to lazily resume runtime
   ├─ upsert stored session
   └─ set workspace active session
 ```
 
-### Reset session
+**Reset session** — start fresh in a workspace:
 
 ```text
-reset_session
-  │
+resetSession({ cwd, model? })
   ├─ resolve/create workspace
-  ├─ capture previous active session
-  ├─ transition previous conversation in memory
-  ├─ create a fresh agent-host session
-  ├─ persist new session with previousSessionId link
+  ├─ capture previous active session ID
+  ├─ transition previous conversation (memory continuity)
+  ├─ create fresh agent-host session
+  ├─ persist with previousSessionId link
   └─ set workspace active session
 ```
 
-These flows are related, but distinct from prompt dispatch, so they live in a separate runner.
+Both flows call `memory.transition_conversation` first — ensuring the memory system processes the outgoing conversation before we move on.
 
-## Query / Discovery Flow
+## Query & Discovery
 
-Read-oriented session behavior lives in [`extensions/session/src/lifecycle/session-query.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-query.ts).
+Lives in `lifecycle/session-query.ts`. Read-only operations:
 
-### Session discovery
+- **`listSessions(cwd)`** — discovers sessions from Claude's local project files under `~/.claude/projects/`, enriches the session DB with metadata (message count, first prompt, git branch), and returns a merged, sorted list.
 
-Session discovery uses Claude's local project files under `~/.claude/projects`:
+- **`getHistory(params)`** — reads paginated transcript history from Claude's JSONL session files. Also extracts usage/cost data.
 
-- [`extensions/session/src/claude-projects.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/claude-projects.ts) resolves the Claude project directory for a workspace
-- it reads `sessions-index.json` when available
-- it scans `.jsonl` transcript files as the primary source of truth
-- it extracts the first prompt for lightweight session previews
+- **`getMemoryContext(cwd?)`** — previews the exact memory block that would be injected into a new session bootstrap. Useful for debugging memory continuity.
 
-This data is used to enrich the Anima session DB rather than replacing it.
-
-### History and memory preview
-
-- `session.get_history` reads paginated transcript history from Claude JSONL files
-- `session.get_memory_context` previews the exact memory block that would be injected for a new session
-
-Memory block formatting lives in [`extensions/session/src/memory-context.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/memory-context.ts).
+Session discovery works by scanning Claude's project directory structure: `~/.claude/projects/{encoded-cwd}/sessions-index.json` and `.jsonl` transcript files. This data enriches (rather than replaces) the session DB.
 
 ## Event Bridges
 
-The session extension has two important event bridges.
+Two bridges adapt async events from the agent-host back into gateway events.
 
-### Session event bridge
+### Session Events (`lifecycle/session-events.ts`)
 
-[`extensions/session/src/lifecycle/session-events.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-events.ts) adapts `agentClient` session events back into gateway events.
+Adapts `agentClient` session events → gateway `ctx.emit`:
 
-It is responsible for:
+- Restores `connectionId` and `tags` for async stream events (the original RPC call has already returned, so routing context must be preserved explicitly)
+- Merges primary and transient tags correctly for concurrent callers
+- Updates stored runtime status on state transitions
+- Accumulates response text for non-streaming callers
 
-- restoring `connectionId` and `tags` for async stream events
-- merging primary and transient tags correctly
-- emitting session stream events through `ctx.emit`
-- updating stored runtime status
-- accumulating response text for non-streaming callers
+### Task Events (`lifecycle/task-events.ts`)
 
-This is necessary because async SDK events keep arriving after the original RPC call has returned, so the extension must preserve routing context explicitly.
+Same pattern for delegated tasks:
 
-### Task event bridge
-
-[`extensions/session/src/lifecycle/task-events.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/task-events.ts) performs the same kind of adaptation for delegated tasks.
-
-It handles:
-
-- task event replay into the extension's in-memory task map
-- state hydration from stored task sessions
-- parent-session notifications on task completion
-- `session.send_notification` wrapping via `<user_notification>` injection
+- Updates the in-memory task map from host events
+- Persists task status and metadata to the session DB
+- Emits scoped events (`session.task.{taskId}.{type}`)
+- Sends completion notifications to the parent session via `<user_notification>` prompt injection
+- Deduplicates notifications to prevent double-sends
 
 ## Task Workflow
 
-Delegated task orchestration lives in [`extensions/session/src/lifecycle/task-workflow.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/task-workflow.ts).
+Lives in `lifecycle/task-workflow.ts`. Tasks are the delegation model — fire off a code review, test run, or general task to a sub-agent.
 
-The task model is intentionally session-centric:
-
-- tasks are represented as child sessions in storage
-- `parentSessionId` links the task back to the chat session
-- task metadata stores prompt, cwd, git/worktree info, and output details
-
-### Task lifecycle
+Tasks are **session-centric**: stored as child sessions with `parentSessionId` linking back to the chat session. This means the existing session DB, query, and discovery machinery all work for tasks too.
 
 ```text
-start_task
-  │
-  ├─ resolve parent session and cwd
+startTask(params, request)
+  ├─ resolve parent session and effective cwd
   ├─ call agent-host TaskHost
-  ├─ persist task as a child session
+  ├─ persist as child session with task metadata
   ├─ cache in memory
   └─ return task handle
 
-task.event
-  │
-  ├─ update in-memory task map
-  ├─ persist runtime status / metadata
-  └─ optionally notify parent session
+task.event (via wireTaskEvents)
+  ├─ update in-memory task state
+  ├─ persist status/metadata
+  ├─ emit scoped gateway event
+  └─ notify parent session on completion
 
-list_tasks / get_task
-  │
-  └─ merge host task state with stored task sessions
+listTasks / getTask
+  └─ merge host state with stored sessions
+      hydrate git info for worktree tasks
 ```
 
-This keeps task orchestration co-located instead of scattering task logic across multiple unrelated session methods.
+The `getTaskGitInfo` helper runs `git status`, `git branch`, and merge-base checks against worktree tasks — so you always know the current state of a delegated task's working directory.
 
 ## Method Dispatch
 
-The session API surface is now split into two layers:
+The API surface is split into two clean layers:
 
-- [`extensions/session/src/session-methods.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-methods.ts): static Zod method definitions
-- [`extensions/session/src/session-dispatch.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-dispatch.ts): method-to-workflow dispatch
+- **`session-methods.ts`** — static Zod schema definitions for every `session.*` method
+- **`session-dispatch.ts`** — the switch that routes methods to lifecycle functions
 
-`index.ts` keeps the logging/timing wrapper and extension bootstrap, but no longer owns the full method switch logic inline.
+Dispatch imports lifecycle functions directly (`runPromptLifecycle`, `switchSession`, `startTask`, etc.) and pulls shared state from the runtime. No dep injection, no indirection — just a method name → function call.
+
+`index.ts` wraps dispatch with a thin logging/timing layer and exposes the extension interface.
 
 ## Data Sources
 
-The session system relies on four data sources:
+Four sources of truth, each with a clear owner:
 
-### 1. Session DB
+| Source                   | Location                 | What It Stores                                                                                   |
+| ------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------ |
+| **Session DB**           | `session-store.ts`       | Session metadata, runtime status, parent/previous links, task sessions, workspace active session |
+| **Workspace DB**         | `workspace.ts`           | Workspace identity, cwd, general vs project-specific scope                                       |
+| **Claude project files** | `~/.claude/projects/...` | JSONL transcripts, `sessions-index.json`, transcript-derived history                             |
+| **Memory extension**     | `ctx.call("memory.*")`   | Conversation transitions, session context (recent messages + summaries)                          |
 
-[`extensions/session/src/session-store.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-store.ts)
+The session extension **consumes** memory; it doesn't own ingestion. It **enriches** the session DB from Claude project files; it doesn't replace them.
 
-Stores:
+## File Map
 
-- session metadata
-- runtime status
-- parent/previous session links
-- task sessions
-- workspace active session mapping
+```text
+extensions/session/src/
+├─ index.ts                        # Extension shell: config → initRuntime → interface
+├─ runtime.ts                      # Pull-model singleton (init/get/reset)
+├─ session-methods.ts              # Zod schema definitions for session.* API
+├─ session-dispatch.ts             # Method → lifecycle function routing
+├─ session-types.ts                # Shared types, helpers, runtime status mapping
+├─ agent-client.ts                 # AgentHostClient (WebSocket RPC to agent-host)
+├─ session-store.ts                # SQLite session/task storage
+├─ workspace.ts                    # SQLite workspace storage
+├─ claude-projects.ts              # Claude project directory discovery
+├─ parse-session.ts                # JSONL transcript parser (paginated)
+├─ memory-context.ts               # Memory block formatting for system prompts
+├─ persistent-sessions.ts          # Persistent session alias resolution + rotation
+└─ lifecycle/
+    ├─ prompt-lifecycle.ts         # The big one: prompt pipeline + bootstrap
+    ├─ session-activation.ts       # Switch/reset session flows
+    ├─ session-query.ts            # List sessions, get history, memory preview
+    ├─ session-events.ts           # Agent-host → gateway event bridge
+    ├─ task-workflow.ts            # Task CRUD + git info
+    └─ task-events.ts              # Task event bridge + completion notifications
+```
 
-### 2. Workspace DB
+## Design Philosophy
 
-[`extensions/session/src/workspace.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/workspace.ts)
+**Lazy materialization.** Creating a session is just a DB write. The expensive SDK + memory work happens on first prompt, when the user is already waiting.
 
-Stores:
+**Pull over push.** Modules reach into the runtime when they need something, rather than receiving a bag of dependencies at construction time. Less boilerplate, easier to follow, and the runtime singleton is the only thing you need to understand to trace any call path.
 
-- workspace identity
-- cwd
-- general vs project-specific workspace scope
+**Explicit stages.** The prompt lifecycle is a pipeline of named stages, not a procedural blob. Each stage has a single responsibility and clear preconditions.
 
-### 3. Claude project files
+**Session-centric tasks.** Tasks aren't a separate concept — they're child sessions. This means all existing session infrastructure (storage, queries, discovery) works for tasks too.
 
-`~/.claude/projects/...`
-
-Provides:
-
-- transcript JSONL files
-- `sessions-index.json`
-- transcript-derived history and previews
-
-### 4. Memory extension
-
-Accessed through `ctx.call("memory.*")`.
-
-Provides:
-
-- `memory.transition_conversation`
-- `memory.get_session_context`
-
-The session extension consumes memory; it does not own the ingestion pipeline.
-
-## Current File Map
-
-### Extension shell
-
-- [`extensions/session/src/index.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/index.ts)
-
-### RPC surface
-
-- [`extensions/session/src/session-methods.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-methods.ts)
-- [`extensions/session/src/session-dispatch.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-dispatch.ts)
-
-### Lifecycle workflows
-
-- [`extensions/session/src/lifecycle/prompt-lifecycle.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/prompt-lifecycle.ts)
-- [`extensions/session/src/lifecycle/session-activation.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-activation.ts)
-- [`extensions/session/src/lifecycle/session-query.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-query.ts)
-- [`extensions/session/src/lifecycle/session-events.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/session-events.ts)
-- [`extensions/session/src/lifecycle/task-workflow.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/task-workflow.ts)
-- [`extensions/session/src/lifecycle/task-events.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/lifecycle/task-events.ts)
-
-### Storage and discovery
-
-- [`extensions/session/src/session-store.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/session-store.ts)
-- [`extensions/session/src/workspace.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/workspace.ts)
-- [`extensions/session/src/claude-projects.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/claude-projects.ts)
-- [`extensions/session/src/parse-session.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/parse-session.ts)
-- [`extensions/session/src/memory-context.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/memory-context.ts)
-- [`extensions/session/src/persistent-sessions.ts`](/Users/michael/Projects/iamclaudia-ai/anima/extensions/session/src/persistent-sessions.ts)
-
-## Design Notes
-
-### Why not public hooks?
-
-The current lifecycle structure is internal on purpose.
-
-We want:
-
-- explicit stage ordering
-- predictable error handling
-- easy reasoning about side effects
-- clean code organization
-
-We do not want to prematurely create a general callback bus for core session behavior.
-
-If public extensibility is added later, it should likely map onto Claude's own hook support where appropriate, with the internal lifecycle remaining the authoritative orchestration model.
-
-### Why this refactor was worth it
-
-The refactor increased the number of modules, but reduced the behavioral complexity of the system:
-
-- create session is now honest and fast
-- prompt bootstrap is explicit
-- switch/reset/task/query flows have clear homes
-- async event routing is no longer hidden inside `index.ts`
-- the extension shell reads as composition rather than one giant control method
-
-That is the right tradeoff for a foundational subsystem.
+**Internal by design.** The lifecycle structure is intentional, not accidental. We don't expose public hooks for core session behavior because we want explicit ordering, predictable error handling, and easy reasoning about side effects. If extensibility is needed later, it should map onto well-defined extension points rather than a general callback bus.
