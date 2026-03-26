@@ -169,11 +169,19 @@ class LibbySession {
     // Send system prompt as first message
     const initPrompt = `${SYSTEM_PROMPT}\n\n---\n\nYou are now ready to process conversation transcripts. For each transcript I send, use your tools to write memories to ~/memory/, then respond with a SUMMARY or SKIP line.\n\nRespond with "ready" to confirm you understand.`;
 
-    await this.ctx.call("session.send_prompt", {
+    const initResult = (await this.ctx.call("session.send_prompt", {
       sessionId: this._sessionId,
       content: initPrompt,
       streaming: false,
-    });
+    })) as { text: string; stopReason?: string };
+
+    if (!initResult.text) {
+      const reason = initResult.stopReason || "unknown";
+      throw new Error(
+        `System prompt got no response (stop_reason: ${reason}). ` +
+          `Check API credentials and model availability.`,
+      );
+    }
 
     this.initialized = true;
     this.promptCount = 0;
@@ -200,10 +208,16 @@ class LibbySession {
       sessionId: this._sessionId,
       content,
       streaming: false,
-    })) as { text: string };
+    })) as { text: string; stopReason?: string };
 
     const text = result.text;
-    if (!text) throw new Error("No text in prompt response");
+    if (!text) {
+      const reason = result.stopReason || "unknown";
+      throw new Error(
+        `No text in prompt response (stop_reason: ${reason}). ` +
+          `This may indicate expired credentials, an API error, or the model responded with only tool calls.`,
+      );
+    }
     return text;
   }
 

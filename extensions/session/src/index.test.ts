@@ -266,9 +266,9 @@ describe("session extension", () => {
       sessionId,
       content: "ping",
       streaming: false,
-    })) as { text: string; sessionId: string };
+    })) as { text: string; sessionId: string; stopReason: string };
 
-    expect(result).toEqual({ text: "Hello world", sessionId });
+    expect(result).toEqual({ text: "Hello world", sessionId, stopReason: "unknown" });
 
     await ext.stop();
   });
