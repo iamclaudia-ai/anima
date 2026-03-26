@@ -15,6 +15,7 @@ class AppState {
     var statusText = "Connecting..."
     var micAvailable = true
     var gatewayHost: String
+    var gatewayToken: String
     var workspaceCwd: String
     private var isRecoveringMic = false
     private var postSpeechRecoveryWorkItem: DispatchWorkItem?
@@ -31,11 +32,13 @@ class AppState {
 
     init() {
         let initialGatewayHost = GatewayWireProtocol.loadGatewayHost()
+        let initialToken = GatewayWireProtocol.loadGatewayToken() ?? ""
         let initialWorkspaceCwd = GatewayWireProtocol.loadGatewayCwd()
         gatewayHost = initialGatewayHost
+        gatewayToken = initialToken
         workspaceCwd = initialWorkspaceCwd
         gateway = GatewayClient(
-            url: GatewayWireProtocol.buildGatewayURL(host: initialGatewayHost),
+            url: GatewayWireProtocol.buildGatewayURL(host: initialGatewayHost, token: initialToken),
             cwd: initialWorkspaceCwd
         )
 
@@ -233,23 +236,26 @@ class AppState {
         resumeListeningAfterSpeech()
     }
 
-    func saveGatewaySettings(host: String, cwd: String) {
+    func saveGatewaySettings(host: String, token: String, cwd: String) {
         let normalizedHost = GatewayWireProtocol.normalizeGatewayHost(host)
+        let normalizedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCwd = cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? GatewayWireProtocol.defaultGatewayCwd
             : cwd.trimmingCharacters(in: .whitespacesAndNewlines)
 
         UserDefaults.standard.set(normalizedHost, forKey: GatewayWireProtocol.gatewayHostDefaultsKey)
+        UserDefaults.standard.set(normalizedToken, forKey: GatewayWireProtocol.gatewayTokenDefaultsKey)
         UserDefaults.standard.set(normalizedCwd, forKey: GatewayWireProtocol.gatewayCwdDefaultsKey)
 
         gatewayHost = normalizedHost
+        gatewayToken = normalizedToken
         workspaceCwd = normalizedCwd
         isConnected = false
         voiceState = .idle
         statusText = "Reconnecting..."
         speechRecognizer.stopListening()
         gateway.updateConfiguration(
-            url: GatewayWireProtocol.buildGatewayURL(host: normalizedHost),
+            url: GatewayWireProtocol.buildGatewayURL(host: normalizedHost, token: normalizedToken),
             cwd: normalizedCwd
         )
     }

@@ -166,11 +166,13 @@ private struct VoiceSettingsView: View {
     let appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var host: String
+    @State private var token: String
     @State private var cwd: String
 
     init(appState: AppState) {
         self.appState = appState
         _host = State(initialValue: appState.gatewayHost)
+        _token = State(initialValue: appState.gatewayToken)
         _cwd = State(initialValue: appState.workspaceCwd)
     }
 
@@ -183,6 +185,16 @@ private struct VoiceSettingsView: View {
                         .autocorrectionDisabled()
 
                     Text("The app always connects using wss://<host>/ws.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Authentication") {
+                    SecureField("anima_sk_...", text: $token)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Text("Run `anima token show` to see your gateway token.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -207,7 +219,7 @@ private struct VoiceSettingsView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        appState.saveGatewaySettings(host: host, cwd: cwd)
+                        appState.saveGatewaySettings(host: host, token: token, cwd: cwd)
                         dismiss()
                     }
                 }

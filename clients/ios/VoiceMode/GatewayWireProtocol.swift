@@ -11,6 +11,7 @@ enum GatewayWireProtocol {
     static let defaultGatewayCwd = "/Users/claudia/chat"
     static let gatewayHostDefaultsKey = "gatewayHost"
     static let gatewayCwdDefaultsKey = "gatewayCwd"
+    static let gatewayTokenDefaultsKey = "gatewayToken"
 
     static func normalizeGatewayHost(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -36,8 +37,11 @@ enum GatewayWireProtocol {
         return normalized.isEmpty ? defaultGatewayHost : normalized
     }
 
-    static func buildGatewayURL(host: String) -> String {
-        "wss://\(normalizeGatewayHost(host))/ws"
+    static func buildGatewayURL(host: String, token: String? = nil) -> String {
+        let base = "wss://\(normalizeGatewayHost(host))/ws"
+        guard let token, !token.isEmpty else { return base }
+        let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? token
+        return "\(base)?token=\(encoded)"
     }
 
     static func loadGatewayHost(defaults: UserDefaults = .standard) -> String {
@@ -56,6 +60,12 @@ enum GatewayWireProtocol {
         let cwd = defaults.string(forKey: gatewayCwdDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (cwd?.isEmpty == false) ? cwd! : defaultGatewayCwd
+    }
+
+    static func loadGatewayToken(defaults: UserDefaults = .standard) -> String? {
+        let token = defaults.string(forKey: gatewayTokenDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (token?.isEmpty == false) ? token : nil
     }
 
     static func makeRequest(
