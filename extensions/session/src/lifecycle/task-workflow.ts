@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { getStoredSession, listTaskSessions, upsertSession } from "../session-store";
 import type { StoredSession } from "../session-store";
 import { getWorkspace, getOrCreateWorkspace } from "../workspace";
-import type { AgentHostSessionInfo, SessionRuntimeConfig } from "../session-types";
+import type { AgentHostSessionInfo } from "../session-types";
+import { getRuntime } from "../runtime";
 
 export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 export type TaskMode = "general" | "review" | "test";
@@ -139,260 +140,217 @@ export function getTaskGitInfo(
   return git;
 }
 
-interface StartTaskResult {
-  taskId: string;
-  outputFile?: string;
-  status?: string;
-  message?: string;
-  cwd?: string;
-  worktreePath?: string;
-  parentRepoPath?: string;
-  continuedFromTaskId?: string;
-}
+// ── Workflow functions ───────────────────────────────────────
 
-interface TaskWorkflowDeps {
-  tasks: Map<string, SessionTask>;
-  taskNotificationsSent: Set<string>;
-  sessionConfig: SessionRuntimeConfig;
-  agentClient: {
-    list(): Promise<unknown>;
-    startTask(params: {
-      sessionId: string;
-      agent: string;
-      prompt: string;
-      mode: TaskMode;
-      cwd?: string;
-      worktree?: boolean;
-      continue?: string;
-      model?: string;
-      effort?: string;
-      sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-      files?: string[];
-      metadata?: Record<string, unknown>;
-    }): Promise<StartTaskResult>;
-    listTasks(params: {
-      sessionId?: string;
-      status?: TaskStatus;
-      agent?: string;
-    }): Promise<unknown>;
-    interruptTask(taskId: string): Promise<unknown>;
+export async function startTask(
+  params: {
+    sessionId: string;
+    agent: string;
+    prompt: string;
+    mode: TaskMode;
+    cwd?: string;
+    worktree?: boolean;
+    continue?: string;
+    model?: string;
+    effort?: string;
+    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+    files?: string[];
+    metadata?: Record<string, unknown>;
+  },
+  request: { connectionId: string | null; tags: string[] | null },
+): Promise<Record<string, unknown>> {
+  const rt = getRuntime();
+  const parentSession = getStoredSession(params.sessionId);
+
+  let effectiveCwd = params.cwd;
+  if (!effectiveCwd && parentSession?.workspaceId) {
+    const workspace = getWorkspace(parentSession.workspaceId);
+    effectiveCwd = workspace?.cwd;
+  }
+  if (!effectiveCwd) {
+    const activeSessions = (await rt.agentClient.list()) as AgentHostSessionInfo[];
+    effectiveCwd = activeSessions.find((s) => s.id === params.sessionId)?.cwd;
+  }
+
+  const result = await rt.agentClient.startTask({
+    sessionId: params.sessionId,
+    agent: params.agent,
+    prompt: params.prompt,
+    mode: params.mode,
+    cwd: effectiveCwd,
+    worktree: params.worktree,
+    continue: params.continue,
+    model: params.model,
+    effort: params.effort,
+    sandbox: params.sandbox,
+    files: params.files,
+    metadata: params.metadata,
+  });
+
+  const nowIso = new Date().toISOString();
+  const workspaceId =
+    parentSession?.workspaceId ||
+    (effectiveCwd ? getOrCreateWorkspace(effectiveCwd).workspace.id : null);
+  if (!workspaceId) {
+    throw new Error(`Unable to resolve workspace for parent session ${params.sessionId}`);
+  }
+
+  const task: SessionTask = {
+    taskId: result.taskId,
+    sessionId: params.sessionId,
+    agent: params.agent,
+    cwd: result.cwd || effectiveCwd,
+    worktreePath: result.worktreePath,
+    parentRepoPath: result.parentRepoPath,
+    continuedFromTaskId: result.continuedFromTaskId,
+    prompt: params.prompt,
+    mode: params.mode,
+    status: "running",
+    startedAt: nowIso,
+    updatedAt: nowIso,
+    outputFile: result.outputFile,
+    context: {
+      connectionId: request.connectionId,
+      tags: request.tags,
+    },
+  };
+  rt.tasks.set(task.taskId, task);
+  rt.taskNotificationsSent.delete(task.taskId);
+  upsertSession({
+    id: task.taskId,
+    workspaceId,
+    providerSessionId: task.taskId,
+    model: params.model || parentSession?.model || rt.sessionConfig.model,
+    agent: task.agent,
+    purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
+    parentSessionId: task.sessionId,
+    runtimeStatus: "running",
+    metadata: {
+      prompt: task.prompt,
+      cwd: task.cwd,
+      worktreePath: task.worktreePath,
+      parentRepoPath: task.parentRepoPath,
+      continuedFromTaskId: task.continuedFromTaskId,
+      outputFile: task.outputFile,
+      connectionId: task.context.connectionId,
+      tags: task.context.tags,
+    },
+    lastActivity: nowIso,
+  });
+
+  return {
+    taskId: task.taskId,
+    sessionId: task.sessionId,
+    agent: task.agent,
+    mode: task.mode,
+    status: task.status,
+    cwd: task.cwd,
+    worktreePath: task.worktreePath,
+    parentRepoPath: task.parentRepoPath,
+    continuedFromTaskId: task.continuedFromTaskId,
+    outputFile: task.outputFile,
+    message: result.message || `Started ${params.agent} task`,
   };
 }
 
-export interface TaskWorkflowRunner {
-  startTask: (
-    params: {
-      sessionId: string;
-      agent: string;
-      prompt: string;
-      mode: TaskMode;
-      cwd?: string;
-      worktree?: boolean;
-      continue?: string;
-      model?: string;
-      effort?: string;
-      sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-      files?: string[];
-      metadata?: Record<string, unknown>;
-    },
-    request: { connectionId: string | null; tags: string[] | null },
-  ) => Promise<Record<string, unknown>>;
-  getTask: (taskId: string) => SessionTask | null;
-  listTasks: (params: {
-    sessionId?: string;
-    status?: TaskStatus;
-    agent?: string;
-  }) => Promise<{ tasks: SessionTask[] }>;
-  interruptTask: (taskId: string) => Promise<{ ok: boolean; taskId: string; error?: string }>;
+export function getTask(taskId: string): SessionTask | null {
+  const rt = getRuntime();
+  return rt.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
 }
 
-export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRunner {
-  return {
-    startTask: async (params, request) => {
-      const parentSession = getStoredSession(params.sessionId);
-
-      let effectiveCwd = params.cwd;
-      if (!effectiveCwd && parentSession?.workspaceId) {
-        const workspace = getWorkspace(parentSession.workspaceId);
-        effectiveCwd = workspace?.cwd;
-      }
-      if (!effectiveCwd) {
-        const activeSessions = (await deps.agentClient.list()) as AgentHostSessionInfo[];
-        effectiveCwd = activeSessions.find((s) => s.id === params.sessionId)?.cwd;
-      }
-
-      const result = await deps.agentClient.startTask({
-        sessionId: params.sessionId,
-        agent: params.agent,
-        prompt: params.prompt,
-        mode: params.mode,
-        cwd: effectiveCwd,
-        worktree: params.worktree,
-        continue: params.continue,
-        model: params.model,
-        effort: params.effort,
-        sandbox: params.sandbox,
-        files: params.files,
-        metadata: params.metadata,
-      });
-
-      const nowIso = new Date().toISOString();
-      const workspaceId =
-        parentSession?.workspaceId ||
-        (effectiveCwd ? getOrCreateWorkspace(effectiveCwd).workspace.id : null);
-      if (!workspaceId) {
-        throw new Error(`Unable to resolve workspace for parent session ${params.sessionId}`);
-      }
-
-      const task: SessionTask = {
-        taskId: result.taskId,
-        sessionId: params.sessionId,
-        agent: params.agent,
-        cwd: result.cwd || effectiveCwd,
-        worktreePath: result.worktreePath,
-        parentRepoPath: result.parentRepoPath,
-        continuedFromTaskId: result.continuedFromTaskId,
-        prompt: params.prompt,
-        mode: params.mode,
-        status: "running",
-        startedAt: nowIso,
-        updatedAt: nowIso,
-        outputFile: result.outputFile,
-        context: {
-          connectionId: request.connectionId,
-          tags: request.tags,
-        },
-      };
-      deps.tasks.set(task.taskId, task);
-      deps.taskNotificationsSent.delete(task.taskId);
+export async function listTasks(params: {
+  sessionId?: string;
+  status?: TaskStatus;
+  agent?: string;
+}): Promise<{ tasks: SessionTask[] }> {
+  const rt = getRuntime();
+  const result = (await rt.agentClient.listTasks({
+    sessionId: params.sessionId,
+    status: params.status,
+    agent: params.agent,
+  })) as { tasks?: SessionTask[] };
+  const hostTasks = result.tasks || [];
+  for (const task of hostTasks) {
+    rt.tasks.set(task.taskId, task);
+    const taskStored = getStoredSession(task.taskId);
+    const parentStored = getStoredSession(task.sessionId);
+    const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
+    if (workspaceId) {
       upsertSession({
         id: task.taskId,
         workspaceId,
         providerSessionId: task.taskId,
-        model: params.model || parentSession?.model || deps.sessionConfig.model,
+        model: taskStored?.model || parentStored?.model || rt.sessionConfig.model,
         agent: task.agent,
         purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
         parentSessionId: task.sessionId,
-        runtimeStatus: "running",
+        runtimeStatus: task.status === "running" ? "running" : task.status,
         metadata: {
           prompt: task.prompt,
           cwd: task.cwd,
           worktreePath: task.worktreePath,
           parentRepoPath: task.parentRepoPath,
           continuedFromTaskId: task.continuedFromTaskId,
+          git: task.git,
           outputFile: task.outputFile,
-          connectionId: task.context.connectionId,
-          tags: task.context.tags,
+          error: task.error,
+          connectionId: task.context?.connectionId || null,
+          tags: task.context?.tags || null,
         },
-        lastActivity: nowIso,
       });
+    }
+  }
 
-      return {
-        taskId: task.taskId,
-        sessionId: task.sessionId,
-        agent: task.agent,
-        mode: task.mode,
-        status: task.status,
-        cwd: task.cwd,
-        worktreePath: task.worktreePath,
-        parentRepoPath: task.parentRepoPath,
-        continuedFromTaskId: task.continuedFromTaskId,
-        outputFile: task.outputFile,
-        message: result.message || `Started ${params.agent} task`,
-      };
-    },
+  const stored = listTaskSessions({
+    parentSessionId: params.sessionId,
+    status: params.status,
+    agent: params.agent,
+  })
+    .map((row) => toSessionTaskFromStored(row))
+    .filter((row): row is SessionTask => !!row);
 
-    getTask: (taskId) => {
-      return deps.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
-    },
+  const merged = new Map<string, SessionTask>();
+  for (const task of stored) merged.set(task.taskId, task);
+  for (const task of hostTasks) merged.set(task.taskId, task);
+  const hydrated = Array.from(merged.values()).map((task) => {
+    if (!task.cwd) return task;
+    const git = getTaskGitInfo(task.cwd, task.parentRepoPath, task.worktreePath);
+    return git ? { ...task, git } : task;
+  });
+  return { tasks: hydrated };
+}
 
-    listTasks: async (params) => {
-      const result = (await deps.agentClient.listTasks({
-        sessionId: params.sessionId,
-        status: params.status,
-        agent: params.agent,
-      })) as { tasks?: SessionTask[] };
-      const hostTasks = result.tasks || [];
-      for (const task of hostTasks) {
-        deps.tasks.set(task.taskId, task);
-        const taskStored = getStoredSession(task.taskId);
-        const parentStored = getStoredSession(task.sessionId);
-        const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
-        if (workspaceId) {
-          upsertSession({
-            id: task.taskId,
-            workspaceId,
-            providerSessionId: task.taskId,
-            model: taskStored?.model || parentStored?.model || deps.sessionConfig.model,
-            agent: task.agent,
-            purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
-            parentSessionId: task.sessionId,
-            runtimeStatus: task.status === "running" ? "running" : task.status,
-            metadata: {
-              prompt: task.prompt,
-              cwd: task.cwd,
-              worktreePath: task.worktreePath,
-              parentRepoPath: task.parentRepoPath,
-              continuedFromTaskId: task.continuedFromTaskId,
-              git: task.git,
-              outputFile: task.outputFile,
-              error: task.error,
-              connectionId: task.context?.connectionId || null,
-              tags: task.context?.tags || null,
-            },
-          });
-        }
-      }
+export async function interruptTask(
+  taskId: string,
+): Promise<{ ok: boolean; taskId: string; error?: string }> {
+  const rt = getRuntime();
+  const task = rt.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
+  if (!task) {
+    return { ok: false, error: "Task not found", taskId };
+  }
 
-      const stored = listTaskSessions({
-        parentSessionId: params.sessionId,
-        status: params.status,
-        agent: params.agent,
-      })
-        .map((row) => toSessionTaskFromStored(row))
-        .filter((row): row is SessionTask => !!row);
-
-      const merged = new Map<string, SessionTask>();
-      for (const task of stored) merged.set(task.taskId, task);
-      for (const task of hostTasks) merged.set(task.taskId, task);
-      const hydrated = Array.from(merged.values()).map((task) => {
-        if (!task.cwd) return task;
-        const git = getTaskGitInfo(task.cwd, task.parentRepoPath, task.worktreePath);
-        return git ? { ...task, git } : task;
+  const ok = (await rt.agentClient.interruptTask(taskId)) as boolean;
+  if (ok) {
+    task.status = "interrupted";
+    task.updatedAt = new Date().toISOString();
+    const stored = getStoredSession(taskId);
+    if (stored) {
+      upsertSession({
+        id: stored.id,
+        workspaceId: stored.workspaceId,
+        providerSessionId: stored.providerSessionId,
+        model: stored.model,
+        agent: stored.agent,
+        purpose: stored.purpose,
+        parentSessionId: stored.parentSessionId!,
+        runtimeStatus: "interrupted",
+        status: stored.status,
+        title: stored.title,
+        summary: stored.summary,
+        metadata: { ...(stored.metadata || {}), interruptedAt: task.updatedAt },
+        previousSessionId: stored.previousSessionId,
       });
-      return { tasks: hydrated };
-    },
-
-    interruptTask: async (taskId) => {
-      const task = deps.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
-      if (!task) {
-        return { ok: false, error: "Task not found", taskId };
-      }
-
-      const ok = (await deps.agentClient.interruptTask(taskId)) as boolean;
-      if (ok) {
-        task.status = "interrupted";
-        task.updatedAt = new Date().toISOString();
-        const stored = getStoredSession(taskId);
-        if (stored) {
-          upsertSession({
-            id: stored.id,
-            workspaceId: stored.workspaceId,
-            providerSessionId: stored.providerSessionId,
-            model: stored.model,
-            agent: stored.agent,
-            purpose: stored.purpose,
-            parentSessionId: stored.parentSessionId!,
-            runtimeStatus: "interrupted",
-            status: stored.status,
-            title: stored.title,
-            summary: stored.summary,
-            metadata: { ...(stored.metadata || {}), interruptedAt: task.updatedAt },
-            previousSessionId: stored.previousSessionId,
-          });
-        }
-      }
-      return { ok, taskId };
-    },
-  };
+    }
+  }
+  return { ok, taskId };
 }
