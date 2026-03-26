@@ -58,6 +58,7 @@ import {
   type StoredSession,
 } from "./session-store";
 import { resolvePersistentSessionForCwd, rotatePersistentSessions } from "./persistent-sessions";
+import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -78,12 +79,6 @@ interface SessionRuntimeConfig {
   thinking: boolean;
   effort: "low" | "medium" | "high" | "max";
   systemPrompt: string | null;
-}
-
-interface SessionBootstrapMetadata {
-  bootstrapSystemPrompt?: string;
-  bootstrapThinking?: boolean;
-  bootstrapEffort?: "low" | "medium" | "high" | "max";
 }
 
 const MEMORY_TRANSITION_TIMEOUT_MS = 1500;
@@ -1299,189 +1294,50 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.send_prompt": {
-        let sessionId = params.sessionId as string;
-        const content = params.content as string | unknown[];
-        const cwd = params.cwd as string | undefined;
-        const model = params.model as string | undefined;
-        const agent = (params.agent as string | undefined) || "claude";
-        const streaming = params.streaming !== false;
-        const source = params.source as string | undefined;
-
-        // Resolve persistent session sentinel → real sessionId
-        if (sessionId === PERSISTENT_SESSION_ID) {
-          if (!cwd) throw new Error("cwd is required for persistent sessions");
-          sessionId = await resolvePersistentSession(cwd);
-          log.info("Resolved persistent session", { cwd, sessionId: sid(sessionId) });
-        }
-
-        log.info("Sending prompt", {
-          agent,
-          sessionId: sid(sessionId),
-          streaming,
-          source: source || "web",
-          content: summarizePrompt(content),
-        });
-
-        const existing = getStoredSession(sessionId);
-        const existingMetadata = (existing?.metadata || null) as SessionBootstrapMetadata | null;
-        const resumeModel = model || existing?.model || sessionConfig.model;
-        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
-        const activeSession = activeSessions.find((s) => s.id === sessionId);
-        if (
-          activeSession &&
-          activeSession.isProcessRunning &&
-          activeSession.model &&
-          resumeModel &&
-          activeSession.model !== resumeModel
-        ) {
-          log.warn("Detected model drift; recycling session runtime", {
-            sessionId: sid(sessionId),
-            runningModel: activeSession.model,
-            desiredModel: resumeModel,
-          });
-          await agentClient.close(sessionId);
-        }
-        let effectiveCwd = cwd;
-        let workspaceResult =
-          effectiveCwd !== undefined ? getOrCreateWorkspace(effectiveCwd) : undefined;
-        if (!effectiveCwd && existing) {
-          const storedWorkspace = getWorkspace(existing.workspaceId);
-          if (storedWorkspace) {
-            effectiveCwd = storedWorkspace.cwd;
-            workspaceResult = { workspace: storedWorkspace, created: false };
-          }
-        }
-
-        if (!existing && effectiveCwd && workspaceResult) {
-          upsertSession({
-            id: sessionId,
-            workspaceId: workspaceResult.workspace.id,
-            providerSessionId: sessionId,
-            model: resumeModel,
-            agent,
-            purpose: "chat",
-            runtimeStatus: "idle",
-          });
-          setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
-        } else if (existing) {
-          touchSession(sessionId);
-        }
-
-        if (effectiveCwd && workspaceResult && !resolveSessionPath(sessionId, effectiveCwd)) {
-          await ensureSessionBootstrapped({
-            sessionId,
-            cwd: effectiveCwd,
-            workspaceId: workspaceResult.workspace.id,
-            agent,
-            model: resumeModel,
-            thinking:
-              typeof existingMetadata?.bootstrapThinking === "boolean"
-                ? existingMetadata.bootstrapThinking
-                : sessionConfig.thinking,
-            effort:
-              existingMetadata?.bootstrapEffort === "low" ||
-              existingMetadata?.bootstrapEffort === "medium" ||
-              existingMetadata?.bootstrapEffort === "high" ||
-              existingMetadata?.bootstrapEffort === "max"
-                ? existingMetadata.bootstrapEffort
-                : sessionConfig.effort,
-            baseSystemPrompt:
-              typeof existingMetadata?.bootstrapSystemPrompt === "string"
-                ? existingMetadata.bootstrapSystemPrompt
-                : sessionConfig.systemPrompt || undefined,
-            includeAllSummaries: workspaceResult.workspace.general,
-          });
-        }
-
-        // Set up request context — capture envelope data now because the extension
-        // host restores currentConnectionId/currentTags after this method returns,
-        // but async stream events keep firing via the manager's EventEmitter.
-        const newCtx: RequestContext = {
-          connectionId: ctx.connectionId,
-          tags: ctx.tags,
-          source,
-          responseText: "",
-        };
-
-        // If there's already a primary context from a different connection (e.g., web UI
-        // with voice.speak), preserve it so its tags persist through tool calls and
-        // transient prompts from CLI/notifications.
-        const existingPrimary = primaryContexts.get(sessionId);
-        if (streaming && ctx.tags?.length) {
-          // This caller has tags (e.g., voice.speak) — promote to primary
-          primaryContexts.set(sessionId, newCtx);
-        } else if (existingPrimary && existingPrimary.connectionId !== ctx.connectionId) {
-          // Different connection without tags — don't clobber primary
-          log.info("Preserving primary context", {
-            sessionId: sid(sessionId),
-            primaryConn: existingPrimary.connectionId?.slice(0, 8),
-            transientConn: ctx.connectionId?.slice(0, 8),
-          });
-        }
-
-        requestContexts.set(sessionId, newCtx);
-
-        if (streaming) {
-          // Fire and forget — events stream back via ctx.emit
-          const promptStart = Date.now();
-          await agentClient.prompt(sessionId, content, effectiveCwd, resumeModel, agent);
-
-          // Log turn completion when we see turn_stop
-          const turnListener = (event: { sessionId: string; type?: string }) => {
-            if (event.sessionId !== sessionId || event.type !== "turn_stop") return;
-            const elapsed = Date.now() - promptStart;
-            const reqCtx = requestContexts.get(sessionId);
-            const responseLen = reqCtx?.responseText?.length || 0;
-            log.info("Streaming turn complete", {
-              sessionId: sid(sessionId),
-              elapsed: `${elapsed}ms`,
-              responseChars: responseLen,
-            });
-            agentClient.removeListener("session.event", turnListener);
-          };
-          agentClient.on("session.event", turnListener);
-
-          return { status: "streaming", sessionId };
-        }
-
-        // Non-streaming: await completion, return final text
-        const promptStart = Date.now();
-        return new Promise<unknown>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            cleanup();
-            log.error("Prompt timed out", { sessionId: sid(sessionId), elapsed: "300s" });
-            reject(new Error("Prompt timed out after 5 minutes"));
-          }, 300_000);
-
-          const onEvent = (event: { eventName: string; sessionId: string; type?: string }) => {
-            if (event.sessionId !== sessionId) return;
-            if (event.type === "turn_stop") {
-              const reqCtx = requestContexts.get(sessionId);
-              const text = reqCtx?.responseText || "";
-              cleanup();
-              const elapsed = Date.now() - promptStart;
-              log.info("Non-streaming prompt complete", {
-                sessionId: sid(sessionId),
-                elapsed: `${elapsed}ms`,
-                responseChars: text.length,
-              });
-              resolve({ text, sessionId });
-            }
-          };
-
-          const cleanup = () => {
-            clearTimeout(timeout);
-            agentClient.removeListener("session.event", onEvent);
-            requestContexts.delete(sessionId);
-            primaryContexts.delete(sessionId);
-          };
-
-          agentClient.on("session.event", onEvent);
-          agentClient.prompt(sessionId, content, effectiveCwd, resumeModel, agent).catch((err) => {
-            cleanup();
-            reject(err);
-          });
-        });
+        return await runPromptLifecycle(
+          {
+            sessionId: params.sessionId as string,
+            content: params.content as string | unknown[],
+            cwd: params.cwd as string | undefined,
+            model: params.model as string | undefined,
+            agent: (params.agent as string | undefined) || "claude",
+            streaming: params.streaming !== false,
+            source: params.source as string | undefined,
+          },
+          {
+            persistentSessionId: PERSISTENT_SESSION_ID,
+            connectionId: ctx.connectionId,
+            tags: ctx.tags,
+            sessionConfig,
+            requestContexts,
+            primaryContexts,
+            log,
+            sid,
+            summarizePrompt,
+            resolvePersistentSession,
+            getStoredSession,
+            getWorkspace,
+            getOrCreateWorkspace,
+            setWorkspaceActiveSession,
+            touchSession,
+            upsertSession: (params) => upsertSession(params),
+            resolveSessionPath,
+            ensureSessionBootstrapped,
+            listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
+            closeSession: async (sessionId) => {
+              await agentClient.close(sessionId);
+            },
+            promptSession: async (sessionId, content, cwd, model, agent) => {
+              await agentClient.prompt(sessionId, content, cwd, model, agent);
+            },
+            onSessionEvent: (listener) => {
+              agentClient.on("session.event", listener);
+            },
+            removeSessionEventListener: (listener) => {
+              agentClient.removeListener("session.event", listener);
+            },
+          },
+        );
       }
 
       case "session.interrupt_session": {

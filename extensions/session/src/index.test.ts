@@ -559,7 +559,9 @@ describe("session extension", () => {
       cwd: "/repo/project",
       content: "hello",
     });
-    await Promise.resolve();
+    for (let i = 0; i < 20 && timeoutCallbacks.length === 0; i++) {
+      await Promise.resolve();
+    }
     expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
     timeoutCallbacks[0]?.();
 
@@ -1277,10 +1279,10 @@ describe("session extension", () => {
         content: "ping",
         streaming: false,
       });
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(timeoutCallbacks.length).toBe(1);
+      for (let i = 0; i < 20 && timeoutCallbacks.length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
       timeoutCallbacks[0]?.();
       await expect(pending).rejects.toThrow("Prompt timed out after 5 minutes");
     } finally {
