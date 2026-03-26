@@ -2,54 +2,29 @@
  * Session Extension
  *
  * Owns all session and workspace lifecycle — the "brain" of Claudia's session management.
- * Session lifecycle, workspace management, and Claude SDK integration.
  *
  * Gateway is a pure hub: this extension handles create, prompt, history, switch, etc.
  * Other extensions interact via ctx.call("session.*") through the gateway hub.
- *
- * Method naming: session.verb_noun (e.g. session.health_check)
  */
 
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
-import {
-  createLogger,
-  loadConfig,
-  PERSISTENT_SESSION_ID,
-  shortId,
-  withTimeout,
-  formatElapsed,
-} from "@anima/shared";
+import { createLogger, loadConfig, shortId, withTimeout, formatElapsed } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readdirSync, statSync } from "node:fs";
 import { AgentHostClient } from "./agent-client";
-import { discoverSessions } from "./claude-projects";
 import { formatMemoryContext, type MemoryContextResult } from "./memory-context";
+import { resolveSessionPath } from "./parse-session";
 import {
   type AgentHostSessionInfo,
-  type SessionRuntimeConfig,
   type RequestContext,
-  mergeTags,
-  toRuntimeStatusFromSessionEvent,
-  summarizePrompt,
+  type SessionRuntimeConfig,
 } from "./session-types";
-import { parseSessionFilePaginated, parseSessionUsage, resolveSessionPath } from "./parse-session";
-import {
-  listWorkspaces,
-  getWorkspace,
-  getWorkspaceByCwd,
-  getOrCreateWorkspace,
-  deleteWorkspace,
-  closeDb,
-} from "./workspace";
+import { type SessionTask } from "./lifecycle/task-workflow";
+import { getOrCreateWorkspace, closeDb } from "./workspace";
 import {
   closeSessionDb,
   getStoredSession,
-  getWorkspaceActiveSession,
-  listTaskSessions,
-  listWorkspaceSessions,
   setWorkspaceActiveSession,
-  touchSession,
   upsertSession,
   type RuntimeStatus,
 } from "./session-store";
@@ -57,11 +32,7 @@ import { resolvePersistentSessionForCwd } from "./persistent-sessions";
 import { createPromptLifecycleRunner } from "./lifecycle/prompt-lifecycle";
 import { createSessionQueryService } from "./lifecycle/session-query";
 import { createSessionActivationRunner } from "./lifecycle/session-activation";
-import {
-  createTaskWorkflowRunner,
-  type SessionTask,
-  toSessionTaskFromStored,
-} from "./lifecycle/task-workflow";
+import { createTaskWorkflowRunner } from "./lifecycle/task-workflow";
 import { createTaskEventBridge } from "./lifecycle/task-events";
 import { createSessionEventBridge } from "./lifecycle/session-events";
 import { sessionMethodDefinitions } from "./session-methods";
@@ -72,40 +43,20 @@ const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "sessio
 const MEMORY_TRANSITION_TIMEOUT_MS = 1500;
 const MEMORY_CONTEXT_TIMEOUT_MS = 2000;
 
-// ── Session Discovery ────────────────────────────────────────
+// ── Helper: transition conversation with timeout ─────────────
 
-/**
- * Get list of child directories from a given path.
- * Expands ~ to home directory.
- * Returns directory names sorted alphabetically.
- */
-function getDirectories(path: string): string[] {
+async function transitionConversation(ctx: ExtensionContext, cwd: string): Promise<void> {
   try {
-    // Expand ~ to home directory
-    const expandedPath = path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
-
-    if (!existsSync(expandedPath)) {
-      return [];
-    }
-
-    const stat = statSync(expandedPath);
-    if (!stat.isDirectory()) {
-      return [];
-    }
-
-    // Read directory entries
-    const entries = readdirSync(expandedPath, { withFileTypes: true });
-
-    // Filter to directories only, exclude hidden directories (starting with .)
-    const directories = entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => entry.name)
-      .sort();
-
-    return directories;
-  } catch (error) {
-    log.warn("Failed to read directories", { path, error: String(error) });
-    return [];
+    await withTimeout(
+      ctx.call("memory.transition_conversation", { cwd }),
+      MEMORY_TRANSITION_TIMEOUT_MS,
+      "memory.transition_conversation",
+    );
+  } catch (err) {
+    log.warn("Failed to transition previous conversations (non-fatal)", {
+      cwd,
+      error: String(err),
+    });
   }
 }
 
@@ -114,7 +65,7 @@ function getDirectories(path: string): string[] {
 export function createSessionExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext;
 
-  // Load global configuration for non-session settings (e.g., agent-host URL).
+  // ── Configuration ──────────────────────────────────────────
   const globalConfig = loadConfig();
   const globalSessionExtConfig = (globalConfig.extensions?.session?.config || {}) as Record<
     string,
@@ -141,14 +92,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     effort: (config.effort as "low" | "medium" | "high" | "max" | undefined) || "medium",
     systemPrompt: (config.systemPrompt as string | null | undefined) ?? null,
   };
-  const agentHostConfig = globalConfig.agentHost;
 
-  // ── Persistent Sessions ──────────────────────────────────────
-  // Extensions like iMessage and Voice Mode pass PERSISTENT_SESSION_ID as
-  // the sessionId. We resolve the real sessionId from ctx.store, keyed by cwd.
-  // If no session exists for that cwd, we create one. If the stored session
-  // is stale/dead, we replace it. Rotation is handled externally by the
-  // scheduler calling session.rotate_persistent_sessions.
+  // ── Runtime objects ────────────────────────────────────────
+  const agentClient = new AgentHostClient(globalConfig.agentHost.url);
+  const requestContexts = new Map<string, RequestContext>();
+  const primaryContexts = new Map<string, RequestContext>();
+  const tasks = new Map<string, SessionTask>();
+  const taskNotificationsSent = new Set<string>();
+  const taskUnsubscribers: Array<() => void> = [];
+
+  // ── Closures over ctx (not available until start()) ────────
 
   async function resolvePersistentSession(cwd: string): Promise<string> {
     return resolvePersistentSessionForCwd({
@@ -166,30 +119,13 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       createSession: async (sessionCwd) => {
         const result = (await handleMethod("session.create_session", {
           cwd: sessionCwd,
-        })) as {
-          sessionId: string;
-        };
+        })) as { sessionId: string };
         return result.sessionId;
       },
       log,
-      formatSessionId: sid,
+      formatSessionId: shortId,
     });
   }
-
-  // Connect to agent-host via WebSocket for SDK process isolation.
-  // SDK processes (Claude query()) run in the agent-host server and survive
-  // gateway/extension restarts. Session extension is a thin RPC client.
-  const agentClient = new AgentHostClient(agentHostConfig.url);
-
-  // Per-session request context (for streaming events).
-  // requestContexts holds the CURRENT active context (may be transient from CLI/notification).
-  // primaryContexts holds the long-lived streaming context from the original caller (e.g., web UI).
-  // When emitting events, tags are merged from both so voice.speak persists across tool calls.
-  const requestContexts = new Map<string, RequestContext>();
-  const primaryContexts = new Map<string, RequestContext>();
-  const tasks = new Map<string, SessionTask>();
-  const taskNotificationsSent = new Set<string>();
-  const taskUnsubscribers: Array<() => void> = [];
 
   async function buildBootstrapSystemPrompt(params: {
     cwd: string;
@@ -199,25 +135,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     const { cwd, baseSystemPrompt, includeAllSummaries } = params;
     let systemPrompt = baseSystemPrompt;
 
-    try {
-      await withTimeout(
-        ctx.call("memory.transition_conversation", { cwd }),
-        MEMORY_TRANSITION_TIMEOUT_MS,
-        "memory.transition_conversation",
-      );
-    } catch (err) {
-      log.warn("Failed to transition previous conversations (non-fatal)", {
-        cwd,
-        error: String(err),
-      });
-    }
+    await transitionConversation(ctx, cwd);
 
     try {
       const memoryContext = (await withTimeout(
-        ctx.call("memory.get_session_context", {
-          cwd,
-          includeAllSummaries,
-        }),
+        ctx.call("memory.get_session_context", { cwd, includeAllSummaries }),
         MEMORY_CONTEXT_TIMEOUT_MS,
         "memory.get_session_context",
       )) as MemoryContextResult | null;
@@ -250,9 +172,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     baseSystemPrompt?: string;
     includeAllSummaries: boolean;
   }): Promise<void> {
-    if (resolveSessionPath(params.sessionId, params.cwd)) {
-      return;
-    }
+    if (resolveSessionPath(params.sessionId, params.cwd)) return;
 
     const systemPrompt = await buildBootstrapSystemPrompt({
       cwd: params.cwd,
@@ -284,25 +204,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         bootstrapEffort: params.effort,
       },
     });
-    log.info("Session bootstrapped", { sessionId: sid(params.sessionId), cwd: params.cwd });
+    log.info("Session bootstrapped", { sessionId: shortId(params.sessionId), cwd: params.cwd });
   }
 
-  function wireSessionEventBridge(): void {
-    taskUnsubscribers.push(sessionEventBridge.wire());
-  }
-
-  function wireTaskEventBridge(): void {
-    taskUnsubscribers.push(taskEventBridge.wire());
-  }
-
-  // ── Method Definitions ─────────────────────────────────────
-
-  const methods = sessionMethodDefinitions;
-
-  // ── Method Handler ─────────────────────────────────────────
-
-  /** Short session ID for logging */
-  const sid = shortId;
+  // ── Subsystems ─────────────────────────────────────────────
 
   const taskEventBridge = createTaskEventBridge({
     tasks,
@@ -331,20 +236,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   const sessionActivation = createSessionActivationRunner({
     sessionConfig,
-    transitionConversation: async (cwd) => {
-      try {
-        await withTimeout(
-          ctx.call("memory.transition_conversation", { cwd }),
-          MEMORY_TRANSITION_TIMEOUT_MS,
-          "memory.transition_conversation",
-        );
-      } catch (err) {
-        log.warn("Failed to transition previous conversations (non-fatal)", {
-          cwd,
-          error: String(err),
-        });
-      }
-    },
+    transitionConversation: (cwd) => transitionConversation(ctx, cwd),
     agentClient,
   });
 
@@ -365,70 +257,23 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     },
   });
 
-  async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
-    // Log all method calls (except high-frequency reads)
-    const isRead =
-      method === "session.list_sessions" ||
-      method === "session.list_workspaces" ||
-      method === "session.get_workspace" ||
-      method === "session.health_check" ||
-      method === "session.rotate_persistent_sessions";
-    if (!isRead) {
-      log.info(
-        `→ ${method}`,
-        params.sessionId ? { sessionId: sid(params.sessionId as string) } : undefined,
-      );
-    }
-
-    const start = Date.now();
-    try {
-      const result = await dispatchMethod(method, params);
-      const elapsed = Date.now() - start;
-      if (!isRead && elapsed > 100) {
-        log.info(`← ${method} OK (${elapsed}ms)`);
-      }
-      return result;
-    } catch (err) {
-      const elapsed = Date.now() - start;
-      log.error(`← ${method} FAILED (${elapsed}ms)`, {
-        error: err instanceof Error ? err.message : String(err),
-        ...(params.sessionId ? { sessionId: sid(params.sessionId as string) } : {}),
-      });
-      throw err;
-    }
-  }
-
-  const dispatchMethod = createSessionMethodDispatcher({
-    config,
-    sessionConfig,
-    getCtx: () => ctx,
-    requestState: { requestContexts, primaryContexts, tasks },
-    agentClient,
-    promptLifecycle,
-    sessionActivation,
-    taskWorkflow,
-    taskEventBridge,
-    sessionQuery,
-    healthCheckDetailed,
-  });
-
   // ── Health Check ───────────────────────────────────────────
 
   function health(): HealthCheckResponse {
-    const agentHostConnected = agentClient.isConnected;
     return {
       ok: true,
-      status: agentHostConnected ? "healthy" : "degraded",
+      status: agentClient.isConnected ? "healthy" : "degraded",
       label: "Sessions",
-      metrics: [{ label: "Agent Host", value: agentHostConnected ? "connected" : "disconnected" }],
+      metrics: [
+        { label: "Agent Host", value: agentClient.isConnected ? "connected" : "disconnected" },
+      ],
       actions: [],
       items: [],
     };
   }
 
   async function healthCheckDetailed(): Promise<HealthCheckResponse> {
-    const agentHostConnected = agentClient.isConnected;
-    if (!agentHostConnected) {
+    if (!agentClient.isConnected) {
       return {
         ok: false,
         status: "degraded",
@@ -456,41 +301,84 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       };
     }
 
-    const visibleSessions = sessions.filter((s) => s.isProcessRunning);
-    const activeCount = visibleSessions.filter((s) => s.isActive).length;
-    const runningCount = visibleSessions.length;
-    const staleCount = visibleSessions.filter((s) => s.stale).length;
-    const sortedSessions = [...visibleSessions].sort((a, b) => {
-      const aTs = Date.parse(a.lastActivity || "");
-      const bTs = Date.parse(b.lastActivity || "");
-      const safeA = Number.isFinite(aTs) ? aTs : 0;
-      const safeB = Number.isFinite(bTs) ? bTs : 0;
-      return safeB - safeA;
-    });
-
+    const visible = sessions.filter((s) => s.isProcessRunning);
     return {
       ok: true,
       status: "healthy",
       label: "Sessions",
       metrics: [
         { label: "Agent Host", value: "connected" },
-        { label: "Active Sessions", value: activeCount },
-        { label: "Running SDK", value: runningCount },
-        { label: "Stale", value: staleCount },
+        { label: "Active Sessions", value: visible.filter((s) => s.isActive).length },
+        { label: "Running SDK", value: visible.length },
+        { label: "Stale", value: visible.filter((s) => s.stale).length },
       ],
       actions: [],
-      items: sortedSessions.map((session) => ({
-        id: session.id,
-        label: session.cwd || session.id,
-        status: !session.isActive ? "inactive" : session.stale ? "stale" : "healthy",
-        details: {
-          model: session.model || "unknown",
-          running: session.isProcessRunning ? "yes" : "no",
-          lastActivity: session.lastActivity || "n/a",
-          lastActivityAgo: formatElapsed(Date.now() - Date.parse(session.lastActivity)),
-        },
-      })),
+      items: [...visible]
+        .sort((a, b) => {
+          const aTs = Date.parse(a.lastActivity || "");
+          const bTs = Date.parse(b.lastActivity || "");
+          return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
+        })
+        .map((s) => ({
+          id: s.id,
+          label: s.cwd || s.id,
+          status: !s.isActive ? "inactive" : s.stale ? "stale" : "healthy",
+          details: {
+            model: s.model || "unknown",
+            running: s.isProcessRunning ? "yes" : "no",
+            lastActivity: s.lastActivity || "n/a",
+            lastActivityAgo: formatElapsed(Date.now() - Date.parse(s.lastActivity)),
+          },
+        })),
     };
+  }
+
+  // ── Method dispatch with logging ───────────────────────────
+
+  const dispatchMethod = createSessionMethodDispatcher({
+    config,
+    sessionConfig,
+    getCtx: () => ctx,
+    requestState: { requestContexts, primaryContexts, tasks },
+    agentClient,
+    promptLifecycle,
+    sessionActivation,
+    taskWorkflow,
+    taskEventBridge,
+    sessionQuery,
+    healthCheckDetailed,
+  });
+
+  async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const isRead =
+      method === "session.list_sessions" ||
+      method === "session.list_workspaces" ||
+      method === "session.get_workspace" ||
+      method === "session.health_check" ||
+      method === "session.rotate_persistent_sessions";
+    if (!isRead) {
+      log.info(
+        `→ ${method}`,
+        params.sessionId ? { sessionId: shortId(params.sessionId as string) } : undefined,
+      );
+    }
+
+    const start = Date.now();
+    try {
+      const result = await dispatchMethod(method, params);
+      const elapsed = Date.now() - start;
+      if (!isRead && elapsed > 100) {
+        log.info(`← ${method} OK (${elapsed}ms)`);
+      }
+      return result;
+    } catch (err) {
+      const elapsed = Date.now() - start;
+      log.error(`← ${method} FAILED (${elapsed}ms)`, {
+        error: err instanceof Error ? err.message : String(err),
+        ...(params.sessionId ? { sessionId: shortId(params.sessionId as string) } : {}),
+      });
+      throw err;
+    }
   }
 
   // ── Extension Interface ────────────────────────────────────
@@ -498,14 +386,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   return {
     id: "session",
     name: "Session Manager",
-    methods,
+    methods: sessionMethodDefinitions,
     events: ["stream.*", "session.task.*"],
     sourceRoutes: [],
 
     async start(extCtx: ExtensionContext): Promise<void> {
       ctx = extCtx;
-      wireTaskEventBridge();
-      wireSessionEventBridge();
+      taskUnsubscribers.push(taskEventBridge.wire());
+      taskUnsubscribers.push(sessionEventBridge.wire());
       try {
         await agentClient.connect();
         const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
@@ -531,7 +419,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
             setWorkspaceActiveSession(workspaceResult.workspace.id, session.id);
           }
         }
-        log.info("Session extension started 🚀", { url: agentHostConfig.url });
+        log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
         log.warn("Failed to connect to agent-host, will retry in background", {
           error: String(error),
@@ -544,7 +432,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         try {
           unsub();
         } catch {
-          // ignore cleanup failures
+          /* ignore cleanup failures */
         }
       }
       taskUnsubscribers.length = 0;
@@ -556,7 +444,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     },
 
     handleMethod,
-
     health,
   };
 }
