@@ -58,7 +58,7 @@ import {
   type StoredSession,
 } from "./session-store";
 import { resolvePersistentSessionForCwd, rotatePersistentSessions } from "./persistent-sessions";
-import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
+import { createPromptLifecycleRunner } from "./lifecycle/prompt-lifecycle";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -1220,6 +1220,44 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     };
   };
 
+  const promptLifecycle = createPromptLifecycleRunner({
+    session: {
+      persistentSessionId: PERSISTENT_SESSION_ID,
+      resolvePersistentSession,
+      getStoredSession,
+      getWorkspace,
+      getOrCreateWorkspace,
+      setWorkspaceActiveSession,
+      touchSession,
+      upsertSession,
+      resolveSessionPath,
+      ensureSessionBootstrapped,
+      listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
+      closeSession: async (sessionId) => {
+        await agentClient.close(sessionId);
+      },
+      promptSession: async (sessionId, content, cwd, model, agent) => {
+        await agentClient.prompt(sessionId, content, cwd, model, agent);
+      },
+      onSessionEvent: (listener) => {
+        agentClient.on("session.event", listener);
+      },
+      removeSessionEventListener: (listener) => {
+        agentClient.removeListener("session.event", listener);
+      },
+    },
+    requestState: {
+      requestContexts,
+      primaryContexts,
+    },
+    services: {
+      sessionConfig,
+      log,
+      sid,
+      summarizePrompt,
+    },
+  });
+
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
     // Log all method calls (except high-frequency reads)
     const isRead =
@@ -1294,7 +1332,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.send_prompt": {
-        return await runPromptLifecycle(
+        return await promptLifecycle.run(
           {
             sessionId: params.sessionId as string,
             content: params.content as string | unknown[],
@@ -1305,37 +1343,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
             source: params.source as string | undefined,
           },
           {
-            persistentSessionId: PERSISTENT_SESSION_ID,
             connectionId: ctx.connectionId,
             tags: ctx.tags,
-            sessionConfig,
-            requestContexts,
-            primaryContexts,
-            log,
-            sid,
-            summarizePrompt,
-            resolvePersistentSession,
-            getStoredSession,
-            getWorkspace,
-            getOrCreateWorkspace,
-            setWorkspaceActiveSession,
-            touchSession,
-            upsertSession: (params) => upsertSession(params),
-            resolveSessionPath,
-            ensureSessionBootstrapped,
-            listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
-            closeSession: async (sessionId) => {
-              await agentClient.close(sessionId);
-            },
-            promptSession: async (sessionId, content, cwd, model, agent) => {
-              await agentClient.prompt(sessionId, content, cwd, model, agent);
-            },
-            onSessionEvent: (listener) => {
-              agentClient.on("session.event", listener);
-            },
-            removeSessionEventListener: (listener) => {
-              agentClient.removeListener("session.event", listener);
-            },
           },
         );
       }

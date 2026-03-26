@@ -51,20 +51,8 @@ export interface PromptLifecycleInput {
   source?: string;
 }
 
-export interface PromptLifecycleDeps {
+export interface PromptLifecycleSessionOps {
   persistentSessionId: string;
-  connectionId: string | null;
-  tags: string[] | null;
-  sessionConfig: SessionRuntimeConfigLike;
-  requestContexts: Map<string, RequestContext>;
-  primaryContexts: Map<string, RequestContext>;
-  log: {
-    info: (message: string, data?: Record<string, unknown>) => void;
-    warn: (message: string, data?: Record<string, unknown>) => void;
-    error: (message: string, data?: Record<string, unknown>) => void;
-  };
-  sid: (sessionId: string) => string;
-  summarizePrompt: (content: string | unknown[]) => unknown;
   resolvePersistentSession: (cwd: string) => Promise<string>;
   getStoredSession: (sessionId: string) => StoredSessionLike | null;
   getWorkspace: (id: string) => WorkspaceInfoLike | null;
@@ -109,6 +97,37 @@ export interface PromptLifecycleDeps {
   ) => void;
 }
 
+export interface PromptLifecycleRequestState {
+  connectionId: string | null;
+  tags: string[] | null;
+  requestContexts: Map<string, RequestContext>;
+  primaryContexts: Map<string, RequestContext>;
+}
+
+export interface PromptLifecycleServices {
+  sessionConfig: SessionRuntimeConfigLike;
+  log: {
+    info: (message: string, data?: Record<string, unknown>) => void;
+    warn: (message: string, data?: Record<string, unknown>) => void;
+    error: (message: string, data?: Record<string, unknown>) => void;
+  };
+  sid: (sessionId: string) => string;
+  summarizePrompt: (content: string | unknown[]) => unknown;
+}
+
+export interface PromptLifecycleDeps {
+  session: PromptLifecycleSessionOps;
+  request: PromptLifecycleRequestState;
+  services: PromptLifecycleServices;
+}
+
+export interface PromptLifecycleRunner {
+  run: (
+    input: PromptLifecycleInput,
+    request: { connectionId: string | null; tags: string[] | null },
+  ) => Promise<{ status: "streaming"; sessionId: string } | { text: string; sessionId: string }>;
+}
+
 interface PromptLifecycleState {
   sessionId: string;
   content: string | unknown[];
@@ -136,18 +155,18 @@ function getBootstrapSettings(
     thinking:
       typeof metadata?.bootstrapThinking === "boolean"
         ? metadata.bootstrapThinking
-        : deps.sessionConfig.thinking,
+        : deps.services.sessionConfig.thinking,
     effort:
       metadata?.bootstrapEffort === "low" ||
       metadata?.bootstrapEffort === "medium" ||
       metadata?.bootstrapEffort === "high" ||
       metadata?.bootstrapEffort === "max"
         ? metadata.bootstrapEffort
-        : deps.sessionConfig.effort,
+        : deps.services.sessionConfig.effort,
     baseSystemPrompt:
       typeof metadata?.bootstrapSystemPrompt === "string"
         ? metadata.bootstrapSystemPrompt
-        : deps.sessionConfig.systemPrompt || undefined,
+        : deps.services.sessionConfig.systemPrompt || undefined,
   };
 }
 
@@ -156,29 +175,29 @@ async function resolveSessionStage(
   deps: PromptLifecycleDeps,
 ): Promise<PromptLifecycleState> {
   let sessionId = input.sessionId;
-  if (sessionId === deps.persistentSessionId) {
+  if (sessionId === deps.session.persistentSessionId) {
     if (!input.cwd) throw new Error("cwd is required for persistent sessions");
-    sessionId = await deps.resolvePersistentSession(input.cwd);
-    deps.log.info("Resolved persistent session", {
+    sessionId = await deps.session.resolvePersistentSession(input.cwd);
+    deps.services.log.info("Resolved persistent session", {
       cwd: input.cwd,
-      sessionId: deps.sid(sessionId),
+      sessionId: deps.services.sid(sessionId),
     });
   }
 
-  deps.log.info("Sending prompt", {
+  deps.services.log.info("Sending prompt", {
     agent: input.agent,
-    sessionId: deps.sid(sessionId),
+    sessionId: deps.services.sid(sessionId),
     streaming: input.streaming,
     source: input.source || "web",
-    content: deps.summarizePrompt(input.content),
+    content: deps.services.summarizePrompt(input.content),
   });
 
-  const existing = deps.getStoredSession(sessionId);
+  const existing = deps.session.getStoredSession(sessionId);
   let effectiveCwd = input.cwd;
   let workspaceResult =
-    effectiveCwd !== undefined ? deps.getOrCreateWorkspace(effectiveCwd) : undefined;
+    effectiveCwd !== undefined ? deps.session.getOrCreateWorkspace(effectiveCwd) : undefined;
   if (!effectiveCwd && existing) {
-    const storedWorkspace = deps.getWorkspace(existing.workspaceId);
+    const storedWorkspace = deps.session.getWorkspace(existing.workspaceId);
     if (storedWorkspace) {
       effectiveCwd = storedWorkspace.cwd;
       workspaceResult = { workspace: storedWorkspace, created: false };
@@ -189,7 +208,7 @@ async function resolveSessionStage(
     sessionId,
     content: input.content,
     effectiveCwd,
-    resolvedModel: input.model || existing?.model || deps.sessionConfig.model,
+    resolvedModel: input.model || existing?.model || deps.services.sessionConfig.model,
     agent: input.agent,
     streaming: input.streaming,
     source: input.source,
@@ -203,7 +222,7 @@ async function prepareRuntimeStage(
   state: PromptLifecycleState,
   deps: PromptLifecycleDeps,
 ): Promise<void> {
-  const activeSessions = await deps.listActiveSessions();
+  const activeSessions = await deps.session.listActiveSessions();
   const activeSession = activeSessions.find((session) => session.id === state.sessionId);
   if (
     activeSession &&
@@ -211,16 +230,16 @@ async function prepareRuntimeStage(
     activeSession.model &&
     activeSession.model !== state.resolvedModel
   ) {
-    deps.log.warn("Detected model drift; recycling session runtime", {
-      sessionId: deps.sid(state.sessionId),
+    deps.services.log.warn("Detected model drift; recycling session runtime", {
+      sessionId: deps.services.sid(state.sessionId),
       runningModel: activeSession.model,
       desiredModel: state.resolvedModel,
     });
-    await deps.closeSession(state.sessionId);
+    await deps.session.closeSession(state.sessionId);
   }
 
   if (!state.existing && state.effectiveCwd && state.workspaceResult) {
-    deps.upsertSession({
+    deps.session.upsertSession({
       id: state.sessionId,
       workspaceId: state.workspaceResult.workspace.id,
       providerSessionId: state.sessionId,
@@ -229,12 +248,12 @@ async function prepareRuntimeStage(
       purpose: "chat",
       runtimeStatus: "idle",
     });
-    deps.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
+    deps.session.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
     return;
   }
 
   if (state.existing) {
-    deps.touchSession(state.sessionId);
+    deps.session.touchSession(state.sessionId);
   }
 }
 
@@ -243,10 +262,10 @@ async function bootstrapSessionStage(
   deps: PromptLifecycleDeps,
 ): Promise<void> {
   if (!state.effectiveCwd || !state.workspaceResult) return;
-  if (deps.resolveSessionPath(state.sessionId, state.effectiveCwd)) return;
+  if (deps.session.resolveSessionPath(state.sessionId, state.effectiveCwd)) return;
 
   const bootstrap = getBootstrapSettings(state, deps);
-  await deps.ensureSessionBootstrapped({
+  await deps.session.ensureSessionBootstrapped({
     sessionId: state.sessionId,
     cwd: state.effectiveCwd,
     workspaceId: state.workspaceResult.workspace.id,
@@ -261,23 +280,23 @@ async function bootstrapSessionStage(
 
 function attachRequestContextStage(state: PromptLifecycleState, deps: PromptLifecycleDeps): void {
   const requestContext: RequestContext = {
-    connectionId: deps.connectionId,
-    tags: deps.tags,
+    connectionId: deps.request.connectionId,
+    tags: deps.request.tags,
     source: state.source,
     responseText: "",
   };
-  const existingPrimary = deps.primaryContexts.get(state.sessionId);
-  if (state.streaming && deps.tags?.length) {
-    deps.primaryContexts.set(state.sessionId, requestContext);
-  } else if (existingPrimary && existingPrimary.connectionId !== deps.connectionId) {
-    deps.log.info("Preserving primary context", {
-      sessionId: deps.sid(state.sessionId),
+  const existingPrimary = deps.request.primaryContexts.get(state.sessionId);
+  if (state.streaming && deps.request.tags?.length) {
+    deps.request.primaryContexts.set(state.sessionId, requestContext);
+  } else if (existingPrimary && existingPrimary.connectionId !== deps.request.connectionId) {
+    deps.services.log.info("Preserving primary context", {
+      sessionId: deps.services.sid(state.sessionId),
       primaryConn: existingPrimary.connectionId?.slice(0, 8),
-      transientConn: deps.connectionId?.slice(0, 8),
+      transientConn: deps.request.connectionId?.slice(0, 8),
     });
   }
 
-  deps.requestContexts.set(state.sessionId, requestContext);
+  deps.request.requestContexts.set(state.sessionId, requestContext);
   state.requestContext = requestContext;
 }
 
@@ -286,7 +305,7 @@ async function dispatchStreamingPromptStage(
   deps: PromptLifecycleDeps,
 ): Promise<{ status: "streaming"; sessionId: string }> {
   const promptStart = Date.now();
-  await deps.promptSession(
+  await deps.session.promptSession(
     state.sessionId,
     state.content,
     state.effectiveCwd,
@@ -297,17 +316,17 @@ async function dispatchStreamingPromptStage(
   const turnListener = (event: { sessionId: string; type?: string }) => {
     if (event.sessionId !== state.sessionId || event.type !== "turn_stop") return;
     const elapsed = Date.now() - promptStart;
-    const reqCtx = deps.requestContexts.get(state.sessionId);
+    const reqCtx = deps.request.requestContexts.get(state.sessionId);
     const responseLen = reqCtx?.responseText?.length || 0;
-    deps.log.info("Streaming turn complete", {
-      sessionId: deps.sid(state.sessionId),
+    deps.services.log.info("Streaming turn complete", {
+      sessionId: deps.services.sid(state.sessionId),
       elapsed: `${elapsed}ms`,
       responseChars: responseLen,
     });
-    deps.removeSessionEventListener(turnListener);
+    deps.session.removeSessionEventListener(turnListener);
   };
 
-  deps.onSessionEvent(turnListener);
+  deps.session.onSessionEvent(turnListener);
   return { status: "streaming", sessionId: state.sessionId };
 }
 
@@ -319,19 +338,22 @@ async function dispatchNonStreamingPromptStage(
   return await new Promise<{ text: string; sessionId: string }>((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
-      deps.log.error("Prompt timed out", { sessionId: deps.sid(state.sessionId), elapsed: "300s" });
+      deps.services.log.error("Prompt timed out", {
+        sessionId: deps.services.sid(state.sessionId),
+        elapsed: "300s",
+      });
       reject(new Error("Prompt timed out after 5 minutes"));
     }, 300_000);
 
     const onEvent = (event: { sessionId: string; type?: string }) => {
       if (event.sessionId !== state.sessionId) return;
       if (event.type === "turn_stop") {
-        const reqCtx = deps.requestContexts.get(state.sessionId);
+        const reqCtx = deps.request.requestContexts.get(state.sessionId);
         const text = reqCtx?.responseText || "";
         cleanup();
         const elapsed = Date.now() - promptStart;
-        deps.log.info("Non-streaming prompt complete", {
-          sessionId: deps.sid(state.sessionId),
+        deps.services.log.info("Non-streaming prompt complete", {
+          sessionId: deps.services.sid(state.sessionId),
           elapsed: `${elapsed}ms`,
           responseChars: text.length,
         });
@@ -341,13 +363,13 @@ async function dispatchNonStreamingPromptStage(
 
     const cleanup = () => {
       clearTimeout(timeout);
-      deps.removeSessionEventListener(onEvent);
-      deps.requestContexts.delete(state.sessionId);
-      deps.primaryContexts.delete(state.sessionId);
+      deps.session.removeSessionEventListener(onEvent);
+      deps.request.requestContexts.delete(state.sessionId);
+      deps.request.primaryContexts.delete(state.sessionId);
     };
 
-    deps.onSessionEvent(onEvent);
-    deps
+    deps.session.onSessionEvent(onEvent);
+    deps.session
       .promptSession(
         state.sessionId,
         state.content,
@@ -362,16 +384,38 @@ async function dispatchNonStreamingPromptStage(
   });
 }
 
-export async function runPromptLifecycle(
-  input: PromptLifecycleInput,
-  deps: PromptLifecycleDeps,
-): Promise<{ status: "streaming"; sessionId: string } | { text: string; sessionId: string }> {
-  const state = await resolveSessionStage(input, deps);
-  await prepareRuntimeStage(state, deps);
-  await bootstrapSessionStage(state, deps);
-  attachRequestContextStage(state, deps);
-  if (state.streaming) {
-    return await dispatchStreamingPromptStage(state, deps);
-  }
-  return await dispatchNonStreamingPromptStage(state, deps);
+export function createPromptLifecycleRunner(base: {
+  session: PromptLifecycleSessionOps;
+  requestState: {
+    requestContexts: Map<string, RequestContext>;
+    primaryContexts: Map<string, RequestContext>;
+  };
+  services: PromptLifecycleServices;
+}): PromptLifecycleRunner {
+  return {
+    run: async (
+      input: PromptLifecycleInput,
+      request: { connectionId: string | null; tags: string[] | null },
+    ) => {
+      const deps: PromptLifecycleDeps = {
+        session: base.session,
+        request: {
+          connectionId: request.connectionId,
+          tags: request.tags,
+          requestContexts: base.requestState.requestContexts,
+          primaryContexts: base.requestState.primaryContexts,
+        },
+        services: base.services,
+      };
+
+      const state = await resolveSessionStage(input, deps);
+      await prepareRuntimeStage(state, deps);
+      await bootstrapSessionStage(state, deps);
+      attachRequestContextStage(state, deps);
+      if (state.streaming) {
+        return await dispatchStreamingPromptStage(state, deps);
+      }
+      return await dispatchNonStreamingPromptStage(state, deps);
+    },
+  };
 }
