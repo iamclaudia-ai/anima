@@ -68,6 +68,7 @@ import {
   type TaskStatus,
   toSessionTaskFromStored,
 } from "./lifecycle/task-workflow";
+import { createTaskEventBridge } from "./lifecycle/task-events";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -596,73 +597,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     taskId: z.string().describe("Task ID"),
   });
 
-  async function sendSessionNotification(
-    sessionId: string,
-    text: string,
-    options?: { connectionId?: string | null; tags?: string[] | null },
-  ): Promise<void> {
-    const notifCtx: RequestContext = {
-      connectionId: options?.connectionId ?? null,
-      tags: options?.tags ?? null,
-      responseText: "",
-    };
-    requestContexts.set(sessionId, notifCtx);
-
-    const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-    const stored = getStoredSession(sessionId);
-    await agentClient.prompt(
-      sessionId,
-      wrapped,
-      undefined,
-      stored?.model || sessionConfig.model,
-      stored?.agent || "claude",
-    );
-  }
-
-  async function notifyTaskCompletion(task: SessionTask): Promise<void> {
-    if (task.status === "running") return;
-    if (taskNotificationsSent.has(task.taskId)) return;
-    taskNotificationsSent.add(task.taskId);
-
-    const elapsedSecs = Math.max(
-      0,
-      Math.round((Date.parse(task.updatedAt) - Date.parse(task.startedAt)) / 1000),
-    );
-    const agentLabel =
-      task.agent.length > 0 ? `${task.agent[0].toUpperCase()}${task.agent.slice(1)}` : "Agent";
-
-    let content: string;
-    if (task.status === "completed") {
-      content =
-        `${agentLabel} completed ${task.mode} task ${task.taskId} (${elapsedSecs}s).` +
-        `${task.outputFile ? ` Output: ${task.outputFile}` : ""}`;
-    } else if (task.status === "interrupted") {
-      content =
-        `${agentLabel} ${task.mode} task ${task.taskId} was interrupted (${elapsedSecs}s).` +
-        `${task.outputFile ? ` Partial output: ${task.outputFile}` : ""}`;
-    } else {
-      content =
-        `${agentLabel} failed ${task.mode} task ${task.taskId} (${elapsedSecs}s): ${task.error || "unknown error"}.` +
-        `${task.outputFile ? ` Partial output: ${task.outputFile}` : ""}`;
-    }
-
-    try {
-      await sendSessionNotification(task.sessionId, content, task.context);
-      log.info("Sent task completion notification", {
-        taskId: task.taskId,
-        sessionId: sid(task.sessionId),
-        status: task.status,
-      });
-    } catch (error) {
-      log.warn("Failed task completion notification", {
-        taskId: task.taskId,
-        sessionId: sid(task.sessionId),
-        status: task.status,
-        error: String(error),
-      });
-    }
-  }
-
   // Wire agent-host events → ctx.emit
   agentClient.on(
     "session.event",
@@ -716,152 +650,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   );
 
   function wireTaskEventBridge(): void {
-    const listener = (event: { taskId: string; eventName: string; [key: string]: unknown }) => {
-      if (!ctx) return;
-      const taskId = event.taskId;
-      let task = tasks.get(taskId);
-      if (!task) {
-        const stored = getStoredSession(taskId);
-        if (stored?.parentSessionId) {
-          const metadata = stored.metadata || {};
-          task = {
-            taskId: stored.id,
-            sessionId: stored.parentSessionId,
-            agent: stored.agent,
-            cwd: typeof metadata.cwd === "string" ? metadata.cwd : undefined,
-            worktreePath:
-              typeof metadata.worktreePath === "string" ? metadata.worktreePath : undefined,
-            parentRepoPath:
-              typeof metadata.parentRepoPath === "string" ? metadata.parentRepoPath : undefined,
-            continuedFromTaskId:
-              typeof metadata.continuedFromTaskId === "string"
-                ? metadata.continuedFromTaskId
-                : undefined,
-            git:
-              metadata.git && typeof metadata.git === "object" && !Array.isArray(metadata.git)
-                ? (metadata.git as Record<string, unknown>)
-                : undefined,
-            prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
-            mode:
-              stored.purpose === "review" || stored.purpose === "test" ? stored.purpose : "general",
-            status:
-              stored.runtimeStatus === "completed" ||
-              stored.runtimeStatus === "failed" ||
-              stored.runtimeStatus === "interrupted"
-                ? stored.runtimeStatus
-                : "running",
-            startedAt: stored.createdAt,
-            updatedAt: stored.updatedAt,
-            error: typeof metadata.error === "string" ? metadata.error : undefined,
-            outputFile: typeof metadata.outputFile === "string" ? metadata.outputFile : undefined,
-            context: {
-              connectionId:
-                typeof metadata.connectionId === "string"
-                  ? (metadata.connectionId as string)
-                  : null,
-              tags: Array.isArray(metadata.tags) ? (metadata.tags as string[]) : null,
-            },
-          };
-          tasks.set(taskId, task);
-        }
-      }
-      if (!task) return;
-
-      const hostEventType = String(event.type || "");
-      const payload = { ...event } as Record<string, unknown>;
-      delete payload.taskId;
-      delete payload.eventName;
-
-      if (hostEventType === "stop") {
-        task.status = payload.status === "interrupted" ? "interrupted" : "completed";
-      } else if (hostEventType === "error") {
-        task.status = "failed";
-        task.error = String(payload.error || "Task failed");
-      }
-      if (typeof payload.outputFile === "string") {
-        task.outputFile = payload.outputFile;
-      }
-      if (typeof payload.cwd === "string") {
-        task.cwd = payload.cwd;
-      }
-      if (typeof payload.worktreePath === "string") {
-        task.worktreePath = payload.worktreePath;
-      }
-      if (typeof payload.parentRepoPath === "string") {
-        task.parentRepoPath = payload.parentRepoPath;
-      }
-      if (typeof payload.continuedFromTaskId === "string") {
-        task.continuedFromTaskId = payload.continuedFromTaskId;
-      }
-      if (payload.git && typeof payload.git === "object" && !Array.isArray(payload.git)) {
-        task.git = payload.git as Record<string, unknown>;
-      }
-      task.updatedAt = new Date().toISOString();
-      const taskStored = getStoredSession(task.taskId);
-      const parentStored = getStoredSession(task.sessionId);
-      const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
-      if (workspaceId) {
-        upsertSession({
-          id: task.taskId,
-          workspaceId,
-          providerSessionId: task.taskId,
-          model: taskStored?.model || parentStored?.model || sessionConfig.model,
-          agent: task.agent,
-          purpose: task.mode === "review" || task.mode === "test" ? task.mode : "task",
-          parentSessionId: task.sessionId,
-          runtimeStatus: task.status === "running" ? "running" : task.status,
-          metadata: {
-            prompt: task.prompt,
-            cwd: task.cwd,
-            worktreePath: task.worktreePath,
-            parentRepoPath: task.parentRepoPath,
-            continuedFromTaskId: task.continuedFromTaskId,
-            git: task.git,
-            outputFile: task.outputFile,
-            error: task.error,
-            connectionId: task.context.connectionId,
-            tags: task.context.tags,
-          },
-        });
-      }
-
-      const mappedType =
-        hostEventType === "start" ||
-        hostEventType === "delta" ||
-        hostEventType === "item" ||
-        hostEventType === "stop" ||
-        hostEventType === "error"
-          ? hostEventType
-          : "item";
-
-      const emitOptions: { source?: string; connectionId?: string; tags?: string[] } = {
-        source: "gateway.caller",
-      };
-      if (task.context.connectionId) emitOptions.connectionId = task.context.connectionId;
-      if (task.context.tags) emitOptions.tags = task.context.tags;
-
-      ctx.emit(
-        `session.task.${taskId}.${mappedType}`,
-        {
-          taskId,
-          sessionId: task.sessionId,
-          agent: task.agent,
-          status: task.status,
-          hostEventType,
-          payload,
-        },
-        emitOptions,
-      );
-
-      if ((hostEventType === "stop" || hostEventType === "error") && task.status !== "running") {
-        void notifyTaskCompletion(task);
-      }
-    };
-
-    agentClient.on("task.event", listener);
-    taskUnsubscribers.push(() => {
-      agentClient.removeListener("task.event", listener);
-    });
+    taskUnsubscribers.push(taskEventBridge.wire());
   }
 
   // ── Method Definitions ─────────────────────────────────────
@@ -1093,6 +882,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       otherBlocks,
     };
   };
+
+  const taskEventBridge = createTaskEventBridge({
+    tasks,
+    taskNotificationsSent,
+    requestContexts,
+    getCtx: () => ctx,
+    getStoredSession,
+    upsertSession,
+    sessionConfig,
+    sendPrompt: async (sessionId, content, cwd, model, agent) => {
+      await agentClient.prompt(sessionId, content, cwd, model, agent);
+    },
+    onTaskEvent: (listener) => {
+      agentClient.on("task.event", listener);
+    },
+    removeTaskEventListener: (listener) => {
+      agentClient.removeListener("task.event", listener);
+    },
+    sid,
+    log,
+  });
 
   const promptLifecycle = createPromptLifecycleRunner({
     session: {
@@ -1456,7 +1266,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           content: { kind: "text", chars: text.length },
         });
 
-        await sendSessionNotification(sessionId, text, {
+        await taskEventBridge.sendSessionNotification(sessionId, text, {
           connectionId: ctx.connectionId,
           tags: ctx.tags,
         });
