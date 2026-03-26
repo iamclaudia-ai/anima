@@ -1,12 +1,16 @@
+import { shortId } from "@anima/shared";
+import { createLogger } from "@anima/shared";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { SessionTask } from "./task-workflow";
 import { toSessionTaskFromStored } from "./task-workflow";
-import type { StoredSession } from "../session-store";
+import { getStoredSession, upsertSession } from "../session-store";
+import type { RequestContext, SessionRuntimeConfig } from "../session-types";
 
-interface RequestContextLike {
-  connectionId: string | null;
-  tags: string[] | null;
-  responseText: string;
-}
+const log = createLogger("SessionExt:TaskEvents", join(homedir(), ".anima", "logs", "session.log"));
+
+type TaskEvent = { taskId: string; eventName: string; [key: string]: unknown };
+type TaskEventListener = (event: TaskEvent) => void;
 
 interface EventBridgeContext {
   emit: (
@@ -19,38 +23,19 @@ interface EventBridgeContext {
 interface TaskEventBridgeDeps {
   tasks: Map<string, SessionTask>;
   taskNotificationsSent: Set<string>;
-  requestContexts: Map<string, RequestContextLike>;
+  requestContexts: Map<string, RequestContext>;
   getCtx: () => EventBridgeContext | undefined;
-  getStoredSession: (id: string) => StoredSession | null;
-  upsertSession: (params: {
-    id: string;
-    workspaceId: string;
-    providerSessionId: string;
-    model: string;
-    agent: string;
-    purpose: "chat" | "task" | "review" | "test";
-    parentSessionId?: string | null;
-    runtimeStatus: "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
-    metadata?: Record<string, unknown> | null;
-  }) => void;
-  sessionConfig: { model: string };
-  sendPrompt: (
-    sessionId: string,
-    content: string,
-    cwd: string | undefined,
-    model: string,
-    agent: string,
-  ) => Promise<void>;
-  onTaskEvent: (
-    listener: (event: { taskId: string; eventName: string; [key: string]: unknown }) => void,
-  ) => void;
-  removeTaskEventListener: (
-    listener: (event: { taskId: string; eventName: string; [key: string]: unknown }) => void,
-  ) => void;
-  sid: (sessionId: string) => string;
-  log: {
-    info: (message: string, data?: Record<string, unknown>) => void;
-    warn: (message: string, data?: Record<string, unknown>) => void;
+  sessionConfig: SessionRuntimeConfig;
+  agentClient: {
+    prompt(
+      sessionId: string,
+      content: string,
+      cwd: string | undefined,
+      model: string,
+      agent?: string,
+    ): Promise<void>;
+    on(event: "task.event", listener: TaskEventListener): void;
+    removeListener(event: "task.event", listener: TaskEventListener): void;
   };
 }
 
@@ -70,7 +55,7 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
     text: string,
     options?: { connectionId?: string | null; tags?: string[] | null },
   ): Promise<void> {
-    const notifCtx: RequestContextLike = {
+    const notifCtx: RequestContext = {
       connectionId: options?.connectionId ?? null,
       tags: options?.tags ?? null,
       responseText: "",
@@ -78,8 +63,8 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
     deps.requestContexts.set(sessionId, notifCtx);
 
     const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-    const stored = deps.getStoredSession(sessionId);
-    await deps.sendPrompt(
+    const stored = getStoredSession(sessionId);
+    await deps.agentClient.prompt(
       sessionId,
       wrapped,
       undefined,
@@ -117,15 +102,15 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
 
     try {
       await sendSessionNotification(task.sessionId, content, task.context);
-      deps.log.info("Sent task completion notification", {
+      log.info("Sent task completion notification", {
         taskId: task.taskId,
-        sessionId: deps.sid(task.sessionId),
+        sessionId: shortId(task.sessionId),
         status: task.status,
       });
     } catch (error) {
-      deps.log.warn("Failed task completion notification", {
+      log.warn("Failed task completion notification", {
         taskId: task.taskId,
-        sessionId: deps.sid(task.sessionId),
+        sessionId: shortId(task.sessionId),
         status: task.status,
         error: String(error),
       });
@@ -133,14 +118,14 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
   }
 
   function wire(): () => void {
-    const listener = (event: { taskId: string; eventName: string; [key: string]: unknown }) => {
+    const listener: TaskEventListener = (event) => {
       const ctx = deps.getCtx();
       if (!ctx) return;
 
       const taskId = event.taskId;
       let task: SessionTask | null | undefined = deps.tasks.get(taskId);
       if (!task) {
-        task = toSessionTaskFromStored(deps.getStoredSession(taskId));
+        task = toSessionTaskFromStored(getStoredSession(taskId));
         if (task) deps.tasks.set(taskId, task);
       }
       if (!task) return;
@@ -168,11 +153,11 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
       }
       task.updatedAt = new Date().toISOString();
 
-      const taskStored = deps.getStoredSession(task.taskId);
-      const parentStored = deps.getStoredSession(task.sessionId);
+      const taskStored = getStoredSession(task.taskId);
+      const parentStored = getStoredSession(task.sessionId);
       const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
       if (workspaceId) {
-        deps.upsertSession({
+        upsertSession({
           id: task.taskId,
           workspaceId,
           providerSessionId: task.taskId,
@@ -229,8 +214,8 @@ export function createTaskEventBridge(deps: TaskEventBridgeDeps): TaskEventBridg
       }
     };
 
-    deps.onTaskEvent(listener);
-    return () => deps.removeTaskEventListener(listener);
+    deps.agentClient.on("task.event", listener);
+    return () => deps.agentClient.removeListener("task.event", listener);
   }
 
   return {

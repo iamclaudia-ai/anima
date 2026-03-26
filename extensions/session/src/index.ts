@@ -309,35 +309,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     taskNotificationsSent,
     requestContexts,
     getCtx: () => ctx,
-    getStoredSession,
-    upsertSession,
     sessionConfig,
-    sendPrompt: async (sessionId, content, cwd, model, agent) => {
-      await agentClient.prompt(sessionId, content, cwd, model, agent);
-    },
-    onTaskEvent: (listener) => {
-      agentClient.on("task.event", listener);
-    },
-    removeTaskEventListener: (listener) => {
-      agentClient.removeListener("task.event", listener);
-    },
-    sid,
-    log,
+    agentClient,
   });
 
   const sessionEventBridge = createSessionEventBridge({
     requestContexts,
     primaryContexts,
     getCtx: () => ctx,
-    mergeTags,
-    toRuntimeStatusFromSessionEvent,
-    touchSession,
-    onSessionEvent: (listener) => {
-      agentClient.on("session.event", listener);
-    },
-    removeSessionEventListener: (listener) => {
-      agentClient.removeListener("session.event", listener);
-    },
+    agentClient,
   });
 
   const promptLifecycle = createPromptLifecycleRunner({

@@ -1,13 +1,12 @@
-interface RequestContextLike {
-  connectionId: string | null;
-  tags: string[] | null;
-  source?: string;
-  responseText: string;
-}
+import { touchSession } from "../session-store";
+import { type RequestContext, mergeTags, toRuntimeStatusFromSessionEvent } from "../session-types";
+
+type SessionEvent = { eventName: string; sessionId: string; [key: string]: unknown };
+type SessionEventListener = (event: SessionEvent) => void;
 
 interface SessionEventBridgeDeps {
-  requestContexts: Map<string, RequestContextLike>;
-  primaryContexts: Map<string, RequestContextLike>;
+  requestContexts: Map<string, RequestContext>;
+  primaryContexts: Map<string, RequestContext>;
   getCtx: () =>
     | {
         emit: (
@@ -17,20 +16,10 @@ interface SessionEventBridgeDeps {
         ) => void;
       }
     | undefined;
-  mergeTags: (primary: string[] | null, current: string[] | null) => string[] | null;
-  toRuntimeStatusFromSessionEvent: (
-    type: string,
-  ) => "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled" | null;
-  touchSession: (
-    sessionId: string,
-    runtimeStatus?: "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled",
-  ) => void;
-  onSessionEvent: (
-    listener: (event: { eventName: string; sessionId: string; [key: string]: unknown }) => void,
-  ) => void;
-  removeSessionEventListener: (
-    listener: (event: { eventName: string; sessionId: string; [key: string]: unknown }) => void,
-  ) => void;
+  agentClient: {
+    on(event: "session.event", listener: SessionEventListener): void;
+    removeListener(event: "session.event", listener: SessionEventListener): void;
+  };
 }
 
 export interface SessionEventBridge {
@@ -40,11 +29,7 @@ export interface SessionEventBridge {
 export function createSessionEventBridge(deps: SessionEventBridgeDeps): SessionEventBridge {
   return {
     wire: () => {
-      const listener = (event: {
-        eventName: string;
-        sessionId: string;
-        [key: string]: unknown;
-      }) => {
+      const listener: SessionEventListener = (event) => {
         const ctx = deps.getCtx();
         if (!ctx) return;
 
@@ -56,8 +41,8 @@ export function createSessionEventBridge(deps: SessionEventBridgeDeps): SessionE
         if (reqCtx?.source) emitOptions.source = reqCtx.source;
         const connId = primaryCtx?.connectionId ?? reqCtx?.connectionId;
         if (connId) emitOptions.connectionId = connId;
-        const mergedTags = deps.mergeTags(primaryCtx?.tags ?? null, reqCtx?.tags ?? null);
-        if (mergedTags) emitOptions.tags = mergedTags;
+        const mergedTags_ = mergeTags(primaryCtx?.tags ?? null, reqCtx?.tags ?? null);
+        if (mergedTags_) emitOptions.tags = mergedTags_;
 
         ctx.emit(
           eventName,
@@ -66,13 +51,11 @@ export function createSessionEventBridge(deps: SessionEventBridgeDeps): SessionE
         );
 
         const runtimeStatus =
-          typeof payload.type === "string"
-            ? deps.toRuntimeStatusFromSessionEvent(payload.type)
-            : null;
+          typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
         if (runtimeStatus) {
-          deps.touchSession(sessionId, runtimeStatus);
+          touchSession(sessionId, runtimeStatus);
         } else {
-          deps.touchSession(sessionId);
+          touchSession(sessionId);
         }
 
         if (payload.type === "content_block_delta") {
@@ -83,8 +66,8 @@ export function createSessionEventBridge(deps: SessionEventBridgeDeps): SessionE
         }
       };
 
-      deps.onSessionEvent(listener);
-      return () => deps.removeSessionEventListener(listener);
+      deps.agentClient.on("session.event", listener);
+      return () => deps.agentClient.removeListener("session.event", listener);
     },
   };
 }
