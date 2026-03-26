@@ -51,6 +51,8 @@ export interface StreamEvent {
 }
 
 export interface CreateSessionOptions {
+  /** Optional caller-supplied session ID */
+  sessionId?: string;
   /** Working directory for Claude CLI */
   cwd: string;
   /** Model to use */
@@ -1013,7 +1015,7 @@ export class SDKSession extends EventEmitter {
 // ── Factory Functions ────────────────────────────────────────
 
 export function createSDKSession(options: CreateSessionOptions): SDKSession {
-  const id = randomUUID();
+  const id = options.sessionId || randomUUID();
   return new SDKSession(id, options, false);
 }
 

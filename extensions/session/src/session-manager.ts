@@ -27,6 +27,8 @@ const log = createLogger("SessionManager", join(homedir(), ".anima", "logs", "se
 // ── Types ────────────────────────────────────────────────────
 
 export interface SessionCreateParams {
+  /** Optional caller-supplied session UUID */
+  sessionId?: string;
   /** Working directory */
   cwd: string;
   /** Model to use */
@@ -90,6 +92,7 @@ export class SessionManager extends EventEmitter {
    */
   async create(params: SessionCreateParams): Promise<{ sessionId: string }> {
     const options: CreateSessionOptions = {
+      sessionId: params.sessionId,
       cwd: params.cwd,
       model: params.model,
       systemPrompt: params.systemPrompt,

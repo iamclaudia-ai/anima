@@ -286,6 +286,7 @@ export async function createAgentHostServer(
         try {
           const result = await sessionHost.create(
             msg.params as {
+              sessionId?: string;
               cwd: string;
               agent?: string;
               model?: string;

@@ -93,6 +93,7 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
   setDefaults(_defaults: SessionDefaults): void {}
 
   async create(_params: {
+    sessionId?: string;
     cwd: string;
     model?: string;
     systemPrompt?: string;

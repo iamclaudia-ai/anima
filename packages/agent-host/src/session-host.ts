@@ -33,6 +33,8 @@ const log = createLogger("SessionHost", join(homedir(), ".anima", "logs", "agent
 // ── Types ────────────────────────────────────────────────────
 
 export interface SessionCreateParams {
+  /** Optional caller-supplied session UUID */
+  sessionId?: string;
   /** Working directory */
   cwd: string;
   /** Agent/provider key (default: claude) */
@@ -125,6 +127,7 @@ export class SessionHost extends EventEmitter {
       throw new Error("Session model is required. Configure extensions.session.config.model.");
     }
     const options: CreateSessionOptions = {
+      sessionId: params.sessionId,
       cwd: params.cwd,
       model: resolvedModel,
       systemPrompt: params.systemPrompt,

@@ -20,6 +20,7 @@ import type {
 import { createLogger, loadConfig, PERSISTENT_SESSION_ID } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   readFileSync,
@@ -77,6 +78,12 @@ interface SessionRuntimeConfig {
   thinking: boolean;
   effort: "low" | "medium" | "high" | "max";
   systemPrompt: string | null;
+}
+
+interface SessionBootstrapMetadata {
+  bootstrapSystemPrompt?: string;
+  bootstrapThinking?: boolean;
+  bootstrapEffort?: "low" | "medium" | "high" | "max";
 }
 
 const MEMORY_TRANSITION_TIMEOUT_MS = 1500;
@@ -588,6 +595,102 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   const tasks = new Map<string, SessionTask>();
   const taskNotificationsSent = new Set<string>();
   const taskUnsubscribers: Array<() => void> = [];
+
+  async function buildBootstrapSystemPrompt(params: {
+    cwd: string;
+    baseSystemPrompt?: string;
+    includeAllSummaries: boolean;
+  }): Promise<string | undefined> {
+    const { cwd, baseSystemPrompt, includeAllSummaries } = params;
+    let systemPrompt = baseSystemPrompt;
+
+    try {
+      await withTimeout(
+        ctx.call("memory.transition_conversation", { cwd }),
+        MEMORY_TRANSITION_TIMEOUT_MS,
+        "memory.transition_conversation",
+      );
+    } catch (err) {
+      log.warn("Failed to transition previous conversations (non-fatal)", {
+        cwd,
+        error: String(err),
+      });
+    }
+
+    try {
+      const memoryContext = (await withTimeout(
+        ctx.call("memory.get_session_context", {
+          cwd,
+          includeAllSummaries,
+        }),
+        MEMORY_CONTEXT_TIMEOUT_MS,
+        "memory.get_session_context",
+      )) as MemoryContextResult | null;
+
+      if (memoryContext) {
+        const memoryBlock = formatMemoryContext(memoryContext);
+        if (memoryBlock) {
+          systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryBlock}` : memoryBlock;
+          log.info("Injected memory context into session bootstrap", {
+            recentMessages: memoryContext.recentMessages.length,
+            recentSummaries: memoryContext.recentSummaries.length,
+          });
+        }
+      }
+    } catch (err) {
+      log.warn("Failed to inject memory context (non-fatal)", { error: String(err) });
+    }
+
+    return systemPrompt;
+  }
+
+  async function ensureSessionBootstrapped(params: {
+    sessionId: string;
+    cwd: string;
+    workspaceId: string;
+    agent: string;
+    model: string;
+    thinking: boolean;
+    effort: "low" | "medium" | "high" | "max";
+    baseSystemPrompt?: string;
+    includeAllSummaries: boolean;
+  }): Promise<void> {
+    if (resolveSessionPath(params.sessionId, params.cwd)) {
+      return;
+    }
+
+    const systemPrompt = await buildBootstrapSystemPrompt({
+      cwd: params.cwd,
+      baseSystemPrompt: params.baseSystemPrompt,
+      includeAllSummaries: params.includeAllSummaries,
+    });
+
+    await agentClient.createSession({
+      sessionId: params.sessionId,
+      cwd: params.cwd,
+      agent: params.agent,
+      model: params.model,
+      systemPrompt,
+      thinking: params.thinking,
+      effort: params.effort,
+    });
+
+    upsertSession({
+      id: params.sessionId,
+      workspaceId: params.workspaceId,
+      providerSessionId: params.sessionId,
+      model: params.model,
+      agent: params.agent,
+      purpose: "chat",
+      runtimeStatus: "idle",
+      metadata: {
+        bootstrapSystemPrompt: params.baseSystemPrompt,
+        bootstrapThinking: params.thinking,
+        bootstrapEffort: params.effort,
+      },
+    });
+    log.info("Session bootstrapped", { sessionId: sid(params.sessionId), cwd: params.cwd });
+  }
 
   const StartTaskSchema = z.object({
     sessionId: z.string().describe("Parent session UUID"),
@@ -1175,76 +1278,24 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           effort,
         });
         const workspaceResult = getOrCreateWorkspace(cwd);
-
-        // Transition previous session's active conversations to 'ready' for Libby,
-        // and inject memory context into the new session's system prompt.
-        const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
-        // Transition ALL active conversations for this workspace to 'ready' for Libby
-        try {
-          await withTimeout(
-            ctx.call("memory.transition_conversation", { cwd }),
-            MEMORY_TRANSITION_TIMEOUT_MS,
-            "memory.transition_conversation",
-          );
-        } catch (err) {
-          log.warn("Failed to transition previous conversations (non-fatal)", {
-            cwd,
-            error: String(err),
-          });
-        }
-
-        // Inject recent memory context into system prompt for continuity
-        try {
-          const memoryContext = (await withTimeout(
-            ctx.call("memory.get_session_context", {
-              cwd,
-              includeAllSummaries: workspaceResult.workspace.general,
-            }),
-            MEMORY_CONTEXT_TIMEOUT_MS,
-            "memory.get_session_context",
-          )) as {
-            recentMessages: Array<{ role: string; content: string; timestamp: string }>;
-            recentSummaries: Array<{
-              summary: string;
-              firstMessageAt: string;
-              lastMessageAt: string;
-            }>;
-          } | null;
-
-          if (memoryContext) {
-            const memoryBlock = formatMemoryContext(memoryContext);
-            if (memoryBlock) {
-              systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoryBlock}` : memoryBlock;
-              log.info("Injected memory context into session", {
-                recentMessages: memoryContext.recentMessages.length,
-                recentSummaries: memoryContext.recentSummaries.length,
-              });
-            }
-          }
-        } catch (err) {
-          log.warn("Failed to inject memory context (non-fatal)", { error: String(err) });
-        }
-
-        const result = await agentClient.createSession({
-          cwd,
-          agent,
-          model,
-          systemPrompt,
-          thinking,
-          effort,
-        });
+        const sessionId = randomUUID();
         upsertSession({
-          id: result.sessionId,
+          id: sessionId,
           workspaceId: workspaceResult.workspace.id,
-          providerSessionId: result.sessionId,
+          providerSessionId: sessionId,
           model,
           agent,
           purpose: "chat",
           runtimeStatus: "idle",
+          metadata: {
+            bootstrapSystemPrompt: systemPrompt,
+            bootstrapThinking: thinking,
+            bootstrapEffort: effort,
+          },
         });
-        setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
-        log.info("Session created", { sessionId: sid(result.sessionId), cwd });
-        return result;
+        setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
+        log.info("Session draft created", { sessionId: sid(sessionId), cwd });
+        return { sessionId };
       }
 
       case "session.send_prompt": {
@@ -1272,6 +1323,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         });
 
         const existing = getStoredSession(sessionId);
+        const existingMetadata = (existing?.metadata || null) as SessionBootstrapMetadata | null;
         const resumeModel = model || existing?.model || sessionConfig.model;
         const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
         const activeSession = activeSessions.find((s) => s.id === sessionId);
@@ -1289,8 +1341,18 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           });
           await agentClient.close(sessionId);
         }
-        if (!existing && cwd) {
-          const workspaceResult = getOrCreateWorkspace(cwd);
+        let effectiveCwd = cwd;
+        let workspaceResult =
+          effectiveCwd !== undefined ? getOrCreateWorkspace(effectiveCwd) : undefined;
+        if (!effectiveCwd && existing) {
+          const storedWorkspace = getWorkspace(existing.workspaceId);
+          if (storedWorkspace) {
+            effectiveCwd = storedWorkspace.cwd;
+            workspaceResult = { workspace: storedWorkspace, created: false };
+          }
+        }
+
+        if (!existing && effectiveCwd && workspaceResult) {
           upsertSession({
             id: sessionId,
             workspaceId: workspaceResult.workspace.id,
@@ -1303,6 +1365,32 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
         } else if (existing) {
           touchSession(sessionId);
+        }
+
+        if (effectiveCwd && workspaceResult && !resolveSessionPath(sessionId, effectiveCwd)) {
+          await ensureSessionBootstrapped({
+            sessionId,
+            cwd: effectiveCwd,
+            workspaceId: workspaceResult.workspace.id,
+            agent,
+            model: resumeModel,
+            thinking:
+              typeof existingMetadata?.bootstrapThinking === "boolean"
+                ? existingMetadata.bootstrapThinking
+                : sessionConfig.thinking,
+            effort:
+              existingMetadata?.bootstrapEffort === "low" ||
+              existingMetadata?.bootstrapEffort === "medium" ||
+              existingMetadata?.bootstrapEffort === "high" ||
+              existingMetadata?.bootstrapEffort === "max"
+                ? existingMetadata.bootstrapEffort
+                : sessionConfig.effort,
+            baseSystemPrompt:
+              typeof existingMetadata?.bootstrapSystemPrompt === "string"
+                ? existingMetadata.bootstrapSystemPrompt
+                : sessionConfig.systemPrompt || undefined,
+            includeAllSummaries: workspaceResult.workspace.general,
+          });
         }
 
         // Set up request context — capture envelope data now because the extension
@@ -1336,7 +1424,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         if (streaming) {
           // Fire and forget — events stream back via ctx.emit
           const promptStart = Date.now();
-          await agentClient.prompt(sessionId, content, cwd, resumeModel, agent);
+          await agentClient.prompt(sessionId, content, effectiveCwd, resumeModel, agent);
 
           // Log turn completion when we see turn_stop
           const turnListener = (event: { sessionId: string; type?: string }) => {
@@ -1389,7 +1477,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           };
 
           agentClient.on("session.event", onEvent);
-          agentClient.prompt(sessionId, content, cwd, resumeModel, agent).catch((err) => {
+          agentClient.prompt(sessionId, content, effectiveCwd, resumeModel, agent).catch((err) => {
             cleanup();
             reject(err);
           });

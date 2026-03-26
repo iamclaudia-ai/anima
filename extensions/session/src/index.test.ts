@@ -113,9 +113,11 @@ describe("session extension", () => {
         (this as unknown as { _isConnected: boolean })._isConnected = false;
       },
     );
-    createSpy = spyOn(AgentHostClient.prototype, "createSession").mockResolvedValue({
-      sessionId: "created-session-1",
-    });
+    createSpy = spyOn(AgentHostClient.prototype, "createSession").mockImplementation(
+      async (params: { sessionId?: string }) => ({
+        sessionId: params.sessionId || "created-session-1",
+      }),
+    );
     interruptSpy = spyOn(AgentHostClient.prototype, "interrupt").mockResolvedValue(true);
     closeSpy = spyOn(AgentHostClient.prototype, "close").mockResolvedValue(undefined);
     listSpy = spyOn(AgentHostClient.prototype, "list").mockResolvedValue([
@@ -307,7 +309,17 @@ describe("session extension", () => {
     promptSpy.mockImplementation(() => Promise.resolve());
 
     const ext = createSessionExtension();
-    await ext.start(createTestContext());
+    await ext.start(
+      createTestContext({
+        async call(method) {
+          if (method === "memory.transition_conversation") return { transitioned: 0 };
+          if (method === "memory.get_session_context") {
+            return { recentMessages: [], recentSummaries: [] };
+          }
+          return null;
+        },
+      }),
+    );
 
     const result = (await ext.handleMethod("session.send_prompt", {
       sessionId,
@@ -317,7 +329,13 @@ describe("session extension", () => {
 
     expect(result).toEqual({ status: "streaming", sessionId });
     expect(promptSpy).toHaveBeenCalledTimes(1);
-    expect(promptSpy).toHaveBeenCalledWith(sessionId, "ping", undefined, "claude-test", "claude");
+    expect(promptSpy).toHaveBeenCalledWith(
+      sessionId,
+      "ping",
+      "/repo/project",
+      "claude-test",
+      "claude",
+    );
 
     await ext.stop();
   });
@@ -402,15 +420,8 @@ describe("session extension", () => {
       effort: "high",
     });
 
-    expect(createSpy).toHaveBeenCalledWith({
-      agent: "claude",
-      cwd: "/repo/project",
-      model: "claude-opus",
-      systemPrompt: "You are strict",
-      thinking: true,
-      effort: "high",
-    });
-    expect(result).toEqual({ sessionId: "created-session-1" });
+    expect(result).toMatchObject({ sessionId: expect.any(String) });
+    expect(createSpy).not.toHaveBeenCalled();
 
     await ext.stop();
   });
@@ -427,14 +438,7 @@ describe("session extension", () => {
       cwd: "/repo/project",
     });
 
-    expect(createSpy).toHaveBeenCalledWith({
-      agent: "claude",
-      cwd: "/repo/project",
-      model: "claude-opus-4-6",
-      systemPrompt: undefined,
-      thinking: true,
-      effort: "high",
-    });
+    expect(createSpy).not.toHaveBeenCalled();
 
     await ext.stop();
   });
@@ -491,8 +495,13 @@ describe("session extension", () => {
       name: "General",
       general: true,
     });
-    await ext.handleMethod("session.create_session", {
+    const generalResult = (await ext.handleMethod("session.create_session", {
       cwd: "/repo/general",
+    })) as { sessionId: string };
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: generalResult.sessionId,
+      cwd: "/repo/general",
+      content: "hello",
     });
 
     await ext.handleMethod("session.get_or_create_workspace", {
@@ -500,8 +509,13 @@ describe("session extension", () => {
       name: "Project",
       general: false,
     });
-    await ext.handleMethod("session.create_session", {
+    const projectResult = (await ext.handleMethod("session.create_session", {
       cwd: "/repo/project",
+    })) as { sessionId: string };
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: projectResult.sessionId,
+      cwd: "/repo/project",
+      content: "hello",
     });
 
     expect(memoryCalls).toEqual([
@@ -512,7 +526,7 @@ describe("session extension", () => {
     await ext.stop();
   });
 
-  it("fails open when memory transition hangs during session creation", async () => {
+  it("fails open when memory transition hangs during first-prompt bootstrap", async () => {
     const timeoutCallbacks: Array<() => void> = [];
     const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
       cb: (...args: unknown[]) => void,
@@ -537,13 +551,21 @@ describe("session extension", () => {
       }),
     );
 
-    const pending = ext.handleMethod("session.create_session", { cwd: "/repo/project" });
+    const created = (await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    })) as { sessionId: string };
+    const pending = ext.handleMethod("session.send_prompt", {
+      sessionId: created.sessionId,
+      cwd: "/repo/project",
+      content: "hello",
+    });
     await Promise.resolve();
     expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
     timeoutCallbacks[0]?.();
 
-    await expect(pending).resolves.toEqual({ sessionId: "created-session-1" });
+    await expect(pending).resolves.toEqual({ status: "streaming", sessionId: created.sessionId });
     expect(createSpy).toHaveBeenCalledWith({
+      sessionId: created.sessionId,
       agent: "claude",
       cwd: "/repo/project",
       model: "claude-opus-4-6",
@@ -555,6 +577,78 @@ describe("session extension", () => {
     await ext.stop();
     timeoutSpy.mockRestore();
     clearSpy.mockRestore();
+  });
+
+  it("bootstraps memory on the first prompt for draft sessions", async () => {
+    const ext = createSessionExtension();
+    await ext.start(
+      createTestContext({
+        async call(method) {
+          if (method === "memory.transition_conversation") return { transitioned: 1 };
+          if (method === "memory.get_session_context") {
+            return {
+              recentMessages: [
+                {
+                  role: "user",
+                  content: "continue where we left off",
+                  timestamp: "2026-02-22T12:00:00.000Z",
+                },
+              ],
+              recentSummaries: [],
+            };
+          }
+          return null;
+        },
+      }),
+    );
+
+    const created = (await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+      systemPrompt: "You are strict",
+      thinking: true,
+      effort: "high",
+    })) as { sessionId: string };
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: created.sessionId,
+      cwd: "/repo/project",
+      content: "hello",
+    });
+
+    expect(createSpy).toHaveBeenCalledWith({
+      sessionId: created.sessionId,
+      agent: "claude",
+      cwd: "/repo/project",
+      model: "claude-opus-4-6",
+      systemPrompt: expect.stringContaining("You are strict"),
+      thinking: true,
+      effort: "high",
+    });
+
+    await ext.stop();
+  });
+
+  it("skips bootstrap when a persisted session file already exists", async () => {
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    const created = (await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    })) as { sessionId: string };
+
+    const persistedDir = join(testHome, ".claude", "projects", "-repo-project");
+    mkdirSync(persistedDir, { recursive: true });
+    writeFileSync(join(persistedDir, `${created.sessionId}.jsonl`), "", "utf-8");
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: created.sessionId,
+      cwd: "/repo/project",
+      content: "hello",
+    });
+
+    expect(createSpy).not.toHaveBeenCalled();
+
+    await ext.stop();
   });
 
   it("starts codex-backed tasks via session.start_task and remaps events", async () => {
@@ -1168,26 +1262,33 @@ describe("session extension", () => {
 
     promptSpy.mockImplementation(() => Promise.resolve());
 
+    const projectDir = join(testHome, ".claude", "projects", "-repo-project");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, `${sessionId}.jsonl`), "", "utf-8");
+
     const ext = createSessionExtension();
     await ext.start(createTestContext());
 
-    const pending = ext.handleMethod("session.send_prompt", {
-      sessionId,
-      cwd: "/repo/project",
-      model: "claude-test",
-      content: "ping",
-      streaming: false,
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(timeoutCallbacks.length).toBe(1);
-    timeoutCallbacks[0]?.();
-    await expect(pending).rejects.toThrow("Prompt timed out after 5 minutes");
-
-    await ext.stop();
-    timeoutSpy.mockRestore();
-    clearSpy.mockRestore();
+    try {
+      const pending = ext.handleMethod("session.send_prompt", {
+        sessionId,
+        cwd: "/repo/project",
+        model: "claude-test",
+        content: "ping",
+        streaming: false,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(timeoutCallbacks.length).toBe(1);
+      timeoutCallbacks[0]?.();
+      await expect(pending).rejects.toThrow("Prompt timed out after 5 minutes");
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      await ext.stop();
+      timeoutSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 
   it("executes slow-call logging path for non-read methods", async () => {
@@ -1198,7 +1299,7 @@ describe("session extension", () => {
     await ext.start(createTestContext());
 
     const result = await ext.handleMethod("session.create_session", { cwd: "/repo/slow" });
-    expect(result).toEqual({ sessionId: "created-session-1" });
+    expect(result).toMatchObject({ sessionId: expect.any(String) });
 
     await ext.stop();
     nowSpy.mockRestore();

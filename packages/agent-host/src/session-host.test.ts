@@ -59,6 +59,34 @@ describe("SessionHost", () => {
     expect(host.getEventsAfter("s-cleanup", 0)).toEqual([]);
   });
 
+  it("creates sessions with a caller-supplied session id", async () => {
+    const fake = new FakeSession("draft-session-1");
+    const created: Array<unknown> = [];
+    const host = new SessionHost({
+      create: (options) => {
+        created.push(options);
+        return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+      },
+    });
+
+    await host.create({
+      sessionId: "draft-session-1",
+      cwd: "/repo",
+      model: "claude-opus-4-6",
+    });
+
+    expect(created).toEqual([
+      {
+        sessionId: "draft-session-1",
+        cwd: "/repo",
+        model: "claude-opus-4-6",
+        systemPrompt: undefined,
+        thinking: undefined,
+        effort: undefined,
+      },
+    ]);
+  });
+
   it("auto-resumes inactive sessions with defaults on prompt", async () => {
     const resumed: Array<{ sessionId: string; options: unknown }> = [];
     const fake = new FakeSession("s-resume");

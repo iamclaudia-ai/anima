@@ -172,6 +172,7 @@ export class AgentHostClient extends EventEmitter {
    * Create a new session on the agent-host.
    */
   async createSession(params: {
+    sessionId?: string;
     cwd: string;
     model?: string;
     systemPrompt?: string;

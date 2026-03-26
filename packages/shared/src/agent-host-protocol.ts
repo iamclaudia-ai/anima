@@ -21,6 +21,7 @@ export interface CreateSessionMessage {
   type: "session.create";
   requestId: string;
   params: {
+    sessionId?: string;
     cwd: string;
     model?: string;
     systemPrompt?: string;
