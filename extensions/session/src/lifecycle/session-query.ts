@@ -1,16 +1,5 @@
-interface SessionListEntry {
-  sessionId: string;
-  created?: string;
-  modified?: string;
-  messageCount?: number;
-  firstPrompt?: string;
-  gitBranch?: string;
-}
-
-interface MemoryContextResult {
-  recentMessages: Array<{ role: string; content: string; timestamp: string }>;
-  recentSummaries: Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }>;
-}
+import type { SessionIndexEntry } from "../claude-projects";
+import type { MemoryContextResult } from "../memory-context";
 
 interface SessionQueryDeps {
   sessionConfig: { model: string };
@@ -20,8 +9,8 @@ interface SessionQueryDeps {
   };
   sid: (sessionId: string) => string;
   getOrCreateWorkspace: (cwd: string) => { workspace: { id: string }; created: boolean };
-  listWorkspaceSessions: (workspaceId: string) => SessionListEntry[];
-  discoverSessions: (cwd: string) => SessionListEntry[];
+  listWorkspaceSessions: (workspaceId: string) => SessionIndexEntry[];
+  discoverSessions: (cwd: string) => SessionIndexEntry[];
   upsertSession: (params: {
     id: string;
     workspaceId: string;
@@ -48,7 +37,7 @@ interface SessionQueryDeps {
 }
 
 export interface SessionQueryService {
-  listSessions: (cwd: string) => { sessions: SessionListEntry[] };
+  listSessions: (cwd: string) => { sessions: SessionIndexEntry[] };
   getHistory: (params: { sessionId: string; cwd?: string; limit?: number; offset?: number }) => {
     messages: unknown[];
     total: number;

@@ -31,6 +31,8 @@ import {
   closeSync,
 } from "node:fs";
 import { AgentHostClient } from "./agent-client";
+import { discoverSessions } from "./claude-projects";
+import { formatMemoryContext, type MemoryContextResult } from "./memory-context";
 import {
   parseSessionFile,
   parseSessionFilePaginated,
@@ -97,15 +99,6 @@ const MEMORY_CONTEXT_TIMEOUT_MS = 2000;
 
 // ── Session Discovery ────────────────────────────────────────
 
-interface SessionIndexEntry {
-  sessionId: string;
-  created?: string;
-  modified?: string;
-  messageCount?: number;
-  firstPrompt?: string;
-  gitBranch?: string;
-}
-
 /**
  * Get list of child directories from a given path.
  * Expands ~ to home directory.
@@ -139,143 +132,6 @@ function getDirectories(path: string): string[] {
     log.warn("Failed to read directories", { path, error: String(error) });
     return [];
   }
-}
-
-/**
- * Resolve the Claude Code project directory for a given CWD.
- * Claude Code encodes paths by replacing / with - (dash).
- */
-function resolveProjectDir(cwd: string): string | null {
-  const projectsDir = join(homedir(), ".claude", "projects");
-  if (!existsSync(projectsDir)) return null;
-
-  // Primary: Claude Code encodes cwd by replacing / with - (dash)
-  const encodedCwd = cwd.replace(/\//g, "-");
-  const primaryDir = join(projectsDir, encodedCwd);
-  if (existsSync(primaryDir)) return primaryDir;
-
-  // Fallback: scan for matching originalPath in sessions-index.json
-  const dirs = readdirSync(projectsDir);
-  for (const dir of dirs) {
-    const indexPath = join(projectsDir, dir, "sessions-index.json");
-    if (!existsSync(indexPath)) continue;
-    try {
-      const data = JSON.parse(readFileSync(indexPath, "utf-8"));
-      if (data.originalPath === cwd) return join(projectsDir, dir);
-    } catch {
-      // skip
-    }
-  }
-
-  return null;
-}
-
-/**
- * Read the sessions-index.json if it exists, returning a map of sessionId → entry.
- */
-function readSessionsIndexMap(projectDir: string): Map<string, SessionIndexEntry> {
-  const map = new Map<string, SessionIndexEntry>();
-  const indexPath = join(projectDir, "sessions-index.json");
-  if (!existsSync(indexPath)) return map;
-
-  try {
-    const data = JSON.parse(readFileSync(indexPath, "utf-8"));
-    const entries: SessionIndexEntry[] =
-      data.entries && Array.isArray(data.entries) ? data.entries : Array.isArray(data) ? data : [];
-    for (const entry of entries) {
-      if (entry.sessionId) map.set(entry.sessionId, entry);
-    }
-  } catch {
-    // skip
-  }
-  return map;
-}
-
-/**
- * Extract first user prompt from a JSONL session file.
- * Reads only the first ~20 lines (user message is typically line 1-2).
- *
- * Claude Code JSONL user message structure:
- *   { type: "user", message: { role: "user", content: "..." | [{type:"text",text:"..."}] } }
- */
-function extractFirstPrompt(filepath: string): string | undefined {
-  try {
-    // Read only first 8KB — enough for the first few messages
-    const buf = new Uint8Array(8192);
-    const fd = openSync(filepath, "r");
-    const bytesRead = readSync(fd, buf, 0, 8192, 0);
-    closeSync(fd);
-    const text = new TextDecoder().decode(buf.subarray(0, bytesRead));
-    const lines = text.split("\n");
-
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-      const line = lines[i]?.trim();
-      if (!line) continue;
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type !== "user") continue;
-
-        // message.content can be string or array of content blocks
-        const content = msg.message?.content;
-        if (typeof content === "string") return content.slice(0, 200);
-        if (Array.isArray(content)) {
-          const textBlock = content.find(
-            (b: { type: string; text?: string }) =>
-              b.type === "text" && b.text && !b.text.startsWith("<local-command-caveat>"),
-          );
-          if (textBlock?.text) return textBlock.text.slice(0, 200);
-        }
-      } catch {
-        // skip — line might be truncated at buffer boundary
-      }
-    }
-  } catch {
-    // skip
-  }
-  return undefined;
-}
-
-/**
- * Discover sessions by scanning JSONL files on disk, enriched with index data.
- * This is the primary source of truth — the index file may be stale or incomplete.
- */
-function discoverSessions(cwd: string): SessionIndexEntry[] {
-  const projectDir = resolveProjectDir(cwd);
-  if (!projectDir) return [];
-
-  // Load index data for enrichment
-  const indexMap = readSessionsIndexMap(projectDir);
-
-  // Scan all .jsonl files in the project directory
-  const files = readdirSync(projectDir).filter((f) => f.endsWith(".jsonl"));
-  const sessions: SessionIndexEntry[] = [];
-
-  for (const file of files) {
-    const sessionId = file.replace(".jsonl", "");
-    const filepath = join(projectDir, file);
-
-    // Get file stats for timestamps
-    let stats;
-    try {
-      stats = statSync(filepath);
-    } catch {
-      continue;
-    }
-
-    // Merge with index data if available
-    const indexed = indexMap.get(sessionId);
-
-    sessions.push({
-      sessionId,
-      created: indexed?.created || stats.birthtime.toISOString(),
-      modified: indexed?.modified || stats.mtime.toISOString(),
-      messageCount: indexed?.messageCount,
-      firstPrompt: indexed?.firstPrompt || extractFirstPrompt(filepath),
-      gitBranch: indexed?.gitBranch,
-    });
-  }
-
-  return sessions;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -326,64 +182,6 @@ function mergeTags(primary: string[] | null, current: string[] | null): string[]
 }
 
 // ── Memory Context Formatting ────────────────────────────────
-
-interface MemoryContextResult {
-  recentMessages: Array<{ role: string; content: string; timestamp: string }>;
-  recentSummaries: Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }>;
-}
-
-/**
- * Format memory context for injection into the system prompt.
- * Returns null if there's nothing meaningful to inject.
- */
-function formatMemoryContext(memory: MemoryContextResult): string | null {
-  if (memory.recentMessages.length === 0 && memory.recentSummaries.length === 0) return null;
-
-  const parts: string[] = [
-    "<claudia_memory_context>",
-    "This is your automatically injected memory context for session continuity.",
-    "It contains a snapshot of the most recent conversation and summaries of recent past sessions in this workspace.",
-    "Use this to maintain continuity — you should know what Michael was working on and pick up naturally.",
-    "Do NOT recite this context back unless asked. Just be aware of it.",
-    "",
-  ];
-
-  if (memory.recentMessages.length > 0) {
-    parts.push("## Last Conversation (most recent messages before this session)");
-    parts.push(
-      "These are the final messages from the immediately preceding session. This is what you and Michael were just doing:\n",
-    );
-    for (const msg of memory.recentMessages) {
-      const time = new Date(msg.timestamp).toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-      const name = msg.role === "user" ? "Michael" : "Claudia";
-      // Truncate very long messages to keep context reasonable
-      const content = msg.content.length > 500 ? msg.content.slice(0, 500) + "..." : msg.content;
-      parts.push(`[${time}] ${name}: ${content}`);
-    }
-  }
-
-  if (memory.recentSummaries.length > 0) {
-    parts.push("\n## Recent Session Summaries (chronological, oldest first)");
-    parts.push(
-      "These are Libby's summaries of your recent archived conversations in this workspace:\n",
-    );
-    for (const s of memory.recentSummaries) {
-      const date = new Date(s.firstMessageAt).toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
-      parts.push(`- [${date}] ${s.summary}`);
-    }
-  }
-
-  parts.push("</claudia_memory_context>");
-  return parts.join("\n");
-}
 
 // ── Extension factory ────────────────────────────────────────
 

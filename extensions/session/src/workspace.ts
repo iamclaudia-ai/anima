@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, readFileSync } from "node
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { generateWorkspaceId, createLogger } from "@anima/shared";
+import { resolveProjectDir } from "./claude-projects";
 
 const log = createLogger("Workspace", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -114,35 +115,6 @@ export function closeDb(): void {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-
-/**
- * Resolve the Claude Code project directory for a given CWD.
- * Claude Code encodes paths by replacing / with - (dash).
- */
-function resolveProjectDir(cwd: string): string | null {
-  const projectsDir = join(homedir(), ".claude", "projects");
-  if (!existsSync(projectsDir)) return null;
-
-  // Primary: Claude Code encodes cwd by replacing / with - (dash)
-  const encodedCwd = cwd.replace(/\//g, "-");
-  const primaryDir = join(projectsDir, encodedCwd);
-  if (existsSync(primaryDir)) return primaryDir;
-
-  // Fallback: scan for matching originalPath in sessions-index.json
-  const dirs = readdirSync(projectsDir);
-  for (const dir of dirs) {
-    const indexPath = join(projectsDir, dir, "sessions-index.json");
-    if (!existsSync(indexPath)) continue;
-    try {
-      const data = JSON.parse(readFileSync(indexPath, "utf-8"));
-      if (data.originalPath === cwd) return join(projectsDir, dir);
-    } catch {
-      // skip
-    }
-  }
-
-  return null;
-}
 
 /**
  * Get the most recent JSONL file timestamp for a workspace.
