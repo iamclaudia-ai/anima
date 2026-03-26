@@ -26,11 +26,14 @@ import { AgentHostClient } from "./agent-client";
 import { discoverSessions } from "./claude-projects";
 import { formatMemoryContext, type MemoryContextResult } from "./memory-context";
 import {
-  parseSessionFile,
-  parseSessionFilePaginated,
-  parseSessionUsage,
-  resolveSessionPath,
-} from "./parse-session";
+  type AgentHostSessionInfo,
+  type SessionRuntimeConfig,
+  type RequestContext,
+  mergeTags,
+  toRuntimeStatusFromSessionEvent,
+  summarizePrompt,
+} from "./session-types";
+import { parseSessionFilePaginated, parseSessionUsage, resolveSessionPath } from "./parse-session";
 import {
   listWorkspaces,
   getWorkspace,
@@ -49,7 +52,6 @@ import {
   touchSession,
   upsertSession,
   type RuntimeStatus,
-  type StoredSession,
 } from "./session-store";
 import { resolvePersistentSessionForCwd } from "./persistent-sessions";
 import { createPromptLifecycleRunner } from "./lifecycle/prompt-lifecycle";
@@ -66,25 +68,6 @@ import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodDispatcher } from "./session-dispatch";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
-
-interface AgentHostSessionInfo {
-  id: string;
-  cwd: string;
-  model: string;
-  isActive: boolean;
-  isProcessRunning: boolean;
-  createdAt: string;
-  lastActivity: string;
-  healthy: boolean;
-  stale: boolean;
-}
-
-interface SessionRuntimeConfig {
-  model: string;
-  thinking: boolean;
-  effort: "low" | "medium" | "high" | "max";
-  systemPrompt: string | null;
-}
 
 const MEMORY_TRANSITION_TIMEOUT_MS = 1500;
 const MEMORY_CONTEXT_TIMEOUT_MS = 2000;
@@ -125,38 +108,6 @@ function getDirectories(path: string): string[] {
     return [];
   }
 }
-
-function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
-  if (type === "process_started") return "running";
-  if (type === "process_ended" || type === "turn_stop") return "idle";
-  return null;
-}
-
-// ── Request context tracking ─────────────────────────────────
-
-interface RequestContext {
-  connectionId: string | null;
-  tags: string[] | null;
-  source?: string;
-  responseText: string;
-}
-
-/**
- * Merge tags from a primary (streaming) context and the current transient context.
- * The primary context's tags are authoritative — e.g., voice.speak from the web UI
- * should persist even when a CLI command or notification temporarily overrides
- * the requestContext for routing purposes.
- */
-function mergeTags(primary: string[] | null, current: string[] | null): string[] | null {
-  if (!primary && !current) return null;
-  if (!primary) return current;
-  if (!current) return primary;
-  // Deduplicate
-  const merged = new Set([...primary, ...current]);
-  return Array.from(merged);
-}
-
-// ── Memory Context Formatting ────────────────────────────────
 
 // ── Extension factory ────────────────────────────────────────
 
@@ -352,35 +303,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   /** Short session ID for logging */
   const sid = shortId;
-
-  /** Summarize prompt shape for logging without storing user content */
-  const summarizePrompt = (content: string | unknown[]) => {
-    if (typeof content === "string") {
-      return {
-        kind: "text",
-        chars: content.length,
-      };
-    }
-
-    const blocks = content as Array<Record<string, unknown>>;
-    let textBlocks = 0;
-    let imageBlocks = 0;
-    let otherBlocks = 0;
-
-    for (const block of blocks) {
-      if (block?.type === "text") textBlocks++;
-      else if (block?.type === "image") imageBlocks++;
-      else otherBlocks++;
-    }
-
-    return {
-      kind: "blocks",
-      blocks: blocks.length,
-      textBlocks,
-      imageBlocks,
-      otherBlocks,
-    };
-  };
 
   const taskEventBridge = createTaskEventBridge({
     tasks,
