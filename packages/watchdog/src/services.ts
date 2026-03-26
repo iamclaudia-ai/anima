@@ -12,6 +12,7 @@ import {
   LOGS_DIR,
   HEALTH_HISTORY_SIZE,
   UNHEALTHY_RESTART_THRESHOLD,
+  getGatewayToken,
 } from "./constants";
 import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
@@ -227,7 +228,12 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
   }
 
   try {
-    const res = await fetch(service.healthUrl, { signal: AbortSignal.timeout(2000) });
+    const headers: Record<string, string> = {};
+    const token = getGatewayToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const res = await fetch(service.healthUrl, { signal: AbortSignal.timeout(2000), headers });
     if (!res.ok) {
       return { healthy: false, reason: `http_${res.status}` };
     }

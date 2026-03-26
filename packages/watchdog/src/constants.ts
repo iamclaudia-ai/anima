@@ -42,6 +42,27 @@ function loadConfig(): WatchdogConfig {
 
 export const config = loadConfig();
 
+// ── Gateway Token ──────────────────────────────────────
+
+const ANIMA_CONFIG_PATH = join(homedir(), ".anima", "anima.json");
+
+/**
+ * Read the gateway bearer token from ~/.anima/anima.json.
+ * Returns null if config doesn't exist or has no token.
+ * Re-reads on each call to pick up token changes without restart.
+ */
+export function getGatewayToken(): string | null {
+  try {
+    if (!existsSync(ANIMA_CONFIG_PATH)) return null;
+    const raw = readFileSync(ANIMA_CONFIG_PATH, "utf-8");
+    // Simple regex extraction — avoids needing a JSON5 parser
+    const match = raw.match(/"token"\s*:\s*"([^"]+)"/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Resolved Constants ──────────────────────────────────
 
 function resolvePath(p: string): string {
