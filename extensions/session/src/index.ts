@@ -560,7 +560,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
     const start = Date.now();
     try {
-      const result = await _handleMethod(method, params);
+      const result = await dispatchMethod(method, params);
       const elapsed = Date.now() - start;
       if (!isRead && elapsed > 100) {
         log.info(`← ${method} OK (${elapsed}ms)`);
@@ -576,7 +576,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     }
   }
 
-  const _handleMethod = createSessionMethodDispatcher({
+  const dispatchMethod = createSessionMethodDispatcher({
     config,
     sessionConfig,
     log,
