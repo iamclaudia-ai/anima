@@ -59,6 +59,7 @@ import {
 } from "./session-store";
 import { resolvePersistentSessionForCwd, rotatePersistentSessions } from "./persistent-sessions";
 import { createPromptLifecycleRunner } from "./lifecycle/prompt-lifecycle";
+import { createSessionQueryService } from "./lifecycle/session-query";
 import { createSessionActivationRunner } from "./lifecycle/session-activation";
 import {
   createTaskWorkflowRunner,
@@ -1187,6 +1188,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     },
   });
 
+  const sessionQuery = createSessionQueryService({
+    sessionConfig,
+    log,
+    sid,
+    getOrCreateWorkspace,
+    listWorkspaceSessions,
+    discoverSessions,
+    upsertSession,
+    resolveSessionPath,
+    parseSessionFilePaginated,
+    parseSessionUsage,
+    getWorkspaceByCwd,
+    getMemoryContext: async (cwd, includeAllSummaries) => {
+      return (await ctx.call("memory.get_session_context", {
+        cwd,
+        includeAllSummaries,
+      })) as MemoryContextResult | null;
+    },
+    formatMemoryContext,
+  });
+
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
     // Log all method calls (except high-frequency reads)
     const isRead =
@@ -1312,76 +1334,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.list_sessions": {
-        const cwd = params.cwd as string;
-        const workspaceResult = getOrCreateWorkspace(cwd);
-        const discovered = discoverSessions(cwd);
-        for (const entry of discovered) {
-          if (!entry.sessionId) continue;
-          upsertSession({
-            id: entry.sessionId,
-            workspaceId: workspaceResult.workspace.id,
-            providerSessionId: entry.sessionId,
-            model: sessionConfig.model,
-            agent: "claude",
-            purpose: "chat",
-            runtimeStatus: "idle",
-            metadata: {
-              messageCount: entry.messageCount,
-              firstPrompt: entry.firstPrompt,
-              gitBranch: entry.gitBranch,
-            },
-            lastActivity: entry.modified || entry.created,
-          });
-        }
-        let sessions: Array<{
-          sessionId: string;
-          created?: string;
-          modified?: string;
-          messageCount?: number;
-          firstPrompt?: string;
-          gitBranch?: string;
-        }>;
-        if (discovered.length > 0) {
-          sessions = discovered;
-        } else if (workspaceResult.created) {
-          sessions = [];
-        } else {
-          sessions = listWorkspaceSessions(workspaceResult.workspace.id);
-        }
-        log.info("Listed sessions", { cwd, count: sessions.length });
-        return {
-          sessions: sessions.sort((a, b) => {
-            const aTime = a.modified || a.created || "";
-            const bTime = b.modified || b.created || "";
-            return bTime.localeCompare(aTime); // Descending by recency
-          }),
-        };
+        return sessionQuery.listSessions(params.cwd as string);
       }
 
       case "session.get_history": {
-        const sessionId = params.sessionId as string;
-        const cwd = params.cwd as string | undefined;
-        const limit = (params.limit as number) || 50;
-        const offset = (params.offset as number) || 0;
-
-        const filepath = resolveSessionPath(sessionId, cwd);
-        if (!filepath) {
-          log.warn("Session file not found", { sessionId: sid(sessionId), cwd: cwd || "none" });
-          return { messages: [], total: 0, hasMore: false };
-        }
-
-        const result = parseSessionFilePaginated(filepath, { limit, offset });
-        const usage = parseSessionUsage(filepath);
-
-        log.info("Loaded history", {
-          sessionId: sid(sessionId),
-          total: (result as { total: number }).total,
-          limit,
-          offset,
-          hasUsage: !!usage,
+        return sessionQuery.getHistory({
+          sessionId: params.sessionId as string,
+          cwd: params.cwd as string | undefined,
+          limit: params.limit as number | undefined,
+          offset: params.offset as number | undefined,
         });
-
-        return { ...result, usage };
       }
 
       case "session.switch_session": {
@@ -1567,28 +1529,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.get_memory_context": {
-        const cwd = (params.cwd as string | undefined) || process.cwd();
-        const workspace = getWorkspaceByCwd(cwd);
-
-        try {
-          const memoryContext = (await ctx.call("memory.get_session_context", {
-            cwd,
-            includeAllSummaries: workspace?.general === true,
-          })) as MemoryContextResult | null;
-
-          if (!memoryContext) {
-            return { formatted: null, raw: null, note: "No memory context available" };
-          }
-
-          const formatted = formatMemoryContext(memoryContext);
-          return {
-            formatted,
-            raw: memoryContext,
-            formattedLength: formatted?.length || 0,
-          };
-        } catch (err) {
-          return { formatted: null, raw: null, error: String(err) };
-        }
+        return await sessionQuery.getMemoryContext(params.cwd as string | undefined);
       }
 
       default:
