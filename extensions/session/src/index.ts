@@ -401,45 +401,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   const dispatchMethod = createSessionMethodDispatcher({
     config,
     sessionConfig,
-    log,
-    sid,
     getCtx: () => ctx,
-    getDirectories,
-    getStoredSession,
-    getWorkspace,
-    getOrCreateWorkspace,
-    setWorkspaceActiveSession,
-    upsertSession,
-    requestState: {
-      requestContexts,
-      primaryContexts,
-      tasks,
-    },
-    agent: {
-      list: async () => (await agentClient.list()) as Array<{ id: string }>,
-      interrupt: async (sessionId) => {
-        return await agentClient.interrupt(sessionId);
-      },
-      close: async (sessionId) => {
-        await agentClient.close(sessionId);
-      },
-      setPermissionMode: async (sessionId, mode) => {
-        return await agentClient.setPermissionMode(sessionId, mode);
-      },
-      sendToolResult: async (sessionId, toolUseId, content, isError) => {
-        return await agentClient.sendToolResult(sessionId, toolUseId, content, isError);
-      },
-      getTask: async (taskId) => {
-        return (await agentClient.getTask(taskId)) as { task?: SessionTask | null };
-      },
-    },
+    requestState: { requestContexts, primaryContexts, tasks },
+    agentClient,
     promptLifecycle,
     sessionActivation,
     taskWorkflow,
     taskEventBridge,
     sessionQuery,
-    listWorkspaces,
-    deleteWorkspace,
     healthCheckDetailed,
   });
 

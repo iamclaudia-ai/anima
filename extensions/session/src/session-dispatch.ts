@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { createLogger, shortId } from "@anima/shared";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { rotatePersistentSessions } from "./persistent-sessions";
 import {
   normalizeTaskMode,
@@ -6,22 +10,32 @@ import {
   type TaskStatus,
   type TaskWorkflowRunner,
 } from "./lifecycle/task-workflow";
-import type { RuntimeStatus, SessionPurpose, StoredSession } from "./session-store";
+import { getStoredSession, setWorkspaceActiveSession, upsertSession } from "./session-store";
+import { getWorkspace, getOrCreateWorkspace, listWorkspaces, deleteWorkspace } from "./workspace";
+import type { RequestContext, SessionRuntimeConfig } from "./session-types";
 
-interface SessionConfigLike {
-  model: string;
-  thinking: boolean;
-  effort: "low" | "medium" | "high" | "max";
-  systemPrompt: string | null;
+const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
+
+function getDirectories(path: string): string[] {
+  try {
+    const expandedPath = path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
+    if (!existsSync(expandedPath)) return [];
+    const stat = statSync(expandedPath);
+    if (!stat.isDirectory()) return [];
+    const entries = readdirSync(expandedPath, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    log.warn("Failed to read directories", { path, error: String(error) });
+    return [];
+  }
 }
 
 interface SessionDispatchDeps {
   config: Record<string, unknown>;
-  sessionConfig: SessionConfigLike;
-  log: {
-    info: (message: string, data?: Record<string, unknown>) => void;
-  };
-  sid: (id: string) => string;
+  sessionConfig: SessionRuntimeConfig;
   getCtx: () => {
     connectionId: string | null;
     tags: string[] | null;
@@ -30,48 +44,23 @@ interface SessionDispatchDeps {
       set: (key: string, value: unknown) => void;
     };
   };
-  getDirectories: (path: string) => string[];
-  getStoredSession: (sessionId: string) => StoredSession | null;
-  getWorkspace: (id: string) => unknown;
-  getOrCreateWorkspace: (
-    cwd: string,
-    name?: string,
-    general?: boolean,
-  ) => { workspace: { id: string; general: boolean }; created: boolean };
-  setWorkspaceActiveSession: (workspaceId: string, sessionId: string) => void;
-  upsertSession: (params: {
-    id: string;
-    workspaceId: string;
-    providerSessionId?: string;
-    model?: string;
-    agent?: string;
-    purpose?: SessionPurpose;
-    parentSessionId?: string | null;
-    status?: "active" | "archived";
-    runtimeStatus?: RuntimeStatus;
-    title?: string | null;
-    summary?: string | null;
-    metadata?: Record<string, unknown> | null;
-    previousSessionId?: string | null;
-    lastActivity?: string;
-  }) => void;
   requestState: {
-    requestContexts: Map<string, unknown>;
-    primaryContexts: Map<string, unknown>;
+    requestContexts: Map<string, RequestContext>;
+    primaryContexts: Map<string, RequestContext>;
     tasks: Map<string, SessionTask>;
   };
-  agent: {
-    list: () => Promise<Array<{ id: string }>>;
-    interrupt: (sessionId: string) => Promise<boolean>;
-    close: (sessionId: string) => Promise<void>;
-    setPermissionMode: (sessionId: string, mode: string) => Promise<boolean>;
-    sendToolResult: (
+  agentClient: {
+    list(): Promise<unknown>;
+    interrupt(sessionId: string): Promise<unknown>;
+    close(sessionId: string): Promise<void>;
+    setPermissionMode(sessionId: string, mode: string): Promise<unknown>;
+    sendToolResult(
       sessionId: string,
       toolUseId: string,
       content: string,
       isError?: boolean,
-    ) => Promise<boolean>;
-    getTask: (taskId: string) => Promise<{ task?: SessionTask | null }>;
+    ): Promise<unknown>;
+    getTask(taskId: string): Promise<unknown>;
   };
   promptLifecycle: {
     run: (
@@ -109,8 +98,6 @@ interface SessionDispatchDeps {
     }) => unknown;
     getMemoryContext: (cwd?: string) => Promise<unknown>;
   };
-  listWorkspaces: () => unknown[];
-  deleteWorkspace: (cwd: string) => boolean;
   healthCheckDetailed: () => Promise<unknown>;
 }
 
@@ -133,16 +120,10 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
           deps.sessionConfig.systemPrompt ||
           undefined;
 
-        deps.log.info("Creating session", {
-          agent,
-          cwd,
-          model,
-          thinking,
-          effort,
-        });
-        const workspaceResult = deps.getOrCreateWorkspace(cwd);
+        log.info("Creating session", { agent, cwd, model, thinking, effort });
+        const workspaceResult = getOrCreateWorkspace(cwd);
         const sessionId = randomUUID();
-        deps.upsertSession({
+        upsertSession({
           id: sessionId,
           workspaceId: workspaceResult.workspace.id,
           providerSessionId: sessionId,
@@ -156,8 +137,8 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
             bootstrapEffort: effort,
           },
         });
-        deps.setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
-        deps.log.info("Session draft created", { sessionId: deps.sid(sessionId), cwd });
+        setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
+        log.info("Session draft created", { sessionId: shortId(sessionId), cwd });
         return { sessionId };
       }
 
@@ -181,19 +162,19 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.interrupt_session": {
-        deps.log.info("Interrupting session", { sessionId: deps.sid(params.sessionId as string) });
-        const ok = await deps.agent.interrupt(params.sessionId as string);
+        log.info("Interrupting session", { sessionId: shortId(params.sessionId as string) });
+        const ok = await deps.agentClient.interrupt(params.sessionId as string);
         return { ok };
       }
 
       case "session.close_session": {
-        deps.log.info("Closing session", { sessionId: deps.sid(params.sessionId as string) });
-        await deps.agent.close(params.sessionId as string);
+        log.info("Closing session", { sessionId: shortId(params.sessionId as string) });
+        await deps.agentClient.close(params.sessionId as string);
         deps.requestState.requestContexts.delete(params.sessionId as string);
         deps.requestState.primaryContexts.delete(params.sessionId as string);
-        const existing = deps.getStoredSession(params.sessionId as string);
+        const existing = getStoredSession(params.sessionId as string);
         if (existing) {
-          deps.upsertSession({
+          upsertSession({
             id: existing.id,
             workspaceId: existing.workspaceId,
             providerSessionId: existing.providerSessionId,
@@ -209,7 +190,7 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
             previousSessionId: existing.previousSessionId,
           });
         }
-        deps.log.info("Session closed", { sessionId: deps.sid(params.sessionId as string) });
+        log.info("Session closed", { sessionId: shortId(params.sessionId as string) });
         return { ok: true };
       }
 
@@ -239,7 +220,7 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
 
       case "session.get_info": {
         const sessionId = params.sessionId as string | undefined;
-        const activeSessions = await deps.agent.list();
+        const activeSessions = (await deps.agentClient.list()) as Array<{ id: string }>;
         if (sessionId) {
           const session = activeSessions.find((entry) => entry.id === sessionId);
           return { session: session || null, activeSessions };
@@ -248,11 +229,11 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.set_permission_mode": {
-        deps.log.info("Setting permission mode", {
-          sessionId: deps.sid(params.sessionId as string),
+        log.info("Setting permission mode", {
+          sessionId: shortId(params.sessionId as string),
           mode: params.mode,
         });
-        const ok = await deps.agent.setPermissionMode(
+        const ok = await deps.agentClient.setPermissionMode(
           params.sessionId as string,
           params.mode as string,
         );
@@ -260,12 +241,12 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.send_tool_result": {
-        deps.log.info("Sending tool result", {
-          sessionId: deps.sid(params.sessionId as string),
+        log.info("Sending tool result", {
+          sessionId: shortId(params.sessionId as string),
           toolUseId: params.toolUseId,
           isError: params.isError,
         });
-        const ok = await deps.agent.sendToolResult(
+        const ok = await deps.agentClient.sendToolResult(
           params.sessionId as string,
           params.toolUseId as string,
           params.content as string,
@@ -299,7 +280,9 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.get_task": {
-        const result = await deps.agent.getTask(params.taskId as string);
+        const result = (await deps.agentClient.getTask(params.taskId as string)) as {
+          task?: SessionTask | null;
+        };
         const hostTask = (result?.task || null) as SessionTask | null;
         if (hostTask) {
           deps.requestState.tasks.set(hostTask.taskId, hostTask);
@@ -323,8 +306,8 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
         const text = params.text as string;
         const ctx = deps.getCtx();
 
-        deps.log.info("Sending notification", {
-          sessionId: deps.sid(sessionId),
+        log.info("Sending notification", {
+          sessionId: shortId(sessionId),
           content: { kind: "text", chars: text.length },
         });
 
@@ -337,19 +320,19 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.list_workspaces":
-        return { workspaces: deps.listWorkspaces() };
+        return { workspaces: listWorkspaces() };
 
       case "session.get_workspace":
-        return { workspace: deps.getWorkspace(params.id as string) };
+        return { workspace: getWorkspace(params.id as string) };
 
       case "session.get_or_create_workspace": {
         const cwd = params.cwd as string;
-        const result = deps.getOrCreateWorkspace(
+        const result = getOrCreateWorkspace(
           cwd,
           params.name as string | undefined,
           params.general as boolean | undefined,
         );
-        deps.log.info("Get/create workspace", {
+        log.info("Get/create workspace", {
           cwd,
           created: result.created,
           general: result.workspace.general,
@@ -358,11 +341,11 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
       }
 
       case "session.delete_workspace":
-        return { deleted: deps.deleteWorkspace(params.cwd as string) };
+        return { deleted: deleteWorkspace(params.cwd as string) };
 
       case "session.get_directories": {
         const path = (params.path as string | undefined) || "~";
-        return { path, directories: deps.getDirectories(path) };
+        return { path, directories: getDirectories(path) };
       }
 
       case "session.health_check":
@@ -388,8 +371,8 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
           },
           maxMessages,
           maxAgeHours,
-          log: deps.log,
-          formatSessionId: deps.sid,
+          log,
+          formatSessionId: shortId,
         });
       }
 
