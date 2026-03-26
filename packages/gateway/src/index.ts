@@ -17,6 +17,7 @@ import type {
   GatewayEvent,
 } from "@anima/shared";
 import { loadConfig, createLogger, matchesEventPattern } from "@anima/shared";
+import { initAuth, authenticateRequest, resetCachedToken } from "./auth";
 export type { GatewayEvent };
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -38,6 +39,9 @@ import manifestData from "./web/manifest.json";
 // Load configuration (anima.json or env var fallback)
 const config = loadConfig();
 const PORT = config.gateway.port;
+
+// Initialize auth — auto-generates token on first run
+const authResult = initAuth();
 const DATA_DIR = process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
 const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
 const sessionExtensionEnabled = Boolean(config.extensions?.session?.enabled);
@@ -651,6 +655,14 @@ const server = Bun.serve<ClientState>({
 
     // WebSocket upgrade — only on /ws
     if (url.pathname === "/ws") {
+      const auth = authenticateRequest(req);
+      if (!auth.ok) {
+        return new globalThis.Response(JSON.stringify({ error: auth.message }), {
+          status: auth.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       const upgraded = server.upgrade(req, {
         data: {
           id: generateId(),
@@ -666,7 +678,29 @@ const server = Bun.serve<ClientState>({
       });
     }
 
+    // Token validation endpoint — lets the login page verify a token
+    if (url.pathname === "/api/auth/validate" && req.method === "POST") {
+      const auth = authenticateRequest(req);
+      return new globalThis.Response(JSON.stringify({ ok: auth.ok }), {
+        status: auth.ok ? 200 : 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Protected API routes — require auth
+    if (url.pathname === "/health" || url.pathname.startsWith("/audiobooks/")) {
+      const auth = authenticateRequest(req);
+      if (!auth.ok) {
+        return new globalThis.Response(JSON.stringify({ error: auth.message }), {
+          status: auth.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Fall through to routes
+    // (SPA fallback serves HTML without auth — login gate is client-side)
+    // (client-error and client-health beacons are exempt — they accept data but don't leak it)
     return null as unknown as globalThis.Response;
   },
   routes: {
@@ -869,6 +903,10 @@ const server = Bun.serve<ClientState>({
   },
 });
 
+const authLine = authResult.generated
+  ? `Token:    ${authResult.token} (NEW — save this!)`
+  : "Auth:     enabled ✓";
+
 log.info(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -880,6 +918,7 @@ log.info(`
 ║                                                           ║
 ║   Model:    ${sessionModel.padEnd(42)}║
 ║   Thinking: ${sessionThinking.padEnd(42)}║
+║   ${authLine.padEnd(53)}║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 `);

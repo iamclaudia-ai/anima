@@ -1,5 +1,11 @@
 import { createRoot } from "react-dom/client";
-import { Router, ErrorBoundary, GatewayClientProvider, GlobalNotifications } from "@anima/ui";
+import {
+  Router,
+  ErrorBoundary,
+  GatewayClientProvider,
+  GlobalNotifications,
+  LoginGate,
+} from "@anima/ui";
 import type { PanelRegistry } from "@anima/ui";
 import type { LayoutDefinition } from "@anima/shared";
 import "@anima/ui/styles";
@@ -68,11 +74,13 @@ const allLayouts: Record<string, LayoutDefinition> = {
 // ── Render ──────────────────────────────────────────────────
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    <GatewayClientProvider>
-      <GlobalNotifications>
-        <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
-      </GlobalNotifications>
-    </GatewayClientProvider>
+    <LoginGate>
+      <GatewayClientProvider>
+        <GlobalNotifications>
+          <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+        </GlobalNotifications>
+      </GatewayClientProvider>
+    </LoginGate>
   </ErrorBoundary>,
 );
 

@@ -10,7 +10,7 @@
  *   anima methods
  */
 
-import { createGatewayClient } from "@anima/shared";
+import { createGatewayClient, loadConfig, generateToken, writeConfigToken } from "@anima/shared";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -1112,10 +1112,62 @@ async function watchdogCommand(args: string[]): Promise<void> {
 
 // ── Main ─────────────────────────────────────────────────
 
+/**
+ * Append the gateway token to the WebSocket URL as a query parameter.
+ * Reads from config — no token means no auth (will get rejected by gateway).
+ */
+function getAuthenticatedGatewayUrl(): string {
+  try {
+    const config = loadConfig();
+    const token = config.gateway?.token;
+    if (token) {
+      const separator = gatewayUrl.includes("?") ? "&" : "?";
+      return `${gatewayUrl}${separator}token=${encodeURIComponent(token)}`;
+    }
+  } catch {
+    // Config not available — proceed without token
+  }
+  return gatewayUrl;
+}
+
 async function main(): Promise<void> {
   const parsed = extractGlobalConnectionArgs(process.argv.slice(2));
   gatewayUrl = parsed.resolvedGatewayUrl;
   const args = parsed.args;
+
+  // ── Token management (local commands, no gateway needed) ──
+  if (args[0] === "token") {
+    const subcommand = args[1];
+    if (subcommand === "generate") {
+      const newToken = generateToken();
+      writeConfigToken(newToken);
+      console.log("✓ Token generated and saved to ~/.anima/anima.json\n");
+      console.log(`  ${newToken}\n`);
+      console.log("Restart the gateway for the new token to take effect.");
+      return;
+    }
+    if (subcommand === "show") {
+      try {
+        const config = loadConfig();
+        const token = config.gateway?.token;
+        if (token) {
+          console.log(token);
+        } else {
+          console.error("No token configured. Run: anima token generate");
+          process.exit(1);
+        }
+      } catch (e) {
+        console.error(`Failed to load config: ${e}`);
+        process.exit(1);
+      }
+      return;
+    }
+    console.error("Usage: anima token generate|show");
+    process.exit(1);
+  }
+
+  // Inject token into gateway URL for all subsequent calls
+  gatewayUrl = getAuthenticatedGatewayUrl();
 
   if (args[0] === "speak") {
     const text = args.slice(1).join(" ");

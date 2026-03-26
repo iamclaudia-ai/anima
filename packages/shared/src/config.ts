@@ -7,10 +7,11 @@
  * - Type-safe config
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import JSON5 from "json5";
+import { generateToken } from "./auth";
 
 // ============================================================================
 // Types
@@ -23,6 +24,8 @@ export interface GatewayConfig {
   endpoint?: string;
   /** Heartbeat interval in milliseconds for broadcasting to extensions (default: 300000 = 5min) */
   heartbeatIntervalMs?: number;
+  /** Bearer token for gateway authentication. Auto-generated on first run if missing. */
+  token?: string;
 }
 
 export type ThinkingEffort = "low" | "medium" | "high" | "max";
@@ -278,4 +281,74 @@ export function getEnabledExtensions(): [string, ExtensionConfig][] {
  */
 export function clearConfigCache(): void {
   cachedConfig = null;
+}
+
+// ============================================================================
+// Token Management
+// ============================================================================
+
+/**
+ * Resolve the config file path (same search order as loadConfig).
+ */
+function resolveConfigPath(configPath?: string): string {
+  const configHome = process.env.ANIMA_HOME || homedir();
+  const paths = [
+    configPath,
+    process.env.ANIMA_CONFIG,
+    join(configHome, ".anima", "anima.json"),
+  ].filter(Boolean) as string[];
+
+  for (const path of paths) {
+    if (existsSync(path)) return path;
+  }
+
+  return join(configHome, ".anima", "anima.json");
+}
+
+/**
+ * Write a token into the config file's gateway section.
+ * Uses targeted insertion to preserve JSON5 comments and formatting.
+ */
+export function writeConfigToken(token: string, configPath?: string): void {
+  const path = resolveConfigPath(configPath);
+  const content = readFileSync(path, "utf-8");
+
+  // If token already exists in the gateway block, replace it
+  const tokenPattern = /("token"\s*:\s*)"[^"]*"/;
+  if (tokenPattern.test(content)) {
+    const updated = content.replace(tokenPattern, `$1"${token}"`);
+    writeFileSync(path, updated, "utf-8");
+  } else {
+    // Insert after the opening brace of the "gateway" block
+    const gatewayPattern = /("gateway"\s*:\s*\{)/;
+    const match = content.match(gatewayPattern);
+    if (match && match.index !== undefined) {
+      const insertPos = match.index + match[0].length;
+      const updated =
+        content.slice(0, insertPos) + `\n    "token": "${token}",` + content.slice(insertPos);
+      writeFileSync(path, updated, "utf-8");
+    } else {
+      throw new Error(
+        `Could not find "gateway" section in ${path}. Add it manually: "gateway": { "token": "${token}" }`,
+      );
+    }
+  }
+
+  // Clear cache so next loadConfig picks up the new token
+  clearConfigCache();
+}
+
+/**
+ * Ensure a gateway token exists. If missing, generates one and writes it to config.
+ * Returns the token (existing or newly generated).
+ */
+export function ensureToken(configPath?: string): { token: string; generated: boolean } {
+  const config = loadConfig(configPath);
+  if (config.gateway.token) {
+    return { token: config.gateway.token, generated: false };
+  }
+
+  const token = generateToken();
+  writeConfigToken(token, configPath);
+  return { token, generated: true };
 }

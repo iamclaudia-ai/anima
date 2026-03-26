@@ -14,3 +14,4 @@ export * from "./agent-host-protocol";
 export * from "./format-duration";
 export * from "./retry";
 export * from "./utils";
+export * from "./auth";

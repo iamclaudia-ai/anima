@@ -438,8 +438,12 @@ async function handleConfigChange(): Promise<void> {
   try {
     log.info("Config file changed, checking for extension enable/disable changes");
 
-    // Clear cache to get fresh config
+    // Clear cache to get fresh config (including auth token)
     clearConfigCache();
+
+    // Reset auth token cache so a regenerated token takes effect
+    const { resetCachedToken } = await import("./auth");
+    resetCachedToken();
 
     const newEnabledExtensions = getEnabledExtensions();
     const newEnabledIds = new Set(newEnabledExtensions.map(([id]) => id));
