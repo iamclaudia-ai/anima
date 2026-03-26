@@ -59,6 +59,7 @@ import {
 } from "./session-store";
 import { resolvePersistentSessionForCwd, rotatePersistentSessions } from "./persistent-sessions";
 import { createPromptLifecycleRunner } from "./lifecycle/prompt-lifecycle";
+import { createSessionActivationRunner } from "./lifecycle/session-activation";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -1258,6 +1259,41 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     },
   });
 
+  const sessionActivation = createSessionActivationRunner({
+    sessionConfig,
+    log,
+    sid,
+    transitionConversation: async (cwd) => {
+      try {
+        await withTimeout(
+          ctx.call("memory.transition_conversation", { cwd }),
+          MEMORY_TRANSITION_TIMEOUT_MS,
+          "memory.transition_conversation",
+        );
+      } catch (err) {
+        log.warn("Failed to transition previous conversations (non-fatal)", {
+          cwd,
+          error: String(err),
+        });
+      }
+    },
+    getStoredSession,
+    getOrCreateWorkspace,
+    getWorkspaceActiveSession,
+    setWorkspaceActiveSession,
+    upsertSession,
+    listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
+    closeSession: async (sessionId) => {
+      await agentClient.close(sessionId);
+    },
+    promptSession: async (sessionId, content, cwd, model) => {
+      await agentClient.prompt(sessionId, content, cwd, model);
+    },
+    createSession: async ({ cwd, model }) => {
+      return await agentClient.createSession({ cwd, model });
+    },
+  });
+
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
     // Log all method calls (except high-frequency reads)
     const isRead =
@@ -1456,98 +1492,18 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
 
       case "session.switch_session": {
-        const sessionId = params.sessionId as string;
-        const cwd = params.cwd as string;
-        const model = params.model as string | undefined;
-        const workspaceResult = getOrCreateWorkspace(cwd);
-        const existing = getStoredSession(sessionId);
-
-        // Transition ALL active conversations for this workspace to 'ready' for Libby
-        try {
-          await withTimeout(
-            ctx.call("memory.transition_conversation", { cwd }),
-            MEMORY_TRANSITION_TIMEOUT_MS,
-            "memory.transition_conversation",
-          );
-        } catch (err) {
-          log.warn("Failed to transition previous conversations (non-fatal)", {
-            cwd,
-            error: String(err),
-          });
-        }
-        const resumeModel = model || existing?.model || sessionConfig.model;
-        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
-        const activeSession = activeSessions.find((s) => s.id === sessionId);
-        if (
-          activeSession &&
-          activeSession.isProcessRunning &&
-          activeSession.model &&
-          resumeModel &&
-          activeSession.model !== resumeModel
-        ) {
-          log.warn("Detected model drift during switch; recycling session runtime", {
-            sessionId: sid(sessionId),
-            runningModel: activeSession.model,
-            desiredModel: resumeModel,
-          });
-          await agentClient.close(sessionId);
-        }
-
-        log.info("Switching session", { sessionId: sid(sessionId), cwd, model: resumeModel });
-        // Agent-host handles resume internally via prompt with cwd
-        await agentClient.prompt(sessionId, "", cwd, resumeModel);
-        upsertSession({
-          id: sessionId,
-          workspaceId: workspaceResult.workspace.id,
-          providerSessionId: existing?.providerSessionId || sessionId,
-          model: existing?.model || resumeModel,
-          agent: existing?.agent || "claude",
-          purpose: existing?.purpose || "chat",
-          runtimeStatus: "idle",
-          metadata: existing?.metadata || null,
-          previousSessionId: existing?.previousSessionId ?? null,
+        return await sessionActivation.switchSession({
+          sessionId: params.sessionId as string,
+          cwd: params.cwd as string,
+          model: params.model as string | undefined,
         });
-        setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
-        return { sessionId };
       }
 
       case "session.reset_session": {
-        const cwd = params.cwd as string;
-        const model = (params.model as string | undefined) || sessionConfig.model;
-        const workspaceResult = getOrCreateWorkspace(cwd);
-        const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
-
-        // Transition ALL active conversations for this workspace to 'ready' for Libby
-        try {
-          await withTimeout(
-            ctx.call("memory.transition_conversation", { cwd }),
-            MEMORY_TRANSITION_TIMEOUT_MS,
-            "memory.transition_conversation",
-          );
-        } catch (err) {
-          log.warn("Failed to transition previous conversations (non-fatal)", {
-            cwd,
-            error: String(err),
-          });
-        }
-
-        log.info("Resetting session", { cwd });
-        const result = await agentClient.createSession({
-          cwd,
-          model,
+        return await sessionActivation.resetSession({
+          cwd: params.cwd as string,
+          model: params.model as string | undefined,
         });
-        upsertSession({
-          id: result.sessionId,
-          workspaceId: workspaceResult.workspace.id,
-          providerSessionId: result.sessionId,
-          model,
-          agent: "claude",
-          purpose: "chat",
-          runtimeStatus: "idle",
-          previousSessionId,
-        });
-        setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
-        return result;
       }
 
       case "session.get_info": {
