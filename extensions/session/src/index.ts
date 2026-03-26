@@ -69,6 +69,7 @@ import {
   toSessionTaskFromStored,
 } from "./lifecycle/task-workflow";
 import { createTaskEventBridge } from "./lifecycle/task-events";
+import { createSessionEventBridge } from "./lifecycle/session-events";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -597,57 +598,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     taskId: z.string().describe("Task ID"),
   });
 
-  // Wire agent-host events → ctx.emit
-  agentClient.on(
-    "session.event",
-    (event: { eventName: string; sessionId: string; [key: string]: unknown }) => {
-      if (!ctx) return;
-
-      const { eventName, sessionId, ...payload } = event;
-      const reqCtx = requestContexts.get(sessionId);
-      const primaryCtx = primaryContexts.get(sessionId);
-
-      const shortSessionId = sessionId.slice(0, 8);
-
-      // Emit stream events with envelope context restored from requestContexts.
-      // We store connectionId/tags at prompt time because the extension host's
-      // currentConnectionId/currentTags are restored to null after the method returns,
-      // but async stream events keep firing via the manager's EventEmitter.
-      //
-      // Tags are merged from the primary streaming context (e.g., web UI with voice.speak)
-      // and the current transient context (e.g., CLI or notification). This ensures
-      // voice tags persist even when a transient caller temporarily overrides requestContexts.
-      const emitOptions: { source?: string; connectionId?: string; tags?: string[] } = {};
-      if (reqCtx?.source) emitOptions.source = reqCtx.source;
-      // Use primary connectionId if the current context is transient (different connection)
-      const connId = primaryCtx?.connectionId ?? reqCtx?.connectionId;
-      if (connId) emitOptions.connectionId = connId;
-      const mergedTags = mergeTags(primaryCtx?.tags ?? null, reqCtx?.tags ?? null);
-      if (mergedTags) emitOptions.tags = mergedTags;
-
-      ctx.emit(
-        eventName,
-        { ...payload, sessionId },
-        Object.keys(emitOptions).length > 0 ? emitOptions : undefined,
-      );
-
-      const runtimeStatus =
-        typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
-      if (runtimeStatus) {
-        touchSession(sessionId, runtimeStatus);
-      } else {
-        touchSession(sessionId);
-      }
-
-      // Accumulate response text for non-streaming callers
-      if (payload.type === "content_block_delta") {
-        const delta = (payload as { delta?: { type?: string; text?: string } }).delta;
-        if (delta?.type === "text_delta" && delta.text && reqCtx) {
-          reqCtx.responseText += delta.text;
-        }
-      }
-    },
-  );
+  function wireSessionEventBridge(): void {
+    taskUnsubscribers.push(sessionEventBridge.wire());
+  }
 
   function wireTaskEventBridge(): void {
     taskUnsubscribers.push(taskEventBridge.wire());
@@ -902,6 +855,21 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     },
     sid,
     log,
+  });
+
+  const sessionEventBridge = createSessionEventBridge({
+    requestContexts,
+    primaryContexts,
+    getCtx: () => ctx,
+    mergeTags,
+    toRuntimeStatusFromSessionEvent,
+    touchSession,
+    onSessionEvent: (listener) => {
+      agentClient.on("session.event", listener);
+    },
+    removeSessionEventListener: (listener) => {
+      agentClient.removeListener("session.event", listener);
+    },
   });
 
   const promptLifecycle = createPromptLifecycleRunner({
@@ -1452,6 +1420,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     async start(extCtx: ExtensionContext): Promise<void> {
       ctx = extCtx;
       wireTaskEventBridge();
+      wireSessionEventBridge();
       try {
         await agentClient.connect();
         const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
