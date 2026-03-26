@@ -304,10 +304,7 @@ export function createSessionMethodDispatcher(deps: SessionDispatchDeps) {
         if (hostTask) {
           deps.requestState.tasks.set(hostTask.taskId, hostTask);
         }
-        const storedTask = deps.taskWorkflow.getTask(
-          params.taskId as string,
-          deps.getStoredSession,
-        );
+        const storedTask = deps.taskWorkflow.getTask(params.taskId as string);
         return { task: hostTask || storedTask || null };
       }
 

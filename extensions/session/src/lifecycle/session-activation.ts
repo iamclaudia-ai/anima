@@ -1,63 +1,26 @@
-interface StoredSessionLike {
-  id: string;
-  workspaceId: string;
-  providerSessionId: string;
-  model: string;
-  agent: string;
-  purpose: "chat" | "task" | "review" | "test";
-  runtimeStatus: "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
-  metadata: Record<string, unknown> | null;
-  previousSessionId: string | null;
-}
+import { createLogger, shortId } from "@anima/shared";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import {
+  getStoredSession,
+  getWorkspaceActiveSession,
+  setWorkspaceActiveSession,
+  upsertSession,
+} from "../session-store";
+import { getOrCreateWorkspace } from "../workspace";
+import type { AgentHostSessionInfo, SessionRuntimeConfig } from "../session-types";
 
-interface WorkspaceInfoLike {
-  id: string;
-}
-
-interface WorkspaceResultLike {
-  workspace: WorkspaceInfoLike;
-  created: boolean;
-}
-
-interface AgentHostSessionInfoLike {
-  id: string;
-  model?: string;
-  isProcessRunning: boolean;
-}
-
-interface SessionRuntimeConfigLike {
-  model: string;
-}
-
-interface SessionActivationLog {
-  info: (message: string, data?: Record<string, unknown>) => void;
-  warn: (message: string, data?: Record<string, unknown>) => void;
-}
+const log = createLogger("SessionExt:Activation", join(homedir(), ".anima", "logs", "session.log"));
 
 interface SessionActivationDeps {
-  sessionConfig: SessionRuntimeConfigLike;
-  log: SessionActivationLog;
-  sid: (sessionId: string) => string;
+  sessionConfig: SessionRuntimeConfig;
   transitionConversation: (cwd: string) => Promise<void>;
-  getStoredSession: (sessionId: string) => StoredSessionLike | null;
-  getOrCreateWorkspace: (cwd: string) => WorkspaceResultLike;
-  getWorkspaceActiveSession: (workspaceId: string) => string | null;
-  setWorkspaceActiveSession: (workspaceId: string, sessionId: string) => void;
-  upsertSession: (params: {
-    id: string;
-    workspaceId: string;
-    providerSessionId?: string;
-    model?: string;
-    agent?: string;
-    purpose?: "chat" | "task" | "review" | "test";
-    runtimeStatus?: "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
-    metadata?: Record<string, unknown> | null;
-    previousSessionId?: string | null;
-  }) => void;
-  listActiveSessions: () => Promise<AgentHostSessionInfoLike[]>;
-  closeSession: (sessionId: string) => Promise<void>;
-  promptSession: (sessionId: string, content: string, cwd: string, model?: string) => Promise<void>;
-  createSession: (params: { cwd: string; model: string }) => Promise<{ sessionId: string }>;
+  agentClient: {
+    list(): Promise<unknown>;
+    close(sessionId: string): Promise<void>;
+    prompt(sessionId: string, content: string, cwd: string, model?: string): Promise<void>;
+    createSession(params: { cwd: string; model: string }): Promise<{ sessionId: string }>;
+  };
 }
 
 export interface SessionActivationRunner {
@@ -72,12 +35,9 @@ export interface SessionActivationRunner {
 async function recycleForModelDrift(params: {
   sessionId: string;
   desiredModel: string;
-  listActiveSessions: () => Promise<AgentHostSessionInfoLike[]>;
-  closeSession: (sessionId: string) => Promise<void>;
-  log: SessionActivationLog;
-  sid: (sessionId: string) => string;
+  agentClient: SessionActivationDeps["agentClient"];
 }): Promise<void> {
-  const activeSessions = await params.listActiveSessions();
+  const activeSessions = (await params.agentClient.list()) as AgentHostSessionInfo[];
   const activeSession = activeSessions.find((session) => session.id === params.sessionId);
   if (
     activeSession &&
@@ -85,12 +45,12 @@ async function recycleForModelDrift(params: {
     activeSession.model &&
     activeSession.model !== params.desiredModel
   ) {
-    params.log.warn("Detected model drift during switch; recycling session runtime", {
-      sessionId: params.sid(params.sessionId),
+    log.warn("Detected model drift during switch; recycling session runtime", {
+      sessionId: shortId(params.sessionId),
       runningModel: activeSession.model,
       desiredModel: params.desiredModel,
     });
-    await params.closeSession(params.sessionId);
+    await params.agentClient.close(params.sessionId);
   }
 }
 
@@ -99,27 +59,24 @@ export function createSessionActivationRunner(
 ): SessionActivationRunner {
   return {
     switchSession: async (params) => {
-      const workspaceResult = deps.getOrCreateWorkspace(params.cwd);
-      const existing = deps.getStoredSession(params.sessionId);
+      const workspaceResult = getOrCreateWorkspace(params.cwd);
+      const existing = getStoredSession(params.sessionId);
       await deps.transitionConversation(params.cwd);
 
       const resumeModel = params.model || existing?.model || deps.sessionConfig.model;
       await recycleForModelDrift({
         sessionId: params.sessionId,
         desiredModel: resumeModel,
-        listActiveSessions: deps.listActiveSessions,
-        closeSession: deps.closeSession,
-        log: deps.log,
-        sid: deps.sid,
+        agentClient: deps.agentClient,
       });
 
-      deps.log.info("Switching session", {
-        sessionId: deps.sid(params.sessionId),
+      log.info("Switching session", {
+        sessionId: shortId(params.sessionId),
         cwd: params.cwd,
         model: resumeModel,
       });
-      await deps.promptSession(params.sessionId, "", params.cwd, resumeModel);
-      deps.upsertSession({
+      await deps.agentClient.prompt(params.sessionId, "", params.cwd, resumeModel);
+      upsertSession({
         id: params.sessionId,
         workspaceId: workspaceResult.workspace.id,
         providerSessionId: existing?.providerSessionId || params.sessionId,
@@ -130,22 +87,22 @@ export function createSessionActivationRunner(
         metadata: existing?.metadata || null,
         previousSessionId: existing?.previousSessionId ?? null,
       });
-      deps.setWorkspaceActiveSession(workspaceResult.workspace.id, params.sessionId);
+      setWorkspaceActiveSession(workspaceResult.workspace.id, params.sessionId);
       return { sessionId: params.sessionId };
     },
 
     resetSession: async (params) => {
       const model = params.model || deps.sessionConfig.model;
-      const workspaceResult = deps.getOrCreateWorkspace(params.cwd);
-      const previousSessionId = deps.getWorkspaceActiveSession(workspaceResult.workspace.id);
+      const workspaceResult = getOrCreateWorkspace(params.cwd);
+      const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
       await deps.transitionConversation(params.cwd);
 
-      deps.log.info("Resetting session", { cwd: params.cwd });
-      const result = await deps.createSession({
+      log.info("Resetting session", { cwd: params.cwd });
+      const result = await deps.agentClient.createSession({
         cwd: params.cwd,
         model,
       });
-      deps.upsertSession({
+      upsertSession({
         id: result.sessionId,
         workspaceId: workspaceResult.workspace.id,
         providerSessionId: result.sessionId,
@@ -155,7 +112,7 @@ export function createSessionActivationRunner(
         runtimeStatus: "idle",
         previousSessionId,
       });
-      deps.setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
+      setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
       return result;
     },
   };

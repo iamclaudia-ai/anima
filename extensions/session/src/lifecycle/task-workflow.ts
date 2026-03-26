@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs";
+import { getStoredSession, listTaskSessions, upsertSession } from "../session-store";
 import type { StoredSession } from "../session-store";
+import { getWorkspace, getOrCreateWorkspace } from "../workspace";
+import type { AgentHostSessionInfo, SessionRuntimeConfig } from "../session-types";
 
 export type TaskStatus = "running" | "completed" | "failed" | "interrupted";
 export type TaskMode = "general" | "review" | "test";
@@ -136,11 +139,6 @@ export function getTaskGitInfo(
   return git;
 }
 
-interface AgentHostSessionInfoLike {
-  id: string;
-  cwd?: string;
-}
-
 interface StartTaskResult {
   taskId: string;
   outputFile?: string;
@@ -155,52 +153,30 @@ interface StartTaskResult {
 interface TaskWorkflowDeps {
   tasks: Map<string, SessionTask>;
   taskNotificationsSent: Set<string>;
-  sessionConfig: { model: string };
-  getStoredSession: (id: string) => StoredSession | null;
-  getWorkspace: (id: string) => { cwd: string } | null;
-  getOrCreateWorkspace: (cwd: string) => { workspace: { id: string } };
-  listTaskSessions: (filters: {
-    parentSessionId?: string;
-    status?: TaskStatus;
-    agent?: string;
-  }) => StoredSession[];
-  upsertSession: (params: {
-    id: string;
-    workspaceId: string;
-    providerSessionId: string;
-    model: string;
-    agent: string;
-    purpose: "chat" | "task" | "review" | "test";
-    parentSessionId?: string | null;
-    runtimeStatus: "running" | "completed" | "failed" | "interrupted";
-    metadata?: Record<string, unknown> | null;
-    lastActivity?: string;
-    status?: "active" | "archived";
-    title?: string | null;
-    summary?: string | null;
-    previousSessionId?: string | null;
-  }) => void;
-  listActiveSessions: () => Promise<AgentHostSessionInfoLike[]>;
-  startTask: (params: {
-    sessionId: string;
-    agent: string;
-    prompt: string;
-    mode: TaskMode;
-    cwd?: string;
-    worktree?: boolean;
-    continue?: string;
-    model?: string;
-    effort?: string;
-    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-    files?: string[];
-    metadata?: Record<string, unknown>;
-  }) => Promise<StartTaskResult>;
-  listTasks: (params: {
-    sessionId?: string;
-    status?: TaskStatus;
-    agent?: string;
-  }) => Promise<{ tasks?: SessionTask[] }>;
-  interruptTask: (taskId: string) => Promise<boolean>;
+  sessionConfig: SessionRuntimeConfig;
+  agentClient: {
+    list(): Promise<unknown>;
+    startTask(params: {
+      sessionId: string;
+      agent: string;
+      prompt: string;
+      mode: TaskMode;
+      cwd?: string;
+      worktree?: boolean;
+      continue?: string;
+      model?: string;
+      effort?: string;
+      sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+      files?: string[];
+      metadata?: Record<string, unknown>;
+    }): Promise<StartTaskResult>;
+    listTasks(params: {
+      sessionId?: string;
+      status?: TaskStatus;
+      agent?: string;
+    }): Promise<unknown>;
+    interruptTask(taskId: string): Promise<unknown>;
+  };
 }
 
 export interface TaskWorkflowRunner {
@@ -221,10 +197,7 @@ export interface TaskWorkflowRunner {
     },
     request: { connectionId: string | null; tags: string[] | null },
   ) => Promise<Record<string, unknown>>;
-  getTask: (
-    taskId: string,
-    getStoredSession: (id: string) => StoredSession | null,
-  ) => SessionTask | null;
+  getTask: (taskId: string) => SessionTask | null;
   listTasks: (params: {
     sessionId?: string;
     status?: TaskStatus;
@@ -236,19 +209,19 @@ export interface TaskWorkflowRunner {
 export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRunner {
   return {
     startTask: async (params, request) => {
-      const parentSession = deps.getStoredSession(params.sessionId);
+      const parentSession = getStoredSession(params.sessionId);
 
       let effectiveCwd = params.cwd;
       if (!effectiveCwd && parentSession?.workspaceId) {
-        const workspace = deps.getWorkspace(parentSession.workspaceId);
+        const workspace = getWorkspace(parentSession.workspaceId);
         effectiveCwd = workspace?.cwd;
       }
       if (!effectiveCwd) {
-        const activeSessions = await deps.listActiveSessions();
+        const activeSessions = (await deps.agentClient.list()) as AgentHostSessionInfo[];
         effectiveCwd = activeSessions.find((s) => s.id === params.sessionId)?.cwd;
       }
 
-      const result = await deps.startTask({
+      const result = await deps.agentClient.startTask({
         sessionId: params.sessionId,
         agent: params.agent,
         prompt: params.prompt,
@@ -266,7 +239,7 @@ export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRu
       const nowIso = new Date().toISOString();
       const workspaceId =
         parentSession?.workspaceId ||
-        (effectiveCwd ? deps.getOrCreateWorkspace(effectiveCwd).workspace.id : null);
+        (effectiveCwd ? getOrCreateWorkspace(effectiveCwd).workspace.id : null);
       if (!workspaceId) {
         throw new Error(`Unable to resolve workspace for parent session ${params.sessionId}`);
       }
@@ -292,7 +265,7 @@ export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRu
       };
       deps.tasks.set(task.taskId, task);
       deps.taskNotificationsSent.delete(task.taskId);
-      deps.upsertSession({
+      upsertSession({
         id: task.taskId,
         workspaceId,
         providerSessionId: task.taskId,
@@ -329,24 +302,24 @@ export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRu
       };
     },
 
-    getTask: (taskId, getStoredSession) => {
+    getTask: (taskId) => {
       return deps.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
     },
 
     listTasks: async (params) => {
-      const result = await deps.listTasks({
+      const result = (await deps.agentClient.listTasks({
         sessionId: params.sessionId,
         status: params.status,
         agent: params.agent,
-      });
+      })) as { tasks?: SessionTask[] };
       const hostTasks = result.tasks || [];
       for (const task of hostTasks) {
         deps.tasks.set(task.taskId, task);
-        const taskStored = deps.getStoredSession(task.taskId);
-        const parentStored = deps.getStoredSession(task.sessionId);
+        const taskStored = getStoredSession(task.taskId);
+        const parentStored = getStoredSession(task.sessionId);
         const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
         if (workspaceId) {
-          deps.upsertSession({
+          upsertSession({
             id: task.taskId,
             workspaceId,
             providerSessionId: task.taskId,
@@ -371,12 +344,11 @@ export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRu
         }
       }
 
-      const stored = deps
-        .listTaskSessions({
-          parentSessionId: params.sessionId,
-          status: params.status,
-          agent: params.agent,
-        })
+      const stored = listTaskSessions({
+        parentSessionId: params.sessionId,
+        status: params.status,
+        agent: params.agent,
+      })
         .map((row) => toSessionTaskFromStored(row))
         .filter((row): row is SessionTask => !!row);
 
@@ -392,18 +364,18 @@ export function createTaskWorkflowRunner(deps: TaskWorkflowDeps): TaskWorkflowRu
     },
 
     interruptTask: async (taskId) => {
-      const task = deps.tasks.get(taskId) || toSessionTaskFromStored(deps.getStoredSession(taskId));
+      const task = deps.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
       if (!task) {
         return { ok: false, error: "Task not found", taskId };
       }
 
-      const ok = await deps.interruptTask(taskId);
+      const ok = (await deps.agentClient.interruptTask(taskId)) as boolean;
       if (ok) {
         task.status = "interrupted";
         task.updatedAt = new Date().toISOString();
-        const stored = deps.getStoredSession(taskId);
+        const stored = getStoredSession(taskId);
         if (stored) {
-          deps.upsertSession({
+          upsertSession({
             id: stored.id,
             workspaceId: stored.workspaceId,
             providerSessionId: stored.providerSessionId,

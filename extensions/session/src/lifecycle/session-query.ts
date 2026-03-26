@@ -1,39 +1,23 @@
+import { createLogger, shortId } from "@anima/shared";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { SessionIndexEntry } from "../claude-projects";
+import { discoverSessions } from "../claude-projects";
 import type { MemoryContextResult } from "../memory-context";
+import { formatMemoryContext } from "../memory-context";
+import { resolveSessionPath, parseSessionFilePaginated, parseSessionUsage } from "../parse-session";
+import { listWorkspaceSessions, upsertSession } from "../session-store";
+import { getOrCreateWorkspace, getWorkspaceByCwd } from "../workspace";
+import type { SessionRuntimeConfig } from "../session-types";
+
+const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "session.log"));
 
 interface SessionQueryDeps {
-  sessionConfig: { model: string };
-  log: {
-    info: (message: string, data?: Record<string, unknown>) => void;
-    warn: (message: string, data?: Record<string, unknown>) => void;
-  };
-  sid: (sessionId: string) => string;
-  getOrCreateWorkspace: (cwd: string) => { workspace: { id: string }; created: boolean };
-  listWorkspaceSessions: (workspaceId: string) => SessionIndexEntry[];
-  discoverSessions: (cwd: string) => SessionIndexEntry[];
-  upsertSession: (params: {
-    id: string;
-    workspaceId: string;
-    providerSessionId: string;
-    model: string;
-    agent: string;
-    purpose: "chat";
-    runtimeStatus: "idle";
-    metadata?: Record<string, unknown> | null;
-    lastActivity?: string;
-  }) => void;
-  resolveSessionPath: (sessionId: string, cwd?: string) => string | null;
-  parseSessionFilePaginated: (
-    filepath: string,
-    options: { limit: number; offset: number },
-  ) => { messages: unknown[]; total: number; hasMore: boolean };
-  parseSessionUsage: (filepath: string) => unknown;
-  getWorkspaceByCwd: (cwd: string) => { general: boolean } | null;
+  sessionConfig: SessionRuntimeConfig;
   getMemoryContext: (
     cwd: string,
     includeAllSummaries: boolean,
   ) => Promise<MemoryContextResult | null>;
-  formatMemoryContext: (memory: MemoryContextResult) => string | null;
 }
 
 export interface SessionQueryService {
@@ -56,11 +40,11 @@ export interface SessionQueryService {
 export function createSessionQueryService(deps: SessionQueryDeps): SessionQueryService {
   return {
     listSessions: (cwd) => {
-      const workspaceResult = deps.getOrCreateWorkspace(cwd);
-      const discovered = deps.discoverSessions(cwd);
+      const workspaceResult = getOrCreateWorkspace(cwd);
+      const discovered = discoverSessions(cwd);
       for (const entry of discovered) {
         if (!entry.sessionId) continue;
-        deps.upsertSession({
+        upsertSession({
           id: entry.sessionId,
           workspaceId: workspaceResult.workspace.id,
           providerSessionId: entry.sessionId,
@@ -82,9 +66,9 @@ export function createSessionQueryService(deps: SessionQueryDeps): SessionQueryS
           ? discovered
           : workspaceResult.created
             ? []
-            : deps.listWorkspaceSessions(workspaceResult.workspace.id);
+            : listWorkspaceSessions(workspaceResult.workspace.id);
 
-      deps.log.info("Listed sessions", { cwd, count: sessions.length });
+      log.info("Listed sessions", { cwd, count: sessions.length });
       return {
         sessions: sessions.sort((a, b) => {
           const aTime = a.modified || a.created || "";
@@ -95,23 +79,23 @@ export function createSessionQueryService(deps: SessionQueryDeps): SessionQueryS
     },
 
     getHistory: ({ sessionId, cwd, limit, offset }) => {
-      const filepath = deps.resolveSessionPath(sessionId, cwd);
+      const filepath = resolveSessionPath(sessionId, cwd);
       if (!filepath) {
-        deps.log.warn("Session file not found", {
-          sessionId: deps.sid(sessionId),
+        log.warn("Session file not found", {
+          sessionId: shortId(sessionId),
           cwd: cwd || "none",
         });
         return { messages: [], total: 0, hasMore: false };
       }
 
-      const result = deps.parseSessionFilePaginated(filepath, {
+      const result = parseSessionFilePaginated(filepath, {
         limit: limit || 50,
         offset: offset || 0,
       });
-      const usage = deps.parseSessionUsage(filepath);
+      const usage = parseSessionUsage(filepath);
 
-      deps.log.info("Loaded history", {
-        sessionId: deps.sid(sessionId),
+      log.info("Loaded history", {
+        sessionId: shortId(sessionId),
         total: result.total,
         limit: limit || 50,
         offset: offset || 0,
@@ -123,7 +107,7 @@ export function createSessionQueryService(deps: SessionQueryDeps): SessionQueryS
 
     getMemoryContext: async (cwd) => {
       const effectiveCwd = cwd || process.cwd();
-      const workspace = deps.getWorkspaceByCwd(effectiveCwd);
+      const workspace = getWorkspaceByCwd(effectiveCwd);
 
       try {
         const memoryContext = await deps.getMemoryContext(
@@ -134,7 +118,7 @@ export function createSessionQueryService(deps: SessionQueryDeps): SessionQueryS
           return { formatted: null, raw: null, note: "No memory context available" };
         }
 
-        const formatted = deps.formatMemoryContext(memoryContext);
+        const formatted = formatMemoryContext(memoryContext);
         return {
           formatted,
           raw: memoryContext,

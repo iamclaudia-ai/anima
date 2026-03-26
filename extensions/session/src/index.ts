@@ -360,8 +360,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   const sessionActivation = createSessionActivationRunner({
     sessionConfig,
-    log,
-    sid,
     transitionConversation: async (cwd) => {
       try {
         await withTimeout(
@@ -376,63 +374,24 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         });
       }
     },
-    getStoredSession,
-    getOrCreateWorkspace,
-    getWorkspaceActiveSession,
-    setWorkspaceActiveSession,
-    upsertSession,
-    listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
-    closeSession: async (sessionId) => {
-      await agentClient.close(sessionId);
-    },
-    promptSession: async (sessionId, content, cwd, model) => {
-      await agentClient.prompt(sessionId, content, cwd, model);
-    },
-    createSession: async ({ cwd, model }) => {
-      return await agentClient.createSession({ cwd, model });
-    },
+    agentClient,
   });
 
   const taskWorkflow = createTaskWorkflowRunner({
     tasks,
     taskNotificationsSent,
     sessionConfig,
-    getStoredSession,
-    getWorkspace,
-    getOrCreateWorkspace,
-    listTaskSessions,
-    upsertSession,
-    listActiveSessions: async () => (await agentClient.list()) as AgentHostSessionInfo[],
-    startTask: async (params) => {
-      return await agentClient.startTask(params);
-    },
-    listTasks: async (params) => {
-      return (await agentClient.listTasks(params)) as { tasks?: SessionTask[] };
-    },
-    interruptTask: async (taskId) => {
-      return await agentClient.interruptTask(taskId);
-    },
+    agentClient,
   });
 
   const sessionQuery = createSessionQueryService({
     sessionConfig,
-    log,
-    sid,
-    getOrCreateWorkspace,
-    listWorkspaceSessions,
-    discoverSessions,
-    upsertSession,
-    resolveSessionPath,
-    parseSessionFilePaginated,
-    parseSessionUsage,
-    getWorkspaceByCwd,
     getMemoryContext: async (cwd, includeAllSummaries) => {
       return (await ctx.call("memory.get_session_context", {
         cwd,
         includeAllSummaries,
       })) as MemoryContextResult | null;
     },
-    formatMemoryContext,
   });
 
   async function handleMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
