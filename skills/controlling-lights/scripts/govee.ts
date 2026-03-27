@@ -16,6 +16,8 @@
  * Color accepts: hex (#FF0000), named colors (red, blue, warm), or RGB (255,0,0).
  */
 
+import "./env";
+
 const API_BASE = "https://openapi.api.govee.com/router/api/v1";
 const API_KEY = process.env.GOVEE_API_KEY;
 

@@ -12,6 +12,7 @@
  *   bun scripts/auto-play.ts <playlist.json> --list     # List all scenes
  */
 
+import "./env";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 
