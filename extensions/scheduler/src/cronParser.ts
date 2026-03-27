@@ -64,6 +64,9 @@ export class CronParser {
 
   /**
    * Parse individual cron field (supports *, ranges, steps, lists)
+   *
+   * Evaluation order matters — lists (,) must be checked first since
+   * list items can contain ranges and steps (e.g., "19-23,0-4").
    */
   private parseField(field: string, min: number, max: number): CronField {
     const result: CronField = {
@@ -76,6 +79,17 @@ export class CronParser {
     if (field === "*") {
       result.isWildcard = true;
       result.values = this.range(min, max);
+      return result;
+    }
+
+    // Handle lists FIRST — items can contain ranges/steps (e.g., "19-23,0-4")
+    if (field.includes(",")) {
+      const allValues = new Set<number>();
+      for (const item of field.split(",")) {
+        const parsed = this.parseField(item.trim(), min, max);
+        for (const v of parsed.values) allValues.add(v);
+      }
+      result.values = [...allValues].sort((a, b) => a - b);
       return result;
     }
 
@@ -104,12 +118,6 @@ export class CronParser {
       result.isRange = true;
       const [start, end] = field.split("-").map((n) => parseInt(n));
       result.values = this.range(start, end);
-      return result;
-    }
-
-    // Handle lists (1,3,5)
-    if (field.includes(",")) {
-      result.values = field.split(",").map((n) => parseInt(n.trim()));
       return result;
     }
 
