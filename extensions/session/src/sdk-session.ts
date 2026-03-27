@@ -29,6 +29,26 @@ import {
 import { createLogger, loadConfig } from "@anima/shared";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+
+/**
+ * Resolve the claude CLI executable path.
+ *
+ * The Agent SDK defaults to spawning "bun <claude-path>" when it can't find a
+ * native binary. When agent-host is launched via launchd (minimal PATH), "bun"
+ * may not be resolvable. Setting pathToClaudeCodeExecutable to the absolute
+ * path of the native claude binary lets the SDK spawn it directly.
+ */
+function findClaudeBin(): string | undefined {
+  const candidates = [
+    join(homedir(), ".local", "bin", "claude"), // npm/manual install
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return Bun.which("claude") ?? undefined;
+}
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
   Query,
@@ -532,6 +552,10 @@ export class SDKSession extends EventEmitter {
       // Working directory and model
       cwd: this.cwd,
       model: this.model,
+
+      // Explicit claude binary path so the SDK spawns it directly without
+      // needing "bun" in PATH (critical when launched via launchd).
+      pathToClaudeCodeExecutable: findClaudeBin(),
 
       // Plain system prompt string: CLAUDE.md chain + custom prompt.
       ...(combinedSystemPrompt ? { systemPrompt: combinedSystemPrompt } : {}),
