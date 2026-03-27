@@ -137,7 +137,28 @@ export class ExtensionManager {
     if (!remoteHost) {
       throw new Error(`No extension found for method: ${method}`);
     }
-    const timeoutMs = method.endsWith(".health_check") ? HEALTH_CHECK_TIMEOUT_MS : undefined;
+    const isHealthCheck = method.endsWith(".health_check");
+    const timeoutMs = isHealthCheck ? HEALTH_CHECK_TIMEOUT_MS : undefined;
+
+    if (isHealthCheck) {
+      // Health checks should never throw — return degraded status on timeout/error
+      try {
+        return await remoteHost.callMethod(method, params ?? {}, connectionId, {
+          ...meta,
+          timeoutMs,
+          tags,
+        });
+      } catch {
+        return {
+          ok: false,
+          status: "unresponsive",
+          label: `${extensionId} (unresponsive)`,
+          metrics: [{ label: "Status", value: "Extension not responding — may need restart" }],
+          items: [],
+        };
+      }
+    }
+
     return remoteHost.callMethod(method, params ?? {}, connectionId, { ...meta, timeoutMs, tags });
   }
 

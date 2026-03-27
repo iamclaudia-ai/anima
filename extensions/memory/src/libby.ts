@@ -204,11 +204,20 @@ class LibbySession {
 
     this.promptCount++;
 
-    const result = (await this.ctx.call("session.send_prompt", {
-      sessionId: this._sessionId,
-      content,
-      streaming: false,
-    })) as { text: string; stopReason?: string };
+    const result = (await Promise.race([
+      this.ctx.call("session.send_prompt", {
+        sessionId: this._sessionId,
+        content,
+        streaming: false,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(new Error(`processTranscript timed out after ${PROCESS_TIMEOUT_MS / 1000}s`)),
+          PROCESS_TIMEOUT_MS,
+        ),
+      ),
+    ])) as { text: string; stopReason?: string };
 
     const text = result.text;
     if (!text) {
@@ -244,6 +253,9 @@ class LibbySession {
 
 /** How long the worker sleeps when no queued conversations are found */
 const WORKER_SLEEP_MS = 30_000;
+
+/** Maximum time to wait for a single processTranscript call (10 minutes) */
+const PROCESS_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Background worker that processes queued conversations one at a time.
