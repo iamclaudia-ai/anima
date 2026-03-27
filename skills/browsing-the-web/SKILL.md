@@ -1,280 +1,162 @@
 ---
 name: browsing-the-web
 description: "MUST be used when you need to browse the web, interact with websites, or automate browser tasks. Efficient browser automation designed for agents — enables intuitive web navigation, form filling, clicking buttons, taking screenshots, data scraping, and testing web apps through accessibility-based workflows using the agent-browser CLI. Triggers on: browse website, visit URL, open webpage, fill form, click button, take screenshot, scrape data, web automation, interact with website, login to site, test web app, extract data from page, navigate to URL, open a website, automate browser actions."
-allowed-tools: Bash(agent-browser:*)
+allowed-tools: Bash(dev-browser:*)
 ---
 
-# Browser Automation with agent-browser
+# Dev Browser
 
-## Core Workflow
+A CLI for controlling browsers with sandboxed JavaScript scripts.
 
-Every browser automation follows this pattern:
+## Usage
 
-1. **Navigate**: `agent-browser open <url>`
-2. **Snapshot**: `agent-browser snapshot -i` (get element refs like `@e1`, `@e2`)
-3. **Interact**: Use refs to click, fill, select
-4. **Re-snapshot**: After navigation or DOM changes, get fresh refs
+Run `dev-browser --help` to learn more.
 
-```bash
-agent-browser open https://example.com/form
-agent-browser snapshot -i
-# Output: @e1 [input type="email"], @e2 [input type="password"], @e3 [button] "Submit"
+## LLM USAGE GUIDE:
 
-agent-browser fill @e1 "user@example.com"
-agent-browser fill @e2 "password123"
-agent-browser click @e3
-agent-browser wait --load networkidle
-agent-browser snapshot -i  # Check result
-```
+Write small, focused scripts. Each script should do ONE thing: navigate, click, fill, or check.
+End each script by logging the state you need for the next decision.
+Use descriptive page names like "login", "checkout", or "results" instead of "page1".
+Named pages from `browser.getPage("name")` persist between script runs, so you usually do not need to re-navigate.
+Inside `page.evaluate(...)`, write plain JavaScript only - no TypeScript syntax in the browser context.
 
-## Essential Commands
+### Quick inspection:
 
 ```bash
-# Navigation
-agent-browser open <url>              # Navigate (aliases: goto, navigate)
-agent-browser close                   # Close browser
+dev-browser --connect <<'EOF'
+const tabs = await browser.listPages();
+console.log(JSON.stringify(tabs, null, 2));
+EOF
 
-# Snapshot
-agent-browser snapshot -i             # Interactive elements with refs (recommended)
-agent-browser snapshot -i -C          # Include cursor-interactive elements (divs with onclick, cursor:pointer)
-agent-browser snapshot -s "#selector" # Scope to CSS selector
-
-# Interaction (use @refs from snapshot)
-agent-browser click @e1               # Click element
-agent-browser fill @e2 "text"         # Clear and type text
-agent-browser type @e2 "text"         # Type without clearing
-agent-browser select @e1 "option"     # Select dropdown option
-agent-browser check @e1               # Check checkbox
-agent-browser press Enter             # Press key
-agent-browser scroll down 500         # Scroll page
-
-# Get information
-agent-browser get text @e1            # Get element text
-agent-browser get url                 # Get current URL
-agent-browser get title               # Get page title
-
-# Wait
-agent-browser wait @e1                # Wait for element
-agent-browser wait --load networkidle # Wait for network idle
-agent-browser wait --url "**/page"    # Wait for URL pattern
-agent-browser wait 2000               # Wait milliseconds
-
-# Capture
-agent-browser screenshot              # Screenshot to temp dir
-agent-browser screenshot --full       # Full page screenshot
-agent-browser pdf output.pdf          # Save as PDF
+dev-browser --connect <<'EOF'
+const page = await browser.getPage("TARGET_ID_HERE");
+console.log(JSON.stringify({
+  url: page.url(),
+  title: await page.title(),
+}, null, 2));
+EOF
 ```
 
-## Common Patterns
-
-### Form Submission
+### AI snapshots for element discovery:
 
 ```bash
-agent-browser open https://example.com/signup
-agent-browser snapshot -i
-agent-browser fill @e1 "Jane Doe"
-agent-browser fill @e2 "jane@example.com"
-agent-browser select @e3 "California"
-agent-browser check @e4
-agent-browser click @e5
-agent-browser wait --load networkidle
+dev-browser <<'EOF'
+const page = await browser.getPage("main");
+const result = await page.snapshotForAI();
+console.log(result.full);
+// Returns { full: string, incremental?: string }.
+// Optional args: { track?: string, depth?: number, timeout?: number }.
+// Read result.full to identify the right element.
+// Then interact with it using Playwright:
+// await page.getByRole("button", { name: "Continue" }).click();
+// Re-run page.snapshotForAI({ track: "main" }) after the page changes.
+EOF
 ```
 
-### Authentication with State Persistence
+### Choosing your approach:
+
+- Unknown pages: use `page.snapshotForAI()` first to discover the page, then interact based on what you find.
+- Known pages/selectors: skip the snapshot and use direct Playwright selectors like `page.click()`, `page.fill()`, or `page.locator()` for faster, more reliable automation.
+
+### Screenshots for visual state:
 
 ```bash
-# Login once and save state
-agent-browser open https://app.example.com/login
-agent-browser snapshot -i
-agent-browser fill @e1 "$USERNAME"
-agent-browser fill @e2 "$PASSWORD"
-agent-browser click @e3
-agent-browser wait --url "**/dashboard"
-agent-browser state save auth.json
-
-# Reuse in future sessions
-agent-browser state load auth.json
-agent-browser open https://app.example.com/dashboard
+dev-browser <<'EOF'
+const page = await browser.getPage("main");
+const buf = await page.screenshot();
+const path = await saveScreenshot(buf, "debug.png");
+console.log(path);
+EOF
 ```
 
-### Session Persistence
+### Waiting patterns:
 
 ```bash
-# Auto-save/restore cookies and localStorage across browser restarts
-agent-browser --session-name myapp open https://app.example.com/login
-# ... login flow ...
-agent-browser close  # State auto-saved to ~/.agent-browser/sessions/
-
-# Next time, state is auto-loaded
-agent-browser --session-name myapp open https://app.example.com/dashboard
-
-# Encrypt state at rest
-export AGENT_BROWSER_ENCRYPTION_KEY=$(openssl rand -hex 32)
-agent-browser --session-name secure open https://app.example.com
-
-# Manage saved states
-agent-browser state list
-agent-browser state show myapp-default.json
-agent-browser state clear myapp
-agent-browser state clean --older-than 7
+dev-browser <<'EOF'
+const page = await browser.getPage("search-results");
+await page.waitForSelector(".results");
+await page.waitForURL("**/success");
+console.log(JSON.stringify({
+  url: page.url(),
+  title: await page.title(),
+}, null, 2));
+EOF
 ```
 
-### Data Extraction
+### Error recovery:
+
+If a script fails, the page usually stays where it stopped.
+Reconnect to the same page name, take a screenshot, and log the URL/title:
 
 ```bash
-agent-browser open https://example.com/products
-agent-browser snapshot -i
-agent-browser get text @e5           # Get specific element text
-agent-browser get text body > page.txt  # Get all page text
-
-# JSON output for parsing
-agent-browser snapshot -i --json
-agent-browser get text @e1 --json
+dev-browser <<'EOF'
+const page = await browser.getPage("checkout");
+const path = await saveScreenshot(await page.screenshot(), "debug.png");
+console.log(JSON.stringify({
+  screenshot: path,
+  url: page.url(),
+  title: await page.title(),
+}, null, 2));
+EOF
 ```
 
-### Parallel Sessions
+### Common Playwright Page methods:
+
+- page.goto(url) Navigate to a URL
+- page.title() Get the current page title
+- page.url() Get the current URL
+- page.snapshotForAI(options) Get an AI-optimized snapshot; returns { full, incremental? }
+  Options: { track?: string, depth?: number, timeout?: number }
+- page.getByRole(role, { name }) Target elements discovered from the snapshot
+- page.textContent(selector) Get the text content of an element
+- page.innerHTML(selector) Get the inner HTML of an element
+- page.fill(selector, value) Fill an input field
+- page.click(selector) Click an element
+- page.type(selector, text) Type text character by character
+- page.press(selector, key) Press a key such as Enter or Tab
+- page.waitForSelector(selector) Wait for an element to appear
+- page.waitForURL(url) Wait for navigation to a URL
+- page.screenshot() Capture a screenshot buffer; save it with saveScreenshot(...)
+- page.$$eval(selector, fn) Run a function on all matching elements
+- page.$eval(selector, fn) Run a function on the first matching element
+- page.evaluate(fn) Run JavaScript in the page context (plain JS only)
+- page.locator(selector) Create a locator for chained actions
+
+### Connecting to a running Chrome instance:
+
+Auto-discover Chrome with debugging enabled:
 
 ```bash
-agent-browser --session site1 open https://site-a.com
-agent-browser --session site2 open https://site-b.com
-
-agent-browser --session site1 snapshot -i
-agent-browser --session site2 snapshot -i
-
-agent-browser session list
+dev-browser --connect <<'EOF'
+  const page = await browser.getPage("main");
+  console.log(await page.title());
+EOF
 ```
 
-### Connect to Existing Chrome
+### Connect to a specific CDP endpoint:
 
 ```bash
-# Auto-discover running Chrome with remote debugging enabled
-agent-browser --auto-connect open https://example.com
-agent-browser --auto-connect snapshot
-
-# Or with explicit CDP port
-agent-browser --cdp 9222 snapshot
+dev-browser --connect http://localhost:9222 <<'EOF'
+  const page = await browser.getPage("main");
+  console.log(await page.title());
+EOF
 ```
 
-### Visual Browser (Debugging)
+### To launch Chrome with debugging enabled:
 
 ```bash
-agent-browser --headed open https://example.com
-agent-browser highlight @e1          # Highlight element
-agent-browser record start demo.webm # Record session
+chrome.exe --remote-debugging-port=9222
+google-chrome --remote-debugging-port=9222
 ```
 
-### Local Files (PDFs, HTML)
+Or visit chrome://inspect/#remote-debugging to configure.
 
-```bash
-# Open local files with file:// URLs
-agent-browser --allow-file-access open file:///path/to/document.pdf
-agent-browser --allow-file-access open file:///path/to/page.html
-agent-browser screenshot output.png
-```
+### Tips:
 
-### iOS Simulator (Mobile Safari)
-
-```bash
-# List available iOS simulators
-agent-browser device list
-
-# Launch Safari on a specific device
-agent-browser -p ios --device "iPhone 16 Pro" open https://example.com
-
-# Same workflow as desktop - snapshot, interact, re-snapshot
-agent-browser -p ios snapshot -i
-agent-browser -p ios tap @e1          # Tap (alias for click)
-agent-browser -p ios fill @e2 "text"
-agent-browser -p ios swipe up         # Mobile-specific gesture
-
-# Take screenshot
-agent-browser -p ios screenshot mobile.png
-
-# Close session (shuts down simulator)
-agent-browser -p ios close
-```
-
-**Requirements:** macOS with Xcode, Appium (`npm install -g appium && appium driver install xcuitest`)
-
-**Real devices:** Works with physical iOS devices if pre-configured. Use `--device "<UDID>"` where UDID is from `xcrun xctrace list devices`.
-
-## Ref Lifecycle (Important)
-
-Refs (`@e1`, `@e2`, etc.) are invalidated when the page changes. Always re-snapshot after:
-
-- Clicking links or buttons that navigate
-- Form submissions
-- Dynamic content loading (dropdowns, modals)
-
-```bash
-agent-browser click @e5              # Navigates to new page
-agent-browser snapshot -i            # MUST re-snapshot
-agent-browser click @e1              # Use new refs
-```
-
-## Semantic Locators (Alternative to Refs)
-
-When refs are unavailable or unreliable, use semantic locators:
-
-```bash
-agent-browser find text "Sign In" click
-agent-browser find label "Email" fill "user@test.com"
-agent-browser find role button click --name "Submit"
-agent-browser find placeholder "Search" type "query"
-agent-browser find testid "submit-btn" click
-```
-
-## JavaScript Evaluation (eval)
-
-Use `eval` to run JavaScript in the browser context. **Shell quoting can corrupt complex expressions** -- use `--stdin` or `-b` to avoid issues.
-
-```bash
-# Simple expressions work with regular quoting
-agent-browser eval 'document.title'
-agent-browser eval 'document.querySelectorAll("img").length'
-
-# Complex JS: use --stdin with heredoc (RECOMMENDED)
-agent-browser eval --stdin <<'EVALEOF'
-JSON.stringify(
-  Array.from(document.querySelectorAll("img"))
-    .filter(i => !i.alt)
-    .map(i => ({ src: i.src.split("/").pop(), width: i.width }))
-)
-EVALEOF
-
-# Alternative: base64 encoding (avoids all shell escaping issues)
-agent-browser eval -b "$(echo -n 'Array.from(document.querySelectorAll("a")).map(a => a.href)' | base64)"
-```
-
-**Why this matters:** When the shell processes your command, inner double quotes, `!` characters (history expansion), backticks, and `$()` can all corrupt the JavaScript before it reaches agent-browser. The `--stdin` and `-b` flags bypass shell interpretation entirely.
-
-**Rules of thumb:**
-
-- Single-line, no nested quotes -> regular `eval 'expression'` with single quotes is fine
-- Nested quotes, arrow functions, template literals, or multiline -> use `eval --stdin <<'EVALEOF'`
-- Programmatic/generated scripts -> use `eval -b` with base64
-
-## Deep-Dive Documentation
-
-| Reference                                                            | When to Use                                               |
-| -------------------------------------------------------------------- | --------------------------------------------------------- |
-| [references/commands.md](references/commands.md)                     | Full command reference with all options                   |
-| [references/snapshot-refs.md](references/snapshot-refs.md)           | Ref lifecycle, invalidation rules, troubleshooting        |
-| [references/session-management.md](references/session-management.md) | Parallel sessions, state persistence, concurrent scraping |
-| [references/authentication.md](references/authentication.md)         | Login flows, OAuth, 2FA handling, state reuse             |
-| [references/video-recording.md](references/video-recording.md)       | Recording workflows for debugging and documentation       |
-| [references/proxy-support.md](references/proxy-support.md)           | Proxy configuration, geo-testing, rotating proxies        |
-
-## Ready-to-Use Templates
-
-| Template                                                                 | Description                         |
-| ------------------------------------------------------------------------ | ----------------------------------- |
-| [templates/form-automation.sh](templates/form-automation.sh)             | Form filling with validation        |
-| [templates/authenticated-session.sh](templates/authenticated-session.sh) | Login once, reuse state             |
-| [templates/capture-workflow.sh](templates/capture-workflow.sh)           | Content extraction with screenshots |
-
-```bash
-./templates/form-automation.sh https://example.com/form
-./templates/authenticated-session.sh https://app.example.com/login
-./templates/capture-workflow.sh https://example.com ./output
-```
+- Use `console.log(JSON.stringify(...))` for structured output.
+- Prefer `page.snapshotForAI()` for structure; use screenshots when visual layout or styling matters.
+- Keep page names stable across scripts so you can resume work after failures.
+- Each `--browser` name maps to a separate daemon-managed browser instance.
+- Use `--connect` to attach to an existing browser; omit the URL to auto-discover Chrome with debugging enabled.
+- Use short timeouts (`--timeout 10`) so scripts fail fast instead of hanging on missing elements.
+- Add `--headless` for unattended automation; omit it when you want to watch the browser window.
