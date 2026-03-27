@@ -82,6 +82,10 @@ const REQUEST_TIMEOUT = 300_000; // 5 min — extensions like memory.process do 
 const RESTART_DELAY = 2_000;
 const MAX_RESTARTS = 5;
 
+// Resolve bun executable — use the same binary that's running this process
+// so it works correctly when launched from launchd without a full shell PATH.
+const BUN_BIN = process.execPath;
+
 /** Callback for handling ctx.call() from extensions */
 export type OnCallCallback = (
   callerExtensionId: string,
@@ -144,8 +148,8 @@ export class ExtensionHostProcess implements ExtensionHost {
     });
 
     const cmd = this.hot
-      ? ["bun", "--hot", this.moduleSpec, configJson]
-      : ["bun", "run", this.moduleSpec, configJson];
+      ? [BUN_BIN, "--hot", this.moduleSpec, configJson]
+      : [BUN_BIN, "run", this.moduleSpec, configJson];
 
     log.info("Extension spawn mode", { id: this.extensionId, hot: this.hot });
 

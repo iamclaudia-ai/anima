@@ -21,6 +21,30 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Subprocess } from "bun";
 
+/**
+ * Resolve the absolute path to the bun executable.
+ *
+ * We can't use process.execPath because the watchdog is a compiled Bun binary —
+ * process.execPath returns the watchdog binary itself, not the bun runtime.
+ * Instead, probe well-known install locations then fall back to PATH lookup.
+ */
+function findBunBin(): string {
+  const home = homedir();
+  const candidates = [
+    join(home, ".bun", "bin", "bun"), // Standard bun install
+    "/opt/homebrew/bin/bun", // Homebrew
+    "/usr/local/bin/bun", // Manual install
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  const which = Bun.which("bun");
+  if (which) return which;
+  throw new Error("Cannot find bun executable — checked ~/.bun/bin, homebrew, and PATH");
+}
+
+const BUN_BIN = findBunBin();
+
 // ── Types ────────────────────────────────────────────────
 
 export interface HealthSnapshot {
@@ -130,11 +154,47 @@ export interface StartServiceOptions {
   force?: boolean;
 }
 
-function commandForStart(service: ManagedService, force = false): string[] {
-  if (!force || service.command.includes("--force")) {
-    return service.command;
+/**
+ * Resolve the executable in a command to its absolute path.
+ *
+ * "bun" always resolves to process.execPath (the binary running the watchdog).
+ * Other executables are resolved via Bun.which() first, then by probing
+ * common user install dirs (~/.local/bin, ~/.bun/bin, /opt/homebrew/bin, etc.).
+ * This ensures services can be spawned correctly even when launchd provides a
+ * minimal PATH that omits user install dirs.
+ */
+function resolveCommand(cmd: string[]): string[] {
+  if (cmd.length === 0) return cmd;
+  const [exe, ...rest] = cmd;
+  // Already absolute
+  if (exe.startsWith("/")) return cmd;
+  // bun → always use the binary running this process
+  if (exe === "bun") return [BUN_BIN, ...rest];
+  // Try Bun.which (works when PATH is populated)
+  const which = Bun.which(exe);
+  if (which) return [which, ...rest];
+  // Probe common user install dirs as fallback (compiled binaries may lack user PATH)
+  const home = homedir();
+  const searchDirs = [
+    `${home}/.local/bin`,
+    `${home}/.bun/bin`,
+    `/opt/homebrew/bin`,
+    `/usr/local/bin`,
+  ];
+  for (const dir of searchDirs) {
+    const candidate = join(dir, exe);
+    if (existsSync(candidate)) return [candidate, ...rest];
   }
-  return [...service.command, "--force"];
+  log("WARN", `Could not resolve executable "${exe}" in PATH or common dirs`);
+  return cmd;
+}
+
+function commandForStart(service: ManagedService, force = false): string[] {
+  const cmd =
+    force && !service.command.includes("--force")
+      ? [...service.command, "--force"]
+      : service.command;
+  return resolveCommand(cmd);
 }
 
 export async function startService(
