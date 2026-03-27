@@ -102,3 +102,36 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
+
+// Prevent unhandled SDK errors from crashing the process.
+// The most common culprit is "ProcessTransport is not ready for writing" which
+// fires when a zombie session's underlying claude process has died. We close the
+// offending session so it can be cleanly lazy-resumed on the next prompt.
+function handleUnhandledError(error: unknown, origin: string): void {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("ProcessTransport is not ready")) {
+    log.warn("Caught unhandled ProcessTransport error — closing zombie sessions", {
+      origin,
+      error: msg,
+    });
+    // Close any session whose transport is dead so it can lazy-resume cleanly
+    try {
+      for (const info of ctx.sessionHost.list()) {
+        if (!(info as Record<string, unknown>).isProcessRunning) {
+          const id = (info as Record<string, unknown>).sessionId as string;
+          ctx.sessionHost.close(id).catch(() => {});
+          log.warn("Closed zombie session", { sessionId: id.slice(0, 8) });
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    return;
+  }
+  // For all other unhandled errors, log and exit so the watchdog restarts us cleanly
+  log.error(`Unhandled ${origin}`, { error: msg });
+  process.exit(1);
+}
+
+process.on("uncaughtException", (error) => handleUnhandledError(error, "uncaughtException"));
+process.on("unhandledRejection", (reason) => handleUnhandledError(reason, "unhandledRejection"));
