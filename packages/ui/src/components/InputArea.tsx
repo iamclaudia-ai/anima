@@ -468,19 +468,26 @@ export function InputArea({
           </div>
         )}
 
-        {/* Send/Stop button - toggles based on isQuerying */}
-        <button
-          onClick={isQuerying ? onInterrupt : onSend}
-          disabled={!isQuerying && (!isConnected || (!input.trim() && attachments.length === 0))}
-          className={`absolute bottom-4 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-            isQuerying
-              ? "bg-red-500 hover:bg-red-600"
-              : "bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
-          } text-white`}
-          aria-label={isQuerying ? "Stop" : "Send message"}
-        >
-          {isQuerying ? <X className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
-        </button>
+        {/* Send/Stop button — show send (blue) if there's text to send, even while querying.
+             Only show stop (red) when querying AND input is empty. */}
+        {(() => {
+          const hasContent = input.trim().length > 0 || attachments.length > 0;
+          const showSend = hasContent || !isQuerying;
+          return (
+            <button
+              onClick={showSend ? onSend : onInterrupt}
+              disabled={showSend && (!isConnected || !hasContent)}
+              className={`absolute bottom-4 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                showSend
+                  ? "bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  : "bg-red-500 hover:bg-red-600"
+              } text-white`}
+              aria-label={showSend ? "Send message" : "Stop"}
+            >
+              {showSend ? <ArrowUp className="w-4 h-4" /> : <X className="w-4 h-4" />}
+            </button>
+          );
+        })()}
 
         {isDragging && (
           <div className="absolute inset-0 bg-blue-50/80 rounded-lg flex items-center justify-center pointer-events-none">
