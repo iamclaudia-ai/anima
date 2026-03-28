@@ -819,6 +819,12 @@ const WATCHDOG_METHODS: MethodCatalogEntry[] = [
     },
   },
   {
+    method: "watchdog.reload",
+    source: "gateway",
+    description:
+      "Reload the watchdog via launchd unload/load — picks up new env vars from ~/.zshrc",
+  },
+  {
     method: "watchdog.install",
     source: "gateway",
     description: "Install watchdog as a launchd service (start on login)",
@@ -913,6 +919,9 @@ async function watchdogCommand(args: string[]): Promise<void> {
     console.log("\nwatchdog commands:\n");
     console.log("  anima watchdog status                  Show service health");
     console.log("  anima watchdog restart <service> [--force]  Restart gateway or runtime");
+    console.log(
+      "  anima watchdog reload                  Reload the watchdog itself via launchd (picks up new env vars)",
+    );
     console.log("  anima watchdog logs                    List available log files");
     console.log("  anima watchdog logs <file> [lines]     Tail a log file");
     console.log("  anima watchdog install                 Install as launchd service");
@@ -1098,6 +1107,31 @@ async function watchdogCommand(args: string[]): Promise<void> {
         unlinkSync(plistDst);
       }
       console.log("✓ Watchdog uninstalled and unloaded.");
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === "reload") {
+    const plistDst = `${process.env.HOME}/Library/LaunchAgents/com.anima.watchdog.plist`;
+    try {
+      console.log("Unloading watchdog...");
+      const unload = Bun.spawn(["launchctl", "unload", plistDst], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await unload.exited;
+
+      console.log("Reloading watchdog (capturing fresh login shell env)...");
+      const load = Bun.spawn(["launchctl", "load", plistDst], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await load.exited;
+
+      console.log("✓ Watchdog reloaded — all services will restart with fresh environment.");
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
       process.exit(1);
