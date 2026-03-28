@@ -22,6 +22,32 @@ import { homedir } from "node:os";
 import type { Subprocess } from "bun";
 
 /**
+ * Build an augmented PATH that includes common user binary directories.
+ *
+ * When launched via launchd, the compiled watchdog binary's process.env.PATH
+ * is minimal (system dirs only) even with zsh -l, because compiled binaries
+ * don't inherit the login shell's PATH expansions. We prepend the known user
+ * dirs so all child processes (gateway, agent-host, extensions, scheduled
+ * tasks) automatically have access to bun, claude, etc.
+ */
+function buildAugmentedPath(): string {
+  const home = homedir();
+  const userDirs = [
+    join(home, ".bun", "bin"),
+    join(home, ".local", "bin"),
+    join(home, "dotfiles", "scripts"),
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+  ];
+  const existing = (process.env.PATH || "").split(":");
+  const merged = [...userDirs.filter((d) => !existing.includes(d)), ...existing];
+  return merged.join(":");
+}
+
+const AUGMENTED_PATH = buildAugmentedPath();
+
+/**
  * Resolve the absolute path to the bun executable.
  *
  * We can't use process.execPath because the watchdog is a compiled Bun binary —
@@ -233,7 +259,7 @@ export async function startService(
     cwd: service.cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, FORCE_COLOR: "0" },
+    env: { ...process.env, PATH: AUGMENTED_PATH, FORCE_COLOR: "0" },
   });
 
   // Drain child output into the service log asynchronously.
