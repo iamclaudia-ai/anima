@@ -134,8 +134,14 @@ export async function processImage(
     // Check if processing is needed
     const needsResize = width > config.maxWidth || height > config.maxHeight;
     const needsCompress = originalSize > config.maxFileSizeBytes;
+    // Always convert HEIC/HEIF — not supported by Claude API and many browsers
+    const isHeic =
+      imageBlock.source.media_type === "image/heic" ||
+      imageBlock.source.media_type === "image/heif" ||
+      metadata.format === "heif";
+    const needsFormatConversion = isHeic;
 
-    if (!needsResize && !needsCompress) {
+    if (!needsResize && !needsCompress && !needsFormatConversion) {
       log.info("Image already optimal, skipping processing");
       return {
         data: imageBlock.source.data,
@@ -146,6 +152,10 @@ export async function processImage(
         originalDimensions: { width, height },
         finalDimensions: { width, height },
       };
+    }
+
+    if (needsFormatConversion) {
+      log.info("Converting HEIC/HEIF to configured format");
     }
 
     // Calculate target dimensions

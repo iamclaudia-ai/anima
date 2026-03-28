@@ -161,13 +161,35 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       );
 
       // Images - send as visual content
+      // Convert HEIC/HEIF (iPhone default) to JPEG before sending
       if (mimeType.startsWith("image/")) {
+        let imageData = base64;
+        let imageMimeType = mimeType;
+
+        if (mimeType === "image/heic" || mimeType === "image/heif") {
+          try {
+            const sharp = (await import("sharp")).default;
+            const inputBuffer = Buffer.from(base64, "base64");
+            const outputBuffer = await sharp(inputBuffer)
+              .resize(1600, 1600, { fit: "inside", withoutEnlargement: true })
+              .jpeg({ quality: 85, mozjpeg: true })
+              .toBuffer();
+            imageData = outputBuffer.toString("base64");
+            imageMimeType = "image/jpeg";
+            ctx?.log.info(
+              `Converted HEIC → JPEG: ${(inputBuffer.length / 1024).toFixed(0)}KB → ${(outputBuffer.length / 1024).toFixed(0)}KB`,
+            );
+          } catch (err) {
+            ctx?.log.warn(`HEIC conversion failed, sending raw: ${err}`);
+          }
+        }
+
         return {
           type: "image",
           source: {
             type: "base64",
-            media_type: mimeType,
-            data: base64,
+            media_type: imageMimeType,
+            data: imageData,
           },
         };
       }

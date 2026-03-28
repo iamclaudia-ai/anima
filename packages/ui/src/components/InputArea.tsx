@@ -98,23 +98,92 @@ export function InputArea({
 
   const processFile = useCallback(
     (file: File) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const [header, data] = dataUrl.split(",");
-        const mediaType = header.match(/data:(.*?);/)?.[1] || "application/octet-stream";
-        const isImage = mediaType.startsWith("image/");
-        onAttachmentsChange([
-          ...attachments,
-          {
-            type: isImage ? "image" : "file",
-            mediaType,
-            data,
-            filename: file.name,
-          },
-        ]);
-      };
-      reader.readAsDataURL(file);
+      const isImage = file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
+
+      if (isImage) {
+        // Client-side image compression: resize to 1600x1600, convert to JPEG
+        // This handles HEIC/HEIF from iPhones and reduces payload before WebSocket send
+        const MAX_DIM = 1600;
+        const QUALITY = 0.85;
+
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+
+          let { width, height } = img;
+
+          // Scale down if needed, maintaining aspect ratio
+          if (width > MAX_DIM || height > MAX_DIM) {
+            const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+            width = Math.round(width * ratio);
+            height = Math.round(height * ratio);
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx2d = canvas.getContext("2d");
+          if (!ctx2d) return;
+          ctx2d.drawImage(img, 0, 0, width, height);
+
+          // Convert to JPEG (handles HEIC/HEIF/WebP/PNG → JPEG)
+          const dataUrl = canvas.toDataURL("image/jpeg", QUALITY);
+          const data = dataUrl.split(",")[1];
+
+          onAttachmentsChange([
+            ...attachments,
+            {
+              type: "image",
+              mediaType: "image/jpeg",
+              data,
+              filename: file.name.replace(/\.(heic|heif)$/i, ".jpg"),
+            },
+          ]);
+        };
+
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          // Fallback: send raw file if canvas can't handle the format
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const [header, data] = dataUrl.split(",");
+            const mediaType = header.match(/data:(.*?);/)?.[1] || "application/octet-stream";
+            onAttachmentsChange([
+              ...attachments,
+              {
+                type: "image",
+                mediaType,
+                data,
+                filename: file.name,
+              },
+            ]);
+          };
+          reader.readAsDataURL(file);
+        };
+
+        img.src = objectUrl;
+      } else {
+        // Non-image files: read as-is
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const [header, data] = dataUrl.split(",");
+          const mediaType = header.match(/data:(.*?);/)?.[1] || "application/octet-stream";
+          onAttachmentsChange([
+            ...attachments,
+            {
+              type: "file",
+              mediaType,
+              data,
+              filename: file.name,
+            },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      }
     },
     [attachments, onAttachmentsChange],
   );
@@ -125,6 +194,8 @@ export function InputArea({
       for (const item of items) {
         if (
           item.type.startsWith("image/") ||
+          item.type === "image/heic" ||
+          item.type === "image/heif" ||
           item.type.startsWith("text/") ||
           item.type === "application/pdf"
         ) {
