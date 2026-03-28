@@ -22,30 +22,45 @@ import { homedir } from "node:os";
 import type { Subprocess } from "bun";
 
 /**
- * Build an augmented PATH that includes common user binary directories.
+ * Capture the full login shell environment by running `zsh -l -c env`.
  *
- * When launched via launchd, the compiled watchdog binary's process.env.PATH
- * is minimal (system dirs only) even with zsh -l, because compiled binaries
- * don't inherit the login shell's PATH expansions. We prepend the known user
- * dirs so all child processes (gateway, agent-host, extensions, scheduled
- * tasks) automatically have access to bun, claude, etc.
+ * Compiled Bun binaries launched via launchd don't inherit the user's login
+ * shell environment — even with the `zsh -l` wrapper in the plist, the binary
+ * sees a minimal process.env. This function spawns a real login shell, runs
+ * `env`, and parses the output so we can inject every variable (API keys,
+ * PATH additions, etc.) into all child processes.
+ *
+ * Falls back to process.env on any error so startup never blocks.
  */
-function buildAugmentedPath(): string {
-  const home = homedir();
-  const userDirs = [
-    join(home, ".bun", "bin"),
-    join(home, ".local", "bin"),
-    join(home, "dotfiles", "scripts"),
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-  ];
-  const existing = (process.env.PATH || "").split(":");
-  const merged = [...userDirs.filter((d) => !existing.includes(d)), ...existing];
-  return merged.join(":");
+async function captureLoginShellEnv(): Promise<Record<string, string>> {
+  try {
+    // -i (interactive) + -l (login) ensures both .zprofile AND .zshrc are
+    // sourced, so files like ~/dotfiles/secrets/apikeys.sh get loaded.
+    const proc = Bun.spawn(["/bin/zsh", "-i", "-l", "-c", "env"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    const env: Record<string, string> = {};
+    for (const line of output.split("\n")) {
+      const idx = line.indexOf("=");
+      if (idx > 0) {
+        env[line.slice(0, idx)] = line.slice(idx + 1);
+      }
+    }
+    return Object.keys(env).length > 10 ? env : { ...(process.env as Record<string, string>) };
+  } catch {
+    return { ...(process.env as Record<string, string>) };
+  }
 }
 
-const AUGMENTED_PATH = buildAugmentedPath();
+// Captured once at startup — all services inherit this full environment.
+const LOGIN_ENV: Record<string, string> = await captureLoginShellEnv();
+log(
+  "INFO",
+  `Login shell env captured: ${Object.keys(LOGIN_ENV).length} variables (OPENAI_API_KEY=${LOGIN_ENV.OPENAI_API_KEY ? "set" : "missing"}, PATH entries=${LOGIN_ENV.PATH?.split(":").length ?? 0})`,
+);
 
 /**
  * Resolve the absolute path to the bun executable.
@@ -259,7 +274,7 @@ export async function startService(
     cwd: service.cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, PATH: AUGMENTED_PATH, FORCE_COLOR: "0" },
+    env: { ...LOGIN_ENV, FORCE_COLOR: "0" },
   });
 
   // Drain child output into the service log asynchronously.
