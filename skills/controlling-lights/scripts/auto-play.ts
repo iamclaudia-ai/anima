@@ -66,8 +66,8 @@ Usage:
   bun scripts/auto-play.ts <playlist.json> --list     List all scenes`);
   process.exit(0);
 }
-
-const resolvedPath = resolve(playlistPath);
+const skillsPath = "/Users/michael/.anima/skills/controlling-lights";
+const resolvedPath = resolve(skillsPath, playlistPath);
 if (!existsSync(resolvedPath)) {
   console.error(`Playlist not found: ${resolvedPath}`);
   process.exit(1);

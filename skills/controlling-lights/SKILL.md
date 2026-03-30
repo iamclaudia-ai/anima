@@ -146,6 +146,8 @@ Command: cd /Users/michael/Projects/iamclaudia-ai/anima/skills/controlling-light
 
 ### Available Playlists
 
+Playlists and state are stored relative to `~/.anima/skills/controlling-lights`. The `auto-play` script will resolve the path automatically.
+
 - `playlists/st-patricks-day.json` — 13 St. Patrick's Day DIY scenes
 
 ### Creating New Playlists
