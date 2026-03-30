@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 struct VoiceModeView: View {
     let appState: AppState
@@ -164,6 +165,7 @@ struct VoiceModeView: View {
 
 private struct VoiceSettingsView: View {
     let appState: AppState
+    @ObservedObject private var audioManager: AudioSessionManager
     @Environment(\.dismiss) private var dismiss
     @State private var host: String
     @State private var token: String
@@ -171,6 +173,7 @@ private struct VoiceSettingsView: View {
 
     init(appState: AppState) {
         self.appState = appState
+        _audioManager = ObservedObject(wrappedValue: appState.audioManager)
         _host = State(initialValue: appState.gatewayHost)
         _token = State(initialValue: appState.gatewayToken)
         _cwd = State(initialValue: appState.workspaceCwd)
@@ -208,8 +211,58 @@ private struct VoiceSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Section("Audio Output") {
+                    if audioManager.currentOutputs.isEmpty {
+                        Text("No active output route detected.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(audioManager.currentOutputs) { output in
+                            LabeledContent(output.name, value: output.detail)
+                        }
+                    }
+
+                    if let input = audioManager.currentInput {
+                        LabeledContent("Input", value: "\(input.name) (\(input.detail))")
+                    }
+
+                    if !audioManager.availableInputs.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Available input routes")
+                                .font(.subheadline.weight(.medium))
+                            ForEach(audioManager.availableInputs) { input in
+                                Text("\(input.name) (\(input.detail))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Route picker")
+                            .font(.subheadline.weight(.medium))
+                        AudioRoutePickerButton()
+                            .frame(height: 44)
+                    }
+
+                    Button(appState.isTestingAudioOutput ? "Playing Test Chime..." : "Play Test Chime") {
+                        appState.playAudioOutputTest()
+                    }
+                    .disabled(appState.isTestingAudioOutput)
+
+                    Text(appState.audioTestStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Use the route picker to switch to CarPlay, Bluetooth, speaker, or other system routes. iOS does not expose a plain list of available outputs here, so the picker is the reliable way to inspect and change them.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                audioManager.refreshRouteSnapshot()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -225,5 +278,18 @@ private struct VoiceSettingsView: View {
                 }
             }
         }
+    }
+}
+
+private struct AudioRoutePickerButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.prioritizesVideoDevices = false
+        picker.activeTintColor = UIColor.systemGreen
+        picker.tintColor = UIColor.systemBlue
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
     }
 }

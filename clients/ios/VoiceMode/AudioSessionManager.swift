@@ -2,6 +2,12 @@ import Foundation
 import AVFoundation
 import Combine
 
+struct AudioRouteDescriptor: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let detail: String
+}
+
 /// Shared audio engine manager that keeps a single AVAudioEngine running
 /// across all voice states (listening, processing, speaking).
 ///
@@ -28,9 +34,14 @@ class AudioSessionManager: ObservableObject {
     /// Callback for route changes (headphones plugged/unplugged, BT)
     var onRouteChange: ((_ reason: AVAudioSession.RouteChangeReason) -> Void)?
 
+    @Published private(set) var currentOutputs: [AudioRouteDescriptor] = []
+    @Published private(set) var currentInput: AudioRouteDescriptor?
+    @Published private(set) var availableInputs: [AudioRouteDescriptor] = []
+
     init() {
         setupEngine()
         registerNotifications()
+        refreshRouteSnapshot()
     }
 
     deinit {
@@ -39,12 +50,18 @@ class AudioSessionManager: ObservableObject {
 
     // MARK: - Audio Session
 
-    /// Configure the shared audio session for simultaneous mic + speaker
+    /// Configure the shared audio session for turn-based voice interaction.
+    ///
+    /// Important: avoid call-style routing (`voiceChat` / HFP), because car
+    /// stereos can interpret that as an active phone call and reject CarPlay or
+    /// media Bluetooth output changes. We want media playback routes for Claudia
+    /// while still recording from the phone's microphone between responses.
     func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [
-                .allowBluetoothHFP,
+            try session.setCategory(.playAndRecord, mode: .default, options: [
+                .allowBluetoothA2DP,
+                .allowAirPlay,
                 .defaultToSpeaker
             ])
             try session.setPreferredInputNumberOfChannels(1)
@@ -52,7 +69,8 @@ class AudioSessionManager: ObservableObject {
                 try session.setPreferredInput(builtInMic)
             }
             try session.setActive(true)
-            print("[AudioSession] Configured: playAndRecord + bluetooth + background")
+            refreshRouteSnapshot()
+            print("[AudioSession] Configured: playAndRecord + media routes + built-in mic preference")
         } catch {
             print("[AudioSession] Configuration error: \(error)")
         }
@@ -183,6 +201,33 @@ class AudioSessionManager: ObservableObject {
         print("[AudioSession] Playback stopped")
     }
 
+    func playTestChime(completion: @escaping (Bool) -> Void) {
+        ensureEngineRunning()
+
+        guard let buffer = makeTestChimeBuffer() else {
+            completion(false)
+            return
+        }
+
+        stopPlayback()
+        scheduleBuffer(buffer) {
+            DispatchQueue.main.async {
+                completion(true)
+            }
+        }
+    }
+
+    func refreshRouteSnapshot() {
+        let session = AVAudioSession.sharedInstance()
+        let route = session.currentRoute
+
+        DispatchQueue.main.async {
+            self.currentOutputs = route.outputs.map(Self.describePort)
+            self.currentInput = route.inputs.first.map(Self.describePort)
+            self.availableInputs = (session.availableInputs ?? []).map(Self.describePort)
+        }
+    }
+
     // MARK: - Scene Phase
 
     /// Call when app enters foreground
@@ -203,6 +248,68 @@ class AudioSessionManager: ObservableObject {
         engine.attach(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: playerFormat)
         print("[AudioSession] Engine configured with player node")
+    }
+
+    private func makeTestChimeBuffer() -> AVAudioPCMBuffer? {
+        let durationSeconds = 0.65
+        let sampleRate = playerFormat.sampleRate
+        let frameCount = AVAudioFrameCount(durationSeconds * sampleRate)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount),
+              let channelData = buffer.floatChannelData?[0] else {
+            return nil
+        }
+
+        buffer.frameLength = frameCount
+
+        for frame in 0..<Int(frameCount) {
+            let t = Double(frame) / sampleRate
+            let progress = t / durationSeconds
+            let envelope = max(0.0, 1.0 - progress)
+            let frequency = progress < 0.5 ? 880.0 : 1320.0
+            let sample = sin(2.0 * .pi * frequency * t) * envelope * 0.28
+            channelData[frame] = Float(sample)
+        }
+
+        return buffer
+    }
+
+    nonisolated private static func describePort(_ port: AVAudioSessionPortDescription) -> AudioRouteDescriptor {
+        AudioRouteDescriptor(
+            id: port.uid,
+            name: port.portName,
+            detail: friendlyName(for: port.portType)
+        )
+    }
+
+    nonisolated private static func friendlyName(for portType: AVAudioSession.Port) -> String {
+        switch portType {
+        case .builtInSpeaker:
+            return "Built-in speaker"
+        case .builtInReceiver:
+            return "Phone receiver"
+        case .builtInMic:
+            return "Built-in microphone"
+        case .headphones:
+            return "Wired headphones"
+        case .headsetMic:
+            return "Headset microphone"
+        case .bluetoothA2DP:
+            return "Bluetooth audio"
+        case .bluetoothHFP:
+            return "Bluetooth hands-free"
+        case .bluetoothLE:
+            return "Bluetooth LE audio"
+        case .carAudio:
+            return "Car audio / CarPlay"
+        case .airPlay:
+            return "AirPlay"
+        case .HDMI:
+            return "HDMI"
+        case .usbAudio:
+            return "USB audio"
+        default:
+            return portType.rawValue
+        }
     }
 
     private func registerNotifications() {
@@ -262,6 +369,7 @@ class AudioSessionManager: ObservableObject {
         }
 
         print("[AudioSession] Route change: \(reason.rawValue)")
+        refreshRouteSnapshot()
 
         switch reason {
         case .oldDeviceUnavailable:

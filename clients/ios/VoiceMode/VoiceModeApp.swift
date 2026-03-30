@@ -14,6 +14,8 @@ class AppState {
     var isConnected = false
     var statusText = "Connecting..."
     var micAvailable = true
+    var isTestingAudioOutput = false
+    var audioTestStatus = "Play a chime to verify the current output route."
     var gatewayHost: String
     var gatewayToken: String
     var workspaceCwd: String
@@ -272,6 +274,44 @@ class AppState {
         default:
             micAvailable = true
             startListening()
+        }
+    }
+
+    func playAudioOutputTest() {
+        guard !isTestingAudioOutput else { return }
+        guard voiceState != .speaking, voiceState != .processing else {
+            audioTestStatus = "Wait for Claudia to finish before testing output."
+            return
+        }
+
+        let shouldResumeListening = isConnected && (voiceState == .listening || speechRecognizer.isListening)
+        let priorVoiceState = voiceState
+        let priorStatusText = statusText
+
+        if shouldResumeListening {
+            speechRecognizer.stopListening()
+            speechRecognizer.setTranscriptionEnabled(false)
+        }
+
+        isTestingAudioOutput = true
+        audioTestStatus = "Playing test chime..."
+        voiceState = .idle
+        statusText = "Testing audio output..."
+
+        audioManager.playTestChime { [weak self] success in
+            guard let self else { return }
+            self.isTestingAudioOutput = false
+            self.audioTestStatus = success
+                ? "Test chime played on the selected output."
+                : "Test chime failed to play."
+
+            if shouldResumeListening && self.isConnected {
+                self.startListening()
+                return
+            }
+
+            self.voiceState = priorVoiceState == .listening ? .idle : priorVoiceState
+            self.statusText = priorStatusText
         }
     }
 
