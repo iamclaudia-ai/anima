@@ -10,7 +10,8 @@
  * 1. Connect to DB
  * 2. Scan all JSONL files in watchPath — incremental import (skip unchanged, import new/grown files)
  * 3. Start chokidar watcher for real-time changes
- * 4. Register gateway.heartbeat handler for marking conversations as ready
+ * 4. Register gateway.heartbeat handler for singleton lock renewal
+ * 5. Start a scheduler actor for ready/queue progression
  *
  * All files are keyed relative to watchPath, so importing from
  * ~/.claude/projects-backup and watching ~/.claude/projects produce
@@ -62,6 +63,7 @@ import { LibbyWorker, type LibbyConfig } from "./libby";
 import { memoryExtensionMachine } from "./state-machine";
 import { ingestMemoryDocument, scanAndIngestMemoryDirCooperative } from "./document-ingest";
 import { DocumentWatcher } from "./document-watcher";
+import { MemoryScheduler } from "./scheduler";
 
 const noopLogger: LoggerLike = {
   info() {},
@@ -201,6 +203,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
   let watcher: MemoryWatcher | null = null;
   let docWatcher: DocumentWatcher | null = null;
   let worker: LibbyWorker | null = null;
+  let scheduler: MemoryScheduler | null = null;
   let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
   let isLockOwner = false;
   let lockState: "held" | "contended" | "released" = "released";
@@ -454,6 +457,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             isLockOwner = false;
             lockState = "contended";
             fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
+            scheduler?.stop();
+            scheduler = null;
             const stopPromise = worker?.stop();
             if (stopPromise) void stopPromise.catch(() => {});
             worker = null;
@@ -519,6 +524,18 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             worker = new LibbyWorker(libbyConfig, ctx, fileLog);
             worker.start();
 
+            scheduler = new MemoryScheduler(
+              {
+                gapMinutes: cfg.conversationGapMinutes,
+                autoProcess: cfg.autoProcess,
+                processBatchSize: cfg.processBatchSize,
+              },
+              ctx,
+              fileLog,
+              () => worker?.wake(),
+            );
+            scheduler.start();
+
             // Check if there are already queued conversations from crash recovery
             const queuedCount = getQueuedCount();
             if (queuedCount > 0) {
@@ -533,13 +550,19 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           }
         };
 
-        // Fast path for already-running snapshots and slow path for async transition completion.
-        void startWorkerWhenRunning();
-        const runningSubscription = actor.subscribe((snapshot) => {
-          if (snapshot.value !== "running") return;
-          runningSubscription.unsubscribe();
+        // Handle both already-running snapshots and async transition completion without
+        // relying on subscription timing.
+        let runningSubscription: { unsubscribe(): void } | null = null;
+        const maybeStartWorker = () => {
+          if (actor.getSnapshot().value !== "running") return;
+          runningSubscription?.unsubscribe();
+          runningSubscription = null;
           void startWorkerWhenRunning();
+        };
+        runningSubscription = actor.subscribe(() => {
+          maybeStartWorker();
         });
+        maybeStartWorker();
       } catch (error) {
         fileLog(
           "ERROR",
@@ -566,6 +589,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       if (docWatcher) {
         await docWatcher.stop();
         docWatcher = null;
+      }
+
+      if (scheduler) {
+        scheduler.stop();
+        scheduler = null;
       }
 
       // Stop Libby worker first
@@ -611,6 +639,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             ? Math.max(0, Math.round(singletonLock.ageMs / 1000))
             : 0;
           const watcherDiag = watcher?.getDiagnostics() ?? null;
+          const schedulerDiag = scheduler?.getDiagnostics() ?? null;
 
           const statusDisplay: Record<
             string,
@@ -685,6 +714,26 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               {
                 label: "Last Ingest File",
                 value: compactHomePath(watcherDiag?.lastIngestFile ?? null),
+              },
+              {
+                label: "Scheduler Running",
+                value: schedulerDiag ? String(schedulerDiag.running) : "false",
+              },
+              {
+                label: "Scheduler Last Run",
+                value: formatElapsedSince(schedulerDiag?.lastRunAt ?? null),
+              },
+              {
+                label: "Scheduler Last Ready",
+                value: String(schedulerDiag?.lastReadyCount ?? 0),
+              },
+              {
+                label: "Scheduler Last Queued",
+                value: String(schedulerDiag?.lastQueuedCount ?? 0),
+              },
+              {
+                label: "Scheduler Last Error",
+                value: schedulerDiag?.lastError ?? "none",
               },
               { label: "Last Error", value: watcherDiag?.lastError ?? "none" },
               { label: "Files Tracked", value: String(stats.fileCount) },

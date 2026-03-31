@@ -9,8 +9,23 @@ import { acquireMemoryExtensionLock, closeDb, getDb, setDbPathForTests } from ".
 function setupSchema(): void {
   const db = getDb();
   db.exec(`
-    CREATE TABLE IF NOT EXISTS memory_file_states (file_path TEXT PRIMARY KEY);
-    CREATE TABLE IF NOT EXISTS memory_transcript_entries (id INTEGER PRIMARY KEY AUTOINCREMENT);
+    CREATE TABLE IF NOT EXISTS memory_file_states (
+      file_path TEXT PRIMARY KEY,
+      source TEXT,
+      status TEXT,
+      last_modified INTEGER,
+      file_size INTEGER,
+      last_processed_offset INTEGER DEFAULT 0,
+      last_committed_entry_id INTEGER,
+      last_entry_timestamp TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS memory_transcript_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_file TEXT,
+      timestamp TEXT
+    );
     CREATE TABLE IF NOT EXISTS memory_conversations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT,
@@ -39,6 +54,13 @@ function setupSchema(): void {
       locked_at TEXT NOT NULL DEFAULT (datetime('now')),
       locked_by_pid INTEGER NOT NULL,
       locked_by_machine TEXT
+    );
+    CREATE TABLE IF NOT EXISTS memory_extension_locks (
+      lock_id TEXT PRIMARY KEY,
+      owner_pid INTEGER NOT NULL,
+      acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 }
@@ -100,6 +122,19 @@ function createTestContext(): ExtensionContext {
   };
 }
 
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 3000,
+  intervalMs = 25,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await Bun.sleep(intervalMs);
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms`);
+}
+
 describe("memory health lock status", () => {
   let tempDir: string;
 
@@ -138,7 +173,33 @@ describe("memory health lock status", () => {
       const watcherMetric = health.metrics.find((m) => m.label === "Last File Change");
       expect(watcherMetric?.value).toBe("n/a");
     } finally {
+      await ext.stop();
       blocker.kill();
     }
+  });
+
+  it("starts the scheduler independently of gateway heartbeat traffic", async () => {
+    const ext = createMemoryExtension({ watch: false, watchPath: join(tempDir, "logs") });
+
+    await ext.start(createTestContext());
+    await waitFor(async () => {
+      const health = (await ext.handleMethod("memory.health_check", {})) as {
+        metrics: Array<{ label: string; value: string }>;
+      };
+      return health.metrics.some(
+        (metric) => metric.label === "Scheduler Running" && metric.value === "true",
+      );
+    });
+
+    const health = (await ext.handleMethod("memory.health_check", {})) as {
+      metrics: Array<{ label: string; value: string }>;
+    };
+    const schedulerRunning = health.metrics.find((m) => m.label === "Scheduler Running");
+    const schedulerLastRun = health.metrics.find((m) => m.label === "Scheduler Last Run");
+
+    expect(schedulerRunning?.value).toBe("true");
+    expect(schedulerLastRun?.value).not.toBe("n/a");
+
+    await ext.stop();
   });
 });

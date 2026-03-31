@@ -12,20 +12,14 @@
  * - running: Fully operational, watching files and processing
  * - stopping: Shutting down cleanly
  *
- * The gateway heartbeat (every 60s) sends HEARTBEAT events to update last_heartbeat timestamp.
- * This is used to detect stale processes on startup.
+ * The gateway heartbeat (every 60s) only updates liveness state.
+ * Scheduler/business progression runs outside the state machine.
  */
 
 import { setup, assign, fromPromise } from "xstate";
 import type { ExtensionContext } from "@anima/shared";
 import { existsSync } from "node:fs";
-import {
-  getDb,
-  getProcessingConversations,
-  resetConversationToQueued,
-  queueConversations,
-  markConversationsReady,
-} from "./db";
+import { getDb, getProcessingConversations, resetConversationToQueued } from "./db";
 import { recoverStuckFiles, ingestDirectoryCooperative, type IngestResult } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import type { MemoryConfig } from "./index";
@@ -294,38 +288,7 @@ export const memoryExtensionMachine = setup({
       on: {
         HEARTBEAT: {
           target: "running",
-          actions: [
-            "updateHeartbeat",
-            ({ context }) => {
-              // Mark conversations as ready based on time gap
-              try {
-                const marked = markConversationsReady(context.config.conversationGapMinutes);
-                if (marked > 0) {
-                  context.fileLog("INFO", `Marked ${marked} conversations as ready (heartbeat)`);
-                  context.ctx?.emit("memory.conversation_ready", {
-                    count: marked,
-                  });
-                }
-
-                // Auto-process if enabled — check independently of markConversationsReady
-                // since conversations can be marked ready by other paths (e.g. size-split segments)
-                if (context.config.autoProcess) {
-                  const queued = queueConversations(context.config.processBatchSize);
-                  if (queued > 0) {
-                    context.fileLog("INFO", `Auto-queued ${queued} conversations for processing`);
-                    context.ctx?.emit("memory.processing_started", {
-                      count: queued,
-                    });
-                  }
-                }
-              } catch (error) {
-                context.fileLog(
-                  "ERROR",
-                  `Heartbeat handler error: ${error instanceof Error ? error.message : String(error)}`,
-                );
-              }
-            },
-          ],
+          actions: ["updateHeartbeat"],
         },
         STOP: {
           target: "stopping",
