@@ -235,4 +235,52 @@ describe("runExtensionHost", () => {
     expect(err.ok).toBe(false);
     expect(String(err.error)).toContain("fixture boom");
   });
+
+  it("lets health checks and heartbeat bypass a blocked regular request", async () => {
+    host = new HostHarness();
+    await host.waitFor((m) => m.type === "register");
+
+    host.send({
+      type: "req",
+      id: "block-1",
+      method: "fixture.block",
+      params: { ms: 400 },
+      connectionId: "conn-block",
+      tags: ["blocked"],
+    });
+
+    host.send({
+      type: "req",
+      id: "health-1",
+      method: "fixture.health_check",
+      params: {},
+      connectionId: "conn-health",
+      tags: ["health"],
+    });
+
+    const health = await host.waitFor((m) => m.type === "res" && m.id === "health-1");
+    expect(health.ok).toBe(true);
+    expect(health.payload).toEqual({
+      ok: true,
+      connectionId: "conn-health",
+      tags: ["health"],
+    });
+
+    host.send({
+      type: "event",
+      event: "gateway.heartbeat",
+      payload: {},
+      connectionId: "conn-heartbeat",
+      tags: ["heartbeat"],
+    });
+
+    const heartbeatEvent = await host.waitFor(
+      (m) => m.type === "event" && m.event === "fixture.heartbeat_seen",
+    );
+    expect(heartbeatEvent.connectionId).toBe("conn-heartbeat");
+    expect(heartbeatEvent.tags).toEqual(["heartbeat"]);
+
+    const blockRes = await host.waitFor((m) => m.type === "res" && m.id === "block-1");
+    expect(blockRes.ok).toBe(true);
+  });
 });

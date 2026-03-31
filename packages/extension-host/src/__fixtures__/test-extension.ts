@@ -29,6 +29,16 @@ function createFixtureExtension(): AnimaExtension {
         description: "Throw an error for protocol error-path testing",
         inputSchema: z.object({}),
       },
+      {
+        name: "fixture.block",
+        description: "Sleep for a bounded duration before resolving",
+        inputSchema: z.object({ ms: z.number().optional() }),
+      },
+      {
+        name: "fixture.health_check",
+        description: "Health check fixture method",
+        inputSchema: z.object({}),
+      },
     ],
     events: ["fixture.*"],
     sourceRoutes: ["fixture-src"],
@@ -37,6 +47,9 @@ function createFixtureExtension(): AnimaExtension {
       ctx.on("trigger.call", async () => {
         await ctx!.call("from.event", { via: "event" });
         ctx!.emit("fixture.after_event", { ok: true });
+      });
+      ctx.on("gateway.heartbeat", async () => {
+        ctx!.emit("fixture.heartbeat_seen", { ok: true });
       });
     },
     async stop() {
@@ -59,6 +72,18 @@ function createFixtureExtension(): AnimaExtension {
       }
       if (method === "fixture.fail") {
         throw new Error("fixture boom");
+      }
+      if (method === "fixture.block") {
+        const ms = typeof params.ms === "number" ? params.ms : 500;
+        await Bun.sleep(ms);
+        return { ok: true, ms };
+      }
+      if (method === "fixture.health_check") {
+        return {
+          ok: true,
+          connectionId: ctx?.connectionId ?? null,
+          tags: ctx?.tags ?? null,
+        };
       }
       throw new Error(`Unknown method: ${method}`);
     },

@@ -15,6 +15,7 @@
 import type { AnimaExtension, ExtensionContext, GatewayEvent } from "@anima/shared";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createLogger, matchesEventPattern } from "@anima/shared";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -23,6 +24,14 @@ import { createExtensionStore } from "./store";
 // ── Types ──────────────────────────────────────────────────────
 
 type ExtensionFactory = (config: Record<string, unknown>) => AnimaExtension;
+
+interface EnvelopeContext {
+  connectionId: string | null;
+  tags: string[] | null;
+  traceId: string | null;
+  depth: number;
+  deadlineMs: number | null;
+}
 
 interface PendingCall {
   resolve: (value: unknown) => void;
@@ -85,13 +94,14 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     payload: unknown,
     options?: { source?: string; connectionId?: string; tags?: string[] },
   ): void {
+    const ambient = getEnvelopeContext();
     write({
       type: "event",
       event: type,
       payload,
       source: options?.source,
-      connectionId: options?.connectionId ?? currentConnectionId,
-      tags: options?.tags ?? currentTags,
+      connectionId: options?.connectionId ?? ambient.connectionId,
+      tags: options?.tags ?? ambient.tags,
     });
   }
 
@@ -107,13 +117,19 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
   const pendingCalls = new Map<string, PendingCall>();
   const CALL_TIMEOUT = 300_000; // 5 min
+  const envelopeContext = new AsyncLocalStorage<EnvelopeContext>();
 
-  // Current call context — set per inbound request from gateway
-  let currentConnectionId: string | null = null;
-  let currentTags: string[] | null = null;
-  let currentTraceId: string | null = null;
-  let currentDepth = 0;
-  let currentDeadlineMs: number | null = null;
+  function getEnvelopeContext(): EnvelopeContext {
+    return (
+      envelopeContext.getStore() ?? {
+        connectionId: null,
+        tags: null,
+        traceId: null,
+        depth: 0,
+        deadlineMs: null,
+      }
+    );
+  }
 
   // ── Event Bus ───────────────────────────────────────────────
 
@@ -176,7 +192,8 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
         const id = randomUUID();
         const now = Date.now();
-        let deadlineMs = currentDeadlineMs;
+        const ambient = getEnvelopeContext();
+        let deadlineMs = ambient.deadlineMs;
         if (!deadlineMs) {
           deadlineMs = now + CALL_TIMEOUT;
         }
@@ -205,21 +222,21 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
             id,
             method,
             params: params ?? {},
-            connectionId: currentConnectionId,
-            tags: currentTags,
-            traceId: currentTraceId || randomUUID(),
-            depth: currentDepth + 1,
+            connectionId: ambient.connectionId,
+            tags: ambient.tags,
+            traceId: ambient.traceId || randomUUID(),
+            depth: ambient.depth + 1,
             deadlineMs,
           });
         });
       },
 
       get connectionId(): string | null {
-        return currentConnectionId;
+        return getEnvelopeContext().connectionId;
       },
 
       get tags(): string[] | null {
-        return currentTags;
+        return getEnvelopeContext().tags;
       },
 
       config,
@@ -285,66 +302,53 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       const id = msg.id as string;
       const method = msg.method as string;
       const params = (msg.params as Record<string, unknown>) || {};
-
-      // Set per-request context from envelope
-      const prevConnectionId = currentConnectionId;
-      const prevTags = currentTags;
-      const prevTraceId = currentTraceId;
-      const prevDepth = currentDepth;
-      const prevDeadlineMs = currentDeadlineMs;
-      currentConnectionId = (msg.connectionId as string) || null;
-      currentTags = (msg.tags as string[]) || null;
-      currentTraceId = (msg.traceId as string) || null;
-      currentDepth = (msg.depth as number) || 0;
-      currentDeadlineMs = (msg.deadlineMs as number) || null;
-
-      const restoreContext = () => {
-        currentConnectionId = prevConnectionId;
-        currentTags = prevTags;
-        currentTraceId = prevTraceId;
-        currentDepth = prevDepth;
-        currentDeadlineMs = prevDeadlineMs;
+      const context: EnvelopeContext = {
+        connectionId: (msg.connectionId as string) || null,
+        tags: (msg.tags as string[]) || null,
+        traceId: (msg.traceId as string) || null,
+        depth: (msg.depth as number) || 0,
+        deadlineMs: (msg.deadlineMs as number) || null,
       };
 
       if (!extension) {
         writeResponse(id, false, "Extension not loaded");
-        restoreContext();
         return;
       }
+      const activeExtension = extension;
 
       // Special internal methods
       if (method === "__health") {
-        writeResponse(id, true, extension.health());
-        restoreContext();
+        writeResponse(id, true, activeExtension.health());
         return;
       }
 
       if (method === "__sourceResponse") {
-        const source = params.source as string;
-        const event = params.event as GatewayEvent;
-        if (extension.handleSourceResponse) {
-          try {
-            await extension.handleSourceResponse(source, event);
-            writeResponse(id, true, { status: "ok" });
-          } catch (error) {
-            writeResponse(id, false, String(error));
+        await envelopeContext.run(context, async () => {
+          const source = params.source as string;
+          const event = params.event as GatewayEvent;
+          if (activeExtension.handleSourceResponse) {
+            try {
+              await activeExtension.handleSourceResponse(source, event);
+              writeResponse(id, true, { status: "ok" });
+            } catch (error) {
+              writeResponse(id, false, String(error));
+            }
+          } else {
+            writeResponse(id, false, "Extension does not handle source responses");
           }
-        } else {
-          writeResponse(id, false, "Extension does not handle source responses");
-        }
-        restoreContext();
+        });
         return;
       }
 
       // Regular method call
-      try {
-        const result = await extension.handleMethod(method, params);
-        writeResponse(id, true, result);
-      } catch (error) {
-        writeResponse(id, false, String(error));
-      }
-
-      restoreContext();
+      await envelopeContext.run(context, async () => {
+        try {
+          const result = await activeExtension.handleMethod(method, params);
+          writeResponse(id, true, result);
+        } catch (error) {
+          writeResponse(id, false, String(error));
+        }
+      });
     } else if (msg.type === "call_res") {
       const id = msg.id as string;
       const pending = pendingCalls.get(id);
@@ -368,14 +372,18 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         connectionId: msg.connectionId as string | undefined,
         tags: (msg.tags as string[]) || undefined,
       };
-      // Set context so any ctx.emit() during handler gets the right connectionId + tags
-      const prevConnectionId = currentConnectionId;
-      const prevTags = currentTags;
-      currentConnectionId = event.connectionId || null;
-      currentTags = event.tags || null;
-      await broadcastToHandlers(event);
-      currentConnectionId = prevConnectionId;
-      currentTags = prevTags;
+      await envelopeContext.run(
+        {
+          connectionId: event.connectionId || null,
+          tags: event.tags || null,
+          traceId: null,
+          depth: 0,
+          deadlineMs: null,
+        },
+        async () => {
+          await broadcastToHandlers(event);
+        },
+      );
     }
   }
 
@@ -397,6 +405,43 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     process.stdin.removeAllListeners("end");
     process.stdin.removeAllListeners("error");
 
+    let regularLane = Promise.resolve();
+
+    const isControlLine = (line: string): boolean => {
+      try {
+        const msg = JSON.parse(line) as Record<string, unknown>;
+        if (msg.type === "call_res") {
+          return true;
+        }
+        if (msg.type === "req") {
+          const method = msg.method as string | undefined;
+          return method === "__health" || method?.endsWith(".health_check") === true;
+        }
+        if (msg.type === "event") {
+          return msg.event === "gateway.heartbeat";
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    };
+
+    const dispatchLine = (line: string): void => {
+      const handler = import.meta.hot?.data?.handleMessage || handleMessage;
+      if (isControlLine(line)) {
+        void handler(line).catch((error: unknown) => {
+          hostLog.error("Control lane handler failed", { error: String(error) });
+        });
+        return;
+      }
+
+      regularLane = regularLane
+        .then(() => handler(line))
+        .catch((error: unknown) => {
+          hostLog.error("Regular lane handler failed", { error: String(error) });
+        });
+    };
+
     // Preserve buffer across HMR reloads so partial lines aren't lost
     let buffer = import.meta.hot?.data?.stdinBuffer ?? "";
 
@@ -416,9 +461,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         }
 
         if (line.length > 0) {
-          // Use latest handler from hot data (survives HMR reloads)
-          const handler = import.meta.hot?.data?.handleMessage || handleMessage;
-          await handler(line);
+          dispatchLine(line);
         }
       }
     });
