@@ -59,10 +59,11 @@ import {
 import { ingestFile, ingestDirectoryCooperative } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import { formatTranscript } from "./transcript-formatter";
-import { LibbyWorker, type LibbyConfig } from "./libby";
+import { LibbyWorker, pushMemoryChanges, type LibbyConfig } from "./libby";
 import { memoryExtensionMachine } from "./state-machine";
 import { ingestMemoryDocument, scanAndIngestMemoryDirCooperative } from "./document-ingest";
 import { DocumentWatcher } from "./document-watcher";
+import { RepoSyncService } from "./repo-sync";
 import { MemoryScheduler } from "./scheduler";
 
 const noopLogger: LoggerLike = {
@@ -203,6 +204,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
   let watcher: MemoryWatcher | null = null;
   let docWatcher: DocumentWatcher | null = null;
   let worker: LibbyWorker | null = null;
+  let repoSync: RepoSyncService | null = null;
   let scheduler: MemoryScheduler | null = null;
   let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
   let isLockOwner = false;
@@ -459,6 +461,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
             scheduler?.stop();
             scheduler = null;
+            const repoSyncStop = repoSync?.stop();
+            if (repoSyncStop) void repoSyncStop.catch(() => {});
+            repoSync = null;
             const stopPromise = worker?.stop();
             if (stopPromise) void stopPromise.catch(() => {});
             worker = null;
@@ -516,12 +521,15 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               );
             }
 
+            repoSync = new RepoSyncService(() => pushMemoryChanges(fileLog), fileLog);
+            repoSync.start();
+
             const libbyConfig: LibbyConfig = {
               model: cfg.model,
               timezone: cfg.timezone,
               minConversationMessages: cfg.minConversationMessages,
             };
-            worker = new LibbyWorker(libbyConfig, ctx, fileLog);
+            worker = new LibbyWorker(libbyConfig, ctx, fileLog, repoSync);
             worker.start();
 
             scheduler = new MemoryScheduler(
@@ -596,6 +604,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         scheduler = null;
       }
 
+      if (repoSync) {
+        await repoSync.stop();
+        repoSync = null;
+      }
+
       // Stop Libby worker first
       if (worker) {
         await worker.stop();
@@ -640,6 +653,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             : 0;
           const watcherDiag = watcher?.getDiagnostics() ?? null;
           const schedulerDiag = scheduler?.getDiagnostics() ?? null;
+          const repoSyncDiag = repoSync?.getDiagnostics() ?? null;
 
           const statusDisplay: Record<
             string,
@@ -734,6 +748,26 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               {
                 label: "Scheduler Last Error",
                 value: schedulerDiag?.lastError ?? "none",
+              },
+              {
+                label: "Repo Sync Running",
+                value: repoSyncDiag ? String(repoSyncDiag.running) : "false",
+              },
+              {
+                label: "Repo Sync Active",
+                value: repoSyncDiag ? String(repoSyncDiag.syncing) : "false",
+              },
+              {
+                label: "Repo Sync Pending",
+                value: String(repoSyncDiag?.pendingRequests ?? 0),
+              },
+              {
+                label: "Repo Sync Last Run",
+                value: formatElapsedSince(repoSyncDiag?.lastCompletedAt ?? null),
+              },
+              {
+                label: "Repo Sync Last Error",
+                value: repoSyncDiag?.lastError ?? "none",
               },
               { label: "Last Error", value: watcherDiag?.lastError ?? "none" },
               { label: "Files Tracked", value: String(stats.fileCount) },

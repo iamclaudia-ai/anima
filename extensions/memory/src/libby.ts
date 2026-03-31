@@ -96,6 +96,10 @@ export interface LibbyConfig {
   minConversationMessages: number;
 }
 
+export interface RepoSyncRequester {
+  requestSync(reason?: string): void;
+}
+
 // ============================================================================
 // Libby Session (RPC via ctx.call)
 // ============================================================================
@@ -274,6 +278,7 @@ export class LibbyWorker {
     private config: LibbyConfig,
     private ctx: ExtensionContext | null,
     private log: (level: string, msg: string) => void,
+    private repoSync: RepoSyncRequester | null = null,
   ) {}
 
   /**
@@ -509,6 +514,10 @@ ${transcript.text}`;
             "INFO",
             `Libby: [${conv.id}] Archived in ${elapsed}s — ${filesWritten.length} files changed`,
           );
+        }
+
+        if (filesWritten.length > 0) {
+          this.repoSync?.requestSync(`conversation:${conv.id}`);
         }
       }
 
@@ -747,9 +756,6 @@ async function commitMemoryChanges(
     const commitHash = commitHashResult.stdout;
     log("INFO", `Libby: Git committed ${filesWritten.length} files (${commitHash})`);
 
-    // Push to remote (rebase first to handle concurrent writes from other nodes)
-    await pushMemoryChanges(log);
-
     return filesWritten;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -762,7 +768,7 @@ async function commitMemoryChanges(
  * Pull with rebase then push ~/memory/ to remote.
  * Best-effort — network failures are logged but don't block processing.
  */
-async function pushMemoryChanges(log: (level: string, msg: string) => void): Promise<void> {
+export async function pushMemoryChanges(log: (level: string, msg: string) => void): Promise<void> {
   try {
     // Rebase local commits on top of remote to keep history linear
     const pullResult = await runCommand(["git", "pull", "--rebase"], MEMORY_ROOT);
