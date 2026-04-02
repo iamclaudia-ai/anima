@@ -4,6 +4,9 @@
  * Preview and define animation sequences from sprite sheets.
  * Each sprite sheet is 4 columns × 6 rows = 24 frames.
  * Frame 0 = top-left, Frame 23 = bottom-right.
+ *
+ * Fixed frame size: 418w × 428h (extra pixels at sheet edges ignored).
+ * Row N starts at Y = N * 428 in the sprite sheet.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -12,6 +15,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const COLS = 4;
 const ROWS = 6;
 const TOTAL_FRAMES = COLS * ROWS;
+const FRAME_W = 418; // fixed frame width in sprite pixels
+const FRAME_H = 428; // fixed frame height in sprite pixels
+const GUIDE_BASE = 400; // default guide Y offset from row start
 
 const SPRITE_SHEETS = [
   { name: "Sheet 1", src: "/bogart/sprites/sprite1.png" },
@@ -22,10 +28,8 @@ const SPRITE_SHEETS = [
 // ── Types ──────────────────────────────────────────────────
 interface AnimationDef {
   name: string;
-  sheet: number; // 0-based index into SPRITE_SHEETS
-  frames: number[]; // frame indices (0-23)
-  offsetX?: number; // px offset to adjust alignment
-  offsetY?: number;
+  sheet: number;
+  frames: number[];
 }
 
 // ── Predefined animations (editable) ───────────────────────
@@ -46,23 +50,26 @@ export function BogartPage() {
   const [activeAnimation, setActiveAnimation] = useState<AnimationDef | null>(null);
   const [newAnimName, setNewAnimName] = useState("");
   const [sheetDimensions, setSheetDimensions] = useState<{ w: number; h: number } | null>(null);
-  const [offsetX, setOffsetX] = useState(0);
-  const [offsetY, setOffsetY] = useState(0);
+  // Per-row guide line offsets from GUIDE_BASE (6 rows × 3 sheets)
+  const [rowOffsets, setRowOffsets] = useState<number[][]>([
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+  ]);
   const [zoom, setZoom] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
-  const [guideLinePos, setGuideLinePos] = useState(33); // % from bottom
   const [showGuideLine, setShowGuideLine] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load sheet dimensions
+  // Load sheet dimensions (for background-size)
   useEffect(() => {
     const img = new Image();
     img.onload = () => setSheetDimensions({ w: img.naturalWidth, h: img.naturalHeight });
     img.src = SPRITE_SHEETS[selectedSheet].src;
   }, [selectedSheet]);
 
-  const frameW = sheetDimensions ? sheetDimensions.w / COLS : 0;
-  const frameH = sheetDimensions ? sheetDimensions.h / ROWS : 0;
+  const displayW = FRAME_W * zoom;
+  const displayH = FRAME_H * zoom;
 
   // Animation playback
   useEffect(() => {
@@ -99,20 +106,16 @@ export function BogartPage() {
       name: newAnimName.trim(),
       sheet: selectedSheet,
       frames: [...selectedFrames],
-      offsetX,
-      offsetY,
     };
     setAnimations((prev) => [...prev, anim]);
     setNewAnimName("");
     setSelectedFrames([]);
-  }, [newAnimName, selectedSheet, selectedFrames, offsetX, offsetY]);
+  }, [newAnimName, selectedSheet, selectedFrames]);
 
   // Play an animation
   const playAnimation = useCallback((anim: AnimationDef) => {
     setSelectedSheet(anim.sheet);
     setActiveAnimation(anim);
-    setOffsetX(anim.offsetX || 0);
-    setOffsetY(anim.offsetY || 0);
     setIsPlaying(true);
   }, []);
 
@@ -121,33 +124,58 @@ export function BogartPage() {
     setActiveAnimation(null);
   }, []);
 
-  // Export all animations as JSON
+  // Export all animations as JSON (includes row offsets for frame height computation)
   const exportAnimations = useCallback(() => {
-    const json = JSON.stringify(
-      animations.filter((a) => !a.name.startsWith("All Frames")),
-      null,
-      2,
-    );
+    const data = {
+      frameSize: { w: FRAME_W, h: FRAME_H },
+      guideBase: GUIDE_BASE,
+      rowOffsets,
+      animations: animations.filter((a) => !a.name.startsWith("All Frames")),
+    };
+    const json = JSON.stringify(data, null, 2);
     navigator.clipboard.writeText(json);
     alert("Copied to clipboard!");
-  }, [animations]);
+  }, [animations, rowOffsets]);
 
-  // Get frame position for CSS background-position
+  // Get row for a frame index
+  const getRow = (frameIdx: number) => Math.floor(frameIdx / COLS);
+
+  // Get frame position in sprite sheet (pixel coords)
   const getFramePos = (frameIdx: number) => {
     const col = frameIdx % COLS;
-    const row = Math.floor(frameIdx / COLS);
-    return { x: col * frameW, y: row * frameH };
+    const row = getRow(frameIdx);
+    return { x: col * FRAME_W, y: row * FRAME_H };
   };
 
-  const displayW = frameW * zoom;
-  const displayH = frameH * zoom;
+  // Get guide line Y position (absolute in sprite sheet) for a row
+  const getGuideY = (row: number) => {
+    return row * FRAME_H + GUIDE_BASE + (rowOffsets[selectedSheet]?.[row] ?? 0);
+  };
+
+  // Guide line position within a frame (pixels from top of frame)
+  const getGuideInFrame = (row: number) => {
+    return GUIDE_BASE + (rowOffsets[selectedSheet]?.[row] ?? 0);
+  };
+
+  // Update a row offset
+  const setRowOffset = (row: number, value: number) => {
+    setRowOffsets((prev) => {
+      const next = prev.map((r) => [...r]);
+      next[selectedSheet][row] = value;
+      return next;
+    });
+  };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: "0 auto", color: "#e0e0e0" }}>
+    <div style={{ padding: 24, maxWidth: 1400, margin: "0 auto", color: "#e0e0e0" }}>
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>🐱 Bogart Sprite Editor</h1>
-      <p style={{ color: "#888", marginBottom: 24 }}>
-        Define animation sequences from sprite sheets. Click frames to select, then save as named
-        animations.
+      <p style={{ color: "#888", marginBottom: 4 }}>
+        Frame size: {FRAME_W}×{FRAME_H}px. Row N starts at Y = N × {FRAME_H}. Guide line at{" "}
+        {GUIDE_BASE}px from row start (adjustable per row).
+      </p>
+      <p style={{ color: "#666", marginBottom: 24, fontSize: 13 }}>
+        Click frames to select animation sequence, then save. Adjust guide line to mark shadow
+        bottom for each row.
       </p>
 
       {/* ── Controls ──────────────────────────────────── */}
@@ -210,30 +238,6 @@ export function BogartPage() {
           />
         </div>
 
-        <div>
-          <label style={{ fontSize: 12, color: "#888" }}>Offset X: {offsetX}px</label>
-          <input
-            type="range"
-            min={-50}
-            max={50}
-            value={offsetX}
-            onChange={(e) => setOffsetX(Number(e.target.value))}
-            style={{ display: "block", width: 120 }}
-          />
-        </div>
-
-        <div>
-          <label style={{ fontSize: 12, color: "#888" }}>Offset Y: {offsetY}px</label>
-          <input
-            type="range"
-            min={-50}
-            max={50}
-            value={offsetY}
-            onChange={(e) => setOffsetY(Number(e.target.value))}
-            style={{ display: "block", width: 120 }}
-          />
-        </div>
-
         <label
           style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 13 }}
         >
@@ -253,24 +257,8 @@ export function BogartPage() {
             checked={showGuideLine}
             onChange={(e) => setShowGuideLine(e.target.checked)}
           />
-          Shadow Guide
+          Guide Line
         </label>
-
-        {showGuideLine && (
-          <div>
-            <label style={{ fontSize: 12, color: "#888" }}>
-              Guide: {guideLinePos}% from bottom
-            </label>
-            <input
-              type="range"
-              min={10}
-              max={50}
-              value={guideLinePos}
-              onChange={(e) => setGuideLinePos(Number(e.target.value))}
-              style={{ display: "block", width: 120 }}
-            />
-          </div>
-        )}
       </div>
 
       {/* ── Main layout: Grid + Preview ───────────────── */}
@@ -297,9 +285,11 @@ export function BogartPage() {
           >
             {Array.from({ length: TOTAL_FRAMES }, (_, i) => {
               const pos = getFramePos(i);
+              const row = getRow(i);
               const isSelected = selectedFrames.includes(i);
               const isCurrentFrame = currentFrame === i && isPlaying;
               const selIdx = selectedFrames.indexOf(i);
+              const guideFromTop = getGuideInFrame(row);
               return (
                 <div
                   key={i}
@@ -337,16 +327,16 @@ export function BogartPage() {
                   >
                     {i}
                   </span>
-                  {/* Shadow guide line */}
+                  {/* Guide line — absolute position within frame */}
                   {showGuideLine && (
                     <div
                       style={{
                         position: "absolute",
-                        bottom: `${guideLinePos}%`,
+                        top: guideFromTop * zoom,
                         left: 0,
                         right: 0,
                         height: 1,
-                        background: "rgba(255, 100, 100, 0.6)",
+                        background: "rgba(255, 100, 100, 0.7)",
                         pointerEvents: "none",
                       }}
                     />
@@ -378,6 +368,47 @@ export function BogartPage() {
               );
             })}
           </div>
+
+          {/* Per-row guide line offsets */}
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: "#aaa" }}>
+              Row Guide Offsets — {SPRITE_SHEETS[selectedSheet].name}
+            </h3>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {Array.from({ length: ROWS }, (_, row) => {
+                const absY = getGuideY(row);
+                const offset = rowOffsets[selectedSheet][row];
+                return (
+                  <div key={row} style={{ textAlign: "center" }}>
+                    <label style={{ fontSize: 11, color: "#888", display: "block" }}>
+                      Row {row}: {offset >= 0 ? "+" : ""}
+                      {offset} → Y={absY}
+                    </label>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      value={offset}
+                      onChange={(e) => setRowOffset(row, Number(e.target.value))}
+                      style={{ width: 100 }}
+                    />
+                  </div>
+                );
+              })}
+              <button
+                onClick={() => {
+                  setRowOffsets((prev) => {
+                    const next = prev.map((r) => [...r]);
+                    next[selectedSheet] = [0, 0, 0, 0, 0, 0];
+                    return next;
+                  });
+                }}
+                style={{ ...btnStyle, fontSize: 11, padding: "4px 8px" }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Preview + Animation Controls */}
@@ -406,7 +437,7 @@ export function BogartPage() {
                   height: displayH,
                   position: "relative",
                   backgroundImage: `url(${SPRITE_SHEETS[selectedSheet].src})`,
-                  backgroundPosition: `-${getFramePos(currentFrame).x * zoom + offsetX}px -${getFramePos(currentFrame).y * zoom + offsetY}px`,
+                  backgroundPosition: `-${getFramePos(currentFrame).x * zoom}px -${getFramePos(currentFrame).y * zoom}px`,
                   backgroundSize: `${sheetDimensions.w * zoom}px ${sheetDimensions.h * zoom}px`,
                   imageRendering: "pixelated",
                 }}
@@ -415,11 +446,11 @@ export function BogartPage() {
                   <div
                     style={{
                       position: "absolute",
-                      bottom: `${guideLinePos}%`,
+                      top: getGuideInFrame(getRow(currentFrame)) * zoom,
                       left: 0,
                       right: 0,
                       height: 1,
-                      background: "rgba(255, 100, 100, 0.6)",
+                      background: "rgba(255, 100, 100, 0.7)",
                       pointerEvents: "none",
                     }}
                   />
@@ -429,7 +460,8 @@ export function BogartPage() {
           </div>
 
           <div style={{ fontSize: 13, color: "#888", marginBottom: 16 }}>
-            Frame: {currentFrame} | {isPlaying ? `Playing @ ${fps} FPS` : "Stopped"}
+            Frame: {currentFrame} (row {getRow(currentFrame)}) |{" "}
+            {isPlaying ? `Playing @ ${fps} FPS` : "Stopped"}
             {activeAnimation && <span> | {activeAnimation.name}</span>}
           </div>
 
@@ -442,8 +474,6 @@ export function BogartPage() {
                     name: "Selection",
                     sheet: selectedSheet,
                     frames: selectedFrames,
-                    offsetX,
-                    offsetY,
                   });
                 }
               }}
@@ -497,7 +527,6 @@ export function BogartPage() {
             {selectedFrames.length > 0 && (
               <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
                 Frames: [{selectedFrames.join(", ")}] from {SPRITE_SHEETS[selectedSheet].name}
-                {(offsetX !== 0 || offsetY !== 0) && ` | offset: (${offsetX}, ${offsetY})`}
               </div>
             )}
           </div>
