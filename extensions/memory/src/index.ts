@@ -25,6 +25,7 @@ import type {
   HealthItem,
   LoggerLike,
 } from "@anima/shared";
+import { createStandardExtension } from "@anima/extension-host";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -124,6 +125,19 @@ const DEFAULT_CONFIG: Required<MemoryConfig> = {
 
 const LOCK_STALE_MS = 3 * 60 * 1000;
 
+interface MemoryExtensionRuntime {
+  ctx: ExtensionContext;
+  watcher: MemoryWatcher | null;
+  docWatcher: DocumentWatcher | null;
+  worker: LibbyWorker | null;
+  repoSync: RepoSyncService | null;
+  scheduler: MemoryScheduler | null;
+  extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null;
+  isLockOwner: boolean;
+  lockState: "held" | "contended" | "released";
+  unsubscribeHeartbeat: (() => void) | null;
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -199,168 +213,732 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
   const basePath = expandPath(cfg.watchPath);
 
   const memoryRoot = join(homedir(), "memory");
+  const methods = [
+    {
+      name: "memory.health_check",
+      description: "Return memory system stats: file count, entry count, conversation breakdown",
+      inputSchema: z.object({}),
+      execution: { lane: "control", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.ingest",
+      description:
+        "Manually ingest JSONL file(s) into the memory database. Paths are relative to the watch directory unless absolute.",
+      inputSchema: z.object({
+        file: z.string().optional().describe("Path to a single JSONL file to ingest"),
+        dir: z
+          .string()
+          .optional()
+          .describe("Path to a directory of JSONL files to ingest recursively"),
+        reimport: z
+          .boolean()
+          .optional()
+          .describe("Force re-import: delete existing entries and re-ingest"),
+      }),
+      execution: { lane: "write", concurrency: "serial" } as const,
+    },
+    {
+      name: "memory.conversations",
+      description: "List conversations with optional status filter",
+      inputSchema: z.object({
+        status: z
+          .enum(["active", "ready", "queued", "processing", "archived", "skipped", "review"])
+          .optional()
+          .describe("Filter by conversation status"),
+        limit: z.number().optional().describe("Max conversations to return (default: 50)"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.process",
+      description:
+        "Queue ready conversations for Libby to process into structured memories in ~/memory/. Worker processes them one at a time in the background.",
+      inputSchema: z.object({
+        batchSize: z
+          .number()
+          .optional()
+          .describe("Max conversations to queue (default: from config)"),
+      }),
+      execution: { lane: "write", concurrency: "serial" } as const,
+    },
+    {
+      name: "memory.process_conversation",
+      description:
+        "Process a specific conversation by ID through Libby. Temporarily marks it as ready if needed.",
+      inputSchema: z.object({
+        id: z.number().describe("Conversation ID to process"),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("Format transcript only, don't call API or write files"),
+      }),
+      execution: { lane: "write", concurrency: "serial" } as const,
+    },
+    {
+      name: "memory.get_transcript",
+      description:
+        "Get the formatted transcript for a conversation by ID. Returns the same text that Libby receives for processing.",
+      inputSchema: z.object({
+        id: z.number().describe("Conversation ID"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.transition_conversation",
+      description:
+        "Mark all active conversations for a workspace as ready for Libby processing. Called when user switches sessions so previous conversations enter the pipeline immediately instead of waiting for the 60-minute gap timer.",
+      inputSchema: z.object({
+        cwd: z
+          .string()
+          .describe(
+            "Workspace directory — all active conversations matching this CWD will transition",
+          ),
+      }),
+      execution: { lane: "write", concurrency: "serial" } as const,
+    },
+    {
+      name: "memory.search",
+      description:
+        "Full-text search across conversation summaries and memory documents. Uses FTS5 with BM25 ranking.",
+      inputSchema: z.object({
+        query: z.string().describe("Search query (supports natural language)"),
+        limit: z.number().optional().default(20).describe("Max results to return"),
+        category: z
+          .string()
+          .optional()
+          .describe(
+            "Filter by category (episodes, milestones, insights, relationships, projects, core, personas, summary)",
+          ),
+        cwd: z.string().optional().describe("Filter by workspace directory"),
+        dateFrom: z.string().optional().describe("Filter results from this date (ISO format)"),
+        dateTo: z.string().optional().describe("Filter results up to this date (ISO format)"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.get_session_context",
+      description:
+        "Get recent conversation context for session continuity. Returns the last N transcript entries across all sessions in the workspace plus recent archived summaries.",
+      inputSchema: z.object({
+        cwd: z.string().describe("Workspace directory to scope lookup"),
+        includeAllSummaries: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("When true, archived summaries are drawn across all workspaces"),
+        maxRecentMessages: z
+          .number()
+          .optional()
+          .default(20)
+          .describe("Max recent messages to return"),
+        maxSummaries: z.number().optional().default(5).describe("Max archived summaries to return"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.calendar",
+      description:
+        "Get conversation counts per day for a given month. Returns calendar heatmap data.",
+      inputSchema: z.object({
+        month: z.string().describe("Year-month in YYYY-MM format (e.g., 2026-03)"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.day",
+      description:
+        "Get all conversations for a specific day, ordered by time. Returns timeline data.",
+      inputSchema: z.object({
+        date: z.string().describe("Date in YYYY-MM-DD format"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.month_range",
+      description: "Get the earliest and latest months that have conversation data.",
+      inputSchema: z.object({}),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.get_episode",
+      description:
+        "Get the full episode markdown file for a conversation. Returns the Libby-generated narrative from ~/memory/episodes/.",
+      inputSchema: z.object({
+        id: z.number().describe("Conversation ID"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+  ];
 
-  let ctx: ExtensionContext | null = null;
-  let watcher: MemoryWatcher | null = null;
-  let docWatcher: DocumentWatcher | null = null;
-  let worker: LibbyWorker | null = null;
-  let repoSync: RepoSyncService | null = null;
-  let scheduler: MemoryScheduler | null = null;
-  let extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null = null;
-  let isLockOwner = false;
-  let lockState: "held" | "contended" | "released" = "released";
-  let unsubscribeHeartbeat: (() => void) | null = null;
+  async function handleMemoryMethod(
+    runtime: MemoryExtensionRuntime,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const ctx = runtime.ctx;
+    switch (method) {
+      case "memory.health_check": {
+        const startedAt = Date.now();
+        const stats = getStats();
+        const s = stats.conversationsByStatus;
+        const workItems = getActiveWorkItems();
+        const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
+        const actorState = runtime.extensionActor?.getSnapshot().value ?? "stopped";
+        const lockHeldByMe = singletonLock?.ownerPid === process.pid;
+        const lockLabel = singletonLock ? (lockHeldByMe ? "held" : "contended") : runtime.lockState;
+        const lockAgeSec = singletonLock ? Math.max(0, Math.round(singletonLock.ageMs / 1000)) : 0;
+        const watcherDiag = runtime.watcher?.getDiagnostics() ?? null;
+        const schedulerDiag = runtime.scheduler?.getDiagnostics() ?? null;
+        const repoSyncDiag = runtime.repoSync?.getDiagnostics() ?? null;
 
-  return {
+        const statusDisplay: Record<
+          string,
+          { healthStatus: "healthy" | "inactive" | "stale" | "dead"; icon: string }
+        > = {
+          processing: { healthStatus: "healthy", icon: "⚙️" },
+          queued: { healthStatus: "inactive", icon: "⏳" },
+          ready: { healthStatus: "inactive", icon: "📋" },
+          active: { healthStatus: "inactive", icon: "💬" },
+        };
+
+        const items: HealthItem[] = workItems.map((conv) => {
+          const meta = conv.metadata ? (JSON.parse(conv.metadata) as Record<string, unknown>) : {};
+          const isProcessing = conv.status === "processing";
+          const display = statusDisplay[conv.status] || { healthStatus: "inactive", icon: "" };
+
+          // Calculate elapsed/waiting time
+          let timeLabel = "";
+          if (conv.statusAt) {
+            const ms = Date.now() - new Date(conv.statusAt + "Z").getTime();
+            timeLabel = ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`;
+          }
+
+          const cwdLabel = ((meta.cwd as string) || conv.sourceFile).replace(/^\/Users\/\w+/, "~");
+
+          const details: Record<string, string> = {
+            status: conv.status,
+            entries: String(conv.entryCount),
+            date: conv.firstMessageAt.slice(0, 10),
+            transcript: isProcessing && meta.transcriptKB ? `${meta.transcriptKB}KB` : "",
+            time: isProcessing && meta.timeRange ? (meta.timeRange as string) : "",
+            elapsed: timeLabel,
+          };
+
+          return {
+            id: String(conv.id),
+            label: `${display.icon} #${conv.id} ${cwdLabel}`,
+            status: display.healthStatus,
+            details,
+          };
+        });
+
+        const response: HealthCheckResponse = {
+          ok: true,
+          status: lockHeldByMe ? "healthy" : "degraded",
+          label: "Memory (Transcript Ingestion + Libby)",
+          metrics: [
+            { label: "Singleton Lock", value: lockLabel },
+            {
+              label: "Lock Owner PID",
+              value: singletonLock ? String(singletonLock.ownerPid) : "none",
+            },
+            {
+              label: "Lock Age",
+              value: singletonLock ? `${lockAgeSec}s` : "n/a",
+            },
+            { label: "Actor State", value: actorState },
+            { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
+            {
+              label: "Last File Change",
+              value: formatElapsedSince(watcherDiag?.lastChangedAt ?? null),
+            },
+            {
+              label: "Last Ingest",
+              value: formatElapsedSince(watcherDiag?.lastIngestAt ?? null),
+            },
+            {
+              label: "Last Ingest File",
+              value: compactHomePath(watcherDiag?.lastIngestFile ?? null),
+            },
+            {
+              label: "Scheduler Running",
+              value: schedulerDiag ? String(schedulerDiag.running) : "false",
+            },
+            {
+              label: "Scheduler Last Run",
+              value: formatElapsedSince(schedulerDiag?.lastRunAt ?? null),
+            },
+            {
+              label: "Scheduler Last Ready",
+              value: String(schedulerDiag?.lastReadyCount ?? 0),
+            },
+            {
+              label: "Scheduler Last Queued",
+              value: String(schedulerDiag?.lastQueuedCount ?? 0),
+            },
+            {
+              label: "Scheduler Last Error",
+              value: schedulerDiag?.lastError ?? "none",
+            },
+            {
+              label: "Repo Sync Running",
+              value: repoSyncDiag ? String(repoSyncDiag.running) : "false",
+            },
+            {
+              label: "Repo Sync Active",
+              value: repoSyncDiag ? String(repoSyncDiag.syncing) : "false",
+            },
+            {
+              label: "Repo Sync Pending",
+              value: String(repoSyncDiag?.pendingRequests ?? 0),
+            },
+            {
+              label: "Repo Sync Last Run",
+              value: formatElapsedSince(repoSyncDiag?.lastCompletedAt ?? null),
+            },
+            {
+              label: "Repo Sync Last Error",
+              value: repoSyncDiag?.lastError ?? "none",
+            },
+            { label: "Last Error", value: watcherDiag?.lastError ?? "none" },
+            { label: "Files Tracked", value: String(stats.fileCount) },
+            { label: "Entries", value: String(stats.entryCount) },
+            { label: "Queued", value: String(s.queued || 0) },
+            { label: "Processing", value: String(s.processing || 0) },
+            { label: "Ready", value: String(s.ready || 0) },
+            { label: "Archived", value: String(s.archived || 0) },
+            { label: "Skipped", value: String(s.skipped || 0) },
+            { label: "Active", value: String(s.active || 0) },
+          ],
+          items,
+        };
+        ctx?.log.info("[memory] health_check completed", {
+          elapsedMs: Date.now() - startedAt,
+          actorState,
+          fileCount: stats.fileCount,
+          queued: s.queued || 0,
+          processing: s.processing || 0,
+        });
+        return response;
+      }
+
+      case "memory.ingest": {
+        const file = params.file as string | undefined;
+        const dir = params.dir as string | undefined;
+        const reimport = params.reimport as boolean | undefined;
+
+        if (!file && !dir) {
+          throw new Error('Provide either "file" or "dir" parameter');
+        }
+
+        if (file) {
+          const startedAt = Date.now();
+          const expanded = expandPath(file);
+          // Determine base path: if file is under a known directory, use that as base
+          // Otherwise, use the file's parent directory
+          const fileBasePath = findBasePath(expanded, basePath);
+          fileLog(
+            "INFO",
+            `Manual ingest: file=${expanded}, base=${fileBasePath}, reimport=${!!reimport}`,
+          );
+          const result = ingestFile(expanded, fileBasePath, cfg.conversationGapMinutes, {
+            forceReimport: reimport,
+            exclude: cfg.exclude,
+          });
+          ctx?.log.info("[memory] ingest file completed", {
+            elapsedMs: Date.now() - startedAt,
+            file: expanded,
+            filesProcessed: result.filesProcessed,
+            entriesInserted: result.entriesInserted,
+          });
+          ctx?.emit("memory.ingested", result);
+          return result;
+        }
+
+        if (dir) {
+          const startedAt = Date.now();
+          const expanded = expandPath(dir);
+          fileLog("INFO", `Manual ingest: dir=${expanded}, reimport=${!!reimport}`);
+          const result = await ingestDirectoryCooperative(expanded, cfg.conversationGapMinutes, {
+            forceReimport: reimport,
+            exclude: cfg.exclude,
+          });
+          ctx?.log.info("[memory] ingest dir completed", {
+            elapsedMs: Date.now() - startedAt,
+            dir: expanded,
+            filesProcessed: result.filesProcessed,
+            entriesInserted: result.entriesInserted,
+          });
+          ctx?.emit("memory.ingested", result);
+          return result;
+        }
+
+        return { error: "unreachable" };
+      }
+
+      case "memory.conversations": {
+        const status = params.status as string | undefined;
+        const limit = (params.limit as number) || 50;
+
+        const d = getDb();
+        let query: string;
+        const queryParams: unknown[] = [];
+
+        const selectCols = `id, session_id AS sessionId, source_file AS sourceFile,
+              first_message_at AS firstMessageAt,
+              last_message_at AS lastMessageAt, entry_count AS entryCount,
+              status, strategy, summary, processed_at AS processedAt,
+              status_at AS statusAt, metadata,
+              created_at AS createdAt`;
+
+        if (status) {
+          query = `SELECT ${selectCols} FROM memory_conversations
+            WHERE status = ?
+            ORDER BY last_message_at DESC
+            LIMIT ?`;
+          queryParams.push(status, limit);
+        } else {
+          query = `SELECT ${selectCols} FROM memory_conversations
+            ORDER BY last_message_at DESC
+            LIMIT ?`;
+          queryParams.push(limit);
+        }
+
+        const conversations = d.query(query).all(...(queryParams as [string, number] | [number]));
+        return { conversations, count: conversations.length };
+      }
+
+      case "memory.process": {
+        const batchSize = (params.batchSize as number) || cfg.processBatchSize;
+
+        const readyCount = getReadyConversations().length;
+        const alreadyQueued = getQueuedCount();
+
+        if (readyCount === 0 && alreadyQueued === 0) {
+          return {
+            status: "nothing_to_do",
+            readyConversations: 0,
+            queuedConversations: 0,
+            message: "No conversations ready or queued for processing.",
+          };
+        }
+
+        // Queue up to batchSize conversations (ready → queued)
+        const newlyQueued = readyCount > 0 ? queueConversations(batchSize) : 0;
+        const totalQueued = alreadyQueued + newlyQueued;
+
+        fileLog(
+          "INFO",
+          `Libby: Queued ${newlyQueued} conversations (${totalQueued} total in queue)`,
+        );
+
+        // Wake the worker if it's sleeping
+        runtime.worker?.wake();
+
+        return {
+          status: "queued",
+          newlyQueued,
+          totalQueued,
+          readyConversations: readyCount - newlyQueued,
+          message: `Queued ${newlyQueued} conversations (${totalQueued} total). Worker is processing. Watch memory.log for progress.`,
+        };
+      }
+
+      case "memory.process_conversation": {
+        const id = params.id as number;
+        const dryRun = (params.dryRun as boolean) || false;
+
+        // Look up conversation
+        const d = getDb();
+        const conv = d
+          .query(
+            `SELECT
+                id, session_id AS sessionId, source_file AS sourceFile,
+                first_message_at AS firstMessageAt,
+                last_message_at AS lastMessageAt, entry_count AS entryCount,
+                status, strategy, summary, processed_at AS processedAt,
+                created_at AS createdAt
+              FROM memory_conversations WHERE id = ?`,
+          )
+          .get(id) as Record<string, unknown> | null;
+
+        if (!conv) {
+          throw new Error(`Conversation ${id} not found`);
+        }
+
+        const originalStatus = conv.status as string;
+
+        // Format transcript preview
+        const entries = getEntriesForConversation(id);
+        if (entries.length === 0) {
+          return { error: "No entries found for this conversation", conversationId: id };
+        }
+
+        const transcript = formatTranscript(conv as any, entries, cfg.timezone);
+        const preview = {
+          conversationId: id,
+          sessionId: conv.sessionId,
+          date: transcript.date,
+          timeRange: transcript.timeRange,
+          cwd: transcript.primaryCwd,
+          entryCount: transcript.entryCount,
+          chars: transcript.text.length,
+          status: originalStatus,
+        };
+
+        if (dryRun) {
+          return {
+            ...preview,
+            dryRun: true,
+            transcript:
+              transcript.text.slice(0, 2000) + (transcript.text.length > 2000 ? "\n..." : ""),
+          };
+        }
+
+        // Queue this specific conversation for processing
+        if (originalStatus !== "queued") {
+          fileLog("INFO", `Queuing conversation ${id} for processing (was: ${originalStatus})`);
+          updateConversationStatus(id, "queued");
+        }
+
+        // Wake the worker to pick it up
+        runtime.worker?.wake();
+
+        return {
+          ...preview,
+          status: "queued",
+          message: `Conversation ${id} queued for processing. Watch memory.log for progress.`,
+        };
+      }
+
+      case "memory.get_transcript": {
+        const id = params.id as number;
+
+        const d = getDb();
+        const conv = d
+          .query(
+            `SELECT
+                id, session_id AS sessionId, source_file AS sourceFile,
+                first_message_at AS firstMessageAt,
+                last_message_at AS lastMessageAt, entry_count AS entryCount,
+                status, summary
+              FROM memory_conversations WHERE id = ?`,
+          )
+          .get(id) as Record<string, unknown> | null;
+
+        if (!conv) {
+          throw new Error(`Conversation ${id} not found`);
+        }
+
+        const entries = getEntriesForConversation(id);
+        if (entries.length === 0) {
+          return { error: "No entries found for this conversation", conversationId: id };
+        }
+
+        const transcript = formatTranscript(conv as any, entries, cfg.timezone);
+
+        return {
+          conversationId: id,
+          status: conv.status,
+          summary: conv.summary,
+          date: transcript.date,
+          timeRange: transcript.timeRange,
+          cwd: transcript.primaryCwd,
+          entryCount: transcript.entryCount,
+          chars: transcript.text.length,
+          transcript: transcript.text,
+        };
+      }
+
+      case "memory.transition_conversation": {
+        const startedAt = Date.now();
+        const cwd = params.cwd as string;
+        const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
+        const pattern = `%${encodedCwd}%`;
+        const changed = transitionActiveConversationsByCwd(pattern);
+
+        if (changed > 0) {
+          ctx?.log.info("[memory] Transitioned active conversations to ready", {
+            cwd,
+            changed,
+          });
+          // Wake Libby so she picks up the newly-ready conversations
+          runtime.worker?.wake();
+        }
+
+        ctx?.log.info("[memory] transition_conversation completed", {
+          elapsedMs: Date.now() - startedAt,
+          cwd,
+          transitioned: changed,
+        });
+        return { cwd, transitioned: changed };
+      }
+
+      case "memory.search": {
+        if (!ftsTableExists()) {
+          throw new Error("FTS index not available — migration may not have run yet");
+        }
+        const query = params.query as string;
+        const results = searchMemory(query, {
+          limit: params.limit as number | undefined,
+          category: params.category as string | undefined,
+          cwd: params.cwd as string | undefined,
+          dateFrom: params.dateFrom as string | undefined,
+          dateTo: params.dateTo as string | undefined,
+        });
+        return {
+          results,
+          query,
+          totalResults: results.length,
+        };
+      }
+
+      case "memory.get_session_context": {
+        const startedAt = Date.now();
+        const cwd = params.cwd as string;
+        const includeAllSummaries = (params.includeAllSummaries as boolean | undefined) ?? false;
+        const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
+        const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
+
+        // Recent transcript entries — query by cwd column (absolute path)
+        const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
+
+        // Archived summaries are either workspace-scoped or global, depending on workspace mode.
+        const pattern = includeAllSummaries
+          ? "%"
+          : `%${cwd.replace(/\//g, "-").replace(/^-/, "")}%`;
+        const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
+
+        ctx?.log.info("[memory] get_session_context completed", {
+          elapsedMs: Date.now() - startedAt,
+          cwd,
+          includeAllSummaries,
+          recentMessages: recentMessages.length,
+          recentSummaries: recentSummaries.length,
+        });
+        return { recentMessages, recentSummaries };
+      }
+
+      case "memory.calendar": {
+        const month = params.month as string;
+        const days = getCalendarData(month);
+        return { month, days };
+      }
+
+      case "memory.day": {
+        const date = params.date as string;
+        const conversations = getDayConversations(date);
+        return { date, conversations, count: conversations.length };
+      }
+
+      case "memory.month_range": {
+        const range = getMonthRange();
+        return range ?? { earliest: null, latest: null };
+      }
+
+      case "memory.get_episode": {
+        const id = params.id as number;
+        const d = getDb();
+        const conv = d
+          .query(
+            `SELECT id, first_message_at AS firstMessageAt, status
+               FROM memory_conversations WHERE id = ?`,
+          )
+          .get(id) as { id: number; firstMessageAt: string; status: string } | null;
+
+        if (!conv) {
+          throw new Error(`Conversation ${id} not found`);
+        }
+
+        // Compute episode path using same logic as Libby
+        const timestamp = new Date(conv.firstMessageAt);
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: cfg.timezone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).formatToParts(timestamp);
+        const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+        const [yr, mo, dy, hr, mi] = ["year", "month", "day", "hour", "minute"].map(get);
+
+        const episodeRelPath = `episodes/${yr}-${mo}/${yr}-${mo}-${dy}-${hr}${mi}-${id}.md`;
+        const episodePath = join(memoryRoot, episodeRelPath);
+
+        if (!existsSync(episodePath)) {
+          return {
+            conversationId: id,
+            status: conv.status,
+            episodePath: episodeRelPath,
+            found: false,
+            content: null,
+          };
+        }
+
+        const content = readFileSync(episodePath, "utf-8");
+        return {
+          conversationId: id,
+          status: conv.status,
+          episodePath: episodeRelPath,
+          found: true,
+          content,
+        };
+      }
+
+      default:
+        throw new Error(`Unknown method: ${method}`);
+    }
+  }
+
+  function health(runtime: MemoryExtensionRuntime | null) {
+    try {
+      const stats = getStats();
+      const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
+      return {
+        ok: singletonLock?.ownerPid === process.pid,
+        details: {
+          fileCount: stats.fileCount,
+          entryCount: stats.entryCount,
+          conversations: stats.conversationsByStatus,
+          watchPath: cfg.watchPath,
+          singletonLock: {
+            state: runtime?.lockState ?? "released",
+            ownerPid: singletonLock?.ownerPid ?? null,
+            heldByCurrentProcess: singletonLock?.ownerPid === process.pid,
+            heartbeatAgeMs: singletonLock?.ageMs ?? null,
+            stale: singletonLock?.stale ?? null,
+          },
+        },
+      };
+    } catch {
+      return { ok: false, details: { error: "Database not accessible" } };
+    }
+  }
+
+  return createStandardExtension<MemoryExtensionRuntime>({
     id: "memory",
     name: "Memory (Ingestion + Libby)",
-    methods: [
-      {
-        name: "memory.health_check",
-        description: "Return memory system stats: file count, entry count, conversation breakdown",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "memory.ingest",
-        description:
-          "Manually ingest JSONL file(s) into the memory database. Paths are relative to the watch directory unless absolute.",
-        inputSchema: z.object({
-          file: z.string().optional().describe("Path to a single JSONL file to ingest"),
-          dir: z
-            .string()
-            .optional()
-            .describe("Path to a directory of JSONL files to ingest recursively"),
-          reimport: z
-            .boolean()
-            .optional()
-            .describe("Force re-import: delete existing entries and re-ingest"),
-        }),
-      },
-      {
-        name: "memory.conversations",
-        description: "List conversations with optional status filter",
-        inputSchema: z.object({
-          status: z
-            .enum(["active", "ready", "queued", "processing", "archived", "skipped", "review"])
-            .optional()
-            .describe("Filter by conversation status"),
-          limit: z.number().optional().describe("Max conversations to return (default: 50)"),
-        }),
-      },
-      {
-        name: "memory.process",
-        description:
-          "Queue ready conversations for Libby to process into structured memories in ~/memory/. Worker processes them one at a time in the background.",
-        inputSchema: z.object({
-          batchSize: z
-            .number()
-            .optional()
-            .describe("Max conversations to queue (default: from config)"),
-        }),
-      },
-      {
-        name: "memory.process_conversation",
-        description:
-          "Process a specific conversation by ID through Libby. Temporarily marks it as ready if needed.",
-        inputSchema: z.object({
-          id: z.number().describe("Conversation ID to process"),
-          dryRun: z
-            .boolean()
-            .optional()
-            .describe("Format transcript only, don't call API or write files"),
-        }),
-      },
-      {
-        name: "memory.get_transcript",
-        description:
-          "Get the formatted transcript for a conversation by ID. Returns the same text that Libby receives for processing.",
-        inputSchema: z.object({
-          id: z.number().describe("Conversation ID"),
-        }),
-      },
-      {
-        name: "memory.transition_conversation",
-        description:
-          "Mark all active conversations for a workspace as ready for Libby processing. Called when user switches sessions so previous conversations enter the pipeline immediately instead of waiting for the 60-minute gap timer.",
-        inputSchema: z.object({
-          cwd: z
-            .string()
-            .describe(
-              "Workspace directory — all active conversations matching this CWD will transition",
-            ),
-        }),
-      },
-      {
-        name: "memory.search",
-        description:
-          "Full-text search across conversation summaries and memory documents. Uses FTS5 with BM25 ranking.",
-        inputSchema: z.object({
-          query: z.string().describe("Search query (supports natural language)"),
-          limit: z.number().optional().default(20).describe("Max results to return"),
-          category: z
-            .string()
-            .optional()
-            .describe(
-              "Filter by category (episodes, milestones, insights, relationships, projects, core, personas, summary)",
-            ),
-          cwd: z.string().optional().describe("Filter by workspace directory"),
-          dateFrom: z.string().optional().describe("Filter results from this date (ISO format)"),
-          dateTo: z.string().optional().describe("Filter results up to this date (ISO format)"),
-        }),
-      },
-      {
-        name: "memory.get_session_context",
-        description:
-          "Get recent conversation context for session continuity. Returns the last N transcript entries across all sessions in the workspace plus recent archived summaries.",
-        inputSchema: z.object({
-          cwd: z.string().describe("Workspace directory to scope lookup"),
-          includeAllSummaries: z
-            .boolean()
-            .optional()
-            .default(false)
-            .describe("When true, archived summaries are drawn across all workspaces"),
-          maxRecentMessages: z
-            .number()
-            .optional()
-            .default(20)
-            .describe("Max recent messages to return"),
-          maxSummaries: z
-            .number()
-            .optional()
-            .default(5)
-            .describe("Max archived summaries to return"),
-        }),
-      },
-      {
-        name: "memory.calendar",
-        description:
-          "Get conversation counts per day for a given month. Returns calendar heatmap data.",
-        inputSchema: z.object({
-          month: z.string().describe("Year-month in YYYY-MM format (e.g., 2026-03)"),
-        }),
-      },
-      {
-        name: "memory.day",
-        description:
-          "Get all conversations for a specific day, ordered by time. Returns timeline data.",
-        inputSchema: z.object({
-          date: z.string().describe("Date in YYYY-MM-DD format"),
-        }),
-      },
-      {
-        name: "memory.month_range",
-        description: "Get the earliest and latest months that have conversation data.",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "memory.get_episode",
-        description:
-          "Get the full episode markdown file for a conversation. Returns the Libby-generated narrative from ~/memory/episodes/.",
-        inputSchema: z.object({
-          id: z.number().describe("Conversation ID"),
-        }),
-      },
-    ],
+    createRuntime(ctx) {
+      return {
+        ctx,
+        watcher: null,
+        docWatcher: null,
+        worker: null,
+        repoSync: null,
+        scheduler: null,
+        extensionActor: null,
+        isLockOwner: false,
+        lockState: "released",
+        unsubscribeHeartbeat: null,
+      };
+    },
+    methods: methods.map((definition) => ({
+      definition,
+      handle: async (params, instance) =>
+        await handleMemoryMethod(instance.runtime, definition.name, params),
+    })),
     events: [
       "memory.ingested",
       "memory.conversation_ready",
@@ -368,9 +946,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       "memory.conversation_processed",
       "memory.processing_complete",
     ],
-
-    async start(context: ExtensionContext) {
-      ctx = context;
+    async start(instance) {
+      const runtime = instance.runtime;
+      const ctx = runtime.ctx;
       traceLog = ctx.createLogger({ component: "trace", fileName: "memory-trace.log" });
       fileLog(
         "INFO",
@@ -378,7 +956,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       );
       ctx.log.info("[memory] Starting memory extension...");
 
-      // Ensure DB connection works
       try {
         getDb();
         ctx.log.info("[memory] Database connection established");
@@ -390,8 +967,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       }
 
       const lockResult = acquireMemoryExtensionLock(process.pid, LOCK_STALE_MS);
-      isLockOwner = lockResult.acquired;
-      lockState = lockResult.acquired ? "held" : "contended";
+      runtime.isLockOwner = lockResult.acquired;
+      runtime.lockState = lockResult.acquired ? "held" : "contended";
 
       if (!lockResult.acquired) {
         ctx.log.warn(
@@ -412,10 +989,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       }
 
       try {
-        // Create XState actor
-        extensionActor = createActor(memoryExtensionMachine, {
-          // Do not restore machine snapshots; restoring transient states (e.g. scanning)
-          // can leave actors stranded across process boundaries.
+        runtime.extensionActor = createActor(memoryExtensionMachine, {
           input: {
             processId: process.pid,
             startedAt: null,
@@ -428,8 +1002,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           },
         });
 
-        // Subscribe to state changes and persist to DB
-        extensionActor.subscribe((snapshot) => {
+        runtime.extensionActor.subscribe((snapshot) => {
           try {
             getDb()
               .query(
@@ -442,47 +1015,40 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             fileLog("ERROR", `Failed to persist state: ${error}`);
           }
 
-          // Update local watcher reference
-          watcher = snapshot.context.watcher;
+          runtime.watcher = snapshot.context.watcher;
         });
 
-        // Start the state machine
-        extensionActor.start();
-        extensionActor.send({ type: "START" });
+        runtime.extensionActor.start();
+        runtime.extensionActor.send({ type: "START" });
 
-        // Subscribe to gateway heartbeat and forward to state machine
-        unsubscribeHeartbeat = ctx.on("gateway.heartbeat", () => {
-          if (!isLockOwner) return;
+        runtime.unsubscribeHeartbeat = ctx.on("gateway.heartbeat", () => {
+          if (!runtime.isLockOwner) return;
 
           const renewed = renewMemoryExtensionLock(process.pid);
           if (!renewed) {
-            isLockOwner = false;
-            lockState = "contended";
+            runtime.isLockOwner = false;
+            runtime.lockState = "contended";
             fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
-            scheduler?.stop();
-            scheduler = null;
-            const repoSyncStop = repoSync?.stop();
+            runtime.scheduler?.stop();
+            runtime.scheduler = null;
+            const repoSyncStop = runtime.repoSync?.stop();
             if (repoSyncStop) void repoSyncStop.catch(() => {});
-            repoSync = null;
-            const stopPromise = worker?.stop();
+            runtime.repoSync = null;
+            const stopPromise = runtime.worker?.stop();
             if (stopPromise) void stopPromise.catch(() => {});
-            worker = null;
-            extensionActor?.send({ type: "STOP" });
+            runtime.worker = null;
+            runtime.extensionActor?.send({ type: "STOP" });
             return;
           }
 
-          extensionActor?.send({ type: "HEARTBEAT" });
+          runtime.extensionActor?.send({ type: "HEARTBEAT" });
         });
 
-        // Do not block extension registration on startup scan/watcher initialization.
-        // Register immediately, then start Libby's worker once the state machine reaches "running".
-        const actor = extensionActor;
+        const actor = runtime.extensionActor;
         const startWorkerWhenRunning = async () => {
-          if (!ctx || worker) return;
+          if (runtime.worker) return;
           if (actor.getSnapshot().value !== "running") return;
           try {
-            // Document indexing (runs once, fast on subsequent restarts)
-            // Episodes are now indexed as documents — summaries no longer go into FTS
             if (ftsTableExists()) {
               fileLog("INFO", "FTS: Index available, running document scan...");
               try {
@@ -498,16 +1064,15 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
                 );
               }
 
-              // Start DocumentWatcher for ongoing ~/memory changes
               try {
-                docWatcher = new DocumentWatcher(
+                runtime.docWatcher = new DocumentWatcher(
                   memoryRoot,
                   async (filePath) => {
                     ingestMemoryDocument(filePath, memoryRoot, fileLog, { force: true });
                   },
                   fileLog,
                 );
-                docWatcher.start();
+                runtime.docWatcher.start();
               } catch (error) {
                 fileLog(
                   "ERROR",
@@ -521,18 +1086,18 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               );
             }
 
-            repoSync = new RepoSyncService(() => pushMemoryChanges(fileLog), fileLog);
-            repoSync.start();
+            runtime.repoSync = new RepoSyncService(() => pushMemoryChanges(fileLog), fileLog);
+            runtime.repoSync.start();
 
             const libbyConfig: LibbyConfig = {
               model: cfg.model,
               timezone: cfg.timezone,
               minConversationMessages: cfg.minConversationMessages,
             };
-            worker = new LibbyWorker(libbyConfig, ctx, fileLog, repoSync);
-            worker.start();
+            runtime.worker = new LibbyWorker(libbyConfig, ctx, fileLog, runtime.repoSync);
+            runtime.worker.start();
 
-            scheduler = new MemoryScheduler(
+            runtime.scheduler = new MemoryScheduler(
               {
                 gapMinutes: cfg.conversationGapMinutes,
                 autoProcess: cfg.autoProcess,
@@ -540,15 +1105,14 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
               },
               ctx,
               fileLog,
-              () => worker?.wake(),
+              () => runtime.worker?.wake(),
             );
-            scheduler.start();
+            runtime.scheduler.start();
 
-            // Check if there are already queued conversations from crash recovery
             const queuedCount = getQueuedCount();
             if (queuedCount > 0) {
               fileLog("INFO", `Found ${queuedCount} queued conversations from previous run`);
-              worker.wake();
+              runtime.worker.wake();
             }
           } catch (error) {
             fileLog(
@@ -558,8 +1122,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           }
         };
 
-        // Handle both already-running snapshots and async transition completion without
-        // relying on subscription timing.
         let runningSubscription: { unsubscribe(): void } | null = null;
         const maybeStartWorker = () => {
           if (actor.getSnapshot().value !== "running") return;
@@ -576,616 +1138,66 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           "ERROR",
           `[memory] Startup failed after lock acquire: ${error instanceof Error ? error.message : String(error)}`,
         );
-        if (isLockOwner) {
+        if (runtime.isLockOwner) {
           releaseMemoryExtensionLock(process.pid);
         }
-        isLockOwner = false;
-        lockState = "released";
+        runtime.isLockOwner = false;
+        runtime.lockState = "released";
         throw error;
       }
     },
+    async stop(instance) {
+      const runtime = instance.runtime;
+      const ctx = runtime.ctx;
+      ctx.log.info("[memory] Stopping memory extension...");
 
-    async stop() {
-      ctx?.log.info("[memory] Stopping memory extension...");
-
-      if (unsubscribeHeartbeat) {
-        unsubscribeHeartbeat();
-        unsubscribeHeartbeat = null;
+      if (runtime.unsubscribeHeartbeat) {
+        runtime.unsubscribeHeartbeat();
+        runtime.unsubscribeHeartbeat = null;
       }
 
-      // Stop DocumentWatcher
-      if (docWatcher) {
-        await docWatcher.stop();
-        docWatcher = null;
+      if (runtime.docWatcher) {
+        await runtime.docWatcher.stop();
+        runtime.docWatcher = null;
       }
 
-      if (scheduler) {
-        scheduler.stop();
-        scheduler = null;
+      if (runtime.scheduler) {
+        runtime.scheduler.stop();
+        runtime.scheduler = null;
       }
 
-      if (repoSync) {
-        await repoSync.stop();
-        repoSync = null;
+      if (runtime.repoSync) {
+        await runtime.repoSync.stop();
+        runtime.repoSync = null;
       }
 
-      // Stop Libby worker first
-      if (worker) {
-        await worker.stop();
-        worker = null;
+      if (runtime.worker) {
+        await runtime.worker.stop();
+        runtime.worker = null;
       }
 
-      // Send STOP event to state machine
-      if (extensionActor) {
-        extensionActor.send({ type: "STOP" });
-        await waitForState(extensionActor, "stopped");
-        extensionActor.stop();
-        extensionActor = null;
+      if (runtime.extensionActor) {
+        runtime.extensionActor.send({ type: "STOP" });
+        await waitForState(runtime.extensionActor, "stopped");
+        runtime.extensionActor.stop();
+        runtime.extensionActor = null;
       }
 
-      // Watcher is stopped by the state machine, just clear reference
-      watcher = null;
+      runtime.watcher = null;
 
-      if (isLockOwner) {
+      if (runtime.isLockOwner) {
         releaseMemoryExtensionLock(process.pid);
       }
-      isLockOwner = false;
-      lockState = "released";
+      runtime.isLockOwner = false;
+      runtime.lockState = "released";
 
       closeDb();
-      ctx = null;
       traceLog = noopLogger;
     },
-
-    async handleMethod(method: string, params: Record<string, unknown>) {
-      switch (method) {
-        case "memory.health_check": {
-          const startedAt = Date.now();
-          const stats = getStats();
-          const s = stats.conversationsByStatus;
-          const workItems = getActiveWorkItems();
-          const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
-          const actorState = extensionActor?.getSnapshot().value ?? "stopped";
-          const lockHeldByMe = singletonLock?.ownerPid === process.pid;
-          const lockLabel = singletonLock ? (lockHeldByMe ? "held" : "contended") : lockState;
-          const lockAgeSec = singletonLock
-            ? Math.max(0, Math.round(singletonLock.ageMs / 1000))
-            : 0;
-          const watcherDiag = watcher?.getDiagnostics() ?? null;
-          const schedulerDiag = scheduler?.getDiagnostics() ?? null;
-          const repoSyncDiag = repoSync?.getDiagnostics() ?? null;
-
-          const statusDisplay: Record<
-            string,
-            { healthStatus: "healthy" | "inactive" | "stale" | "dead"; icon: string }
-          > = {
-            processing: { healthStatus: "healthy", icon: "⚙️" },
-            queued: { healthStatus: "inactive", icon: "⏳" },
-            ready: { healthStatus: "inactive", icon: "📋" },
-            active: { healthStatus: "inactive", icon: "💬" },
-          };
-
-          const items: HealthItem[] = workItems.map((conv) => {
-            const meta = conv.metadata
-              ? (JSON.parse(conv.metadata) as Record<string, unknown>)
-              : {};
-            const isProcessing = conv.status === "processing";
-            const display = statusDisplay[conv.status] || { healthStatus: "inactive", icon: "" };
-
-            // Calculate elapsed/waiting time
-            let timeLabel = "";
-            if (conv.statusAt) {
-              const ms = Date.now() - new Date(conv.statusAt + "Z").getTime();
-              timeLabel = ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`;
-            }
-
-            const cwdLabel = ((meta.cwd as string) || conv.sourceFile).replace(
-              /^\/Users\/\w+/,
-              "~",
-            );
-
-            const details: Record<string, string> = {
-              status: conv.status,
-              entries: String(conv.entryCount),
-              date: conv.firstMessageAt.slice(0, 10),
-              transcript: isProcessing && meta.transcriptKB ? `${meta.transcriptKB}KB` : "",
-              time: isProcessing && meta.timeRange ? (meta.timeRange as string) : "",
-              elapsed: timeLabel,
-            };
-
-            return {
-              id: String(conv.id),
-              label: `${display.icon} #${conv.id} ${cwdLabel}`,
-              status: display.healthStatus,
-              details,
-            };
-          });
-
-          const response: HealthCheckResponse = {
-            ok: true,
-            status: lockHeldByMe ? "healthy" : "degraded",
-            label: "Memory (Transcript Ingestion + Libby)",
-            metrics: [
-              { label: "Singleton Lock", value: lockLabel },
-              {
-                label: "Lock Owner PID",
-                value: singletonLock ? String(singletonLock.ownerPid) : "none",
-              },
-              {
-                label: "Lock Age",
-                value: singletonLock ? `${lockAgeSec}s` : "n/a",
-              },
-              { label: "Actor State", value: actorState },
-              { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
-              {
-                label: "Last File Change",
-                value: formatElapsedSince(watcherDiag?.lastChangedAt ?? null),
-              },
-              {
-                label: "Last Ingest",
-                value: formatElapsedSince(watcherDiag?.lastIngestAt ?? null),
-              },
-              {
-                label: "Last Ingest File",
-                value: compactHomePath(watcherDiag?.lastIngestFile ?? null),
-              },
-              {
-                label: "Scheduler Running",
-                value: schedulerDiag ? String(schedulerDiag.running) : "false",
-              },
-              {
-                label: "Scheduler Last Run",
-                value: formatElapsedSince(schedulerDiag?.lastRunAt ?? null),
-              },
-              {
-                label: "Scheduler Last Ready",
-                value: String(schedulerDiag?.lastReadyCount ?? 0),
-              },
-              {
-                label: "Scheduler Last Queued",
-                value: String(schedulerDiag?.lastQueuedCount ?? 0),
-              },
-              {
-                label: "Scheduler Last Error",
-                value: schedulerDiag?.lastError ?? "none",
-              },
-              {
-                label: "Repo Sync Running",
-                value: repoSyncDiag ? String(repoSyncDiag.running) : "false",
-              },
-              {
-                label: "Repo Sync Active",
-                value: repoSyncDiag ? String(repoSyncDiag.syncing) : "false",
-              },
-              {
-                label: "Repo Sync Pending",
-                value: String(repoSyncDiag?.pendingRequests ?? 0),
-              },
-              {
-                label: "Repo Sync Last Run",
-                value: formatElapsedSince(repoSyncDiag?.lastCompletedAt ?? null),
-              },
-              {
-                label: "Repo Sync Last Error",
-                value: repoSyncDiag?.lastError ?? "none",
-              },
-              { label: "Last Error", value: watcherDiag?.lastError ?? "none" },
-              { label: "Files Tracked", value: String(stats.fileCount) },
-              { label: "Entries", value: String(stats.entryCount) },
-              { label: "Queued", value: String(s.queued || 0) },
-              { label: "Processing", value: String(s.processing || 0) },
-              { label: "Ready", value: String(s.ready || 0) },
-              { label: "Archived", value: String(s.archived || 0) },
-              { label: "Skipped", value: String(s.skipped || 0) },
-              { label: "Active", value: String(s.active || 0) },
-            ],
-            items,
-          };
-          ctx?.log.info("[memory] health_check completed", {
-            elapsedMs: Date.now() - startedAt,
-            actorState,
-            fileCount: stats.fileCount,
-            queued: s.queued || 0,
-            processing: s.processing || 0,
-          });
-          return response;
-        }
-
-        case "memory.ingest": {
-          const file = params.file as string | undefined;
-          const dir = params.dir as string | undefined;
-          const reimport = params.reimport as boolean | undefined;
-
-          if (!file && !dir) {
-            throw new Error('Provide either "file" or "dir" parameter');
-          }
-
-          if (file) {
-            const startedAt = Date.now();
-            const expanded = expandPath(file);
-            // Determine base path: if file is under a known directory, use that as base
-            // Otherwise, use the file's parent directory
-            const fileBasePath = findBasePath(expanded, basePath);
-            fileLog(
-              "INFO",
-              `Manual ingest: file=${expanded}, base=${fileBasePath}, reimport=${!!reimport}`,
-            );
-            const result = ingestFile(expanded, fileBasePath, cfg.conversationGapMinutes, {
-              forceReimport: reimport,
-              exclude: cfg.exclude,
-            });
-            ctx?.log.info("[memory] ingest file completed", {
-              elapsedMs: Date.now() - startedAt,
-              file: expanded,
-              filesProcessed: result.filesProcessed,
-              entriesInserted: result.entriesInserted,
-            });
-            ctx?.emit("memory.ingested", result);
-            return result;
-          }
-
-          if (dir) {
-            const startedAt = Date.now();
-            const expanded = expandPath(dir);
-            fileLog("INFO", `Manual ingest: dir=${expanded}, reimport=${!!reimport}`);
-            const result = await ingestDirectoryCooperative(expanded, cfg.conversationGapMinutes, {
-              forceReimport: reimport,
-              exclude: cfg.exclude,
-            });
-            ctx?.log.info("[memory] ingest dir completed", {
-              elapsedMs: Date.now() - startedAt,
-              dir: expanded,
-              filesProcessed: result.filesProcessed,
-              entriesInserted: result.entriesInserted,
-            });
-            ctx?.emit("memory.ingested", result);
-            return result;
-          }
-
-          return { error: "unreachable" };
-        }
-
-        case "memory.conversations": {
-          const status = params.status as string | undefined;
-          const limit = (params.limit as number) || 50;
-
-          const d = getDb();
-          let query: string;
-          const queryParams: unknown[] = [];
-
-          const selectCols = `id, session_id AS sessionId, source_file AS sourceFile,
-              first_message_at AS firstMessageAt,
-              last_message_at AS lastMessageAt, entry_count AS entryCount,
-              status, strategy, summary, processed_at AS processedAt,
-              status_at AS statusAt, metadata,
-              created_at AS createdAt`;
-
-          if (status) {
-            query = `SELECT ${selectCols} FROM memory_conversations
-            WHERE status = ?
-            ORDER BY last_message_at DESC
-            LIMIT ?`;
-            queryParams.push(status, limit);
-          } else {
-            query = `SELECT ${selectCols} FROM memory_conversations
-            ORDER BY last_message_at DESC
-            LIMIT ?`;
-            queryParams.push(limit);
-          }
-
-          const conversations = d.query(query).all(...(queryParams as [string, number] | [number]));
-          return { conversations, count: conversations.length };
-        }
-
-        case "memory.process": {
-          const batchSize = (params.batchSize as number) || cfg.processBatchSize;
-
-          const readyCount = getReadyConversations().length;
-          const alreadyQueued = getQueuedCount();
-
-          if (readyCount === 0 && alreadyQueued === 0) {
-            return {
-              status: "nothing_to_do",
-              readyConversations: 0,
-              queuedConversations: 0,
-              message: "No conversations ready or queued for processing.",
-            };
-          }
-
-          // Queue up to batchSize conversations (ready → queued)
-          const newlyQueued = readyCount > 0 ? queueConversations(batchSize) : 0;
-          const totalQueued = alreadyQueued + newlyQueued;
-
-          fileLog(
-            "INFO",
-            `Libby: Queued ${newlyQueued} conversations (${totalQueued} total in queue)`,
-          );
-
-          // Wake the worker if it's sleeping
-          worker?.wake();
-
-          return {
-            status: "queued",
-            newlyQueued,
-            totalQueued,
-            readyConversations: readyCount - newlyQueued,
-            message: `Queued ${newlyQueued} conversations (${totalQueued} total). Worker is processing. Watch memory.log for progress.`,
-          };
-        }
-
-        case "memory.process_conversation": {
-          const id = params.id as number;
-          const dryRun = (params.dryRun as boolean) || false;
-
-          // Look up conversation
-          const d = getDb();
-          const conv = d
-            .query(
-              `SELECT
-                id, session_id AS sessionId, source_file AS sourceFile,
-                first_message_at AS firstMessageAt,
-                last_message_at AS lastMessageAt, entry_count AS entryCount,
-                status, strategy, summary, processed_at AS processedAt,
-                created_at AS createdAt
-              FROM memory_conversations WHERE id = ?`,
-            )
-            .get(id) as Record<string, unknown> | null;
-
-          if (!conv) {
-            throw new Error(`Conversation ${id} not found`);
-          }
-
-          const originalStatus = conv.status as string;
-
-          // Format transcript preview
-          const entries = getEntriesForConversation(id);
-          if (entries.length === 0) {
-            return { error: "No entries found for this conversation", conversationId: id };
-          }
-
-          const transcript = formatTranscript(conv as any, entries, cfg.timezone);
-          const preview = {
-            conversationId: id,
-            sessionId: conv.sessionId,
-            date: transcript.date,
-            timeRange: transcript.timeRange,
-            cwd: transcript.primaryCwd,
-            entryCount: transcript.entryCount,
-            chars: transcript.text.length,
-            status: originalStatus,
-          };
-
-          if (dryRun) {
-            return {
-              ...preview,
-              dryRun: true,
-              transcript:
-                transcript.text.slice(0, 2000) + (transcript.text.length > 2000 ? "\n..." : ""),
-            };
-          }
-
-          // Queue this specific conversation for processing
-          if (originalStatus !== "queued") {
-            fileLog("INFO", `Queuing conversation ${id} for processing (was: ${originalStatus})`);
-            updateConversationStatus(id, "queued");
-          }
-
-          // Wake the worker to pick it up
-          worker?.wake();
-
-          return {
-            ...preview,
-            status: "queued",
-            message: `Conversation ${id} queued for processing. Watch memory.log for progress.`,
-          };
-        }
-
-        case "memory.get_transcript": {
-          const id = params.id as number;
-
-          const d = getDb();
-          const conv = d
-            .query(
-              `SELECT
-                id, session_id AS sessionId, source_file AS sourceFile,
-                first_message_at AS firstMessageAt,
-                last_message_at AS lastMessageAt, entry_count AS entryCount,
-                status, summary
-              FROM memory_conversations WHERE id = ?`,
-            )
-            .get(id) as Record<string, unknown> | null;
-
-          if (!conv) {
-            throw new Error(`Conversation ${id} not found`);
-          }
-
-          const entries = getEntriesForConversation(id);
-          if (entries.length === 0) {
-            return { error: "No entries found for this conversation", conversationId: id };
-          }
-
-          const transcript = formatTranscript(conv as any, entries, cfg.timezone);
-
-          return {
-            conversationId: id,
-            status: conv.status,
-            summary: conv.summary,
-            date: transcript.date,
-            timeRange: transcript.timeRange,
-            cwd: transcript.primaryCwd,
-            entryCount: transcript.entryCount,
-            chars: transcript.text.length,
-            transcript: transcript.text,
-          };
-        }
-
-        case "memory.transition_conversation": {
-          const startedAt = Date.now();
-          const cwd = params.cwd as string;
-          const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
-          const pattern = `%${encodedCwd}%`;
-          const changed = transitionActiveConversationsByCwd(pattern);
-
-          if (changed > 0) {
-            ctx?.log.info("[memory] Transitioned active conversations to ready", {
-              cwd,
-              changed,
-            });
-            // Wake Libby so she picks up the newly-ready conversations
-            worker?.wake();
-          }
-
-          ctx?.log.info("[memory] transition_conversation completed", {
-            elapsedMs: Date.now() - startedAt,
-            cwd,
-            transitioned: changed,
-          });
-          return { cwd, transitioned: changed };
-        }
-
-        case "memory.search": {
-          if (!ftsTableExists()) {
-            throw new Error("FTS index not available — migration may not have run yet");
-          }
-          const query = params.query as string;
-          const results = searchMemory(query, {
-            limit: params.limit as number | undefined,
-            category: params.category as string | undefined,
-            cwd: params.cwd as string | undefined,
-            dateFrom: params.dateFrom as string | undefined,
-            dateTo: params.dateTo as string | undefined,
-          });
-          return {
-            results,
-            query,
-            totalResults: results.length,
-          };
-        }
-
-        case "memory.get_session_context": {
-          const startedAt = Date.now();
-          const cwd = params.cwd as string;
-          const includeAllSummaries = (params.includeAllSummaries as boolean | undefined) ?? false;
-          const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
-          const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
-
-          // Recent transcript entries — query by cwd column (absolute path)
-          const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
-
-          // Archived summaries are either workspace-scoped or global, depending on workspace mode.
-          const pattern = includeAllSummaries
-            ? "%"
-            : `%${cwd.replace(/\//g, "-").replace(/^-/, "")}%`;
-          const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
-
-          ctx?.log.info("[memory] get_session_context completed", {
-            elapsedMs: Date.now() - startedAt,
-            cwd,
-            includeAllSummaries,
-            recentMessages: recentMessages.length,
-            recentSummaries: recentSummaries.length,
-          });
-          return { recentMessages, recentSummaries };
-        }
-
-        case "memory.calendar": {
-          const month = params.month as string;
-          const days = getCalendarData(month);
-          return { month, days };
-        }
-
-        case "memory.day": {
-          const date = params.date as string;
-          const conversations = getDayConversations(date);
-          return { date, conversations, count: conversations.length };
-        }
-
-        case "memory.month_range": {
-          const range = getMonthRange();
-          return range ?? { earliest: null, latest: null };
-        }
-
-        case "memory.get_episode": {
-          const id = params.id as number;
-          const d = getDb();
-          const conv = d
-            .query(
-              `SELECT id, first_message_at AS firstMessageAt, status
-               FROM memory_conversations WHERE id = ?`,
-            )
-            .get(id) as { id: number; firstMessageAt: string; status: string } | null;
-
-          if (!conv) {
-            throw new Error(`Conversation ${id} not found`);
-          }
-
-          // Compute episode path using same logic as Libby
-          const timestamp = new Date(conv.firstMessageAt);
-          const parts = new Intl.DateTimeFormat("en-CA", {
-            timeZone: cfg.timezone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          }).formatToParts(timestamp);
-          const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
-          const [yr, mo, dy, hr, mi] = ["year", "month", "day", "hour", "minute"].map(get);
-
-          const episodeRelPath = `episodes/${yr}-${mo}/${yr}-${mo}-${dy}-${hr}${mi}-${id}.md`;
-          const episodePath = join(memoryRoot, episodeRelPath);
-
-          if (!existsSync(episodePath)) {
-            return {
-              conversationId: id,
-              status: conv.status,
-              episodePath: episodeRelPath,
-              found: false,
-              content: null,
-            };
-          }
-
-          const content = readFileSync(episodePath, "utf-8");
-          return {
-            conversationId: id,
-            status: conv.status,
-            episodePath: episodeRelPath,
-            found: true,
-            content,
-          };
-        }
-
-        default:
-          throw new Error(`Unknown method: ${method}`);
-      }
+    health(instance) {
+      return health(instance?.runtime ?? null);
     },
-
-    health() {
-      try {
-        const stats = getStats();
-        const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
-        return {
-          ok: singletonLock?.ownerPid === process.pid,
-          details: {
-            fileCount: stats.fileCount,
-            entryCount: stats.entryCount,
-            conversations: stats.conversationsByStatus,
-            watchPath: cfg.watchPath,
-            singletonLock: {
-              state: lockState,
-              ownerPid: singletonLock?.ownerPid ?? null,
-              heldByCurrentProcess: singletonLock?.ownerPid === process.pid,
-              heartbeatAgeMs: singletonLock?.ageMs ?? null,
-              stale: singletonLock?.stale ?? null,
-            },
-          },
-        };
-      } catch {
-        return { ok: false, details: { error: "Database not accessible" } };
-      }
-    },
-  };
+  })(config as Record<string, unknown>);
 }
 
 /**
