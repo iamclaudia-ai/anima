@@ -19,25 +19,26 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const COLS = 4;
 const ROWS = 6;
 const TOTAL_FRAMES = COLS * ROWS;
-const FRAME_W = 418;
-const FRAME_H = 428;
+const FRAME_W = 416;
+const FRAME_H = 416;
 
 const SPRITE_SHEETS = [
   {
     name: "Sheet 1",
     src: "/bogart/sprites/sprite1.png",
     // Shadow bottom Y within each frame (pixels from top of frame)
-    baselines: [299, 289, 281, 271, 262, 255],
+    // Scanned with 416×416 grid at x=208, bottom-up
+    baselines: [301, 301, 305, 307, 310, 315],
   },
   {
     name: "Sheet 2",
     src: "/bogart/sprites/sprite2.png",
-    baselines: [302, 293, 284, 274, 264, 256],
+    baselines: [302, 305, 316, 313, 312, 313],
   },
   {
     name: "Sheet 3",
     src: "/bogart/sprites/sprite3.png",
-    baselines: [307, 296, 284, 273, 263, 256],
+    baselines: [307, 308, 308, 309, 314, 316],
   },
 ];
 
@@ -369,8 +370,6 @@ export function BogartPage() {
                   height: displayH,
                   position: "relative",
                   bottom: 20,
-                  // Shift container down by baseline delta so shadows align.
-                  // Background stays at exact frame position.
                   marginTop: getBaselineShift(currentFrame, activeAnimation?.sheet) * zoom,
                   backgroundImage: `url(${SPRITE_SHEETS[activeAnimation?.sheet ?? selectedSheet].src})`,
                   backgroundPosition: `-${getFramePos(currentFrame).x * zoom}px -${getFramePos(currentFrame).y * zoom}px`,

@@ -1,0 +1,89 @@
+{
+  "frameSize": {
+    "w": 416,
+    "h": 416
+  },
+  "sheets": [
+    {
+      "name": "Sheet 1",
+      "baselines": [301, 301, 305, 307, 310, 315]
+    },
+    {
+      "name": "Sheet 2",
+      "baselines": [302, 305, 316, 313, 312, 313]
+    },
+    {
+      "name": "Sheet 3",
+      "baselines": [307, 308, 308, 309, 314, 316]
+    }
+  ],
+  "animations": [
+    {
+      "name": "walk-down",
+      "sheet": 0,
+      "frames": [0, 1, 2, 3]
+    },
+    {
+      "name": "walk-right",
+      "sheet": 0,
+      "frames": [4, 5, 6, 7]
+    },
+    {
+      "name": "walk-up",
+      "sheet": 0,
+      "frames": [8, 9, 10, 11]
+    },
+    {
+      "name": "walk-left",
+      "sheet": 0,
+      "frames": [12, 13, 14, 15]
+    },
+    {
+      "name": "sit",
+      "sheet": 0,
+      "frames": [16, 17, 18, 19]
+    },
+    {
+      "name": "lick-paw",
+      "sheet": 0,
+      "frames": [20, 21, 22, 23]
+    },
+    {
+      "name": "sleep",
+      "sheet": 2,
+      "frames": [0, 1, 2, 3]
+    },
+    {
+      "name": "stir",
+      "sheet": 2,
+      "frames": [4, 5, 6, 7]
+    },
+    {
+      "name": "stand",
+      "sheet": 2,
+      "frames": [8, 9, 10, 11]
+    },
+    {
+      "name": "stretch",
+      "sheet": 2,
+      "frames": [12, 13, 14, 15]
+    },
+    {
+      "name": "walk-right-2",
+      "sheet": 2,
+      "frames": [16, 19, 20, 21, 22, 23]
+    },
+    {
+      "name": "sit-2",
+      "sheet": 2,
+      "frames": [17, 18]
+    },
+    {
+      "name": "chase-yarn",
+      "sheet": 1,
+      "frames": [
+        0, 1, 2, 3, 7, 5, 4, 6, 11, 10, 9, 8, 12, 13, 14, 15, 19, 18, 17, 16, 20, 21, 22, 23
+      ]
+    }
+  ]
+}
