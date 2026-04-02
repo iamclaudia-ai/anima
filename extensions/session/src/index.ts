@@ -9,6 +9,7 @@
 
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 import { createLogger, loadConfig, shortId } from "@anima/shared";
+import { createStandardExtension } from "@anima/extension-host";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { AgentHostClient } from "./agent-client";
@@ -24,8 +25,8 @@ import {
 import { wireSessionEvents } from "./lifecycle/session-events";
 import { wireTaskEvents } from "./lifecycle/task-events";
 import { sessionMethodDefinitions } from "./session-methods";
-import { dispatchMethod } from "./session-dispatch";
-import { initRuntime, resetRuntime } from "./runtime";
+import { createSessionMethodHandlers } from "./session-dispatch";
+import { getRuntime, initRuntime, resetRuntime } from "./runtime";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -63,6 +64,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   // ── Runtime objects (initialized before start, ctx bound in start) ──
   const agentClient = new AgentHostClient(globalConfig.agentHost.url);
   const unsubscribers: Array<() => void> = [];
+  const methodHandlers = createSessionMethodHandlers();
 
   // ── Health Check ───────────────────────────────────────────
 
@@ -97,7 +99,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
     const start = Date.now();
     try {
-      const result = await dispatchMethod(method, params);
+      const handler = methodHandlers[method];
+      if (!handler) {
+        throw new Error(`Unknown method: ${method}`);
+      }
+      const runtime = getRuntime();
+      const result = await handler(params, runtime.ctx);
       const elapsed = Date.now() - start;
       if (!isRead && elapsed > 100) {
         log.info(`← ${method} OK (${elapsed}ms)`);
@@ -115,10 +122,19 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   // ── Extension Interface ────────────────────────────────────
 
-  return {
+  return createStandardExtension({
     id: "session",
     name: "Session Manager",
-    methods: sessionMethodDefinitions,
+    methods: sessionMethodDefinitions.map((definition) => ({
+      definition,
+      handle: async (params, ctx) => {
+        const handler = methodHandlers[definition.name];
+        if (!handler) {
+          throw new Error(`Unknown method: ${definition.name}`);
+        }
+        return await handler(params, ctx);
+      },
+    })),
     events: ["stream.*", "session.task.*"],
     sourceRoutes: [],
 
@@ -186,10 +202,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       resetRuntime();
       log.info("Session extension stopped");
     },
-
-    handleMethod,
     health,
-  };
+  })(config);
 }
 
 export default createSessionExtension;

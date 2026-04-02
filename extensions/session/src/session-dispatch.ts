@@ -3,6 +3,7 @@ import { createLogger, shortId, formatElapsed } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readdirSync, statSync } from "node:fs";
+import type { ExtensionContext } from "@anima/shared";
 import { rotatePersistentSessions } from "./persistent-sessions";
 import { normalizeTaskMode, type TaskStatus } from "./lifecycle/task-workflow";
 import { startTask, getTask, listTasks, interruptTask } from "./lifecycle/task-workflow";
@@ -18,6 +19,11 @@ import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
+
+export type SessionMethodHandler = (
+  params: Record<string, unknown>,
+  ctx: ExtensionContext,
+) => Promise<unknown> | unknown;
 
 function getDirectories(path: string): string[] {
   try {
@@ -98,16 +104,84 @@ async function healthCheckDetailed(): Promise<HealthCheckResponse> {
   };
 }
 
-// ── Method dispatch ─────────────────────────────────────────
+export function createSessionReadHandlers(): Record<string, SessionMethodHandler> {
+  return {
+    "session.list_sessions": async (params) => listSessions(params.cwd as string),
+    "session.get_history": async (params) =>
+      getHistory({
+        sessionId: params.sessionId as string,
+        cwd: params.cwd as string | undefined,
+        limit: params.limit as number | undefined,
+        offset: params.offset as number | undefined,
+      }),
+    "session.get_info": async (params) => {
+      const rt = getRuntime();
+      const sessionId = params.sessionId as string | undefined;
+      const activeSessions = (await rt.agentClient.list()) as Array<{ id: string }>;
+      if (sessionId) {
+        const session = activeSessions.find((entry) => entry.id === sessionId);
+        return { session: session || null, activeSessions };
+      }
+      return { activeSessions };
+    },
+    "session.get_task": async (params) => {
+      const rt = getRuntime();
+      const result = (await rt.agentClient.getTask(params.taskId as string)) as {
+        task?: SessionTask | null;
+      };
+      const hostTask = (result?.task || null) as SessionTask | null;
+      if (hostTask) {
+        rt.tasks.set(hostTask.taskId, hostTask);
+      }
+      const storedTask = getTask(params.taskId as string);
+      return { task: hostTask || storedTask || null };
+    },
+    "session.list_tasks": async (params) =>
+      listTasks({
+        sessionId: params.sessionId as string | undefined,
+        status: params.status as TaskStatus | undefined,
+        agent: params.agent as string | undefined,
+      }),
+    "session.list_workspaces": async () => ({ workspaces: listWorkspaces() }),
+    "session.get_workspace": async (params) => ({ workspace: getWorkspace(params.id as string) }),
+    "session.get_directories": async (params) => {
+      const path = (params.path as string | undefined) || "~";
+      return { path, directories: getDirectories(path) };
+    },
+    "session.health_check": async () => healthCheckDetailed(),
+    "session.rotate_persistent_sessions": async () => {
+      const rt = getRuntime();
+      const rotationConfig = (rt.config.persistentSessionRotation as {
+        maxMessages?: number;
+        maxAgeHours?: number;
+      }) || { maxMessages: 200, maxAgeHours: 24 };
+      const maxMessages = rotationConfig.maxMessages ?? 200;
+      const maxAgeHours = rotationConfig.maxAgeHours ?? 24;
+      return rotatePersistentSessions({
+        store: {
+          getEntries: () =>
+            rt.ctx.store.get<
+              Record<string, { sessionId: string; messageCount: number; createdAt: string }>
+            >("persistentSessions") || {},
+          setEntries: (entries) => {
+            rt.ctx.store.set("persistentSessions", entries);
+          },
+        },
+        maxMessages,
+        maxAgeHours,
+        log,
+        formatSessionId: shortId,
+      });
+    },
+    "session.get_memory_context": async (params) =>
+      getMemoryContext(params.cwd as string | undefined),
+  };
+}
 
-export async function dispatchMethod(
-  method: string,
-  params: Record<string, unknown>,
-): Promise<unknown> {
-  const rt = getRuntime();
-
-  switch (method) {
-    case "session.create_session": {
+export function createSessionWriteHandlers(): Record<string, SessionMethodHandler> {
+  return {
+    "session.create_session": async (params) => {
+      const rt = getRuntime();
       const cwd = params.cwd as string;
       const agent = (params.agent as string | undefined) || "claude";
       const model = (params.model as string | undefined) || rt.sessionConfig.model;
@@ -137,9 +211,9 @@ export async function dispatchMethod(
       setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
       log.info("Session draft created", { sessionId: shortId(sessionId), cwd });
       return { sessionId };
-    }
-
-    case "session.send_prompt": {
+    },
+    "session.send_prompt": async (params) => {
+      const rt = getRuntime();
       return await runPromptLifecycle(
         {
           sessionId: params.sessionId as string,
@@ -155,15 +229,15 @@ export async function dispatchMethod(
           tags: rt.ctx.tags,
         },
       );
-    }
-
-    case "session.interrupt_session": {
+    },
+    "session.interrupt_session": async (params) => {
+      const rt = getRuntime();
       log.info("Interrupting session", { sessionId: shortId(params.sessionId as string) });
       const ok = await rt.agentClient.interrupt(params.sessionId as string);
       return { ok };
-    }
-
-    case "session.close_session": {
+    },
+    "session.close_session": async (params) => {
+      const rt = getRuntime();
       log.info("Closing session", { sessionId: shortId(params.sessionId as string) });
       await rt.agentClient.close(params.sessionId as string);
       rt.requestContexts.delete(params.sessionId as string);
@@ -188,43 +262,20 @@ export async function dispatchMethod(
       }
       log.info("Session closed", { sessionId: shortId(params.sessionId as string) });
       return { ok: true };
-    }
-
-    case "session.list_sessions":
-      return listSessions(params.cwd as string);
-
-    case "session.get_history":
-      return getHistory({
-        sessionId: params.sessionId as string,
-        cwd: params.cwd as string | undefined,
-        limit: params.limit as number | undefined,
-        offset: params.offset as number | undefined,
-      });
-
-    case "session.switch_session":
-      return await switchSession({
+    },
+    "session.switch_session": async (params) =>
+      switchSession({
         sessionId: params.sessionId as string,
         cwd: params.cwd as string,
         model: params.model as string | undefined,
-      });
-
-    case "session.reset_session":
-      return await resetSession({
+      }),
+    "session.reset_session": async (params) =>
+      resetSession({
         cwd: params.cwd as string,
         model: params.model as string | undefined,
-      });
-
-    case "session.get_info": {
-      const sessionId = params.sessionId as string | undefined;
-      const activeSessions = (await rt.agentClient.list()) as Array<{ id: string }>;
-      if (sessionId) {
-        const session = activeSessions.find((entry) => entry.id === sessionId);
-        return { session: session || null, activeSessions };
-      }
-      return { activeSessions };
-    }
-
-    case "session.set_permission_mode": {
+      }),
+    "session.set_permission_mode": async (params) => {
+      const rt = getRuntime();
       log.info("Setting permission mode", {
         sessionId: shortId(params.sessionId as string),
         mode: params.mode,
@@ -234,9 +285,9 @@ export async function dispatchMethod(
         params.mode as string,
       );
       return { ok };
-    }
-
-    case "session.send_tool_result": {
+    },
+    "session.send_tool_result": async (params) => {
+      const rt = getRuntime();
       log.info("Sending tool result", {
         sessionId: shortId(params.sessionId as string),
         toolUseId: params.toolUseId,
@@ -249,9 +300,9 @@ export async function dispatchMethod(
         params.isError as boolean,
       );
       return { ok };
-    }
-
-    case "session.start_task": {
+    },
+    "session.start_task": async (params) => {
+      const rt = getRuntime();
       return await startTask(
         {
           sessionId: params.sessionId as string,
@@ -272,31 +323,10 @@ export async function dispatchMethod(
           tags: rt.ctx.tags,
         },
       );
-    }
-
-    case "session.get_task": {
-      const result = (await rt.agentClient.getTask(params.taskId as string)) as {
-        task?: SessionTask | null;
-      };
-      const hostTask = (result?.task || null) as SessionTask | null;
-      if (hostTask) {
-        rt.tasks.set(hostTask.taskId, hostTask);
-      }
-      const storedTask = getTask(params.taskId as string);
-      return { task: hostTask || storedTask || null };
-    }
-
-    case "session.list_tasks":
-      return await listTasks({
-        sessionId: params.sessionId as string | undefined,
-        status: params.status as TaskStatus | undefined,
-        agent: params.agent as string | undefined,
-      });
-
-    case "session.interrupt_task":
-      return await interruptTask(params.taskId as string);
-
-    case "session.send_notification": {
+    },
+    "session.interrupt_task": async (params) => interruptTask(params.taskId as string),
+    "session.send_notification": async (params) => {
+      const rt = getRuntime();
       const sessionId = params.sessionId as string;
       const text = params.text as string;
 
@@ -311,15 +341,8 @@ export async function dispatchMethod(
       });
 
       return { ok: true, sessionId };
-    }
-
-    case "session.list_workspaces":
-      return { workspaces: listWorkspaces() };
-
-    case "session.get_workspace":
-      return { workspace: getWorkspace(params.id as string) };
-
-    case "session.get_or_create_workspace": {
+    },
+    "session.get_or_create_workspace": async (params) => {
       const cwd = params.cwd as string;
       const result = getOrCreateWorkspace(
         cwd,
@@ -332,47 +355,28 @@ export async function dispatchMethod(
         general: result.workspace.general,
       });
       return result;
-    }
+    },
+    "session.delete_workspace": async (params) => ({
+      deleted: deleteWorkspace(params.cwd as string),
+    }),
+  };
+}
 
-    case "session.delete_workspace":
-      return { deleted: deleteWorkspace(params.cwd as string) };
+export function createSessionMethodHandlers(): Record<string, SessionMethodHandler> {
+  return {
+    ...createSessionReadHandlers(),
+    ...createSessionWriteHandlers(),
+  };
+}
 
-    case "session.get_directories": {
-      const path = (params.path as string | undefined) || "~";
-      return { path, directories: getDirectories(path) };
-    }
-
-    case "session.health_check":
-      return healthCheckDetailed();
-
-    case "session.rotate_persistent_sessions": {
-      const rotationConfig = (rt.config.persistentSessionRotation as {
-        maxMessages?: number;
-        maxAgeHours?: number;
-      }) || { maxMessages: 200, maxAgeHours: 24 };
-      const maxMessages = rotationConfig.maxMessages ?? 200;
-      const maxAgeHours = rotationConfig.maxAgeHours ?? 24;
-      return rotatePersistentSessions({
-        store: {
-          getEntries: () =>
-            rt.ctx.store.get<
-              Record<string, { sessionId: string; messageCount: number; createdAt: string }>
-            >("persistentSessions") || {},
-          setEntries: (entries) => {
-            rt.ctx.store.set("persistentSessions", entries);
-          },
-        },
-        maxMessages,
-        maxAgeHours,
-        log,
-        formatSessionId: shortId,
-      });
-    }
-
-    case "session.get_memory_context":
-      return await getMemoryContext(params.cwd as string | undefined);
-
-    default:
-      throw new Error(`Unknown method: ${method}`);
+export async function dispatchMethod(
+  method: string,
+  params: Record<string, unknown>,
+  ctx: ExtensionContext,
+): Promise<unknown> {
+  const handler = createSessionMethodHandlers()[method];
+  if (!handler) {
+    throw new Error(`Unknown method: ${method}`);
   }
+  return await handler(params, ctx);
 }
