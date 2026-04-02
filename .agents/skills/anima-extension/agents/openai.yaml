@@ -1,0 +1,3 @@
+display_name: Anima Extension
+short_description: Build or refactor Anima extensions on the current runtime model
+default_prompt: Create or update an Anima extension using createStandardExtension, runtime containers, and method execution metadata.
