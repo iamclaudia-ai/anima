@@ -1,13 +1,7 @@
 import { createLogger, PERSISTENT_SESSION_ID, shortId, withTimeout } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import {
-  getStoredSession,
-  setWorkspaceActiveSession,
-  touchSession,
-  upsertSession,
-} from "../session-store";
-import { getWorkspace, getOrCreateWorkspace } from "../workspace";
+import { touchSession } from "../session-store";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
 import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
@@ -107,7 +101,7 @@ async function resolvePersistentSession(cwd: string): Promise<string> {
         rt.ctx.store.set("persistentSessions", entries);
       },
     },
-    listActiveSessions: async () => (await rt.agentClient.list()) as AgentHostSessionInfo[],
+    listActiveSessions: async () => (await rt.bridge.listSessions()) as AgentHostSessionInfo[],
     createSession: async (sessionCwd) => {
       const result = (await rt.dispatchMethod("session.create_session", {
         cwd: sessionCwd,
@@ -174,7 +168,7 @@ async function ensureSessionBootstrapped(params: {
     includeAllSummaries: params.includeAllSummaries,
   });
 
-  await rt.agentClient.createSession({
+  await rt.bridge.createSession({
     sessionId: params.sessionId,
     cwd: params.cwd,
     agent: params.agent,
@@ -184,7 +178,7 @@ async function ensureSessionBootstrapped(params: {
     effort: params.effort,
   });
 
-  upsertSession({
+  rt.registry.upsertSession({
     id: params.sessionId,
     workspaceId: params.workspaceId,
     providerSessionId: params.sessionId,
@@ -249,11 +243,12 @@ async function resolveSessionStage(input: PromptLifecycleInput): Promise<PromptL
     content: summarizePrompt(input.content),
   });
 
-  const existing = getStoredSession(sessionId);
+  const existing = rt.registry.getStoredSession(sessionId);
   let effectiveCwd = input.cwd;
-  let workspaceResult = effectiveCwd !== undefined ? getOrCreateWorkspace(effectiveCwd) : undefined;
+  let workspaceResult =
+    effectiveCwd !== undefined ? rt.registry.getOrCreateWorkspace(effectiveCwd) : undefined;
   if (!effectiveCwd && existing) {
-    const storedWorkspace = getWorkspace(existing.workspaceId);
+    const storedWorkspace = rt.registry.getWorkspace(existing.workspaceId);
     if (storedWorkspace) {
       effectiveCwd = storedWorkspace.cwd;
       workspaceResult = { workspace: storedWorkspace, created: false };
@@ -276,7 +271,7 @@ async function resolveSessionStage(input: PromptLifecycleInput): Promise<PromptL
 
 async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
   const rt = getRuntime();
-  const activeSessions = (await rt.agentClient.list()) as AgentHostSessionInfo[];
+  const activeSessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
   const activeSession = activeSessions.find((session) => session.id === state.sessionId);
   if (
     activeSession &&
@@ -289,11 +284,11 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       runningModel: activeSession.model,
       desiredModel: state.resolvedModel,
     });
-    await rt.agentClient.close(state.sessionId);
+    await rt.bridge.closeSession(state.sessionId);
   }
 
   if (!state.existing && state.effectiveCwd && state.workspaceResult) {
-    upsertSession({
+    rt.registry.upsertSession({
       id: state.sessionId,
       workspaceId: state.workspaceResult.workspace.id,
       providerSessionId: state.sessionId,
@@ -302,7 +297,7 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       purpose: "chat",
       runtimeStatus: "idle",
     });
-    setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
+    rt.registry.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
     return;
   }
 
@@ -361,7 +356,7 @@ async function dispatchStreamingPromptStage(
 ): Promise<{ status: "streaming"; sessionId: string }> {
   const rt = getRuntime();
   const promptStart = Date.now();
-  await rt.agentClient.prompt(
+  await rt.bridge.prompt(
     state.sessionId,
     state.content,
     state.effectiveCwd,
@@ -378,10 +373,10 @@ async function dispatchStreamingPromptStage(
       elapsed: `${elapsed}ms`,
       responseChars: responseLen,
     });
-    rt.agentClient.removeListener("session.event", turnListener);
+    rt.bridge.offSessionEvent(turnListener);
   };
 
-  rt.agentClient.on("session.event", turnListener);
+  rt.bridge.onSessionEvent(turnListener);
   return { status: "streaming", sessionId: state.sessionId };
 }
 
@@ -393,7 +388,7 @@ async function dispatchNonStreamingPromptStage(
   const turnResultPromise = rt.sessionActors.beginTurn(state.sessionId, 300_000);
 
   try {
-    await rt.agentClient.prompt(
+    await rt.bridge.prompt(
       state.sessionId,
       state.content,
       state.effectiveCwd,

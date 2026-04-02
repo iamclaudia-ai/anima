@@ -40,6 +40,6 @@ export function wireSessionEvents(): () => void {
     }
   };
 
-  rt.agentClient.on("session.event", listener);
-  return () => rt.agentClient.removeListener("session.event", listener);
+  rt.bridge.onSessionEvent(listener);
+  return () => rt.bridge.offSessionEvent(listener);
 }

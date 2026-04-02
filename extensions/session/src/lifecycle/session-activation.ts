@@ -1,13 +1,7 @@
 import { createLogger, shortId, withTimeout } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import {
-  getStoredSession,
-  getWorkspaceActiveSession,
-  setWorkspaceActiveSession,
-  upsertSession,
-} from "../session-store";
-import { getOrCreateWorkspace } from "../workspace";
+import { getWorkspaceActiveSession } from "../session-store";
 import type { AgentHostSessionInfo } from "../session-types";
 import { getRuntime } from "../runtime";
 
@@ -33,7 +27,7 @@ async function transitionConversation(cwd: string): Promise<void> {
 
 async function recycleForModelDrift(sessionId: string, desiredModel: string): Promise<void> {
   const rt = getRuntime();
-  const activeSessions = (await rt.agentClient.list()) as AgentHostSessionInfo[];
+  const activeSessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
   const activeSession = activeSessions.find((s) => s.id === sessionId);
   if (
     activeSession &&
@@ -46,7 +40,7 @@ async function recycleForModelDrift(sessionId: string, desiredModel: string): Pr
       runningModel: activeSession.model,
       desiredModel,
     });
-    await rt.agentClient.close(sessionId);
+    await rt.bridge.closeSession(sessionId);
   }
 }
 
@@ -56,8 +50,8 @@ export async function switchSession(params: {
   model?: string;
 }): Promise<{ sessionId: string }> {
   const rt = getRuntime();
-  const workspaceResult = getOrCreateWorkspace(params.cwd);
-  const existing = getStoredSession(params.sessionId);
+  const workspaceResult = rt.registry.getOrCreateWorkspace(params.cwd);
+  const existing = rt.registry.getStoredSession(params.sessionId);
   await transitionConversation(params.cwd);
 
   const resumeModel = params.model || existing?.model || rt.sessionConfig.model;
@@ -68,8 +62,8 @@ export async function switchSession(params: {
     cwd: params.cwd,
     model: resumeModel,
   });
-  await rt.agentClient.prompt(params.sessionId, "", params.cwd, resumeModel);
-  upsertSession({
+  await rt.bridge.prompt(params.sessionId, "", params.cwd, resumeModel);
+  rt.registry.upsertSession({
     id: params.sessionId,
     workspaceId: workspaceResult.workspace.id,
     providerSessionId: existing?.providerSessionId || params.sessionId,
@@ -80,7 +74,7 @@ export async function switchSession(params: {
     metadata: existing?.metadata || null,
     previousSessionId: existing?.previousSessionId ?? null,
   });
-  setWorkspaceActiveSession(workspaceResult.workspace.id, params.sessionId);
+  rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, params.sessionId);
   return { sessionId: params.sessionId };
 }
 
@@ -90,13 +84,13 @@ export async function resetSession(params: {
 }): Promise<{ sessionId: string }> {
   const rt = getRuntime();
   const model = params.model || rt.sessionConfig.model;
-  const workspaceResult = getOrCreateWorkspace(params.cwd);
+  const workspaceResult = rt.registry.getOrCreateWorkspace(params.cwd);
   const previousSessionId = getWorkspaceActiveSession(workspaceResult.workspace.id);
   await transitionConversation(params.cwd);
 
   log.info("Resetting session", { cwd: params.cwd });
-  const result = await rt.agentClient.createSession({ cwd: params.cwd, model });
-  upsertSession({
+  const result = await rt.bridge.createSession({ cwd: params.cwd, model });
+  rt.registry.upsertSession({
     id: result.sessionId,
     workspaceId: workspaceResult.workspace.id,
     providerSessionId: result.sessionId,
@@ -106,6 +100,6 @@ export async function resetSession(params: {
     runtimeStatus: "idle",
     previousSessionId,
   });
-  setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
+  rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
   return result;
 }

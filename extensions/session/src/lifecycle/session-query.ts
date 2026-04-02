@@ -6,19 +6,18 @@ import { discoverSessions } from "../claude-projects";
 import type { MemoryContextResult } from "../memory-context";
 import { formatMemoryContext } from "../memory-context";
 import { resolveSessionPath, parseSessionFilePaginated, parseSessionUsage } from "../parse-session";
-import { listWorkspaceSessions, upsertSession } from "../session-store";
-import { getOrCreateWorkspace, getWorkspaceByCwd } from "../workspace";
+import { listWorkspaceSessions } from "../session-store";
 import { getRuntime } from "../runtime";
 
 const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "session.log"));
 
 export function listSessions(cwd: string): { sessions: SessionIndexEntry[] } {
   const rt = getRuntime();
-  const workspaceResult = getOrCreateWorkspace(cwd);
+  const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
   const discovered = discoverSessions(cwd);
   for (const entry of discovered) {
     if (!entry.sessionId) continue;
-    upsertSession({
+    rt.registry.upsertSession({
       id: entry.sessionId,
       workspaceId: workspaceResult.workspace.id,
       providerSessionId: entry.sessionId,
@@ -93,7 +92,7 @@ export async function getMemoryContext(cwd?: string): Promise<{
 }> {
   const rt = getRuntime();
   const effectiveCwd = cwd || process.cwd();
-  const workspace = getWorkspaceByCwd(effectiveCwd);
+  const workspace = rt.registry.getWorkspaceByCwd(effectiveCwd);
 
   try {
     const memoryContext = (await rt.ctx.call("memory.get_session_context", {

@@ -9,16 +9,19 @@
  */
 
 import type { ExtensionContext } from "@anima/shared";
-import type { AgentHostClient } from "./agent-client";
 import type { SessionRuntimeConfig } from "./session-types";
 import type { SessionTask } from "./lifecycle/task-workflow";
 import type { SessionActorRegistry } from "./session-actor-registry";
+import type { SessionAgentBridge } from "./session-agent-bridge";
+import type { SessionRegistry } from "./session-registry";
 
 export interface SessionRuntime {
   /** Extension context — available after start() */
   ctx: ExtensionContext;
-  /** WebSocket client to agent-host */
-  agentClient: AgentHostClient;
+  /** Actor owning agent-host transport and event bridge subscriptions */
+  bridge: SessionAgentBridge;
+  /** Actor owning workspace/session registry state */
+  registry: SessionRegistry;
   /** Resolved session configuration (model, thinking, effort) */
   sessionConfig: SessionRuntimeConfig;
   /** Extension config from anima.json */

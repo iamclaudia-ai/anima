@@ -15,19 +15,16 @@ import { homedir } from "node:os";
 import { AgentHostClient } from "./agent-client";
 import type { AgentHostSessionInfo, SessionRuntimeConfig } from "./session-types";
 import type { SessionTask } from "./lifecycle/task-workflow";
-import { getOrCreateWorkspace, closeDb } from "./workspace";
-import {
-  closeSessionDb,
-  setWorkspaceActiveSession,
-  upsertSession,
-  type RuntimeStatus,
-} from "./session-store";
+import { closeDb } from "./workspace";
+import { closeSessionDb } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
 import { wireTaskEvents } from "./lifecycle/task-events";
 import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodHandlers } from "./session-dispatch";
 import { getRuntime, initRuntime, resetRuntime } from "./runtime";
 import { SessionActorRegistry } from "./session-actor-registry";
+import { SessionAgentBridge } from "./session-agent-bridge";
+import { SessionRegistry } from "./session-registry";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -64,6 +61,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   // ── Runtime objects (initialized before start, ctx bound in start) ──
   const agentClient = new AgentHostClient(globalConfig.agentHost.url);
+  const bridge = new SessionAgentBridge(agentClient);
+  const registry = new SessionRegistry();
   const unsubscribers: Array<() => void> = [];
   const methodHandlers = createSessionMethodHandlers();
 
@@ -72,11 +71,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   function health(): HealthCheckResponse {
     return {
       ok: true,
-      status: agentClient.isConnected ? "healthy" : "degraded",
+      status: bridge.isConnected ? "healthy" : "degraded",
       label: "Sessions",
-      metrics: [
-        { label: "Agent Host", value: agentClient.isConnected ? "connected" : "disconnected" },
-      ],
+      metrics: [{ label: "Agent Host", value: bridge.isConnected ? "connected" : "disconnected" }],
       actions: [],
       items: [],
     };
@@ -142,7 +139,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     async start(ctx: ExtensionContext): Promise<void> {
       initRuntime({
         ctx,
-        agentClient,
+        bridge,
+        registry,
         sessionConfig,
         config,
         sessionActors: new SessionActorRegistry(),
@@ -155,30 +153,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       unsubscribers.push(wireSessionEvents());
 
       try {
-        await agentClient.connect();
-        const activeSessions = (await agentClient.list()) as AgentHostSessionInfo[];
-        for (const session of activeSessions) {
-          if (!session.cwd) continue;
-          const workspaceResult = getOrCreateWorkspace(session.cwd);
-          const runtimeStatus: RuntimeStatus = session.isProcessRunning
-            ? session.stale
-              ? "stalled"
-              : "running"
-            : "idle";
-          upsertSession({
-            id: session.id,
-            workspaceId: workspaceResult.workspace.id,
-            providerSessionId: session.id,
-            model: session.model,
-            agent: "claude",
-            purpose: "chat",
-            runtimeStatus,
-            lastActivity: session.lastActivity,
-          });
-          if (session.isActive) {
-            setWorkspaceActiveSession(workspaceResult.workspace.id, session.id);
-          }
-        }
+        await bridge.connect();
+        const activeSessions = (await bridge.listSessions()) as AgentHostSessionInfo[];
+        registry.recordConnectedSessions(activeSessions);
         log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
         log.warn("Failed to connect to agent-host, will retry in background", {
@@ -196,7 +173,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         }
       }
       unsubscribers.length = 0;
-      agentClient.disconnect();
+      bridge.disconnect();
       closeSessionDb();
       closeDb();
       resetRuntime();

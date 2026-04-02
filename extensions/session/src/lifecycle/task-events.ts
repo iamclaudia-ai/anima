@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { SessionTask } from "./task-workflow";
 import { toSessionTaskFromStored } from "./task-workflow";
-import { getStoredSession, upsertSession } from "../session-store";
 import type { RequestContext } from "../session-types";
 import { getRuntime } from "../runtime";
 
@@ -26,8 +25,8 @@ export async function sendSessionNotification(
   rt.sessionActors.bindNotificationRequest(sessionId, notifCtx);
 
   const wrapped = `<user_notification>\n${text}\n</user_notification>`;
-  const stored = getStoredSession(sessionId);
-  await rt.agentClient.prompt(
+  const stored = rt.registry.getStoredSession(sessionId);
+  await rt.bridge.prompt(
     sessionId,
     wrapped,
     undefined,
@@ -90,7 +89,7 @@ export function wireTaskEvents(): () => void {
     const taskId = event.taskId;
     let task: SessionTask | null | undefined = rt.tasks.get(taskId);
     if (!task) {
-      task = toSessionTaskFromStored(getStoredSession(taskId));
+      task = toSessionTaskFromStored(rt.registry.getStoredSession(taskId));
       if (task) rt.tasks.set(taskId, task);
     }
     if (!task) return;
@@ -118,11 +117,11 @@ export function wireTaskEvents(): () => void {
     }
     task.updatedAt = new Date().toISOString();
 
-    const taskStored = getStoredSession(task.taskId);
-    const parentStored = getStoredSession(task.sessionId);
+    const taskStored = rt.registry.getStoredSession(task.taskId);
+    const parentStored = rt.registry.getStoredSession(task.sessionId);
     const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
     if (workspaceId) {
-      upsertSession({
+      rt.registry.upsertSession({
         id: task.taskId,
         workspaceId,
         providerSessionId: task.taskId,
@@ -179,6 +178,6 @@ export function wireTaskEvents(): () => void {
     }
   };
 
-  rt.agentClient.on("task.event", listener);
-  return () => rt.agentClient.removeListener("task.event", listener);
+  rt.bridge.onTaskEvent(listener);
+  return () => rt.bridge.offTaskEvent(listener);
 }

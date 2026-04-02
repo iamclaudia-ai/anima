@@ -11,8 +11,6 @@ import { sendSessionNotification } from "./lifecycle/task-events";
 import { listSessions, getHistory, getMemoryContext } from "./lifecycle/session-query";
 import { switchSession, resetSession } from "./lifecycle/session-activation";
 import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
-import { getStoredSession, setWorkspaceActiveSession, upsertSession } from "./session-store";
-import { getWorkspace, getOrCreateWorkspace, listWorkspaces, deleteWorkspace } from "./workspace";
 import type { AgentHostSessionInfo } from "./session-types";
 import type { SessionTask } from "./lifecycle/task-workflow";
 import type { HealthCheckResponse } from "@anima/shared";
@@ -44,7 +42,7 @@ function getDirectories(path: string): string[] {
 
 async function healthCheckDetailed(): Promise<HealthCheckResponse> {
   const rt = getRuntime();
-  if (!rt.agentClient.isConnected) {
+  if (!rt.bridge.isConnected) {
     return {
       ok: false,
       status: "degraded",
@@ -57,7 +55,7 @@ async function healthCheckDetailed(): Promise<HealthCheckResponse> {
 
   let sessions: AgentHostSessionInfo[] = [];
   try {
-    sessions = (await rt.agentClient.list()) as AgentHostSessionInfo[];
+    sessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
   } catch {
     return {
       ok: false,
@@ -117,7 +115,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     "session.get_info": async (params) => {
       const rt = getRuntime();
       const sessionId = params.sessionId as string | undefined;
-      const activeSessions = (await rt.agentClient.list()) as Array<{ id: string }>;
+      const activeSessions = (await rt.bridge.listSessions()) as Array<{ id: string }>;
       if (sessionId) {
         const session = activeSessions.find((entry) => entry.id === sessionId);
         return { session: session || null, activeSessions };
@@ -126,7 +124,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     },
     "session.get_task": async (params) => {
       const rt = getRuntime();
-      const result = (await rt.agentClient.getTask(params.taskId as string)) as {
+      const result = (await rt.bridge.getTask(params.taskId as string)) as {
         task?: SessionTask | null;
       };
       const hostTask = (result?.task || null) as SessionTask | null;
@@ -142,8 +140,14 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
         status: params.status as TaskStatus | undefined,
         agent: params.agent as string | undefined,
       }),
-    "session.list_workspaces": async () => ({ workspaces: listWorkspaces() }),
-    "session.get_workspace": async (params) => ({ workspace: getWorkspace(params.id as string) }),
+    "session.list_workspaces": async () => {
+      const rt = getRuntime();
+      return { workspaces: rt.registry.listWorkspaces() };
+    },
+    "session.get_workspace": async (params) => {
+      const rt = getRuntime();
+      return { workspace: rt.registry.getWorkspace(params.id as string) };
+    },
     "session.get_directories": async (params) => {
       const path = (params.path as string | undefined) || "~";
       return { path, directories: getDirectories(path) };
@@ -192,9 +196,9 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         (params.systemPrompt as string | undefined) || rt.sessionConfig.systemPrompt || undefined;
 
       log.info("Creating session", { agent, cwd, model, thinking, effort });
-      const workspaceResult = getOrCreateWorkspace(cwd);
+      const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
       const sessionId = randomUUID();
-      upsertSession({
+      rt.registry.upsertSession({
         id: sessionId,
         workspaceId: workspaceResult.workspace.id,
         providerSessionId: sessionId,
@@ -208,7 +212,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
           bootstrapEffort: effort,
         },
       });
-      setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
+      rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
       log.info("Session draft created", { sessionId: shortId(sessionId), cwd });
       return { sessionId };
     },
@@ -233,32 +237,15 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
     "session.interrupt_session": async (params) => {
       const rt = getRuntime();
       log.info("Interrupting session", { sessionId: shortId(params.sessionId as string) });
-      const ok = await rt.agentClient.interrupt(params.sessionId as string);
+      const ok = await rt.bridge.interruptSession(params.sessionId as string);
       return { ok };
     },
     "session.close_session": async (params) => {
       const rt = getRuntime();
       log.info("Closing session", { sessionId: shortId(params.sessionId as string) });
-      await rt.agentClient.close(params.sessionId as string);
+      await rt.bridge.closeSession(params.sessionId as string);
       rt.sessionActors.clearSession(params.sessionId as string);
-      const existing = getStoredSession(params.sessionId as string);
-      if (existing) {
-        upsertSession({
-          id: existing.id,
-          workspaceId: existing.workspaceId,
-          providerSessionId: existing.providerSessionId,
-          model: existing.model,
-          agent: existing.agent,
-          purpose: existing.purpose,
-          parentSessionId: existing.parentSessionId,
-          status: "archived",
-          runtimeStatus: existing.runtimeStatus,
-          title: existing.title,
-          summary: existing.summary,
-          metadata: existing.metadata,
-          previousSessionId: existing.previousSessionId,
-        });
-      }
+      rt.registry.archiveSession(params.sessionId as string);
       log.info("Session closed", { sessionId: shortId(params.sessionId as string) });
       return { ok: true };
     },
@@ -279,7 +266,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         sessionId: shortId(params.sessionId as string),
         mode: params.mode,
       });
-      const ok = await rt.agentClient.setPermissionMode(
+      const ok = await rt.bridge.setPermissionMode(
         params.sessionId as string,
         params.mode as string,
       );
@@ -292,7 +279,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         toolUseId: params.toolUseId,
         isError: params.isError,
       });
-      const ok = await rt.agentClient.sendToolResult(
+      const ok = await rt.bridge.sendToolResult(
         params.sessionId as string,
         params.toolUseId as string,
         params.content as string,
@@ -342,8 +329,9 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       return { ok: true, sessionId };
     },
     "session.get_or_create_workspace": async (params) => {
+      const rt = getRuntime();
       const cwd = params.cwd as string;
-      const result = getOrCreateWorkspace(
+      const result = rt.registry.getOrCreateWorkspace(
         cwd,
         params.name as string | undefined,
         params.general as boolean | undefined,
@@ -355,9 +343,10 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       });
       return result;
     },
-    "session.delete_workspace": async (params) => ({
-      deleted: deleteWorkspace(params.cwd as string),
-    }),
+    "session.delete_workspace": async (params) => {
+      const rt = getRuntime();
+      return { deleted: rt.registry.deleteWorkspace(params.cwd as string) };
+    },
   };
 }
 

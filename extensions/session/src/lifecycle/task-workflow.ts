@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { getStoredSession, listTaskSessions, upsertSession } from "../session-store";
+import { listTaskSessions } from "../session-store";
 import type { StoredSession } from "../session-store";
-import { getWorkspace, getOrCreateWorkspace } from "../workspace";
+import { getWorkspace } from "../workspace";
 import type { AgentHostSessionInfo } from "../session-types";
 import { getRuntime } from "../runtime";
 
@@ -160,7 +160,7 @@ export async function startTask(
   request: { connectionId: string | null; tags: string[] | null },
 ): Promise<Record<string, unknown>> {
   const rt = getRuntime();
-  const parentSession = getStoredSession(params.sessionId);
+  const parentSession = rt.registry.getStoredSession(params.sessionId);
 
   let effectiveCwd = params.cwd;
   if (!effectiveCwd && parentSession?.workspaceId) {
@@ -168,11 +168,11 @@ export async function startTask(
     effectiveCwd = workspace?.cwd;
   }
   if (!effectiveCwd) {
-    const activeSessions = (await rt.agentClient.list()) as AgentHostSessionInfo[];
+    const activeSessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
     effectiveCwd = activeSessions.find((s) => s.id === params.sessionId)?.cwd;
   }
 
-  const result = await rt.agentClient.startTask({
+  const result = await rt.bridge.startTask({
     sessionId: params.sessionId,
     agent: params.agent,
     prompt: params.prompt,
@@ -190,7 +190,7 @@ export async function startTask(
   const nowIso = new Date().toISOString();
   const workspaceId =
     parentSession?.workspaceId ||
-    (effectiveCwd ? getOrCreateWorkspace(effectiveCwd).workspace.id : null);
+    (effectiveCwd ? rt.registry.getOrCreateWorkspace(effectiveCwd).workspace.id : null);
   if (!workspaceId) {
     throw new Error(`Unable to resolve workspace for parent session ${params.sessionId}`);
   }
@@ -216,7 +216,7 @@ export async function startTask(
   };
   rt.tasks.set(task.taskId, task);
   rt.taskNotificationsSent.delete(task.taskId);
-  upsertSession({
+  rt.registry.upsertSession({
     id: task.taskId,
     workspaceId,
     providerSessionId: task.taskId,
@@ -255,7 +255,7 @@ export async function startTask(
 
 export function getTask(taskId: string): SessionTask | null {
   const rt = getRuntime();
-  return rt.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
+  return rt.tasks.get(taskId) || toSessionTaskFromStored(rt.registry.getStoredSession(taskId));
 }
 
 export async function listTasks(params: {
@@ -264,7 +264,7 @@ export async function listTasks(params: {
   agent?: string;
 }): Promise<{ tasks: SessionTask[] }> {
   const rt = getRuntime();
-  const result = (await rt.agentClient.listTasks({
+  const result = (await rt.bridge.listTasks({
     sessionId: params.sessionId,
     status: params.status,
     agent: params.agent,
@@ -272,11 +272,11 @@ export async function listTasks(params: {
   const hostTasks = result.tasks || [];
   for (const task of hostTasks) {
     rt.tasks.set(task.taskId, task);
-    const taskStored = getStoredSession(task.taskId);
-    const parentStored = getStoredSession(task.sessionId);
+    const taskStored = rt.registry.getStoredSession(task.taskId);
+    const parentStored = rt.registry.getStoredSession(task.sessionId);
     const workspaceId = taskStored?.workspaceId || parentStored?.workspaceId;
     if (workspaceId) {
-      upsertSession({
+      rt.registry.upsertSession({
         id: task.taskId,
         workspaceId,
         providerSessionId: task.taskId,
@@ -324,18 +324,19 @@ export async function interruptTask(
   taskId: string,
 ): Promise<{ ok: boolean; taskId: string; error?: string }> {
   const rt = getRuntime();
-  const task = rt.tasks.get(taskId) || toSessionTaskFromStored(getStoredSession(taskId));
+  const task =
+    rt.tasks.get(taskId) || toSessionTaskFromStored(rt.registry.getStoredSession(taskId));
   if (!task) {
     return { ok: false, error: "Task not found", taskId };
   }
 
-  const ok = (await rt.agentClient.interruptTask(taskId)) as boolean;
+  const ok = (await rt.bridge.interruptTask(taskId)) as boolean;
   if (ok) {
     task.status = "interrupted";
     task.updatedAt = new Date().toISOString();
-    const stored = getStoredSession(taskId);
+    const stored = rt.registry.getStoredSession(taskId);
     if (stored) {
-      upsertSession({
+      rt.registry.upsertSession({
         id: stored.id,
         workspaceId: stored.workspaceId,
         providerSessionId: stored.providerSessionId,
