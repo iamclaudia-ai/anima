@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createExtensionStore } from "./store";
 import { RequestScheduler } from "./request-scheduler";
+export { createStandardExtension } from "./standard-extension";
 
 // ── Types ──────────────────────────────────────────────────────
 
