@@ -265,7 +265,7 @@ export function BogartPage() {
               display: "grid",
               gridTemplateColumns: `repeat(${COLS}, ${displayW}px)`,
               gap: showGrid ? 2 : 0,
-              background: showGrid ? "#333" : "transparent",
+              background: showGrid ? "#e8dff0" : "transparent",
               padding: showGrid ? 2 : 0,
               borderRadius: 8,
             }}
@@ -352,7 +352,7 @@ export function BogartPage() {
             style={{
               width: displayW + 40,
               height: displayH + 40,
-              background: "#1a1a1a",
+              background: "#e8dff0",
               borderRadius: 8,
               border: "1px solid #333",
               display: "flex",
