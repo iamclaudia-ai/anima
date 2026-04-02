@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 
+import { ensureToken } from "@anima/shared";
+
 const gatewayHttp = process.env.ANIMA_GATEWAY_HTTP || "http://localhost:30086";
 const gatewayWs = process.env.ANIMA_GATEWAY_WS || "ws://localhost:30086/ws";
+const { token } = ensureToken();
 
 interface Message {
   type: "req" | "res" | "event";
@@ -19,7 +22,10 @@ function id(): string {
 }
 
 async function checkHealth(): Promise<void> {
-  const res = await fetch(`${gatewayHttp}/health`, { signal: AbortSignal.timeout(3000) });
+  const res = await fetch(`${gatewayHttp}/health`, {
+    signal: AbortSignal.timeout(3000),
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) {
     throw new Error(`Gateway health failed: HTTP ${res.status}`);
   }
@@ -31,7 +37,7 @@ async function checkHealth(): Promise<void> {
 }
 
 async function methodListSmoke(): Promise<number> {
-  const ws = new WebSocket(gatewayWs);
+  const ws = new WebSocket(`${gatewayWs}?token=${token}`);
   return new Promise((resolve, reject) => {
     const reqId = id();
 
