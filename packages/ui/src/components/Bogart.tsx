@@ -34,21 +34,32 @@ const SHEETS = [
 const MAX_BASELINE = Math.max(...SHEETS.flatMap((s) => s.baselines));
 
 // ── Animation definitions ──────────────────────────────────
-const ANIMS = {
-  "walk-right": { sheet: 0, frames: [4, 5, 6, 7] },
-  "walk-left": { sheet: 0, frames: [12, 13, 14, 15] },
-  sit: { sheet: 0, frames: [16, 17, 18, 19] },
-  "lick-paw": { sheet: 0, frames: [20, 21, 22, 23] },
-  sleep: { sheet: 2, frames: [0, 1, 2, 3] },
-  stir: { sheet: 2, frames: [4, 5, 6, 7] },
-  stand: { sheet: 2, frames: [8, 9, 10, 11] },
-  stretch: { sheet: 2, frames: [12, 13, 14, 15] },
-  "walk-right-2": { sheet: 2, frames: [16, 19, 20, 21, 22, 23] },
+// movement: "right" | "left" | "none" — whether the sprite moves during this animation
+// loop: true = repeats until state changes, false = plays once then stops on last frame
+interface AnimDef {
+  sheet: number;
+  frames: readonly number[];
+  loop: boolean;
+  movement: "right" | "left" | "none";
+}
+
+const ANIMS: Record<string, AnimDef> = {
+  "walk-right": { sheet: 0, frames: [4, 5, 6, 7], loop: true, movement: "right" },
+  "walk-left": { sheet: 0, frames: [12, 13, 14, 15], loop: true, movement: "left" },
+  sit: { sheet: 0, frames: [16, 17, 18, 19], loop: true, movement: "none" },
+  "lick-paw": { sheet: 0, frames: [20, 21, 22, 23], loop: false, movement: "none" },
+  sleep: { sheet: 2, frames: [0, 1, 2, 3], loop: true, movement: "none" },
+  stir: { sheet: 2, frames: [4, 5, 6, 7], loop: false, movement: "none" },
+  stand: { sheet: 2, frames: [8, 9, 10, 11], loop: false, movement: "none" },
+  stretch: { sheet: 2, frames: [12, 13, 14, 15], loop: false, movement: "none" },
+  "walk-right-2": { sheet: 2, frames: [16, 19, 20, 21, 22, 23], loop: true, movement: "right" },
   "chase-yarn": {
     sheet: 1,
     frames: [0, 1, 2, 3, 7, 5, 4, 6, 11, 10, 9, 8, 12, 13, 14, 15, 19, 18, 17, 16, 20, 21, 22, 23],
+    loop: true,
+    movement: "none",
   },
-} as const;
+};
 
 type AnimName = keyof typeof ANIMS;
 
@@ -118,7 +129,6 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   useEffect(() => {
     if (isQuerying && state !== "chasing") {
       setState("chasing");
-      setDirection(1);
       playAnim("chase-yarn");
     } else if (isTyping && (state === "sleeping" || state === "settling")) {
       setState("waking");
@@ -193,6 +203,12 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
     }
   }, [state, direction, playAnim]);
 
+  // Sync direction when walk animation bounces off edge
+  useEffect(() => {
+    if (currentAnim === "walk-right") setDirection(1);
+    else if (currentAnim === "walk-left") setDirection(-1);
+  }, [currentAnim]);
+
   // ── Frame ticker ─────────────────────────────────────────
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -202,19 +218,39 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
 
     intervalRef.current = setInterval(() => {
       setFrameIndex((prev) => {
+        const isLastFrame = prev === totalFrames - 1;
+
+        // Non-looping animation reached the end
+        if (isLastFrame && !anim.loop) {
+          // Check if we're in a sequence
+          if (sequenceRef.current.length > 0) {
+            const seqAnims = sequenceRef.current as AnimName[] & { onDone?: () => void };
+            sequenceIdxRef.current++;
+            if (sequenceIdxRef.current < seqAnims.length) {
+              const nextAnim = seqAnims[sequenceIdxRef.current];
+              setCurrentAnim(nextAnim);
+              return 0;
+            }
+            // Sequence complete
+            sequenceRef.current = [];
+            sequenceIdxRef.current = 0;
+            seqAnims.onDone?.();
+          }
+          // Stay on last frame
+          return prev;
+        }
+
         const next = (prev + 1) % totalFrames;
 
-        // Check if we completed a cycle and are in a sequence
-        if (next === 0 && sequenceRef.current.length > 0) {
+        // Looping animation completed a cycle — check sequence
+        if (next === 0 && anim.loop && sequenceRef.current.length > 0) {
           const seqAnims = sequenceRef.current as AnimName[] & { onDone?: () => void };
           sequenceIdxRef.current++;
           if (sequenceIdxRef.current < seqAnims.length) {
-            // Advance to next animation in sequence
             const nextAnim = seqAnims[sequenceIdxRef.current];
             setCurrentAnim(nextAnim);
             return 0;
           }
-          // Sequence complete
           sequenceRef.current = [];
           sequenceIdxRef.current = 0;
           seqAnims.onDone?.();
@@ -223,28 +259,23 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
         return next;
       });
 
-      // Movement for walking/chasing states
-      if (stateRef.current === "walking" || stateRef.current === "chasing") {
+      // Movement — driven by the animation's movement property
+      const movement = ANIMS[currentAnim].movement;
+      if (movement !== "none") {
+        const dir = movement === "right" ? 1 : -1;
         setPosX((prev) => {
-          const speed = stateRef.current === "chasing" ? WALK_SPEED * 2 : WALK_SPEED;
-          let next = prev + speed * (stateRef.current === "chasing" ? direction : direction);
+          let next = prev + WALK_SPEED * dir;
 
           // Bounce off edges
           const maxX = containerWidth - DISPLAY_W - 10;
           if (next >= maxX) {
             next = maxX;
             setDirection(-1);
-            if (stateRef.current === "chasing") {
-              // Don't change anim — chase-yarn handles all directions
-            } else {
-              playAnim("walk-left");
-            }
+            playAnim("walk-left");
           } else if (next <= 10) {
             next = 10;
             setDirection(1);
-            if (stateRef.current !== "chasing") {
-              playAnim("walk-right");
-            }
+            playAnim("walk-right");
           }
           return next;
         });
@@ -254,7 +285,7 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [currentAnim, containerWidth, direction, playAnim]);
+  }, [currentAnim, containerWidth, playAnim]);
 
   // ── Rendering ────────────────────────────────────────────
   const anim = ANIMS[currentAnim];
@@ -264,9 +295,6 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   const row = Math.floor(frameIdx / COLS);
   const baseline = sheet.baselines[row];
   const baselineShift = (MAX_BASELINE - baseline) * DISPLAY_SCALE;
-
-  // Flip horizontally for chasing when moving left
-  const shouldFlip = state === "chasing" && direction === -1;
 
   return (
     <div
@@ -280,7 +308,6 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
         pointerEvents: "none",
         zIndex: 10,
         overflow: "hidden",
-        transform: shouldFlip ? "scaleX(-1)" : undefined,
         transition: "left 0.05s linear",
       }}
     >
