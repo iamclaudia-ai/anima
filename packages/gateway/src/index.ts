@@ -845,15 +845,15 @@ const server = Bun.serve<ClientState>({
     },
 
     // Static file serving for bogart sprites
-    "/bogart/*": (req: globalThis.Request) => {
+    "/bogart/sprites/*": (req: globalThis.Request) => {
       const url = new URL(req.url);
-      const filename = url.pathname.slice("/bogart/".length);
+      const filename = url.pathname.slice("/bogart/sprites/".length);
 
       if (!filename || filename.includes("..") || !filename.endsWith(".png")) {
         return new globalThis.Response("Not found", { status: 404 });
       }
 
-      const filePath = join(import.meta.dirname, "..", "..", "..", "assets", "bogart", filename);
+      const filePath = join(process.cwd(), "assets", "bogart", filename);
       const file = Bun.file(filePath);
 
       return file.size > 0

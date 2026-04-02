@@ -14,9 +14,9 @@ const ROWS = 6;
 const TOTAL_FRAMES = COLS * ROWS;
 
 const SPRITE_SHEETS = [
-  { name: "Sheet 1", src: "/bogart/sprite1.png" },
-  { name: "Sheet 2", src: "/bogart/sprite2.png" },
-  { name: "Sheet 3", src: "/bogart/sprite3.png" },
+  { name: "Sheet 1", src: "/bogart/sprites/sprite1.png" },
+  { name: "Sheet 2", src: "/bogart/sprites/sprite2.png" },
+  { name: "Sheet 3", src: "/bogart/sprites/sprite3.png" },
 ];
 
 // ── Types ──────────────────────────────────────────────────
