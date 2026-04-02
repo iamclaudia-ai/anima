@@ -369,8 +369,11 @@ export function BogartPage() {
                   height: displayH,
                   position: "relative",
                   bottom: 20,
+                  // Shift container down by baseline delta so shadows align.
+                  // Background stays at exact frame position.
+                  marginTop: getBaselineShift(currentFrame, activeAnimation?.sheet) * zoom,
                   backgroundImage: `url(${SPRITE_SHEETS[activeAnimation?.sheet ?? selectedSheet].src})`,
-                  backgroundPosition: `-${getFramePos(currentFrame).x * zoom}px -${(getFramePos(currentFrame).y - getBaselineShift(currentFrame, activeAnimation?.sheet)) * zoom}px`,
+                  backgroundPosition: `-${getFramePos(currentFrame).x * zoom}px -${getFramePos(currentFrame).y * zoom}px`,
                   backgroundSize: `${sheetDimensions.w * zoom}px ${sheetDimensions.h * zoom}px`,
                   imageRendering: "pixelated",
                 }}
