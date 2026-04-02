@@ -13,7 +13,7 @@ import { createStandardExtension } from "@anima/extension-host";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { AgentHostClient } from "./agent-client";
-import type { AgentHostSessionInfo, SessionRuntimeConfig, RequestContext } from "./session-types";
+import type { AgentHostSessionInfo, SessionRuntimeConfig } from "./session-types";
 import type { SessionTask } from "./lifecycle/task-workflow";
 import { getOrCreateWorkspace, closeDb } from "./workspace";
 import {
@@ -27,6 +27,7 @@ import { wireTaskEvents } from "./lifecycle/task-events";
 import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodHandlers } from "./session-dispatch";
 import { getRuntime, initRuntime, resetRuntime } from "./runtime";
+import { SessionActorRegistry } from "./session-actor-registry";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -144,8 +145,7 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         agentClient,
         sessionConfig,
         config,
-        requestContexts: new Map<string, RequestContext>(),
-        primaryContexts: new Map<string, RequestContext>(),
+        sessionActors: new SessionActorRegistry(),
         tasks: new Map<string, SessionTask>(),
         taskNotificationsSent: new Set<string>(),
         dispatchMethod: handleMethod,

@@ -240,8 +240,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       const rt = getRuntime();
       log.info("Closing session", { sessionId: shortId(params.sessionId as string) });
       await rt.agentClient.close(params.sessionId as string);
-      rt.requestContexts.delete(params.sessionId as string);
-      rt.primaryContexts.delete(params.sessionId as string);
+      rt.sessionActors.clearSession(params.sessionId as string);
       const existing = getStoredSession(params.sessionId as string);
       if (existing) {
         upsertSession({

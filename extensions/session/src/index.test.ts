@@ -273,6 +273,81 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("keeps prompt state isolated across concurrent sessions", async () => {
+    promptSpy.mockImplementation(function (this: AgentHostClient, sid: string) {
+      return new Promise<void>((resolve) => {
+        const chunks =
+          sid === "session-a"
+            ? [
+                { at: 0, text: "Alpha " },
+                { at: 20, text: "done" },
+              ]
+            : [
+                { at: 5, text: "Beta " },
+                { at: 10, text: "done" },
+              ];
+
+        for (const chunk of chunks) {
+          setTimeout(() => {
+            this.emit("session.event", {
+              eventName: `session.${sid}.content_block_delta`,
+              sessionId: sid,
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: chunk.text },
+            });
+          }, chunk.at);
+        }
+
+        setTimeout(
+          () => {
+            this.emit("session.event", {
+              eventName: `session.${sid}.turn_stop`,
+              sessionId: sid,
+              type: "turn_stop",
+            });
+            resolve();
+          },
+          sid === "session-a" ? 25 : 15,
+        );
+      });
+    });
+
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    const promptA = ext.handleMethod("session.send_prompt", {
+      sessionId: "session-a",
+      content: "alpha",
+      streaming: false,
+    }) as Promise<{ text: string; sessionId: string; stopReason: string }>;
+
+    const promptB = ext.handleMethod("session.send_prompt", {
+      sessionId: "session-b",
+      content: "beta",
+      streaming: false,
+    }) as Promise<{ text: string; sessionId: string; stopReason: string }>;
+
+    const listed = (await ext.handleMethod("session.list_workspaces", {})) as {
+      workspaces: Array<{ id: string }>;
+    };
+
+    const [resultA, resultB] = await Promise.all([promptA, promptB]);
+
+    expect(listed.workspaces).toHaveLength(1);
+    expect(resultA).toEqual({
+      text: "Alpha done",
+      sessionId: "session-a",
+      stopReason: "unknown",
+    });
+    expect(resultB).toEqual({
+      text: "Beta done",
+      sessionId: "session-b",
+      stopReason: "unknown",
+    });
+
+    await ext.stop();
+  });
+
   it("propagates envelope data to async stream events", async () => {
     const emitted: Array<{ eventName: string; options?: Record<string, unknown> }> = [];
 

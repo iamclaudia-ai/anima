@@ -23,7 +23,7 @@ export async function sendSessionNotification(
     tags: options?.tags ?? null,
     responseText: "",
   };
-  rt.requestContexts.set(sessionId, notifCtx);
+  rt.sessionActors.bindNotificationRequest(sessionId, notifCtx);
 
   const wrapped = `<user_notification>\n${text}\n</user_notification>`;
   const stored = getStoredSession(sessionId);

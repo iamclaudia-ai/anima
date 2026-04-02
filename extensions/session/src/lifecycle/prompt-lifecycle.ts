@@ -340,18 +340,19 @@ function attachRequestContextStage(
     source: state.source,
     responseText: "",
   };
-  const existingPrimary = rt.primaryContexts.get(state.sessionId);
-  if (state.streaming && request.tags?.length) {
-    rt.primaryContexts.set(state.sessionId, requestContext);
-  } else if (existingPrimary && existingPrimary.connectionId !== request.connectionId) {
+  const binding = rt.sessionActors.bindPromptRequest(state.sessionId, requestContext, {
+    streaming: state.streaming,
+  });
+  if (
+    binding.preservedPrimaryConnectionId &&
+    binding.preservedPrimaryConnectionId !== request.connectionId
+  ) {
     log.info("Preserving primary context", {
       sessionId: shortId(state.sessionId),
-      primaryConn: existingPrimary.connectionId?.slice(0, 8),
+      primaryConn: binding.preservedPrimaryConnectionId.slice(0, 8),
       transientConn: request.connectionId?.slice(0, 8),
     });
   }
-
-  rt.requestContexts.set(state.sessionId, requestContext);
   state.requestContext = requestContext;
 }
 
@@ -371,8 +372,7 @@ async function dispatchStreamingPromptStage(
   const turnListener: SessionEventListener = (event) => {
     if (event.sessionId !== state.sessionId || event.type !== "turn_stop") return;
     const elapsed = Date.now() - promptStart;
-    const reqCtx = rt.requestContexts.get(state.sessionId);
-    const responseLen = reqCtx?.responseText?.length || 0;
+    const responseLen = rt.sessionActors.getResponseTextLength(state.sessionId);
     log.info("Streaming turn complete", {
       sessionId: shortId(state.sessionId),
       elapsed: `${elapsed}ms`,
@@ -390,70 +390,50 @@ async function dispatchNonStreamingPromptStage(
 ): Promise<{ text: string; sessionId: string; stopReason: string }> {
   const rt = getRuntime();
   const promptStart = Date.now();
-  return await new Promise<{ text: string; sessionId: string; stopReason: string }>(
-    (resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        log.error("Prompt timed out", {
-          sessionId: shortId(state.sessionId),
-          elapsed: "300s",
-        });
-        reject(new Error("Prompt timed out after 5 minutes"));
-      }, 300_000);
+  const turnResultPromise = rt.sessionActors.beginTurn(state.sessionId, 300_000);
 
-      const onEvent: SessionEventListener = (event) => {
-        if (event.sessionId !== state.sessionId) return;
+  try {
+    await rt.agentClient.prompt(
+      state.sessionId,
+      state.content,
+      state.effectiveCwd,
+      state.resolvedModel,
+      state.agent,
+    );
+  } catch (error) {
+    rt.sessionActors.failTurn(
+      state.sessionId,
+      error instanceof Error ? error : new Error(String(error)),
+    );
+    await turnResultPromise.catch(() => undefined);
+    throw error;
+  }
 
-        // Handle process_died — session crashed or auth error
-        if (event.type === "process_died") {
-          cleanup();
-          const reason = (event as { reason?: string }).reason || "unknown";
-          log.error("Non-streaming prompt failed: process died", {
-            sessionId: shortId(state.sessionId),
-            reason,
-          });
-          reject(new Error(`Session process died: ${reason}`));
-          return;
-        }
-
-        if (event.type === "turn_stop") {
-          const reqCtx = rt.requestContexts.get(state.sessionId);
-          const text = reqCtx?.responseText || "";
-          const stopReason = (event as { stop_reason?: string }).stop_reason || "unknown";
-          cleanup();
-          const elapsed = Date.now() - promptStart;
-          log.info("Non-streaming prompt complete", {
-            sessionId: shortId(state.sessionId),
-            elapsed: `${elapsed}ms`,
-            responseChars: text.length,
-            stopReason,
-          });
-          resolve({ text, sessionId: state.sessionId, stopReason });
-        }
-      };
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        rt.agentClient.removeListener("session.event", onEvent);
-        rt.requestContexts.delete(state.sessionId);
-        rt.primaryContexts.delete(state.sessionId);
-      };
-
-      rt.agentClient.on("session.event", onEvent);
-      rt.agentClient
-        .prompt(
-          state.sessionId,
-          state.content,
-          state.effectiveCwd,
-          state.resolvedModel,
-          state.agent,
-        )
-        .catch((error) => {
-          cleanup();
-          reject(error);
-        });
-    },
-  );
+  try {
+    const result = await turnResultPromise;
+    const elapsed = Date.now() - promptStart;
+    log.info("Non-streaming prompt complete", {
+      sessionId: shortId(state.sessionId),
+      elapsed: `${elapsed}ms`,
+      responseChars: result.text.length,
+      stopReason: result.stopReason,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "Prompt timed out after 5 minutes") {
+      log.error("Prompt timed out", {
+        sessionId: shortId(state.sessionId),
+        elapsed: "300s",
+      });
+    } else if (message.startsWith("Session process died:")) {
+      log.error("Non-streaming prompt failed: process died", {
+        sessionId: shortId(state.sessionId),
+        reason: message.replace("Session process died: ", "") || "unknown",
+      });
+    }
+    throw error;
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────

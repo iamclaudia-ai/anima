@@ -7,7 +7,6 @@
  */
 
 import type { RuntimeStatus } from "./session-store";
-import type { SessionTask } from "./lifecycle/task-workflow";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -35,14 +34,6 @@ export interface RequestContext {
   tags: string[] | null;
   source?: string;
   responseText: string;
-}
-
-/** All shared mutable state for the session extension runtime. */
-export interface SessionRuntimeState {
-  requestContexts: Map<string, RequestContext>;
-  primaryContexts: Map<string, RequestContext>;
-  tasks: Map<string, SessionTask>;
-  taskNotificationsSent: Set<string>;
 }
 
 // ── Pure helpers ─────────────────────────────────────────────

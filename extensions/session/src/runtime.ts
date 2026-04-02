@@ -10,8 +10,9 @@
 
 import type { ExtensionContext } from "@anima/shared";
 import type { AgentHostClient } from "./agent-client";
-import type { RequestContext, SessionRuntimeConfig } from "./session-types";
+import type { SessionRuntimeConfig } from "./session-types";
 import type { SessionTask } from "./lifecycle/task-workflow";
+import type { SessionActorRegistry } from "./session-actor-registry";
 
 export interface SessionRuntime {
   /** Extension context — available after start() */
@@ -22,10 +23,8 @@ export interface SessionRuntime {
   sessionConfig: SessionRuntimeConfig;
   /** Extension config from anima.json */
   config: Record<string, unknown>;
-  /** Per-session current request context (may be transient) */
-  requestContexts: Map<string, RequestContext>;
-  /** Per-session primary streaming context (long-lived, authoritative for tags) */
-  primaryContexts: Map<string, RequestContext>;
+  /** Per-session prompt/session actors */
+  sessionActors: SessionActorRegistry;
   /** In-memory task cache */
   tasks: Map<string, SessionTask>;
   /** Prevents duplicate task completion notifications */
