@@ -211,6 +211,20 @@ export interface ExtensionMethodDefinition {
   inputSchema: ZodTypeAny;
   /** Optional output schema (future use) */
   outputSchema?: ZodTypeAny;
+  /** Optional execution policy used by the extension host runtime scheduler */
+  execution?: ExtensionMethodExecution;
+}
+
+export type ExtensionMethodLane = "control" | "read" | "write" | "long_running" | "stream";
+export type ExtensionMethodConcurrency = "parallel" | "serial" | "keyed";
+
+export interface ExtensionMethodExecution {
+  /** Scheduling lane for the host runtime */
+  lane?: ExtensionMethodLane;
+  /** Concurrency policy within the lane */
+  concurrency?: ExtensionMethodConcurrency;
+  /** Params key to serialize by when concurrency = keyed */
+  keyParam?: string;
 }
 
 // ============================================================================

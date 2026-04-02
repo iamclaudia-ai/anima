@@ -244,7 +244,7 @@ describe("runExtensionHost", () => {
       type: "req",
       id: "block-1",
       method: "fixture.block",
-      params: { ms: 400 },
+      params: { ms: 400, resourceId: "resource-1" },
       connectionId: "conn-block",
       tags: ["blocked"],
     });
@@ -282,5 +282,63 @@ describe("runExtensionHost", () => {
 
     const blockRes = await host.waitFor((m) => m.type === "res" && m.id === "block-1");
     expect(blockRes.ok).toBe(true);
+  });
+
+  it("lets read lane requests bypass a long-running keyed request", async () => {
+    host = new HostHarness();
+    await host.waitFor((m) => m.type === "register");
+
+    host.send({
+      type: "req",
+      id: "block-2",
+      method: "fixture.block",
+      params: { ms: 400, resourceId: "resource-2" },
+    });
+
+    host.send({
+      type: "req",
+      id: "read-1",
+      method: "fixture.read_fast",
+      params: { value: "fast" },
+    });
+
+    const readRes = await host.waitFor((m) => m.type === "res" && m.id === "read-1");
+    expect(readRes.ok).toBe(true);
+    expect(readRes.payload).toEqual({ ok: true, value: "fast" });
+
+    const blockRes = await host.waitFor((m) => m.type === "res" && m.id === "block-2");
+    expect(blockRes.ok).toBe(true);
+  });
+
+  it("serializes keyed requests per resource while allowing different keys to run", async () => {
+    host = new HostHarness();
+    await host.waitFor((m) => m.type === "register");
+
+    host.send({
+      type: "req",
+      id: "key-a1",
+      method: "fixture.block",
+      params: { ms: 250, resourceId: "same-key" },
+    });
+    host.send({
+      type: "req",
+      id: "key-a2",
+      method: "fixture.block",
+      params: { ms: 10, resourceId: "same-key" },
+    });
+    host.send({
+      type: "req",
+      id: "key-b1",
+      method: "fixture.block",
+      params: { ms: 10, resourceId: "other-key" },
+    });
+
+    const firstFast = await host.waitFor((m) => m.type === "res" && m.id === "key-b1");
+    expect(firstFast.ok).toBe(true);
+
+    const firstSame = await host.waitFor((m) => m.type === "res" && m.id === "key-a1");
+    const secondSame = await host.waitFor((m) => m.type === "res" && m.id === "key-a2");
+    expect(firstSame.ok).toBe(true);
+    expect(secondSame.ok).toBe(true);
   });
 });

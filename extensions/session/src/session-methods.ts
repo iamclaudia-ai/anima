@@ -48,6 +48,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       thinking: z.boolean().optional().describe("Enable thinking"),
       effort: z.enum(["low", "medium", "high", "max"]).optional().describe("Thinking effort"),
     }),
+    execution: { lane: "write", concurrency: "serial" },
   },
   {
     name: "session.send_prompt",
@@ -61,6 +62,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       streaming: z.boolean().optional().default(true).describe("Stream events or await result"),
       source: z.string().optional().describe("Source for routing (e.g. imessage/+1555...)"),
     }),
+    execution: { lane: "long_running", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.interrupt_session",
@@ -68,6 +70,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       sessionId: z.string().describe("Session UUID"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.close_session",
@@ -75,6 +78,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       sessionId: z.string().describe("Session UUID"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.list_sessions",
@@ -82,6 +86,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       cwd: z.string().describe("Workspace CWD"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.get_history",
@@ -92,6 +97,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       limit: z.number().optional().default(50).describe("Max messages"),
       offset: z.number().optional().default(0).describe("Offset from most recent"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.switch_session",
@@ -101,6 +107,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       cwd: z.string().describe("Workspace CWD"),
       model: z.string().optional().describe("Model override"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.reset_session",
@@ -109,6 +116,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       cwd: z.string().describe("Workspace CWD"),
       model: z.string().optional().describe("Model to use"),
     }),
+    execution: { lane: "write", concurrency: "serial" },
   },
   {
     name: "session.get_info",
@@ -116,6 +124,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       sessionId: z.string().optional().describe("Session UUID (optional)"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.set_permission_mode",
@@ -124,6 +133,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       sessionId: z.string().describe("Session UUID"),
       mode: z.string().describe("Permission mode"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.send_notification",
@@ -137,6 +147,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
         .min(1)
         .describe("Notification text (will be wrapped in <user_notification> tags)"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.send_tool_result",
@@ -147,31 +158,37 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       content: z.string().describe("Result content"),
       isError: z.boolean().optional().default(false).describe("Is error result"),
     }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.start_task",
     description: "Start a delegated task using a specific agent/provider",
     inputSchema: StartTaskSchema,
+    execution: { lane: "long_running", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.get_task",
     description: "Get delegated task status by task ID",
     inputSchema: GetTaskSchema,
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.list_tasks",
     description: "List delegated tasks with optional filters",
     inputSchema: ListTasksSchema,
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.interrupt_task",
     description: "Interrupt a delegated task by task ID",
     inputSchema: InterruptTaskSchema,
+    execution: { lane: "write", concurrency: "serial" },
   },
   {
     name: "session.list_workspaces",
     description: "List all workspaces",
     inputSchema: z.object({}),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.get_workspace",
@@ -179,6 +196,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       id: z.string().describe("Workspace ID"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.get_or_create_workspace",
@@ -191,6 +209,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
         .optional()
         .describe("Mark workspace as general so archived summaries span all workspaces"),
     }),
+    execution: { lane: "write", concurrency: "serial" },
   },
   {
     name: "session.delete_workspace",
@@ -198,6 +217,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       cwd: z.string().describe("Working directory of workspace to delete"),
     }),
+    execution: { lane: "write", concurrency: "serial" },
   },
   {
     name: "session.get_directories",
@@ -205,17 +225,20 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     inputSchema: z.object({
       path: z.string().optional().default("~").describe("Path to list directories from"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.health_check",
     description: "Health status of session extension",
     inputSchema: z.object({}),
+    execution: { lane: "control", concurrency: "parallel" },
   },
   {
     name: "session.rotate_persistent_sessions",
     description:
       "Check persistent sessions against rotation policy (maxMessages/maxAgeHours) and clear stale ones. Called by scheduler on a cron.",
     inputSchema: z.object({}),
+    execution: { lane: "control", concurrency: "parallel" },
   },
   {
     name: "session.get_memory_context",
@@ -227,5 +250,6 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
         .optional()
         .describe("Workspace directory (defaults to caller's working directory)"),
     }),
+    execution: { lane: "read", concurrency: "parallel" },
   },
 ];

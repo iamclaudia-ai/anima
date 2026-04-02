@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { createExtensionStore } from "./store";
+import { RequestScheduler } from "./request-scheduler";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
   const eventHandlers = new Map<string, Set<EventHandler>>();
   let _debugEventSeq = 0;
+  let requestScheduler: RequestScheduler | null = null;
 
   async function broadcastToHandlers(event: GatewayEvent): Promise<void> {
     const handlers: EventHandler[] = [];
@@ -279,6 +281,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     });
 
     hostLog.info("Extension registered", { id: ext.id });
+    requestScheduler = new RequestScheduler(ext.methods);
 
     await ext.start(ctx);
 
@@ -341,14 +344,22 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       }
 
       // Regular method call
-      await envelopeContext.run(context, async () => {
-        try {
-          const result = await activeExtension.handleMethod(method, params);
-          writeResponse(id, true, result);
-        } catch (error) {
-          writeResponse(id, false, String(error));
-        }
-      });
+      const scheduler = requestScheduler;
+      const execute = async () => {
+        await envelopeContext.run(context, async () => {
+          try {
+            const result = await activeExtension.handleMethod(method, params);
+            writeResponse(id, true, result);
+          } catch (error) {
+            writeResponse(id, false, String(error));
+          }
+        });
+      };
+      if (scheduler) {
+        scheduler.schedule({ method, params, work: execute });
+      } else {
+        await execute();
+      }
     } else if (msg.type === "call_res") {
       const id = msg.id as string;
       const pending = pendingCalls.get(id);
@@ -405,41 +416,11 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     process.stdin.removeAllListeners("end");
     process.stdin.removeAllListeners("error");
 
-    let regularLane = Promise.resolve();
-
-    const isControlLine = (line: string): boolean => {
-      try {
-        const msg = JSON.parse(line) as Record<string, unknown>;
-        if (msg.type === "call_res") {
-          return true;
-        }
-        if (msg.type === "req") {
-          const method = msg.method as string | undefined;
-          return method === "__health" || method?.endsWith(".health_check") === true;
-        }
-        if (msg.type === "event") {
-          return msg.event === "gateway.heartbeat";
-        }
-      } catch {
-        return false;
-      }
-      return false;
-    };
-
     const dispatchLine = (line: string): void => {
       const handler = import.meta.hot?.data?.handleMessage || handleMessage;
-      if (isControlLine(line)) {
-        void handler(line).catch((error: unknown) => {
-          hostLog.error("Control lane handler failed", { error: String(error) });
-        });
-        return;
-      }
-
-      regularLane = regularLane
-        .then(() => handler(line))
-        .catch((error: unknown) => {
-          hostLog.error("Regular lane handler failed", { error: String(error) });
-        });
+      void handler(line).catch((error: unknown) => {
+        hostLog.error("Inbound handler failed", { error: String(error) });
+      });
     };
 
     // Preserve buffer across HMR reloads so partial lines aren't lost
