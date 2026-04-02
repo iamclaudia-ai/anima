@@ -64,10 +64,10 @@ describe("createStandardExtension", () => {
             inputSchema: z.object({}),
             execution: { lane: "read", concurrency: "parallel" },
           },
-          handle(_params, ctx) {
+          handle(_params, instance) {
             return {
-              connectionId: ctx.connectionId,
-              tags: ctx.tags,
+              connectionId: instance.ctx.connectionId,
+              tags: instance.ctx.tags,
             };
           },
         },
@@ -121,5 +121,65 @@ describe("createStandardExtension", () => {
     });
     expect(seenSources[0]).toBe("standard-src/client-1");
     expect(seenEvents[0]).toBe("session.done");
+  });
+
+  it("creates a shared runtime container and passes it to methods and lifecycle hooks", async () => {
+    const seen: string[] = [];
+
+    const factory = createStandardExtension({
+      id: "standard-runtime",
+      name: "Standard Runtime",
+      createRuntime(ctx, config) {
+        seen.push(`create:${ctx.connectionId}`);
+        return { calls: 0, flavor: String(config.flavor || "none") };
+      },
+      methods: [
+        {
+          definition: {
+            name: "standard.runtime",
+            description: "Use shared runtime",
+            inputSchema: z.object({}),
+            execution: { lane: "read", concurrency: "parallel" },
+          },
+          handle(_params, instance) {
+            instance.runtime.calls += 1;
+            return {
+              calls: instance.runtime.calls,
+              flavor: instance.runtime.flavor,
+              connectionId: instance.ctx.connectionId,
+            };
+          },
+        },
+      ],
+      events: [],
+      start(instance) {
+        seen.push(`start:${instance.runtime.flavor}`);
+      },
+      stop(instance) {
+        seen.push(`stop:${instance.runtime.calls}`);
+      },
+      health(instance) {
+        return { ok: true, details: { started: instance !== null } };
+      },
+    });
+
+    const ext = factory({ flavor: "vanilla" });
+    expect(ext.health()).toEqual({ ok: true, details: { started: false } });
+
+    await ext.start(createTestContext());
+    expect(await ext.handleMethod("standard.runtime", {})).toEqual({
+      calls: 1,
+      flavor: "vanilla",
+      connectionId: "conn-standard",
+    });
+    expect(await ext.handleMethod("standard.runtime", {})).toEqual({
+      calls: 2,
+      flavor: "vanilla",
+      connectionId: "conn-standard",
+    });
+    expect(ext.health()).toEqual({ ok: true, details: { started: true } });
+
+    await ext.stop();
+    expect(seen).toEqual(["create:conn-standard", "start:vanilla", "stop:2"]);
   });
 });

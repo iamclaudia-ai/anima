@@ -95,6 +95,14 @@ Important:
 - `request()` should internally allocate a `requestId`, store a pending resolver, and resolve when a matching `response` arrives
 - extension authors should not manually pass reply recipients or callbacks around
 
+The standard extension helper should also expose a runtime container pattern:
+
+- `createRuntime(ctx, config)` builds the extension's shared services once
+- method handlers receive `{ ctx, runtime, config }`
+- `start`, `stop`, `health`, and `handleSourceResponse` operate on the same container
+
+That gives smaller extensions a direct path into the actor model without requiring each extension to manually wire singleton state in `start()`.
+
 ## Actor Model
 
 Do not model one extension as one actor.

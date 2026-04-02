@@ -28,6 +28,12 @@ import { SessionRegistry } from "./session-registry";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
+interface SessionExtensionRuntime {
+  bridge: SessionAgentBridge;
+  registry: SessionRegistry;
+  unsubscribers: Array<() => void>;
+}
+
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): AnimaExtension {
@@ -63,7 +69,6 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   const agentClient = new AgentHostClient(globalConfig.agentHost.url);
   const bridge = new SessionAgentBridge(agentClient);
   const registry = new SessionRegistry();
-  const unsubscribers: Array<() => void> = [];
   const methodHandlers = createSessionMethodHandlers();
 
   // ── Health Check ───────────────────────────────────────────
@@ -120,23 +125,10 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
 
   // ── Extension Interface ────────────────────────────────────
 
-  return createStandardExtension({
+  return createStandardExtension<SessionExtensionRuntime>({
     id: "session",
     name: "Session Manager",
-    methods: sessionMethodDefinitions.map((definition) => ({
-      definition,
-      handle: async (params, ctx) => {
-        const handler = methodHandlers[definition.name];
-        if (!handler) {
-          throw new Error(`Unknown method: ${definition.name}`);
-        }
-        return await handler(params, ctx);
-      },
-    })),
-    events: ["stream.*", "session.task.*"],
-    sourceRoutes: [],
-
-    async start(ctx: ExtensionContext): Promise<void> {
+    createRuntime(ctx): SessionExtensionRuntime {
       initRuntime({
         ctx,
         bridge,
@@ -149,13 +141,34 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         dispatchMethod: handleMethod,
       });
 
-      unsubscribers.push(wireTaskEvents());
-      unsubscribers.push(wireSessionEvents());
+      return {
+        bridge,
+        registry,
+        unsubscribers: [],
+      };
+    },
+    methods: sessionMethodDefinitions.map((definition) => ({
+      definition,
+      handle: async (params, instance) => {
+        const handler = methodHandlers[definition.name];
+        if (!handler) {
+          throw new Error(`Unknown method: ${definition.name}`);
+        }
+        return await handler(params, instance.ctx);
+      },
+    })),
+    events: ["stream.*", "session.task.*"],
+    sourceRoutes: [],
+
+    async start(instance): Promise<void> {
+      instance.runtime.unsubscribers.push(wireTaskEvents());
+      instance.runtime.unsubscribers.push(wireSessionEvents());
 
       try {
-        await bridge.connect();
-        const activeSessions = (await bridge.listSessions()) as AgentHostSessionInfo[];
-        registry.recordConnectedSessions(activeSessions);
+        await instance.runtime.bridge.connect();
+        const activeSessions =
+          (await instance.runtime.bridge.listSessions()) as AgentHostSessionInfo[];
+        instance.runtime.registry.recordConnectedSessions(activeSessions);
         log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
         log.warn("Failed to connect to agent-host, will retry in background", {
@@ -164,16 +177,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       }
     },
 
-    async stop(): Promise<void> {
-      for (const unsub of unsubscribers) {
+    async stop(instance): Promise<void> {
+      for (const unsub of instance.runtime.unsubscribers) {
         try {
           unsub();
         } catch {
           /* ignore cleanup failures */
         }
       }
-      unsubscribers.length = 0;
-      bridge.disconnect();
+      instance.runtime.unsubscribers.length = 0;
+      instance.runtime.bridge.disconnect();
       closeSessionDb();
       closeDb();
       resetRuntime();
