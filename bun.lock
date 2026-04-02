@@ -96,6 +96,13 @@
         "typescript": "^5.7.2",
       },
     },
+    "extensions/bogart": {
+      "name": "@anima/ext-bogart",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anima/ui": "workspace:*",
+      },
+    },
     "extensions/chat": {
       "name": "@anima/ext-chat",
       "version": "0.1.0",
@@ -245,6 +252,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@anima/ext-audiobooks": "workspace:*",
+        "@anima/ext-bogart": "workspace:*",
         "@anima/ext-chat": "workspace:*",
         "@anima/ext-control": "workspace:*",
         "@anima/ext-editor": "workspace:*",
@@ -331,6 +339,8 @@
     "@anima/desktop": ["@anima/desktop@workspace:clients/desktop"],
 
     "@anima/ext-audiobooks": ["@anima/ext-audiobooks@workspace:extensions/audiobooks"],
+
+    "@anima/ext-bogart": ["@anima/ext-bogart@workspace:extensions/bogart"],
 
     "@anima/ext-chat": ["@anima/ext-chat@workspace:extensions/chat"],
 

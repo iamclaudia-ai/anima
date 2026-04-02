@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anima/ext-audiobooks": "workspace:*",
+    "@anima/ext-bogart": "workspace:*",
     "@anima/ext-chat": "workspace:*",
     "@anima/ext-control": "workspace:*",
     "@anima/ext-editor": "workspace:*",
