@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { FileText, FileImage, File, X, ArrowUp } from "lucide-react";
 import type { Attachment, Usage } from "../types";
 import { useBridge } from "../bridge";
+import { Bogart } from "./Bogart";
 
 function getFileIcon(mediaType: string) {
   if (mediaType.startsWith("image/")) return FileImage;
@@ -33,11 +34,28 @@ export function InputArea({
   onInterrupt,
 }: InputAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(600);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaContainerRef = useRef<HTMLDivElement>(null);
   const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
   const hadFocusBeforeDisconnectRef = useRef(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bridge = useBridge();
   const isTauriRuntime = typeof window !== "undefined" && "__TAURI__" in window;
+
+  // Track container width for Bogart's walking bounds
+  useEffect(() => {
+    const el = textareaContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Auto-resize textarea to fit content
   useEffect(() => {
@@ -244,6 +262,11 @@ export function InputArea({
       onInputChange(value);
       bridge.saveDraft(value);
 
+      // Track typing state for Bogart
+      setIsTyping(true);
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => setIsTyping(false), 2000);
+
       // Save cursor position on every change
       cursorPositionRef.current = {
         start: e.target.selectionStart,
@@ -402,11 +425,14 @@ export function InputArea({
 
       {/* Textarea with integrated send/stop button */}
       <div
+        ref={textareaContainerRef}
         className={`relative ${isDragging ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* Bogart the cat 🐱 */}
+        <Bogart isQuerying={isQuerying} isTyping={isTyping} containerWidth={containerWidth} />
         <textarea
           ref={textareaRef}
           value={input}
