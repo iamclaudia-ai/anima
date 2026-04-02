@@ -46,7 +46,7 @@ interface AnimDef {
 const ANIMS: Record<string, AnimDef> = {
   "walk-right": { sheet: 0, frames: [4, 5, 6, 7], loop: true, movement: "right" },
   "walk-left": { sheet: 0, frames: [12, 13, 14, 15], loop: true, movement: "left" },
-  sit: { sheet: 0, frames: [16, 17, 18, 19], loop: true, movement: "none" },
+  sit: { sheet: 0, frames: [16, 17, 18, 19], loop: false, movement: "none" },
   "lick-paw": { sheet: 0, frames: [20, 21, 22, 23], loop: false, movement: "none" },
   sleep: { sheet: 2, frames: [0, 1, 2, 3], loop: true, movement: "none" },
   stir: { sheet: 2, frames: [4, 5, 6, 7], loop: false, movement: "none" },
@@ -129,7 +129,15 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   useEffect(() => {
     if (isQuerying && state !== "chasing") {
       setState("chasing");
-      playAnim("chase-yarn");
+      // Randomly pick between chase-yarn (stays put) and walking
+      const roll = Math.random();
+      if (roll < 0.4) {
+        playAnim("chase-yarn");
+      } else {
+        const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
+        setDirection(walkDir === "walk-right" ? 1 : -1);
+        playAnim(walkDir);
+      }
     } else if (isTyping && (state === "sleeping" || state === "settling")) {
       setState("waking");
       playSequence(["stir", "stretch", "stand"], "idle");
@@ -195,6 +203,28 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
       return () => clearInterval(idleAction);
     }
   }, [state, playAnim, resetIdleTimer]);
+
+  // ── Chasing behavior: switch between yarn and walking ────
+  useEffect(() => {
+    if (state !== "chasing") return;
+
+    const switchAnim = setInterval(
+      () => {
+        if (stateRef.current !== "chasing") return;
+        const roll = Math.random();
+        if (roll < 0.4) {
+          playAnim("chase-yarn");
+        } else {
+          const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
+          setDirection(walkDir === "walk-right" ? 1 : -1);
+          playAnim(walkDir);
+        }
+      },
+      4000 + Math.random() * 3000,
+    );
+
+    return () => clearInterval(switchAnim);
+  }, [state, playAnim]);
 
   // ── Walking state ────────────────────────────────────────
   useEffect(() => {
