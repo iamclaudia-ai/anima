@@ -151,21 +151,57 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
     }
   }, [isQuerying, isTyping, state, playAnim, playSequence, resetIdleTimer]);
 
+  // ── Chain helper: play animations with delays between them ─
+  const chainTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearChain = useCallback(() => {
+    for (const t of chainTimersRef.current) clearTimeout(t);
+    chainTimersRef.current = [];
+  }, []);
+
+  // A chain step is either an animation name or a delay in ms
+  type ChainStep = AnimName | number;
+
+  const playChain = useCallback(
+    (steps: ChainStep[], onDone?: () => void) => {
+      clearChain();
+      let delay = 0;
+
+      for (const step of steps) {
+        if (typeof step === "number") {
+          delay += step;
+        } else {
+          const anim = step;
+          const animDuration = (ANIMS[anim].frames.length / FPS) * 1000;
+          const t = setTimeout(() => {
+            if (stateRef.current === "settling" || stateRef.current === "idle") {
+              playAnim(anim);
+            }
+          }, delay);
+          chainTimersRef.current.push(t);
+          delay += animDuration;
+        }
+      }
+
+      if (onDone) {
+        const t = setTimeout(() => onDone(), delay);
+        chainTimersRef.current.push(t);
+      }
+    },
+    [clearChain, playAnim],
+  );
+
   // ── Settling → sleep ─────────────────────────────────────
+  // sit → (pause 8s) → lick-paw → (pause 3s) → stretch → sleep
   useEffect(() => {
     if (state === "settling") {
-      playAnim("lick-paw");
-      // After one lick-paw cycle, go to sleep
-      const timer = setTimeout(
-        () => {
-          setState("sleeping");
-          playAnim("sleep");
-        },
-        (ANIMS["lick-paw"].frames.length / FPS) * 1000,
-      );
-      return () => clearTimeout(timer);
+      playChain(["sit", 8000, "lick-paw", 3000, "stretch"], () => {
+        setState("sleeping");
+        playAnim("sleep");
+      });
+      return () => clearChain();
     }
-  }, [state, playAnim]);
+  }, [state, playAnim, playChain, clearChain]);
 
   // ── Idle behavior: occasional random animations ──────────
   useEffect(() => {
@@ -173,20 +209,18 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
       playAnim("sit");
       resetIdleTimer();
 
-      // Random idle actions every 8-15 seconds
+      // Random idle actions every 10-20 seconds
       const idleAction = setInterval(
         () => {
           if (stateRef.current !== "idle") return;
           const roll = Math.random();
-          if (roll < 0.3) {
-            playAnim("lick-paw");
-            setTimeout(
-              () => {
-                if (stateRef.current === "idle") playAnim("sit");
-              },
-              (ANIMS["lick-paw"].frames.length / FPS) * 1000,
-            );
-          } else if (roll < 0.5) {
+          if (roll < 0.25) {
+            // Lick paw then sit again
+            playChain(["lick-paw", 1500, "sit"]);
+          } else if (roll < 0.4) {
+            // Stretch then sit
+            playChain(["stretch", 1000, "sit"]);
+          } else if (roll < 0.6) {
             // Short walk
             setState("walking");
             setDirection(Math.random() > 0.5 ? 1 : -1);
@@ -196,13 +230,17 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
               }
             }, 3000);
           }
+          // else: just keep sitting (40% chance of doing nothing)
         },
-        8000 + Math.random() * 7000,
+        10000 + Math.random() * 10000,
       );
 
-      return () => clearInterval(idleAction);
+      return () => {
+        clearInterval(idleAction);
+        clearChain();
+      };
     }
-  }, [state, playAnim, resetIdleTimer]);
+  }, [state, playAnim, playChain, clearChain, resetIdleTimer]);
 
   // ── Chasing behavior: switch between yarn and walking ────
   useEffect(() => {
