@@ -108,6 +108,28 @@ gh comment review 123 \
   -R beehiiv/swarm
 ```
 
+### Shell Escaping with HEREDOC
+
+When your review body or inline comments contain backticks, quotes, or special characters (very common in code reviews!), **always use HEREDOC** to avoid shell escaping issues:
+
+```bash
+gh comment review <PR> "$(cat <<'EOF'
+Clean implementation! The `useRoles()` pattern is consistent with existing code.
+One minor suggestion — see inline comment.
+EOF
+)" \
+  --comment "$(cat <<'EOF'
+client/src/components/Foo.tsx:42:Nit: This `roles?.includes('admin') ?? false` logic is duplicated. Consider extracting to a `useCanManage()` hook.
+EOF
+)" \
+  --event APPROVE \
+  -R beehiiv/swarm
+```
+
+**Why HEREDOC?** Without it, backticks trigger command substitution, parentheses cause parse errors, and quotes need careful escaping. The `<<'EOF'` (quoted) form prevents ALL shell interpolation.
+
+**Alternative:** Write to temp files and use `$(cat /tmp/body.txt)` — works but HEREDOC is cleaner for inline use.
+
 ### Batch Review from YAML
 
 For complex reviews with many comments, use a YAML config:
