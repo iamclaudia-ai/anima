@@ -51,7 +51,7 @@ const ANIMS: Record<string, AnimDef> = {
   sleep: { sheet: 2, frames: [0, 1, 2, 3], loop: true, movement: "none" },
   stir: { sheet: 2, frames: [4, 5, 6, 7], loop: false, movement: "none" },
   stand: { sheet: 2, frames: [8, 9, 10, 11], loop: false, movement: "none" },
-  stretch: { sheet: 2, frames: [12, 13, 14, 15], loop: false, movement: "none" },
+  stretch: { sheet: 2, frames: [12, 13, 14, 15, 15, 15, 15], loop: false, movement: "none" },
   "walk-right-2": { sheet: 2, frames: [16, 19, 20, 21, 22, 23], loop: true, movement: "right" },
   "chase-yarn": {
     sheet: 1,
