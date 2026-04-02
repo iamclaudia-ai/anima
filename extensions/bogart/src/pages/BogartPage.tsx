@@ -50,6 +50,8 @@ export function BogartPage() {
   const [offsetY, setOffsetY] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
+  const [guideLinePos, setGuideLinePos] = useState(33); // % from bottom
+  const [showGuideLine, setShowGuideLine] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load sheet dimensions
@@ -242,6 +244,33 @@ export function BogartPage() {
           />
           Grid
         </label>
+
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 13 }}
+        >
+          <input
+            type="checkbox"
+            checked={showGuideLine}
+            onChange={(e) => setShowGuideLine(e.target.checked)}
+          />
+          Shadow Guide
+        </label>
+
+        {showGuideLine && (
+          <div>
+            <label style={{ fontSize: 12, color: "#888" }}>
+              Guide: {guideLinePos}% from bottom
+            </label>
+            <input
+              type="range"
+              min={10}
+              max={50}
+              value={guideLinePos}
+              onChange={(e) => setGuideLinePos(Number(e.target.value))}
+              style={{ display: "block", width: 120 }}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Main layout: Grid + Preview ───────────────── */}
@@ -308,6 +337,20 @@ export function BogartPage() {
                   >
                     {i}
                   </span>
+                  {/* Shadow guide line */}
+                  {showGuideLine && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: `${guideLinePos}%`,
+                        left: 0,
+                        right: 0,
+                        height: 1,
+                        background: "rgba(255, 100, 100, 0.6)",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  )}
                   {/* Selection order badge */}
                   {isSelected && (
                     <span
@@ -361,12 +404,27 @@ export function BogartPage() {
                 style={{
                   width: displayW,
                   height: displayH,
+                  position: "relative",
                   backgroundImage: `url(${SPRITE_SHEETS[selectedSheet].src})`,
                   backgroundPosition: `-${getFramePos(currentFrame).x * zoom + offsetX}px -${getFramePos(currentFrame).y * zoom + offsetY}px`,
                   backgroundSize: `${sheetDimensions.w * zoom}px ${sheetDimensions.h * zoom}px`,
                   imageRendering: "pixelated",
                 }}
-              />
+              >
+                {showGuideLine && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: `${guideLinePos}%`,
+                      left: 0,
+                      right: 0,
+                      height: 1,
+                      background: "rgba(255, 100, 100, 0.6)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                )}
+              </div>
             )}
           </div>
 
