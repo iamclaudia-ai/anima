@@ -24,9 +24,7 @@ Today, memory recovery is implemented as:
 
 - gateway process supervision
 - gateway health probing
-- interim memory-specific evidence gathered from the shared Anima SQLite database
-
-That direct memory-table probing is transitional, not the desired long-term abstraction.
+- gateway-reported extension liveness lock evidence
 
 ## Core Model
 
@@ -56,36 +54,37 @@ The main failure mode we observed was:
 
 That means a normal HTTP `200` from gateway is not enough to conclude the system is healthy.
 
-To catch this, watchdog currently reads the memory singleton lock row from the Anima SQLite database:
+To catch this, watchdog reads gateway health and looks at gateway-managed runtime lock state:
 
-- table: `memory_extension_locks`
-- lock id: `memory-extension`
-
-It derives:
-
-- `ownerPid`
-- `heartbeatAgeMs`
-- `stale`
-- `ownerAlive`
+- `/health.runtimeLocks`
+- `extensionId = "memory"`
+- `lockType = "singleton"`
+- `resourceKey = "__default__"`
 
 From that it can emit two specific health reasons:
 
 - `memory_stale_lock`
-  The lock owner process still exists, but the heartbeat is stale.
-- `memory_orphaned_lock`
-  The lock heartbeat is stale and the recorded owner PID no longer exists.
+  The gateway-reported memory singleton lock is stale.
 
 These are currently treated as gateway health failures.
-
-This works, but it is not the target architecture, because watchdog should not need to understand memory-specific tables.
 
 ## Current Recovery Action
 
 Today the watchdog can restart top-level services directly, and gateway already exposes `gateway.restart_extension` for hosted extensions.
 
-The current watchdog implementation still recovers a stale memory lock by treating it as a gateway health failure.
+The current watchdog implementation treats a stale memory liveness lock as a gateway health failure, but it no longer restarts gateway by default for that case.
 
-That makes gateway restart the practical recovery action today, even though this is not the preferred steady state.
+When gateway is still healthy enough to answer requests, watchdog now:
+
+- connects to gateway
+- calls `gateway.restart_extension` for `memory`
+- journals that targeted recovery
+
+Gateway restart remains the fallback only for actual gateway-level failures such as:
+
+- gateway process dead
+- gateway unreachable
+- gateway not serving extensions correctly
 
 ## Intended Recovery Action
 
@@ -101,11 +100,7 @@ For a memory-only wedge, the desired recovery action is:
 
 - restart `memory` through gateway
 
-not:
-
-- restart `gateway`
-
-This is the cleaner separation of concerns.
+This is now the active behavior.
 
 ## Restart Policy
 
@@ -125,11 +120,11 @@ Uses an immediate threshold:
 
 - first qualifying check triggers restart eligibility
 
-This is deliberate because a stale memory singleton lock is already evidence that memory progression stopped and did not self-recover.
+This is deliberate because a stale memory liveness lock is already evidence that memory progression stopped and did not self-recover.
 
 Backoff still applies, so repeated restart loops are bounded.
 
-Once liveness locks migrate into gateway ownership, this same policy should be applied to the gateway-reported extension lock state rather than watchdog inspecting extension tables directly.
+This policy now applies to gateway-reported extension lock state.
 
 ## Incident Lifecycle
 
@@ -204,8 +199,9 @@ For each service it exposes:
 For gateway, `healthDetails` may currently include memory lock evidence such as:
 
 - lock owner pid
-- heartbeat age
-- whether the owner process still exists
+- updated timestamp / age
+- staleness flag
+- extension-defined lock metadata
 
 This is enough for dashboards to explain why a service is unhealthy instead of only showing red/yellow/green.
 
@@ -213,46 +209,34 @@ This is enough for dashboards to explain why a service is unhealthy instead of o
 
 The current system is intentionally incremental. The main limitations are:
 
-- watchdog still understands memory-specific lock evidence directly
-- watchdog still tends toward restarting gateway rather than targeting `memory`
 - recovery journal is JSONL, not yet a first-class SQLite incident store
 - Mission Control does not yet render incident timelines richly
 - health payloads are not yet migrated to the structured schema system described in the health-schema plan
 
 The main architectural limitation is:
 
-- liveness/recovery-relevant locks are not yet gateway-owned
+- only the first extension liveness lock migration is complete; other recovery-relevant locks still need the same treatment
 
 ## Practical Example: Memory Wedge
 
 The recovery sequence for the recent memory failure mode is now:
 
 1. Memory wedges under file churn.
-2. Memory singleton lock heartbeat stops advancing.
-3. Watchdog gateway health probe reads the lock row and sees stale heartbeat.
-4. Gateway health is marked unhealthy with reason `memory_stale_lock` or `memory_orphaned_lock`.
+2. Gateway-managed memory liveness lock stops advancing.
+3. Watchdog gateway health probe reads `runtimeLocks` and sees the stale memory singleton.
+4. Gateway health is marked unhealthy with reason `memory_stale_lock`.
 5. Watchdog opens an incident and writes a journal entry.
 6. Restart threshold is met immediately for this reason.
-7. Watchdog currently recovers by treating gateway as unhealthy and restarting it.
-8. Restart completion is journaled.
-9. When health becomes good again, watchdog closes the incident and records `health_restored`.
-
-This should evolve into:
-
-1. Memory wedges under file churn.
-2. Gateway-owned memory liveness lease goes stale.
-3. Gateway reports stale extension lock state.
-4. Watchdog opens an incident without inspecting memory tables directly.
-5. Watchdog asks gateway to restart `memory`.
-6. Gateway clears or takes over the stale liveness lock as part of extension restart/startup.
-7. Recovery is journaled and the incident closes when health is restored.
+7. Watchdog asks gateway to restart `memory`.
+8. Gateway restarts the extension, which reacquires the gateway-owned liveness lock on startup.
+9. Restart completion is journaled.
+10. When health becomes good again, watchdog closes the incident and records `health_restored`.
 
 ## Near-Term Next Steps
 
 The next logical improvements are:
 
-1. Migrate liveness/recovery locks to gateway ownership.
-2. Change watchdog to use gateway-reported extension liveness lock state.
-3. Prefer `gateway.restart_extension("memory")` when gateway is healthy.
-4. Mission Control incident timeline UI backed by the recovery journal.
-5. Structured health schemas so memory, session, voice, and watchdog can expose richer operator state without flat metric sprawl.
+1. Migrate more liveness/recovery locks to gateway ownership.
+2. Mission Control incident timeline UI backed by the recovery journal.
+3. Structured health schemas so memory, session, voice, and watchdog can expose richer operator state without flat metric sprawl.
+4. Move the recovery journal from JSONL to a richer incident store if operators need querying, grouping, or retention policies.

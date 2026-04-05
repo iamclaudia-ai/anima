@@ -2,16 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  acquireMemoryExtensionLock,
-  closeDb,
-  getDb,
-  getMemoryExtensionLockStatus,
-  releaseMemoryExtensionLock,
-  renewMemoryExtensionLock,
-  setDbPathForTests,
-  upsertConversation,
-} from "./db";
+import { closeDb, getDb, setDbPathForTests, upsertConversation } from "./db";
 
 function setupSchema(): void {
   const db = getDb();
@@ -49,68 +40,6 @@ function setupSchema(): void {
     );
   `);
 }
-
-describe("memory singleton lock", () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "anima-memory-lock-"));
-    setDbPathForTests(join(tempDir, "anima.test.db"));
-    setupSchema();
-  });
-
-  afterEach(() => {
-    closeDb();
-    setDbPathForTests(null);
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it("acquires lock when none exists", () => {
-    const result = acquireMemoryExtensionLock(1111, 60_000);
-    expect(result.acquired).toBe(true);
-    expect(result.ownerPid).toBe(1111);
-
-    const status = getMemoryExtensionLockStatus(60_000);
-    expect(status).not.toBeNull();
-    expect(status?.ownerPid).toBe(1111);
-    expect(status?.stale).toBe(false);
-  });
-
-  it("rejects a second process when lock is fresh", () => {
-    expect(acquireMemoryExtensionLock(process.pid, 60_000).acquired).toBe(true);
-
-    const result = acquireMemoryExtensionLock(2222, 60_000);
-    expect(result.acquired).toBe(false);
-    expect(result.ownerPid).toBe(process.pid);
-  });
-
-  it("steals lock when heartbeat is stale", () => {
-    expect(acquireMemoryExtensionLock(1111, 60_000).acquired).toBe(true);
-
-    getDb()
-      .query("UPDATE memory_extension_locks SET last_heartbeat = datetime('now', '-5 minutes')")
-      .run();
-
-    const result = acquireMemoryExtensionLock(2222, 60_000);
-    expect(result.acquired).toBe(true);
-    expect(result.stolen).toBe(true);
-    expect(result.previousOwnerPid).toBe(1111);
-
-    const status = getMemoryExtensionLockStatus(60_000);
-    expect(status?.ownerPid).toBe(2222);
-  });
-
-  it("renews and releases only for current owner", () => {
-    expect(acquireMemoryExtensionLock(process.pid, 60_000).acquired).toBe(true);
-
-    expect(renewMemoryExtensionLock(2222)).toBe(false);
-    expect(renewMemoryExtensionLock(process.pid)).toBe(true);
-
-    expect(releaseMemoryExtensionLock(2222)).toBe(false);
-    expect(releaseMemoryExtensionLock(process.pid)).toBe(true);
-    expect(getMemoryExtensionLockStatus(60_000)).toBeNull();
-  });
-});
 
 describe("memory conversation upsert", () => {
   let tempDir: string;

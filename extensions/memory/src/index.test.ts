@@ -55,13 +55,6 @@ function setupSchema(): void {
       locked_by_pid INTEGER NOT NULL,
       locked_by_machine TEXT
     );
-    CREATE TABLE IF NOT EXISTS memory_extension_locks (
-      lock_id TEXT PRIMARY KEY,
-      owner_pid INTEGER NOT NULL,
-      acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
-      last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
   `);
 }
 

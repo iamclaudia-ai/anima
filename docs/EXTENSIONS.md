@@ -547,6 +547,26 @@ The gateway enforces one live process per extension ID using DB-backed singleton
 
 This applies to all extensions (voice, memory, session, etc.) without per-extension code.
 
+### Gateway-Owned Runtime Liveness Locks
+
+Recovery-relevant extension locks are also moving into gateway ownership.
+
+This is a second lock layer, separate from host-process singleton enforcement:
+
+- `extension_process_locks`
+  gateway host-process ownership
+- `extension_runtime_locks`
+  extension runtime liveness / recovery ownership
+
+Extensions reach those through gateway methods rather than private tables:
+
+- `gateway.acquire_liveness_lock`
+- `gateway.renew_liveness_lock`
+- `gateway.release_liveness_lock`
+- `gateway.list_liveness_locks`
+
+The first concrete migration is `memory` singleton ownership. That lock is now gateway-managed so watchdog can reason about it without inspecting memory internals.
+
 ### NDJSON Protocol
 
 Communication happens over stdin/stdout with newline-delimited JSON:

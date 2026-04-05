@@ -127,7 +127,6 @@ function forceClearStartupLocks(): void {
   const cleared = {
     extensionProcessLocks: clearLockTable("extension_process_locks"),
     extensionRuntimeLocks: clearLockTable("extension_runtime_locks"),
-    memoryExtensionLocks: clearLockTable("memory_extension_locks"),
     memoryFileLocks: clearLockTable("memory_file_locks"),
   };
 

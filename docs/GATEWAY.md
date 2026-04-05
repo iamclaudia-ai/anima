@@ -55,7 +55,11 @@ Deep-dive into the gateway's startup, message routing, and extension communicati
 4. **Bun.serve** -- HTTP + WebSocket on single port
 5. **start.ts** (async) -- Kill orphans, spawn extension hosts
 
-The `/health` payload includes extension running status plus `extensionLocks` (singleton lock owner/heartbeat state).
+The `/health` payload includes:
+
+- `extensions`
+- `extensionLocks` for gateway-owned extension host process locks
+- `runtimeLocks` for gateway-owned extension liveness/recovery locks
 
 ### Extension Host Spawn (start.ts)
 
@@ -78,6 +82,26 @@ Lock semantics:
 - Stale lock is stolen automatically
 - Lock is released on extension stop / gateway shutdown
 - If lock renewal fails, the gateway stops that extension host
+
+### Runtime Liveness Locks
+
+Gateway also owns recovery-relevant runtime locks in `extension_runtime_locks`.
+
+These are distinct from process-spawn locks:
+
+- `extension_process_locks`
+  one gateway-owned host process per extension ID
+- `extension_runtime_locks`
+  extension liveness/recovery leases such as memory singleton ownership
+
+Extensions use gateway methods to acquire, renew, and release runtime locks:
+
+- `gateway.acquire_liveness_lock`
+- `gateway.renew_liveness_lock`
+- `gateway.release_liveness_lock`
+- `gateway.list_liveness_locks`
+
+This keeps watchdog decoupled from extension-specific tables. Watchdog reads gateway `/health.runtimeLocks` and applies recovery policy there.
 
 Each extension process runs directly with `bun --hot` (native HMR) by default. Extensions with `hot: false` in config use `bun run` instead and can be restarted via `gateway.restart_extension`. The extension imports `runExtensionHost()` from `packages/extension-host` which provides the NDJSON bridge:
 
