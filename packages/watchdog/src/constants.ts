@@ -73,9 +73,15 @@ export const WATCHDOG_PORT = config.port ?? 30085;
 export const PROJECT_DIR = process.env.ANIMA_PROJECT_DIR || process.cwd();
 export const LOGS_DIR = resolvePath(config.logsDir ?? "~/.anima/logs");
 export const LOG_FILE = join(LOGS_DIR, "watchdog.log");
+export const RECOVERY_JOURNAL_FILE = join(LOGS_DIR, "watchdog-recovery.jsonl");
 export const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB
 export const MAX_LOG_FILES = 2;
 export const HEALTH_CHECK_INTERVAL = 5000; // 5s
 export const HEALTH_HISTORY_SIZE = 60; // 5-minute window at 5s intervals
 export const UNHEALTHY_RESTART_THRESHOLD = 6; // 6 consecutive failures = 30s
+export const MEMORY_LOCK_STALE_MS = 3 * 60 * 1000;
 export const STARTED_AT = Date.now();
+
+export function getAnimaDbPath(): string {
+  return process.env.ANIMA_DB_PATH || resolvePath("~/.anima/anima.db");
+}

@@ -18,6 +18,7 @@ export async function getStatus(): Promise<Record<string, unknown>> {
       processAlive,
       healthy,
       healthReason: health.reason ?? null,
+      healthDetails: service.lastHealthDetails ?? null,
       consecutiveFailures: service.consecutiveFailures,
       lastRestart: service.lastRestart ? new Date(service.lastRestart).toISOString() : null,
       lastHealthReason: service.lastHealthReason ?? null,

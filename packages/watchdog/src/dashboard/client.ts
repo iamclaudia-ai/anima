@@ -10,6 +10,15 @@ interface ServiceStatus {
   pid: number | null;
   processAlive: boolean;
   healthy: boolean;
+  healthReason?: string | null;
+  healthDetails?: {
+    memoryLock?: {
+      ownerPid?: number | null;
+      heartbeatAgeMs?: number | null;
+      stale?: boolean;
+      ownerAlive?: boolean | null;
+    };
+  } | null;
   consecutiveFailures: number;
   lastRestart: string | null;
   history: { timestamp: number; processAlive: boolean; healthy: boolean }[];
@@ -237,6 +246,11 @@ async function refreshStatus(): Promise<void> {
       const lastRestart = svc.lastRestart
         ? new Date(svc.lastRestart).toLocaleTimeString()
         : "never";
+      const detailLine = svc.healthDetails?.memoryLock
+        ? `memory lock: pid ${svc.healthDetails.memoryLock.ownerPid ?? "?"}, age ${Math.round((svc.healthDetails.memoryLock.heartbeatAgeMs ?? 0) / 1000)}s`
+        : svc.healthReason
+          ? `reason: ${svc.healthReason}`
+          : "";
 
       html +=
         `<div class="card">` +
@@ -249,6 +263,9 @@ async function refreshStatus(): Promise<void> {
         `<div class="metric"><span class="label">PID</span><span>${svc.pid ?? "—"}</span></div>` +
         `<div class="metric"><span class="label">failures</span><span>${svc.consecutiveFailures}</span></div>` +
         `<div class="metric"><span class="label">last restart</span><span>${lastRestart}</span></div>` +
+        (detailLine
+          ? `<div class="metric"><span class="label">detail</span><span>${escapeHtml(detailLine)}</span></div>`
+          : "") +
         `<div class="sparkline">${sparkline}</div>` +
         `</div>` +
         `<div class="card-actions">` +

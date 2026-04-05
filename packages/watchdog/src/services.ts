@@ -11,15 +11,19 @@ import {
   PROJECT_DIR,
   LOGS_DIR,
   HEALTH_HISTORY_SIZE,
+  MEMORY_LOCK_STALE_MS,
   UNHEALTHY_RESTART_THRESHOLD,
+  getAnimaDbPath,
   getGatewayToken,
 } from "./constants";
 import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
+import { recordRecoveryEvent } from "./recovery-journal";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Subprocess } from "bun";
+import { Database } from "bun:sqlite";
 
 /**
  * Capture the full login shell environment by running `zsh -l -c env`.
@@ -109,6 +113,7 @@ export interface ManagedService {
   history: HealthSnapshot[];
   proc: Subprocess | null;
   lastHealthReason?: string | null;
+  lastHealthDetails?: Record<string, unknown> | null;
 }
 
 // ── Build Services from Config ──────────────────────────
@@ -131,6 +136,7 @@ function buildService(id: string, cfg: ServiceConfig): ManagedService {
     consecutiveFailures: 0,
     history: [],
     proc: null,
+    lastHealthDetails: null,
   };
 }
 
@@ -320,6 +326,57 @@ export async function restartService(
 export interface HealthCheckResult {
   healthy: boolean;
   reason?: string;
+  details?: Record<string, unknown>;
+}
+
+interface MemoryLockEvidence {
+  ownerPid: number | null;
+  heartbeatAgeMs: number | null;
+  stale: boolean;
+  ownerAlive: boolean | null;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    return true;
+  }
+}
+
+function getMemoryLockEvidence(): MemoryLockEvidence | null {
+  const dbPath = getAnimaDbPath();
+  if (!existsSync(dbPath)) return null;
+
+  let db: Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const row = db
+      .query(
+        `SELECT owner_pid AS ownerPid,
+                CAST((julianday('now') - julianday(last_heartbeat)) * 86400000 AS INTEGER) AS heartbeatAgeMs
+         FROM memory_extension_locks
+         WHERE lock_id = 'memory-extension'`,
+      )
+      .get() as { ownerPid: number; heartbeatAgeMs: number | null } | null;
+
+    if (!row) return null;
+
+    return {
+      ownerPid: row.ownerPid,
+      heartbeatAgeMs: row.heartbeatAgeMs,
+      stale: (row.heartbeatAgeMs ?? 0) > MEMORY_LOCK_STALE_MS,
+      ownerAlive: row.ownerPid ? processExists(row.ownerPid) : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    db?.close(false);
+  }
 }
 
 export async function checkHealth(service: ManagedService): Promise<HealthCheckResult> {
@@ -344,7 +401,21 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
       const body = (await res.json()) as { extensions?: Record<string, unknown> };
       const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
       if (extensionCount === 0) {
-        return { healthy: false, reason: "zero_extensions" };
+        return { healthy: false, reason: "zero_extensions", details: { extensionCount } };
+      }
+    }
+
+    if (service.id === "gateway") {
+      const memoryLock = getMemoryLockEvidence();
+      if (memoryLock?.stale) {
+        return {
+          healthy: false,
+          reason: memoryLock.ownerAlive ? "memory_stale_lock" : "memory_orphaned_lock",
+          details: { memoryLock },
+        };
+      }
+      if (memoryLock) {
+        return { healthy: true, details: { memoryLock } };
       }
     }
 
@@ -352,6 +423,13 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
   } catch {
     return { healthy: false, reason: "unreachable" };
   }
+}
+
+function restartThresholdForReason(reason: string | null): number {
+  if (reason === "memory_stale_lock" || reason === "memory_orphaned_lock") {
+    return 1;
+  }
+  return UNHEALTHY_RESTART_THRESHOLD;
 }
 
 // ── Health Monitor Loop ─────────────────────────────────
@@ -363,6 +441,7 @@ export async function monitorServices(): Promise<void> {
     const healthy = health.healthy;
     const reason = health.reason ?? null;
     service.lastHealthReason = reason;
+    service.lastHealthDetails = health.details ?? null;
 
     // Record snapshot
     service.history.push({
@@ -387,20 +466,65 @@ export async function monitorServices(): Promise<void> {
     } else if (!healthy) {
       // Process alive but health check failing
       service.consecutiveFailures++;
-      if (service.consecutiveFailures >= UNHEALTHY_RESTART_THRESHOLD) {
+      const restartThreshold = restartThresholdForReason(reason);
+      if (reason === "memory_stale_lock" || reason === "memory_orphaned_lock") {
+        recordRecoveryEvent({
+          timestamp: new Date().toISOString(),
+          serviceId: service.id,
+          event: "memory_stale_lock_detected",
+          reason,
+          details: health.details,
+        });
+      } else {
+        recordRecoveryEvent({
+          timestamp: new Date().toISOString(),
+          serviceId: service.id,
+          event: "health_check_failed",
+          reason,
+          details: health.details,
+        });
+      }
+      if (service.consecutiveFailures >= restartThreshold) {
         const timeSinceRestart = Date.now() - service.lastRestart;
         if (timeSinceRestart < service.restartBackoff) continue;
 
+        recordRecoveryEvent({
+          timestamp: new Date().toISOString(),
+          serviceId: service.id,
+          event: "restart_requested",
+          reason,
+          details: {
+            consecutiveFailures: service.consecutiveFailures,
+            restartBackoff: service.restartBackoff,
+            health: health.details ?? undefined,
+          },
+        });
         log(
           "WARN",
           `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
         );
         const useForce = reason === "zero_extensions";
         await startService(service, { force: useForce });
+        recordRecoveryEvent({
+          timestamp: new Date().toISOString(),
+          serviceId: service.id,
+          event: "restart_completed",
+          reason,
+          details: { pid: service.proc?.pid ?? null, forced: useForce },
+        });
         service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
       }
     } else {
       // Healthy — reset counters
+      if (service.consecutiveFailures > 0 || service.lastHealthReason) {
+        recordRecoveryEvent({
+          timestamp: new Date().toISOString(),
+          serviceId: service.id,
+          event: "health_restored",
+          reason,
+          details: health.details ?? undefined,
+        });
+      }
       service.consecutiveFailures = 0;
       if (Date.now() - service.lastRestart > 60000) {
         service.restartBackoff = 1000;
