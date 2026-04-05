@@ -8,9 +8,9 @@ class HostHarness {
   private lines: HostMsg[] = [];
   private stdoutDone = false;
 
-  constructor() {
+  constructor(config: Record<string, unknown> = {}) {
     const fixture = join(import.meta.dir, "__fixtures__", "test-extension.ts");
-    this.proc = Bun.spawn(["bun", fixture, "{}"], {
+    this.proc = Bun.spawn(["bun", fixture, JSON.stringify(config)], {
       cwd: join(import.meta.dir, "..", "..", ".."),
       stdin: "pipe",
       stdout: "pipe",
@@ -175,6 +175,28 @@ describe("runExtensionHost", () => {
     const res = await host.waitFor((m) => m.type === "res" && m.id === "r3");
     expect(res.ok).toBe(true);
     expect(res.payload).toEqual({ text: "pong" });
+  });
+
+  it("allows ctx.call during extension start", async () => {
+    host = new HostHarness({ startCallMethod: "startup.call" });
+
+    await host.waitFor((m) => m.type === "register");
+    const startupCall = await host.waitFor((m) => m.type === "call" && m.method === "startup.call");
+    host.send({
+      type: "call_res",
+      id: startupCall.id,
+      ok: true,
+      payload: { ok: true, via: "start" },
+    });
+
+    const startedCallResult = await host.waitFor(
+      (m) => m.type === "event" && m.event === "fixture.started_call_result",
+    );
+    expect(startedCallResult.payload).toEqual({ ok: true, via: "start" });
+
+    host.send({ type: "req", id: "post-start", method: "__health", params: {} });
+    const health = await host.waitFor((m) => m.type === "res" && m.id === "post-start");
+    expect(health.ok).toBe(true);
   });
 
   it("uses event envelope context for handler-initiated ctx.call/emit", async () => {

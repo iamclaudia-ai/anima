@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { AnimaExtension, ExtensionContext, GatewayEvent } from "@anima/shared";
 import { runExtensionHost } from "../index";
 
-function createFixtureExtension(): AnimaExtension {
+function createFixtureExtension(config: Record<string, unknown> = {}): AnimaExtension {
   let ctx: ExtensionContext | null = null;
 
   return {
@@ -62,6 +62,10 @@ function createFixtureExtension(): AnimaExtension {
     sourceRoutes: ["fixture-src"],
     async start(extCtx: ExtensionContext) {
       ctx = extCtx;
+      if (config.startCallMethod && typeof config.startCallMethod === "string") {
+        const result = await ctx.call(config.startCallMethod, { via: "start" });
+        ctx.emit("fixture.started_call_result", result);
+      }
       ctx.on("trigger.call", async () => {
         await ctx!.call("from.event", { via: "event" });
         ctx!.emit("fixture.after_event", { ok: true });
@@ -123,5 +127,5 @@ function createFixtureExtension(): AnimaExtension {
 }
 
 if (import.meta.main) {
-  runExtensionHost(() => createFixtureExtension());
+  runExtensionHost((config) => createFixtureExtension(config));
 }

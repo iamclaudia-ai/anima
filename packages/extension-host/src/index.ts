@@ -283,6 +283,12 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
 
     hostLog.info("Extension registered", { id: ext.id });
     requestScheduler = new RequestScheduler(ext.methods);
+    extension = ext;
+    if (import.meta.hot) {
+      import.meta.hot.data.extension = extension;
+      import.meta.hot.data.stdinInitialized = true;
+    }
+    readStdin();
 
     await ext.start(ctx);
 
@@ -472,21 +478,14 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
   // ── Start ───────────────────────────────────────────────────
 
   try {
-    extension = await loadAndStart();
-    if (import.meta.hot) {
-      import.meta.hot.data.extension = extension;
-    }
     const isHmrReload = import.meta.hot?.data?.stdinInitialized === true;
+    extension = await loadAndStart();
     if (isHmrReload) {
       hostLog.info("Extension hot-reloaded successfully", {
         id: extension.id,
         name: extension.name,
       });
     }
-    if (import.meta.hot) {
-      import.meta.hot.data.stdinInitialized = true;
-    }
-    readStdin();
   } catch (error) {
     hostLog.error("Failed to start extension", { error: String(error) });
     write({ type: "error", error: String(error) });
