@@ -225,6 +225,8 @@ export interface ExtensionMethodExecution {
   concurrency?: ExtensionMethodConcurrency;
   /** Params key to serialize by when concurrency = keyed */
   keyParam?: string;
+  /** Envelope context field to serialize by when concurrency = keyed */
+  keyContext?: "connectionId";
 }
 
 // ============================================================================

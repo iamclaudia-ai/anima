@@ -357,7 +357,12 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         });
       };
       if (scheduler) {
-        scheduler.schedule({ method, params, work: execute });
+        scheduler.schedule({
+          method,
+          params,
+          connectionId: context.connectionId,
+          work: execute,
+        });
       } else {
         await execute();
       }

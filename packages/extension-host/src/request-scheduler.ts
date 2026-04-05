@@ -8,6 +8,7 @@ import type {
 interface ScheduleOptions {
   method: string;
   params: Record<string, unknown>;
+  connectionId?: string | null;
   work: () => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ interface MethodExecutionPolicy {
   lane: ExtensionMethodLane;
   concurrency: ExtensionMethodConcurrency;
   keyParam?: string;
+  keyContext?: "connectionId";
 }
 
 const DEFAULT_POLICY: MethodExecutionPolicy = {
@@ -42,12 +44,7 @@ export class RequestScheduler {
     }
 
     if (policy.concurrency === "keyed") {
-      const keyValue =
-        policy.keyParam && typeof options.params[policy.keyParam] === "string"
-          ? (options.params[policy.keyParam] as string)
-          : policy.keyParam && typeof options.params[policy.keyParam] === "number"
-            ? String(options.params[policy.keyParam])
-            : "__default__";
+      const keyValue = this.resolveKeyValue(policy, options);
       const chainKey = `${policy.lane}:${keyValue}`;
       this.enqueue(this.keyChains, chainKey, options.work);
       return;
@@ -78,6 +75,21 @@ export class RequestScheduler {
       lane: execution?.lane ?? DEFAULT_POLICY.lane,
       concurrency: execution?.concurrency ?? DEFAULT_POLICY.concurrency,
       keyParam: execution?.keyParam,
+      keyContext: execution?.keyContext,
     };
+  }
+
+  private resolveKeyValue(policy: MethodExecutionPolicy, options: ScheduleOptions): string {
+    if (policy.keyParam) {
+      const paramValue = options.params[policy.keyParam];
+      if (typeof paramValue === "string") return paramValue;
+      if (typeof paramValue === "number") return String(paramValue);
+    }
+
+    if (policy.keyContext === "connectionId" && options.connectionId) {
+      return options.connectionId;
+    }
+
+    return "__default__";
   }
 }

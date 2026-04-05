@@ -21,6 +21,7 @@ import type {
   HealthCheckResponse,
   LoggerLike,
 } from "@anima/shared";
+import { createStandardExtension } from "@anima/extension-host";
 import { z } from "zod";
 import { CartesiaStream } from "./cartesia-stream";
 import { SentenceChunker } from "./sentence-chunker";
@@ -33,18 +34,14 @@ const noopLogger: LoggerLike = {
   child: () => noopLogger,
 };
 
-let traceLog: LoggerLike = noopLogger;
-
-function fileLog(level: string, msg: string): void {
-  if (level === "ERROR") traceLog.error(msg);
-  else if (level === "WARN") traceLog.warn(msg);
-  else traceLog.info(msg);
+function loggerFileLog(logger: LoggerLike, level: string, msg: string): void {
+  if (level === "ERROR") logger.error(msg);
+  else if (level === "WARN") logger.warn(msg);
+  else logger.info(msg);
 }
 
 function connectionFileLog(cs: ConnectionVoiceState, level: string, msg: string): void {
-  if (level === "ERROR") cs.traceLog.error(msg);
-  else if (level === "WARN") cs.traceLog.warn(msg);
-  else cs.traceLog.info(msg);
+  loggerFileLog(cs.traceLog, level, msg);
 }
 
 // ============================================================================
@@ -330,62 +327,254 @@ function createConnectionState(connectionId: string, traceLog: LoggerLike): Conn
 // Voice Extension
 // ============================================================================
 
-export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
-  // Filter out undefined values so they don't override defaults
-  const defined = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
-  const cfg: Required<VoiceConfig> = { ...DEFAULT_CONFIG, ...defined };
+interface VoiceExtensionRuntime {
+  manager: VoiceConnectionManager;
+  traceLog: LoggerLike;
+  unsubscribers: Array<() => void>;
+}
 
-  let ctx: ExtensionContext | null = null;
-  let unsubscribers: Array<() => void> = [];
+class VoiceConnectionManager {
+  private readonly connections = new Map<string, ConnectionVoiceState>();
 
-  // Per-connection voice state — keyed by connectionId
-  const connections = new Map<string, ConnectionVoiceState>();
+  constructor(
+    private readonly ctx: ExtensionContext,
+    private readonly cfg: Required<VoiceConfig>,
+  ) {}
 
-  function getOrCreateConnection(connectionId: string): ConnectionVoiceState {
-    let state = connections.get(connectionId);
+  handleContentBlockStart(event: GatewayEvent): void {
+    const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+    if (!wantsVoice || !event.connectionId) return;
+
+    const payload = event.payload as {
+      content_block?: { type: string };
+      sessionId?: string;
+    };
+    const blockType = payload.content_block?.type || null;
+    const cs = this.getOrCreateConnection(event.connectionId);
+    cs.currentBlockType = blockType;
+
+    connectionFileLog(
+      cs,
+      "INFO",
+      `content_block_start: type=${blockType}, conn=${event.connectionId}, session=${payload.sessionId || event.sessionId || "?"}`,
+    );
+
+    if (cs.currentBlockType === "text") {
+      cs.textBuffer = "";
+      if (this.cfg.streaming && this.cfg.apiKey) {
+        const sessionId = payload.sessionId || event.sessionId || "unknown";
+        void this.startStream(cs, sessionId).catch((error) => {
+          connectionFileLog(cs, "ERROR", `startStream error: ${String(error)}`);
+        });
+      }
+    }
+  }
+
+  handleContentBlockDelta(event: GatewayEvent): void {
+    const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+    if (!wantsVoice || !event.connectionId) return;
+
+    const cs = this.connections.get(event.connectionId);
+    if (!cs || cs.currentBlockType !== "text") return;
+
+    const payload = event.payload as {
+      delta?: { type: string; text?: string };
+    };
+    if (payload.delta?.type !== "text_delta" || !payload.delta.text) return;
+
+    const deltaText = payload.delta.text;
+    cs.textBuffer += deltaText;
+
+    if (this.cfg.streaming && cs.currentStreamId) {
+      void this.feedStreamingText(cs, deltaText).catch((err) => {
+        connectionFileLog(cs, "ERROR", `feedStreamingText error: ${err.message}`);
+      });
+    }
+  }
+
+  async handleMessageStop(event: GatewayEvent): Promise<void> {
+    const wantsVoice = event.tags?.includes("voice.speak") ?? false;
+    if (!wantsVoice || !event.connectionId) return;
+
+    const cs = this.connections.get(event.connectionId);
+    if (!cs) return;
+
+    connectionFileLog(
+      cs,
+      "INFO",
+      `message_stop: conn=${cs.connectionId}, hasActiveStream=${!!cs.currentStreamId}, textBuffer=${cs.textBuffer.length} chars`,
+    );
+
+    if (this.cfg.streaming && cs.currentStreamId) {
+      await this.endStream(cs);
+    } else if (!this.cfg.streaming && cs.textBuffer && cs.currentStreamId) {
+      const cleaned = cleanForSpeech(cs.textBuffer);
+      if (cleaned) {
+        await this.speakBatch(cleaned);
+      }
+    }
+
+    cs.textBuffer = "";
+    cs.currentBlockType = null;
+  }
+
+  async speakBatch(text: string): Promise<void> {
+    if (!this.cfg.apiKey) {
+      throw new Error("No CARTESIA_API_KEY configured");
+    }
+
+    if (!text.trim()) return;
+
+    this.ctx.emit("voice.speaking", { text: text.substring(0, 100) });
+
+    try {
+      const audioBuffer = await batchSpeak(text, this.cfg);
+      const base64Audio = audioBuffer.toString("base64");
+      this.ctx.emit("voice.audio", {
+        format: "wav",
+        data: base64Audio,
+        text: text.substring(0, 100),
+      });
+      this.ctx.emit("voice.done", { text: text.substring(0, 100) });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.ctx.log.error(`Batch TTS error: ${errorMsg}`);
+      this.ctx.emit("voice.error", { error: errorMsg });
+      throw error;
+    }
+  }
+
+  async replay(sessionId: string, streamId: string): Promise<void> {
+    const path = getAudioPath(sessionId, streamId);
+    if (!path) throw new Error("Audio not found");
+
+    const audio = await Bun.file(path).arrayBuffer();
+    this.ctx.emit("voice.audio", {
+      format: "wav",
+      data: Buffer.from(audio).toString("base64"),
+      sessionId,
+      streamId,
+    });
+  }
+
+  stopForConnection(connectionId: string | null): void {
+    if (connectionId) {
+      const state = this.connections.get(connectionId);
+      if (state) {
+        this.abortStream(state);
+      }
+      return;
+    }
+    this.abortAll();
+  }
+
+  abortAll(): void {
+    for (const cs of this.connections.values()) {
+      this.abortStream(cs);
+    }
+    this.connections.clear();
+  }
+
+  getStatus(): {
+    streaming: boolean;
+    voiceId: string;
+    model: string;
+    activeConnections: Array<{
+      connectionId: string;
+      speaking: boolean;
+      activeStream: string | null;
+      sessionId: string | null;
+      queueLength: number;
+    }>;
+  } {
+    return {
+      streaming: this.cfg.streaming,
+      voiceId: this.cfg.voiceId,
+      model: this.cfg.model,
+      activeConnections: Array.from(this.connections.entries()).map(([connId, cs]) => ({
+        connectionId: connId,
+        speaking: cs.isSpeaking,
+        activeStream: cs.currentStreamId,
+        sessionId: cs.currentSessionId,
+        queueLength: cs.sentenceQueue.length,
+      })),
+    };
+  }
+
+  buildHealthCheck(): HealthCheckResponse {
+    return {
+      ok: !!this.cfg.apiKey,
+      status: this.cfg.apiKey ? "healthy" : "degraded",
+      label: "Voice (Cartesia)",
+      metrics: [
+        { label: "Streaming", value: this.cfg.streaming ? "on" : "off" },
+        { label: "Voice", value: this.cfg.voiceId },
+        { label: "Model", value: this.cfg.model },
+        { label: "Emotions", value: this.cfg.emotions?.join(", ") || "none" },
+        { label: "Speed", value: this.cfg.speed?.toString() || "1.0" },
+        { label: "Speaking", value: this.hasActiveSpeech() ? "yes" : "no" },
+        { label: "Connections", value: this.connections.size.toString() },
+      ],
+    };
+  }
+
+  buildRuntimeHealth() {
+    return {
+      ok: !!this.cfg.apiKey,
+      details: {
+        apiKeyConfigured: !!this.cfg.apiKey,
+        streaming: this.cfg.streaming,
+        voiceId: this.cfg.voiceId,
+        speaking: this.hasActiveSpeech(),
+        activeConnections: this.connections.size,
+      },
+    };
+  }
+
+  private hasActiveSpeech(): boolean {
+    return Array.from(this.connections.values()).some((cs) => cs.isSpeaking);
+  }
+
+  private getOrCreateConnection(connectionId: string): ConnectionVoiceState {
+    let state = this.connections.get(connectionId);
     if (!state) {
-      const connectionTraceLog =
-        ctx?.createLogger({
-          component: `conn:${connectionId.slice(0, 8)}`,
-          fileName: `voice-${connectionId}.log`,
-        }) ?? traceLog;
+      const connectionTraceLog = this.ctx.createLogger({
+        component: `conn:${connectionId.slice(0, 8)}`,
+        fileName: `voice-${connectionId}.log`,
+      });
       state = createConnectionState(connectionId, connectionTraceLog);
-      connections.set(connectionId, state);
+      this.connections.set(connectionId, state);
       connectionFileLog(state, "INFO", `Created voice state for connection=${connectionId}`);
     }
     return state;
   }
 
-  /** Generate a unique stream ID for this utterance */
-  function newStreamId(): string {
+  private newStreamId(): string {
     return crypto.randomUUID().slice(0, 8);
   }
 
-  /** Get emit options for connection-scoped routing */
-  function callerEmitOptions(connectionId: string): { connectionId: string; source: string } {
+  private callerEmitOptions(connectionId: string): { connectionId: string; source: string } {
     return {
       connectionId,
       source: "gateway.caller",
     };
   }
 
-  // --- Per-connection streaming functions ---
-
-  function resolveQueueDrainIfIdle(cs: ConnectionVoiceState): void {
+  private resolveQueueDrainIfIdle(cs: ConnectionVoiceState): void {
     if (!cs.processingQueue && cs.sentenceQueue.length === 0 && cs.queueDrainResolve) {
       cs.queueDrainResolve();
       cs.queueDrainResolve = null;
     }
   }
 
-  async function waitForQueueDrain(cs: ConnectionVoiceState): Promise<void> {
+  private async waitForQueueDrain(cs: ConnectionVoiceState): Promise<void> {
     if (!cs.processingQueue && cs.sentenceQueue.length === 0) return;
     await new Promise<void>((resolve) => {
       cs.queueDrainResolve = resolve;
     });
   }
 
-  async function sendSentenceToCartesia(
+  private async sendSentenceToCartesia(
     cs: ConnectionVoiceState,
     sentence: string,
     streamId: string,
@@ -399,12 +588,12 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
 
       let streamHadError = false;
       const sentenceStream = new CartesiaStream({
-        apiKey: cfg.apiKey,
-        voiceId: cfg.voiceId,
-        model: cfg.model,
-        dictionaryId: cfg.dictionaryId,
-        emotions: cfg.emotions,
-        speed: cfg.speed,
+        apiKey: this.cfg.apiKey,
+        voiceId: this.cfg.voiceId,
+        model: this.cfg.model,
+        dictionaryId: this.cfg.dictionaryId,
+        emotions: this.cfg.emotions,
+        speed: this.cfg.speed,
         log: (level, msg) => connectionFileLog(cs, level, msg),
         onAudioChunk: ({ audio }) => {
           if (cs.abortRequested) return;
@@ -412,10 +601,10 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
           const pcmChunk = Buffer.from(audio, "base64");
           const wavChunk = pcmToWav(pcmChunk, 24000, 1);
           const index = cs.streamChunkIndex++;
-          ctx?.emit(
+          this.ctx.emit(
             "voice.audio_chunk",
             { audio: wavChunk.toString("base64"), format: "wav", index, streamId, sessionId },
-            callerEmitOptions(connectionId),
+            this.callerEmitOptions(connectionId),
           );
           cs.currentAudioChunks.push(pcmChunk);
         },
@@ -461,18 +650,22 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     }
 
     const err = lastError ?? new Error("Failed to send sentence to Cartesia");
-    ctx?.emit("voice.error", { error: err.message, streamId }, callerEmitOptions(connectionId));
+    this.ctx.emit(
+      "voice.error",
+      { error: err.message, streamId },
+      this.callerEmitOptions(connectionId),
+    );
     connectionFileLog(cs, "ERROR", `Dropped sentence after retries: ${err.message}`);
   }
 
-  async function processSentenceQueue(cs: ConnectionVoiceState): Promise<void> {
+  private async processSentenceQueue(cs: ConnectionVoiceState): Promise<void> {
     if (cs.processingQueue) return;
     cs.processingQueue = true;
     try {
       while (!cs.abortRequested && cs.sentenceQueue.length > 0) {
         const entry = cs.sentenceQueue.shift();
         if (!entry) continue;
-        await sendSentenceToCartesia(
+        await this.sendSentenceToCartesia(
           cs,
           entry.text,
           entry.streamId,
@@ -482,11 +675,11 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       }
     } finally {
       cs.processingQueue = false;
-      resolveQueueDrainIfIdle(cs);
+      this.resolveQueueDrainIfIdle(cs);
     }
   }
 
-  function enqueueSentence(cs: ConnectionVoiceState, sentence: string): void {
+  private enqueueSentence(cs: ConnectionVoiceState, sentence: string): void {
     if (!cs.currentStreamId || !cs.currentSessionId) return;
     cs.sentenceQueue.push({
       text: sentence,
@@ -494,17 +687,15 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       sessionId: cs.currentSessionId,
       connectionId: cs.connectionId,
     });
-    void processSentenceQueue(cs);
+    void this.processSentenceQueue(cs);
   }
 
-  async function startStream(cs: ConnectionVoiceState, sessionId: string): Promise<void> {
-    if (!cfg.apiKey) {
+  private async startStream(cs: ConnectionVoiceState, sessionId: string): Promise<void> {
+    if (!this.cfg.apiKey) {
       connectionFileLog(cs, "WARN", "startStream called but no apiKey");
       return;
     }
 
-    // If a previous stream is active, flush its remaining text into the queue
-    // but do NOT wait for drain or clear the queue — old sentences keep playing.
     if (cs.currentStreamId && cs.currentChunker) {
       const trailingFiltered = cs.streamingFilter.flush();
       if (trailingFiltered) {
@@ -512,7 +703,7 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
         for (const sentence of trailingSentences) {
           const cleaned = cleanForSpeech(sentence);
           if (cleaned) {
-            enqueueSentence(cs, cleaned);
+            this.enqueueSentence(cs, cleaned);
           }
         }
       }
@@ -526,24 +717,23 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
             "INFO",
             `startStream: flushing previous stream text before new stream: "${cleaned.substring(0, 80)}"`,
           );
-          enqueueSentence(cs, cleaned);
+          this.enqueueSentence(cs, cleaned);
         }
       }
-      // Emit stream_end for the old stream so clients can track segments
-      ctx?.emit(
+
+      this.ctx.emit(
         "voice.stream_end",
         { streamId: cs.currentStreamId, sessionId: cs.currentSessionId },
-        callerEmitOptions(cs.connectionId),
+        this.callerEmitOptions(cs.connectionId),
       );
     }
 
-    const streamId = newStreamId();
+    const streamId = this.newStreamId();
     cs.currentStreamId = streamId;
     cs.currentSessionId = sessionId;
     cs.currentAudioChunks = [];
     cs.currentChunker = new SentenceChunker();
     cs.streamingFilter.reset();
-    // NOTE: sentenceQueue is NOT cleared — old sentences keep synthesizing
     cs.streamChunkIndex = 0;
     cs.streamGeneration++;
     cs.abortRequested = false;
@@ -555,15 +745,17 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     );
 
     cs.isSpeaking = true;
-    ctx?.emit(
+    this.ctx.emit(
       "voice.stream_start",
       { streamId: cs.currentStreamId, sessionId: cs.currentSessionId },
-      callerEmitOptions(cs.connectionId),
+      this.callerEmitOptions(cs.connectionId),
     );
-    ctx?.log.info(`Streaming TTS started (stream=${cs.currentStreamId}, conn=${cs.connectionId})`);
+    this.ctx.log.info(
+      `Streaming TTS started (stream=${cs.currentStreamId}, conn=${cs.connectionId})`,
+    );
   }
 
-  async function feedStreamingText(cs: ConnectionVoiceState, text: string): Promise<void> {
+  private async feedStreamingText(cs: ConnectionVoiceState, text: string): Promise<void> {
     if (!cs.currentChunker || !cs.currentStreamId) return;
 
     connectionFileLog(cs, "INFO", `FEEDING TEXT [conn=${cs.connectionId}]: "${text}"`);
@@ -575,20 +767,18 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       const cleaned = cleanForSpeech(sentence);
       if (cleaned) {
         connectionFileLog(cs, "INFO", `SPEAKING SENTENCE [conn=${cs.connectionId}]: "${cleaned}"`);
-        enqueueSentence(cs, cleaned);
+        this.enqueueSentence(cs, cleaned);
       }
     }
   }
 
-  async function endStream(cs: ConnectionVoiceState): Promise<void> {
+  private async endStream(cs: ConnectionVoiceState): Promise<void> {
     if (!cs.currentChunker || !cs.currentStreamId) return;
 
-    // Capture generation so we can detect if a new stream started while we await.
     const generation = cs.streamGeneration;
     const streamId = cs.currentStreamId;
     const sessionId = cs.currentSessionId;
 
-    // Flush any remaining line-filtered content into the chunker first.
     const trailingFiltered = cs.streamingFilter.flush();
     if (trailingFiltered) {
       const trailingSentences = cs.currentChunker.feed(trailingFiltered);
@@ -600,12 +790,11 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
             "INFO",
             `endStream: flushing trailing text: "${cleaned.substring(0, 80)}"`,
           );
-          enqueueSentence(cs, cleaned);
+          this.enqueueSentence(cs, cleaned);
         }
       }
     }
 
-    // Flush any remaining text in the chunker
     const remaining = cs.currentChunker.flush();
     if (remaining) {
       const cleaned = cleanForSpeech(remaining);
@@ -615,31 +804,28 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
           "INFO",
           `endStream: flushing remaining text: "${cleaned.substring(0, 80)}"`,
         );
-        enqueueSentence(cs, cleaned);
+        this.enqueueSentence(cs, cleaned);
       }
     }
 
-    // Wait until all queued sentences are synthesized.
     connectionFileLog(
       cs,
       "INFO",
       `endStream: waiting for sentence queue drain (stream=${streamId}, conn=${cs.connectionId})`,
     );
-    await waitForQueueDrain(cs);
+    await this.waitForQueueDrain(cs);
     connectionFileLog(
       cs,
       "INFO",
       `endStream: session ended (stream=${streamId}, conn=${cs.connectionId})`,
     );
 
-    // If a new stream started while we were waiting, don't touch current state.
     if (cs.streamGeneration !== generation) {
       connectionFileLog(
         cs,
         "INFO",
         `endStream: stale generation (${generation} != ${cs.streamGeneration}), skipping state reset`,
       );
-      // Still save audio for this stream segment
       if (streamId && sessionId && cs.currentAudioChunks.length > 0) {
         const fullAudio = Buffer.concat(cs.currentAudioChunks);
         saveAudio(fullAudio, sessionId, streamId).catch(() => {});
@@ -647,28 +833,29 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       return;
     }
 
-    ctx?.log.info(`Streaming TTS ended (stream=${streamId}, conn=${cs.connectionId})`);
+    this.ctx.log.info(`Streaming TTS ended (stream=${streamId}, conn=${cs.connectionId})`);
 
-    // Save accumulated audio from all sentences to disk
-    if (streamId && sessionId && cs.currentAudioChunks && cs.currentAudioChunks.length > 0) {
+    if (streamId && sessionId && cs.currentAudioChunks.length > 0) {
       const fullAudio = Buffer.concat(cs.currentAudioChunks);
       saveAudio(fullAudio, sessionId, streamId)
         .then((path) => {
-          ctx?.log.info(
+          this.ctx.log.info(
             `Full response audio saved: ${path} (${(fullAudio.length / 1024).toFixed(1)}KB)`,
           );
         })
         .catch((err) => {
-          ctx?.log.error(`Failed to save full audio: ${err.message}`);
+          this.ctx.log.error(`Failed to save full audio: ${err.message}`);
         });
     }
 
-    // Signal stream end to clients
     if (streamId) {
-      ctx?.emit("voice.stream_end", { streamId, sessionId }, callerEmitOptions(cs.connectionId));
+      this.ctx.emit(
+        "voice.stream_end",
+        { streamId, sessionId },
+        this.callerEmitOptions(cs.connectionId),
+      );
     }
 
-    // Reset streaming state — safe because generation matches.
     cs.isSpeaking = false;
     cs.currentChunker = null;
     cs.currentStreamId = null;
@@ -677,14 +864,13 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     cs.streamChunkIndex = 0;
     cs.streamingFilter.reset();
 
-    // Clean up connection state if fully idle
     if (!cs.processingQueue && cs.sentenceQueue.length === 0) {
-      connections.delete(cs.connectionId);
+      this.connections.delete(cs.connectionId);
       connectionFileLog(cs, "INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
     }
   }
 
-  function abortStream(cs: ConnectionVoiceState): void {
+  private abortStream(cs: ConnectionVoiceState): void {
     const streamId = cs.currentStreamId;
     connectionFileLog(
       cs,
@@ -692,20 +878,19 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
       `Aborting stream: stream=${streamId || "none"}, conn=${cs.connectionId}`,
     );
 
-    // Signal abort to clients
     if (streamId) {
-      ctx?.emit(
+      this.ctx.emit(
         "voice.stream_end",
         { streamId, sessionId: cs.currentSessionId, aborted: true },
-        callerEmitOptions(cs.connectionId),
+        this.callerEmitOptions(cs.connectionId),
       );
-      ctx?.log.info(`Streaming TTS aborted (stream=${streamId}, conn=${cs.connectionId})`);
+      this.ctx.log.info(`Streaming TTS aborted (stream=${streamId}, conn=${cs.connectionId})`);
     }
 
     cs.abortRequested = true;
     cs.sentenceQueue = [];
-    cs.streamGeneration++; // invalidate any in-flight endStream()
-    resolveQueueDrainIfIdle(cs);
+    cs.streamGeneration++;
+    this.resolveQueueDrainIfIdle(cs);
     cs.activeSentenceStream?.abort();
     cs.activeSentenceStream = null;
 
@@ -717,312 +902,164 @@ export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
     cs.streamChunkIndex = 0;
     cs.streamingFilter.reset();
 
-    connections.delete(cs.connectionId);
+    this.connections.delete(cs.connectionId);
     connectionFileLog(cs, "INFO", `Cleaned up voice state for connection=${cs.connectionId}`);
   }
+}
 
-  /** Abort all active connections (used on extension stop) */
-  function abortAll(): void {
-    for (const cs of connections.values()) {
-      abortStream(cs);
-    }
-    connections.clear();
-  }
+const voiceMethodDefinitions = [
+  {
+    name: "voice.speak",
+    description: "Synthesize text to speech and emit a voice.audio event",
+    inputSchema: z.object({
+      text: z.string().min(1),
+    }),
+    execution: { lane: "long_running", concurrency: "keyed", keyContext: "connectionId" } as const,
+  },
+  {
+    name: "voice.stop",
+    description: "Stop active streaming TTS playback for the current connection",
+    inputSchema: z.object({}),
+    execution: { lane: "write", concurrency: "keyed", keyContext: "connectionId" } as const,
+  },
+  {
+    name: "voice.status",
+    description: "Get current voice extension status and active stream state",
+    inputSchema: z.object({}),
+    execution: { lane: "read", concurrency: "parallel" } as const,
+  },
+  {
+    name: "voice.replay",
+    description: "Replay previously saved response audio by session and stream id",
+    inputSchema: z.object({
+      sessionId: z.string().min(1),
+      streamId: z.string().min(1),
+    }),
+    execution: { lane: "read", concurrency: "parallel" } as const,
+  },
+  {
+    name: "voice.health_check",
+    description: "Return standardized health_check payload for Voice extension",
+    inputSchema: z.object({}),
+    execution: { lane: "control", concurrency: "parallel" } as const,
+  },
+];
 
-  // --- Batch TTS (for voice.speak method) ---
+export function createVoiceExtension(config: VoiceConfig = {}): AnimaExtension {
+  const defined = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  );
+  const cfg: Required<VoiceConfig> = { ...DEFAULT_CONFIG, ...defined };
 
-  async function speakBatch(text: string): Promise<void> {
-    if (!cfg.apiKey) {
-      throw new Error("No CARTESIA_API_KEY configured");
-    }
-
-    if (!text.trim()) return;
-
-    ctx?.emit("voice.speaking", { text: text.substring(0, 100) });
-
-    try {
-      const audioBuffer = await batchSpeak(text, cfg);
-      const base64Audio = audioBuffer.toString("base64");
-      ctx?.emit("voice.audio", {
-        format: "wav",
-        data: base64Audio,
-        text: text.substring(0, 100),
-      });
-      ctx?.emit("voice.done", { text: text.substring(0, 100) });
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      ctx?.log.error(`Batch TTS error: ${errorMsg}`);
-      ctx?.emit("voice.error", { error: errorMsg });
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // Extension Implementation
-  // ============================================================================
-
-  return {
+  return createStandardExtension<VoiceExtensionRuntime>({
     id: "voice",
     name: "Voice (TTS)",
-    methods: [
-      {
-        name: "voice.speak",
-        description: "Synthesize text to speech and emit a voice.audio event",
-        inputSchema: z.object({
-          text: z.string().min(1),
-        }),
+    createRuntime(ctx) {
+      return {
+        manager: new VoiceConnectionManager(ctx, cfg),
+        traceLog: ctx.createLogger({ component: "trace", fileName: "voice-trace.log" }),
+        unsubscribers: [],
+      };
+    },
+    methods: voiceMethodDefinitions.map((definition) => ({
+      definition,
+      async handle(params, instance) {
+        switch (definition.name) {
+          case "voice.speak": {
+            const text = params.text as string;
+            if (!text) throw new Error('Missing "text" parameter');
+            const cleaned = cleanForSpeech(text);
+            await instance.runtime.manager.speakBatch(cleaned);
+            return { ok: true };
+          }
+          case "voice.stop": {
+            instance.runtime.manager.stopForConnection(instance.ctx.connectionId);
+            return { ok: true };
+          }
+          case "voice.status":
+            return instance.runtime.manager.getStatus();
+          case "voice.replay": {
+            const sessionId = params.sessionId as string;
+            const streamId = params.streamId as string;
+            if (!sessionId || !streamId) throw new Error("Missing sessionId or streamId");
+            await instance.runtime.manager.replay(sessionId, streamId);
+            return { ok: true };
+          }
+          case "voice.health_check":
+            return instance.runtime.manager.buildHealthCheck();
+          default:
+            throw new Error(`Unknown method: ${definition.name}`);
+        }
       },
-      {
-        name: "voice.stop",
-        description: "Stop active streaming TTS playback for the current stream",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "voice.status",
-        description: "Get current voice extension status and active stream state",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "voice.replay",
-        description: "Replay previously saved response audio by session and stream id",
-        inputSchema: z.object({
-          sessionId: z.string().min(1),
-          streamId: z.string().min(1),
-        }),
-      },
-      {
-        name: "voice.health_check",
-        description: "Return standardized health_check payload for Voice extension",
-        inputSchema: z.object({}),
-      },
-    ],
+    })),
     events: [
       "voice.speaking",
       "voice.done",
       "voice.audio",
-      "voice.error", // batch compat
+      "voice.error",
       "voice.stream_start",
       "voice.audio_chunk",
-      "voice.stream_end", // streaming
+      "voice.stream_end",
     ],
-
-    async start(context: ExtensionContext) {
-      ctx = context;
-      traceLog = ctx.createLogger({ component: "trace", fileName: "voice-trace.log" });
-      fileLog(
+    async start(instance) {
+      loggerFileLog(
+        instance.runtime.traceLog,
         "INFO",
         `Voice extension starting (streaming=${cfg.streaming}, apiKey=${!!cfg.apiKey}, voice=${cfg.voiceId}, dictionaryId=${cfg.dictionaryId || "none"})`,
       );
-      ctx.log.info("Starting voice extension...");
+      instance.ctx.log.info("Starting voice extension...");
 
       if (!cfg.apiKey) {
-        ctx.log.warn("No CARTESIA_API_KEY - TTS will not work");
+        instance.ctx.log.warn("No CARTESIA_API_KEY - TTS will not work");
       } else {
-        ctx.log.info(
+        instance.ctx.log.info(
           `Cartesia configured (voice=${cfg.voiceId}, streaming=${cfg.streaming}, model=${cfg.model})`,
         );
       }
 
-      // --- Event Subscriptions ---
-      // Voice activates when events carry the "voice.speak" tag on the envelope.
-      // Tags are set by the client (e.g., web chat sends tags: ["voice.speak"]).
-      // State is tracked per connectionId so multiple tabs and non-voiced
-      // sessions (e.g., Libby) never interfere with each other.
-
-      // Track content block type — start streaming if voice.speak tag present.
-      unsubscribers.push(
-        ctx.on("session.*.content_block_start", (event: GatewayEvent) => {
-          const wantsVoice = event.tags?.includes("voice.speak") ?? false;
-          if (!wantsVoice || !event.connectionId) return;
-
-          const payload = event.payload as {
-            content_block?: { type: string };
-            sessionId?: string;
-          };
-          const blockType = payload.content_block?.type || null;
-
-          const cs = getOrCreateConnection(event.connectionId);
-          cs.currentBlockType = blockType;
-
-          connectionFileLog(
-            cs,
-            "INFO",
-            `content_block_start: type=${blockType}, conn=${event.connectionId}, session=${payload.sessionId || event.sessionId || "?"}`,
-          );
-
-          if (cs.currentBlockType === "text") {
-            cs.textBuffer = "";
-
-            if (cfg.streaming && cfg.apiKey) {
-              const sessionId = payload.sessionId || event.sessionId || "unknown";
-              startStream(cs, sessionId);
-            }
-          }
+      instance.runtime.unsubscribers.push(
+        instance.ctx.on("session.*.content_block_start", (event: GatewayEvent) => {
+          instance.runtime.manager.handleContentBlockStart(event);
+        }),
+      );
+      instance.runtime.unsubscribers.push(
+        instance.ctx.on("session.*.content_block_delta", (event: GatewayEvent) => {
+          instance.runtime.manager.handleContentBlockDelta(event);
+        }),
+      );
+      instance.runtime.unsubscribers.push(
+        instance.ctx.on("session.*.message_stop", async (event: GatewayEvent) => {
+          await instance.runtime.manager.handleMessageStop(event);
         }),
       );
 
-      // Process text deltas — only for voiced events
-      unsubscribers.push(
-        ctx.on("session.*.content_block_delta", (event: GatewayEvent) => {
-          const wantsVoice = event.tags?.includes("voice.speak") ?? false;
-          if (!wantsVoice || !event.connectionId) return;
-
-          const cs = connections.get(event.connectionId);
-          if (!cs || cs.currentBlockType !== "text") return;
-
-          const payload = event.payload as {
-            delta?: { type: string; text?: string };
-          };
-
-          if (payload.delta?.type === "text_delta" && payload.delta.text) {
-            const deltaText = payload.delta.text;
-            cs.textBuffer += deltaText;
-
-            // Stream text to Cartesia in real-time
-            if (cfg.streaming && cs.currentStreamId) {
-              feedStreamingText(cs, deltaText).catch((err) => {
-                connectionFileLog(cs, "ERROR", `feedStreamingText error: ${err.message}`);
-              });
-            }
-          }
-        }),
-      );
-
-      // On message complete — only for voiced events
-      unsubscribers.push(
-        ctx.on("session.*.message_stop", async (event: GatewayEvent) => {
-          const wantsVoice = event.tags?.includes("voice.speak") ?? false;
-          if (!wantsVoice || !event.connectionId) return;
-
-          const cs = connections.get(event.connectionId);
-          if (!cs) return;
-
-          connectionFileLog(
-            cs,
-            "INFO",
-            `message_stop: conn=${cs.connectionId}, hasActiveStream=${!!cs.currentStreamId}, textBuffer=${cs.textBuffer.length} chars`,
-          );
-
-          if (cfg.streaming && cs.currentStreamId) {
-            await endStream(cs);
-          } else if (!cfg.streaming && cs.textBuffer && cs.currentStreamId) {
-            const cleaned = cleanForSpeech(cs.textBuffer);
-            if (cleaned) {
-              await speakBatch(cleaned);
-            }
-          }
-
-          // Reset for next content block
-          cs.textBuffer = "";
-          cs.currentBlockType = null;
-        }),
-      );
-
-      ctx.log.info("Voice extension started");
+      instance.ctx.log.info("Voice extension started");
     },
+    async stop(instance) {
+      instance.ctx.log.info("Stopping voice extension...");
+      instance.runtime.manager.abortAll();
 
-    async stop() {
-      ctx?.log.info("Stopping voice extension...");
-
-      // Abort all active connection streams
-      abortAll();
-
-      for (const unsub of unsubscribers) {
+      for (const unsub of instance.runtime.unsubscribers) {
         unsub();
       }
-      unsubscribers = [];
-      ctx = null;
-      traceLog = noopLogger;
+      instance.runtime.unsubscribers.length = 0;
     },
-
-    async handleMethod(method: string, params: Record<string, unknown>) {
-      switch (method) {
-        case "voice.speak": {
-          const text = params.text as string;
-          if (!text) throw new Error('Missing "text" parameter');
-          const cleaned = cleanForSpeech(text);
-          if (!cfg.apiKey) throw new Error("No CARTESIA_API_KEY configured");
-          await speakBatch(cleaned);
-          return { ok: true };
-        }
-
-        case "voice.stop": {
-          // Stop all active streams (could be refined to stop by connectionId)
-          abortAll();
-          return { ok: true };
-        }
-
-        case "voice.status": {
-          const activeConnections = Array.from(connections.entries()).map(([connId, cs]) => ({
-            connectionId: connId,
-            speaking: cs.isSpeaking,
-            activeStream: cs.currentStreamId,
-            sessionId: cs.currentSessionId,
-            queueLength: cs.sentenceQueue.length,
-          }));
-          return {
+    health(instance) {
+      if (!instance) {
+        return {
+          ok: !!cfg.apiKey,
+          details: {
+            apiKeyConfigured: !!cfg.apiKey,
             streaming: cfg.streaming,
             voiceId: cfg.voiceId,
-            model: cfg.model,
-            activeConnections,
-          };
-        }
-
-        case "voice.replay": {
-          const sessionId = params.sessionId as string;
-          const streamId = params.streamId as string;
-          if (!sessionId || !streamId) throw new Error("Missing sessionId or streamId");
-
-          const path = getAudioPath(sessionId, streamId);
-          if (!path) throw new Error("Audio not found");
-
-          const audio = await Bun.file(path).arrayBuffer();
-          ctx?.emit("voice.audio", {
-            format: "wav",
-            data: Buffer.from(audio).toString("base64"),
-            streamId,
-          });
-          return { ok: true };
-        }
-
-        case "voice.health_check": {
-          const anyActive = Array.from(connections.values()).some((cs) => cs.isSpeaking);
-          const response: HealthCheckResponse = {
-            ok: !!cfg.apiKey,
-            status: cfg.apiKey ? "healthy" : "disconnected",
-            label: "Voice (Cartesia)",
-            metrics: [
-              { label: "Streaming", value: cfg.streaming ? "on" : "off" },
-              { label: "Voice", value: cfg.voiceId },
-              { label: "Model", value: cfg.model },
-              { label: "Emotions", value: cfg.emotions?.join(", ") || "none" },
-              { label: "Speed", value: cfg.speed?.toString() || "1.0" },
-              { label: "Speaking", value: anyActive ? "yes" : "no" },
-              { label: "Connections", value: connections.size.toString() },
-            ],
-          };
-          return response;
-        }
-
-        default:
-          throw new Error(`Unknown method: ${method}`);
+            speaking: false,
+            activeConnections: 0,
+          },
+        };
       }
+      return instance.runtime.manager.buildRuntimeHealth();
     },
-
-    health() {
-      const anyActive = Array.from(connections.values()).some((cs) => cs.isSpeaking);
-      return {
-        ok: !!cfg.apiKey,
-        details: {
-          apiKeyConfigured: !!cfg.apiKey,
-          streaming: cfg.streaming,
-          voiceId: cfg.voiceId,
-          speaking: anyActive,
-          activeConnections: connections.size,
-        },
-      };
-    },
-  };
+  })(defined);
 }
 
 export default createVoiceExtension;

@@ -40,6 +40,12 @@ function createFixtureExtension(): AnimaExtension {
         execution: { lane: "long_running", concurrency: "keyed", keyParam: "resourceId" },
       },
       {
+        name: "fixture.block_by_connection",
+        description: "Sleep for a bounded duration before resolving, keyed by connectionId",
+        inputSchema: z.object({ ms: z.number().optional() }),
+        execution: { lane: "long_running", concurrency: "keyed", keyContext: "connectionId" },
+      },
+      {
         name: "fixture.health_check",
         description: "Health check fixture method",
         inputSchema: z.object({}),
@@ -89,6 +95,11 @@ function createFixtureExtension(): AnimaExtension {
         const ms = typeof params.ms === "number" ? params.ms : 500;
         await Bun.sleep(ms);
         return { ok: true, ms, resourceId: params.resourceId ?? null };
+      }
+      if (method === "fixture.block_by_connection") {
+        const ms = typeof params.ms === "number" ? params.ms : 500;
+        await Bun.sleep(ms);
+        return { ok: true, ms, connectionId: ctx?.connectionId ?? null };
       }
       if (method === "fixture.health_check") {
         return {

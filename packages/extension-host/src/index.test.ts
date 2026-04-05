@@ -341,4 +341,42 @@ describe("runExtensionHost", () => {
     expect(firstSame.ok).toBe(true);
     expect(secondSame.ok).toBe(true);
   });
+
+  it("serializes keyed requests by connectionId while allowing different connections to run", async () => {
+    host = new HostHarness();
+    await host.waitFor((m) => m.type === "register");
+
+    host.send({
+      type: "req",
+      id: "conn-a1",
+      method: "fixture.block_by_connection",
+      params: { ms: 250 },
+      connectionId: "conn-a",
+    });
+    host.send({
+      type: "req",
+      id: "conn-a2",
+      method: "fixture.block_by_connection",
+      params: { ms: 10 },
+      connectionId: "conn-a",
+    });
+    host.send({
+      type: "req",
+      id: "conn-b1",
+      method: "fixture.block_by_connection",
+      params: { ms: 10 },
+      connectionId: "conn-b",
+    });
+
+    const otherConnection = await host.waitFor((m) => m.type === "res" && m.id === "conn-b1");
+    expect(otherConnection.ok).toBe(true);
+    expect(otherConnection.payload).toEqual({ ok: true, ms: 10, connectionId: "conn-b" });
+
+    const firstSame = await host.waitFor((m) => m.type === "res" && m.id === "conn-a1");
+    const secondSame = await host.waitFor((m) => m.type === "res" && m.id === "conn-a2");
+    expect(firstSame.ok).toBe(true);
+    expect(secondSame.ok).toBe(true);
+    expect(firstSame.payload).toEqual({ ok: true, ms: 250, connectionId: "conn-a" });
+    expect(secondSame.payload).toEqual({ ok: true, ms: 10, connectionId: "conn-a" });
+  });
 });
