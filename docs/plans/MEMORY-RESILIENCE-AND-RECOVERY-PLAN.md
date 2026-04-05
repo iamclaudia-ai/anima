@@ -47,6 +47,29 @@ The work should be split into four tracks:
 3. Recovery policy and watchdog integration
 4. Durable incident and recovery journal
 
+## Direction Update: Move Liveness Locks Up To Gateway
+
+One important architectural conclusion from this work is that recovery-relevant locks should not stay indefinitely inside memory.
+
+The memory wedge exposed that:
+
+- memory-specific locks were initially convenient
+- but once watchdog and recovery policy depended on them, the coupling became undesirable
+
+So the long-term direction is:
+
+- keep extension-local advisory locks local
+- move liveness/recovery-relevant locks to gateway ownership
+- have watchdog consume gateway-reported lock state instead of memory tables directly
+
+For memory, that means:
+
+- the singleton liveness lock should migrate to gateway
+- any processing lease that becomes part of operator recovery may also migrate later
+- `memory_file_locks` can stay local unless they become recovery-relevant
+
+This does not change the immediate resilience work on watcher hardening, but it does change the intended end state for recovery.
+
 ## Architecture Note: Use XState For Ingestion
 
 The memory extension already uses XState for its top-level lifecycle in
@@ -393,7 +416,15 @@ Right now there is no trustworthy answer to:
 
 ### Proposed Journal
 
-Add a durable recovery journal, ideally in SQLite.
+Add a durable recovery journal.
+
+Short term:
+
+- JSONL is acceptable
+
+Longer term:
+
+- a SQLite incident store may still be preferable
 
 Suggested tables:
 
@@ -450,7 +481,14 @@ This allows:
 
 1. Add watcher debounce/coalescing for JSONL ingestion.
 2. Add memory-side stale-progress detection.
-3. Teach watchdog to restart memory on stale lock heartbeat plus repeated health timeout.
+3. Teach watchdog to recover memory on stale liveness lock plus repeated health timeout.
+
+Important architectural note:
+
+- the current direct watchdog read of memory lock state is an interim implementation
+- the target design is for gateway to own and report memory liveness locks
+- watchdog should eventually consume gateway lock evidence and use `gateway.restart_extension("memory")`
+
 4. Log recovery attempts durably, even if only to a first-pass JSONL journal.
 
 ### Phase 2: Health Model
@@ -502,8 +540,9 @@ This allows:
 The highest-value next implementation slice is:
 
 1. watcher debounce/coalescing for `MemoryWatcher`
-2. watchdog memory-specific stale-heartbeat restart policy
+2. first-pass watchdog stale-liveness detection and recovery
 3. first-pass incident/recovery journal
-4. richer memory health metrics for freshness and recovery state
+4. migrate liveness locks to gateway ownership and remove memory-specific watchdog coupling
+5. richer memory health metrics for freshness and recovery state
 
 This gives immediate resilience gains without requiring a full observability redesign first.

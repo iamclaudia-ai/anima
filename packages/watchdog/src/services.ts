@@ -114,6 +114,12 @@ export interface ManagedService {
   proc: Subprocess | null;
   lastHealthReason?: string | null;
   lastHealthDetails?: Record<string, unknown> | null;
+  activeIncident?: {
+    key: string;
+    reason: string | null;
+    openedAt: number;
+    restartRequestedAt?: number | null;
+  } | null;
 }
 
 // ── Build Services from Config ──────────────────────────
@@ -137,6 +143,7 @@ function buildService(id: string, cfg: ServiceConfig): ManagedService {
     history: [],
     proc: null,
     lastHealthDetails: null,
+    activeIncident: null,
   };
 }
 
@@ -432,10 +439,79 @@ function restartThresholdForReason(reason: string | null): number {
   return UNHEALTHY_RESTART_THRESHOLD;
 }
 
+function incidentKeyFor(service: ManagedService, reason: string | null): string {
+  return `${service.id}:${reason ?? "unknown"}`;
+}
+
+function openIncident(
+  service: ManagedService,
+  reason: string | null,
+  details: Record<string, unknown> | undefined,
+): void {
+  const key = incidentKeyFor(service, reason);
+  if (service.activeIncident?.key === key) {
+    return;
+  }
+
+  service.activeIncident = {
+    key,
+    reason,
+    openedAt: Date.now(),
+    restartRequestedAt: null,
+  };
+
+  recordRecoveryEvent({
+    timestamp: new Date().toISOString(),
+    serviceId: service.id,
+    event:
+      reason === "memory_stale_lock" || reason === "memory_orphaned_lock"
+        ? "memory_stale_lock_detected"
+        : "health_check_failed",
+    reason,
+    details,
+  });
+}
+
+function markRestartRequested(
+  service: ManagedService,
+  reason: string | null,
+  details: Record<string, unknown>,
+): void {
+  if (service.activeIncident?.restartRequestedAt) {
+    return;
+  }
+  if (service.activeIncident) {
+    service.activeIncident.restartRequestedAt = Date.now();
+  }
+  recordRecoveryEvent({
+    timestamp: new Date().toISOString(),
+    serviceId: service.id,
+    event: "restart_requested",
+    reason,
+    details,
+  });
+}
+
+function closeIncident(
+  service: ManagedService,
+  details: Record<string, unknown> | undefined,
+): void {
+  if (!service.activeIncident) return;
+  recordRecoveryEvent({
+    timestamp: new Date().toISOString(),
+    serviceId: service.id,
+    event: "health_restored",
+    reason: service.activeIncident.reason,
+    details,
+  });
+  service.activeIncident = null;
+}
+
 // ── Health Monitor Loop ─────────────────────────────────
 
 export async function monitorServices(): Promise<void> {
   for (const [_id, service] of Object.entries(services)) {
+    const previousReason = service.lastHealthReason ?? null;
     const processAlive = isProcessAlive(service);
     const health = processAlive ? await checkHealth(service) : { healthy: false, reason: "dead" };
     const healthy = health.healthy;
@@ -460,6 +536,7 @@ export async function monitorServices(): Promise<void> {
       const timeSinceRestart = Date.now() - service.lastRestart;
       if (timeSinceRestart < service.restartBackoff) continue;
 
+      openIncident(service, "dead", undefined);
       log("WARN", `${service.name} process dead — restarting...`);
       await startService(service);
       service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
@@ -467,37 +544,15 @@ export async function monitorServices(): Promise<void> {
       // Process alive but health check failing
       service.consecutiveFailures++;
       const restartThreshold = restartThresholdForReason(reason);
-      if (reason === "memory_stale_lock" || reason === "memory_orphaned_lock") {
-        recordRecoveryEvent({
-          timestamp: new Date().toISOString(),
-          serviceId: service.id,
-          event: "memory_stale_lock_detected",
-          reason,
-          details: health.details,
-        });
-      } else {
-        recordRecoveryEvent({
-          timestamp: new Date().toISOString(),
-          serviceId: service.id,
-          event: "health_check_failed",
-          reason,
-          details: health.details,
-        });
-      }
+      openIncident(service, reason, health.details);
       if (service.consecutiveFailures >= restartThreshold) {
         const timeSinceRestart = Date.now() - service.lastRestart;
         if (timeSinceRestart < service.restartBackoff) continue;
 
-        recordRecoveryEvent({
-          timestamp: new Date().toISOString(),
-          serviceId: service.id,
-          event: "restart_requested",
-          reason,
-          details: {
-            consecutiveFailures: service.consecutiveFailures,
-            restartBackoff: service.restartBackoff,
-            health: health.details ?? undefined,
-          },
+        markRestartRequested(service, reason, {
+          consecutiveFailures: service.consecutiveFailures,
+          restartBackoff: service.restartBackoff,
+          health: health.details ?? undefined,
         });
         log(
           "WARN",
@@ -516,14 +571,8 @@ export async function monitorServices(): Promise<void> {
       }
     } else {
       // Healthy — reset counters
-      if (service.consecutiveFailures > 0 || service.lastHealthReason) {
-        recordRecoveryEvent({
-          timestamp: new Date().toISOString(),
-          serviceId: service.id,
-          event: "health_restored",
-          reason,
-          details: health.details ?? undefined,
-        });
+      if (service.consecutiveFailures > 0 || previousReason || service.activeIncident) {
+        closeIncident(service, health.details ?? undefined);
       }
       service.consecutiveFailures = 0;
       if (Date.now() - service.lastRestart > 60000) {
