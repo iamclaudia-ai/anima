@@ -11,6 +11,7 @@
     "restart": "lsof -ti:30086 | xargs kill -9 2>/dev/null; sleep 0.5 && bun run dev",
     "watchdog": "bun run packages/watchdog/src/index.ts",
     "watchdog:deploy": "bun run --filter @anima/watchdog deploy",
+    "watchdog:reload": "bun run watchdog:deploy && anima watchdog reload",
     "cli": "bun run packages/cli/src/index.ts",
     "migrate:anima": "bun run scripts/migrate-to-anima.ts",
     "build": "bun run --filter '*' build",
