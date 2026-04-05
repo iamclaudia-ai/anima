@@ -21,6 +21,7 @@ interface ExtensionInfo {
 interface ExtensionHealth {
   extension: ExtensionInfo;
   health: HealthCheckResponse | null;
+  rawPayload?: unknown;
   error?: string;
 }
 
@@ -101,6 +102,7 @@ function HealthCard({
   onAction: (action: HealthAction, itemId?: string) => void;
 }) {
   const { health, error } = data;
+  const [showRaw, setShowRaw] = useState(false);
 
   if (error || !health) {
     return (
@@ -128,6 +130,14 @@ function HealthCard({
           <span className="text-xs text-zinc-500 capitalize">{health.status}</span>
         </div>
         <div className="flex gap-2">
+          {data.rawPayload !== undefined && (
+            <button
+              onClick={() => setShowRaw((current) => !current)}
+              className="text-xs px-2.5 py-1 rounded-md bg-zinc-700/50 text-zinc-300 hover:bg-zinc-600/50 transition-colors"
+            >
+              {showRaw ? "Hide JSON" : "Show JSON"}
+            </button>
+          )}
           {globalActions.map((action) => (
             <button
               key={action.method}
@@ -189,6 +199,14 @@ function HealthCard({
       {/* Empty state */}
       {health.items && health.items.length === 0 && (
         <p className="text-xs text-zinc-600 italic">No active resources</p>
+      )}
+
+      {showRaw && data.rawPayload !== undefined && (
+        <div className="mt-4 border-t border-zinc-700/30 pt-3">
+          <pre className="overflow-x-auto rounded-lg bg-zinc-950/80 p-3 text-[11px] leading-5 text-zinc-300">
+            {JSON.stringify(data.rawPayload, null, 2)}
+          </pre>
+        </div>
       )}
     </div>
   );
@@ -272,7 +290,7 @@ export function MissionControlPage() {
           const healthMethod = ext.methods.find((m: string) => m.endsWith(".health_check"))!;
           const payload = await request<unknown>(healthMethod);
           const health = normalizeHealthResponse(ext, payload);
-          return { extension: ext, health } as ExtensionHealth;
+          return { extension: ext, health, rawPayload: payload } as ExtensionHealth;
         }),
       );
 
