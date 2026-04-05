@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext, GatewayEvent } from "@anima/shared";
 import { createMemoryExtension } from "./index";
-import { acquireMemoryExtensionLock, closeDb, getDb, setDbPathForTests } from "./db";
+import { closeDb, getDb, setDbPathForTests } from "./db";
 
 function setupSchema(): void {
   const db = getDb();
@@ -65,8 +65,26 @@ function setupSchema(): void {
   `);
 }
 
-function createTestContext(): ExtensionContext {
+function createTestContext(options: { preheldLockPid?: number | null } = {}): ExtensionContext {
   const listeners = new Map<string, (event: GatewayEvent) => void | Promise<void>>();
+  let runtimeLock: {
+    holderPid: number | null;
+    holderInstanceId: string;
+    staleAfterMs: number;
+    updatedAt: number;
+    stale: boolean;
+    metadata: Record<string, unknown> | null;
+  } | null =
+    options.preheldLockPid != null
+      ? {
+          holderPid: options.preheldLockPid,
+          holderInstanceId: `memory:${options.preheldLockPid}`,
+          staleAfterMs: 60_000,
+          updatedAt: Date.now(),
+          stale: false,
+          metadata: { actor: "memory", role: "singleton" } as Record<string, unknown>,
+        }
+      : null;
 
   return {
     on(pattern, handler) {
@@ -74,7 +92,43 @@ function createTestContext(): ExtensionContext {
       return () => listeners.delete(pattern);
     },
     emit() {},
-    async call() {
+    async call(method, params) {
+      if (method === "gateway.acquire_liveness_lock") {
+        if (!runtimeLock) {
+          runtimeLock = {
+            holderPid: (params?.holderPid as number | null) ?? null,
+            holderInstanceId: params?.holderInstanceId as string,
+            staleAfterMs: (params?.staleAfterMs as number) ?? 180_000,
+            updatedAt: Date.now(),
+            stale: false,
+            metadata: (params?.metadata as Record<string, unknown>) ?? null,
+          };
+          return { acquired: true, lock: runtimeLock };
+        }
+        return { acquired: false, lock: runtimeLock };
+      }
+      if (method === "gateway.renew_liveness_lock") {
+        if (
+          runtimeLock &&
+          runtimeLock.holderPid === ((params?.holderPid as number | null) ?? null) &&
+          runtimeLock.holderInstanceId === (params?.holderInstanceId as string)
+        ) {
+          runtimeLock = { ...runtimeLock, updatedAt: Date.now(), stale: false };
+          return { renewed: true };
+        }
+        return { renewed: false };
+      }
+      if (method === "gateway.release_liveness_lock") {
+        if (
+          runtimeLock &&
+          runtimeLock.holderPid === ((params?.holderPid as number | null) ?? null) &&
+          runtimeLock.holderInstanceId === (params?.holderInstanceId as string)
+        ) {
+          runtimeLock = null;
+          return { released: true };
+        }
+        return { released: false };
+      }
       return {};
     },
     connectionId: null,
@@ -158,9 +212,7 @@ describe("memory health lock status", () => {
     });
 
     try {
-      acquireMemoryExtensionLock(blocker.pid, 60_000);
-
-      await ext.start(createTestContext());
+      await ext.start(createTestContext({ preheldLockPid: blocker.pid }));
 
       const health = (await ext.handleMethod("memory.health_check", {})) as {
         status: string;

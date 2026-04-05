@@ -11,19 +11,17 @@ import {
   PROJECT_DIR,
   LOGS_DIR,
   HEALTH_HISTORY_SIZE,
-  MEMORY_LOCK_STALE_MS,
   UNHEALTHY_RESTART_THRESHOLD,
-  getAnimaDbPath,
   getGatewayToken,
 } from "./constants";
 import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
 import { recordRecoveryEvent } from "./recovery-journal";
+import { createGatewayClient } from "@anima/shared";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Subprocess } from "bun";
-import { Database } from "bun:sqlite";
 
 /**
  * Capture the full login shell environment by running `zsh -l -c env`.
@@ -336,53 +334,36 @@ export interface HealthCheckResult {
   details?: Record<string, unknown>;
 }
 
-interface MemoryLockEvidence {
-  ownerPid: number | null;
-  heartbeatAgeMs: number | null;
-  stale: boolean;
-  ownerAlive: boolean | null;
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
-      return false;
-    }
-    return true;
+function toGatewayWsUrl(healthUrl: string): string {
+  const url = new URL(healthUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/ws";
+  const token = getGatewayToken();
+  if (token) {
+    url.searchParams.set("token", token);
   }
+  return url.toString();
 }
 
-function getMemoryLockEvidence(): MemoryLockEvidence | null {
-  const dbPath = getAnimaDbPath();
-  if (!existsSync(dbPath)) return null;
+async function restartExtensionViaGateway(
+  gatewayService: ManagedService,
+  extensionId: string,
+): Promise<void> {
+  if (!gatewayService.healthUrl) {
+    throw new Error("Gateway health URL is required for targeted extension restart");
+  }
 
-  let db: Database | null = null;
+  const client = createGatewayClient({
+    url: toGatewayWsUrl(gatewayService.healthUrl),
+    requestTimeoutMs: 5000,
+    autoReconnect: false,
+  });
+
   try {
-    db = new Database(dbPath, { readonly: true });
-    const row = db
-      .query(
-        `SELECT owner_pid AS ownerPid,
-                CAST((julianday('now') - julianday(last_heartbeat)) * 86400000 AS INTEGER) AS heartbeatAgeMs
-         FROM memory_extension_locks
-         WHERE lock_id = 'memory-extension'`,
-      )
-      .get() as { ownerPid: number; heartbeatAgeMs: number | null } | null;
-
-    if (!row) return null;
-
-    return {
-      ownerPid: row.ownerPid,
-      heartbeatAgeMs: row.heartbeatAgeMs,
-      stale: (row.heartbeatAgeMs ?? 0) > MEMORY_LOCK_STALE_MS,
-      ownerAlive: row.ownerPid ? processExists(row.ownerPid) : null,
-    };
-  } catch {
-    return null;
+    await client.connect();
+    await client.call("gateway.restart_extension", { extension: extensionId }, { timeoutMs: 5000 });
   } finally {
-    db?.close(false);
+    client.disconnect(1000, "watchdog restart complete");
   }
 }
 
@@ -405,19 +386,71 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
 
     // If this service requires extensions to be loaded, check for that
     if (service.requireExtensions) {
-      const body = (await res.json()) as { extensions?: Record<string, unknown> };
+      const body = (await res.json()) as {
+        extensions?: Record<string, unknown>;
+        runtimeLocks?: Array<{
+          extensionId: string;
+          lockType: string;
+          resourceKey: string;
+          holderPid: number | null;
+          holderInstanceId: string;
+          acquiredAt: number;
+          updatedAt: number;
+          staleAfterMs: number;
+          metadata: Record<string, unknown> | null;
+          stale: boolean;
+        }>;
+      };
       const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
       if (extensionCount === 0) {
         return { healthy: false, reason: "zero_extensions", details: { extensionCount } };
       }
-    }
 
-    if (service.id === "gateway") {
-      const memoryLock = getMemoryLockEvidence();
+      if (service.id === "gateway") {
+        const memoryLock =
+          body.runtimeLocks?.find(
+            (lock) =>
+              lock.extensionId === "memory" &&
+              lock.lockType === "singleton" &&
+              lock.resourceKey === "__default__",
+          ) ?? null;
+        if (memoryLock?.stale) {
+          return {
+            healthy: false,
+            reason: "memory_stale_lock",
+            details: { memoryLock },
+          };
+        }
+        if (memoryLock) {
+          return { healthy: true, details: { memoryLock } };
+        }
+      }
+    } else if (service.id === "gateway") {
+      const body = (await res.json()) as {
+        runtimeLocks?: Array<{
+          extensionId: string;
+          lockType: string;
+          resourceKey: string;
+          holderPid: number | null;
+          holderInstanceId: string;
+          acquiredAt: number;
+          updatedAt: number;
+          staleAfterMs: number;
+          metadata: Record<string, unknown> | null;
+          stale: boolean;
+        }>;
+      };
+      const memoryLock =
+        body.runtimeLocks?.find(
+          (lock) =>
+            lock.extensionId === "memory" &&
+            lock.lockType === "singleton" &&
+            lock.resourceKey === "__default__",
+        ) ?? null;
       if (memoryLock?.stale) {
         return {
           healthy: false,
-          reason: memoryLock.ownerAlive ? "memory_stale_lock" : "memory_orphaned_lock",
+          reason: "memory_stale_lock",
           details: { memoryLock },
         };
       }
@@ -549,25 +582,45 @@ export async function monitorServices(): Promise<void> {
         const timeSinceRestart = Date.now() - service.lastRestart;
         if (timeSinceRestart < service.restartBackoff) continue;
 
+        const recoveryTarget =
+          service.id === "gateway" && reason === "memory_stale_lock" ? "memory" : service.id;
         markRestartRequested(service, reason, {
           consecutiveFailures: service.consecutiveFailures,
           restartBackoff: service.restartBackoff,
+          recoveryTarget,
           health: health.details ?? undefined,
         });
-        log(
-          "WARN",
-          `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
-        );
-        const useForce = reason === "zero_extensions";
-        await startService(service, { force: useForce });
-        recordRecoveryEvent({
-          timestamp: new Date().toISOString(),
-          serviceId: service.id,
-          event: "restart_completed",
-          reason,
-          details: { pid: service.proc?.pid ?? null, forced: useForce },
-        });
-        service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
+        if (service.id === "gateway" && reason === "memory_stale_lock") {
+          log(
+            "WARN",
+            `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason}) — restarting memory extension via gateway...`,
+          );
+          await restartExtensionViaGateway(service, "memory");
+          service.lastRestart = Date.now();
+          recordRecoveryEvent({
+            timestamp: new Date().toISOString(),
+            serviceId: service.id,
+            event: "restart_completed",
+            reason,
+            details: { recoveryTarget: "memory" },
+          });
+          service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
+        } else {
+          log(
+            "WARN",
+            `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
+          );
+          const useForce = reason === "zero_extensions";
+          await startService(service, { force: useForce });
+          recordRecoveryEvent({
+            timestamp: new Date().toISOString(),
+            serviceId: service.id,
+            event: "restart_completed",
+            reason,
+            details: { pid: service.proc?.pid ?? null, forced: useForce, recoveryTarget },
+          });
+          service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
+        }
       }
     } else {
       // Healthy — reset counters

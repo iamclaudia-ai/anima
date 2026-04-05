@@ -6,7 +6,7 @@
  * Each enabled extension runs in its own host process via stdio NDJSON.
  */
 
-import { extensions, handleExtensionEvent } from "./index";
+import { executeGatewayMethod, extensions, handleExtensionEvent } from "./index";
 import {
   getEnabledExtensions,
   createLogger,
@@ -126,6 +126,7 @@ function forceClearStartupLocks(): void {
 
   const cleared = {
     extensionProcessLocks: clearLockTable("extension_process_locks"),
+    extensionRuntimeLocks: clearLockTable("extension_runtime_locks"),
     memoryExtensionLocks: clearLockTable("memory_extension_locks"),
     memoryFileLocks: clearLockTable("memory_file_locks"),
   };
@@ -211,17 +212,22 @@ async function spawnOutOfProcessExtension(
       // ctx.call handler: route calls from this extension through the gateway hub
       const onCall: OnCallCallback = async (callerExtensionId, method, params, meta) => {
         try {
-          const result = await extensions.handleMethod(
-            method,
-            params,
-            meta.connectionId,
-            {
-              traceId: meta.traceId,
-              depth: meta.depth,
-              deadlineMs: meta.deadlineMs,
-            },
-            meta.tags,
-          );
+          const result = method.startsWith("gateway.")
+            ? await executeGatewayMethod(method, params, {
+                connectionId: meta.connectionId,
+                callerExtensionId,
+              })
+            : await extensions.handleMethod(
+                method,
+                params,
+                meta.connectionId,
+                {
+                  traceId: meta.traceId,
+                  depth: meta.depth,
+                  deadlineMs: meta.deadlineMs,
+                },
+                meta.tags,
+              );
           return { ok: true as const, payload: result };
         } catch (error) {
           return { ok: false as const, error: String(error) };

@@ -27,6 +27,7 @@ import type {
 } from "@anima/shared";
 import { createStandardExtension } from "@anima/extension-host";
 import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -44,10 +45,6 @@ import {
   queueConversations,
   getQueuedCount,
   getActiveWorkItems,
-  acquireMemoryExtensionLock,
-  renewMemoryExtensionLock,
-  releaseMemoryExtensionLock,
-  getMemoryExtensionLockStatus,
   transitionActiveConversationsByCwd,
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
@@ -135,6 +132,15 @@ interface MemoryExtensionRuntime {
   extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null;
   isLockOwner: boolean;
   lockState: "held" | "contended" | "released";
+  lockHolderInstanceId: string;
+  runtimeLock: {
+    holderPid: number | null;
+    holderInstanceId: string;
+    staleAfterMs: number;
+    updatedAt: number;
+    stale: boolean;
+    metadata: Record<string, unknown> | null;
+  } | null;
   unsubscribeHeartbeat: (() => void) | null;
 }
 
@@ -198,6 +204,67 @@ function formatElapsedSince(iso: string | null): string {
 function compactHomePath(path: string | null): string {
   if (!path) return "n/a";
   return path.replace(/^\/Users\/\w+/, "~");
+}
+
+async function acquireLivenessLock(runtime: MemoryExtensionRuntime) {
+  const result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
+    lockType: "singleton",
+    holderPid: process.pid,
+    holderInstanceId: runtime.lockHolderInstanceId,
+    staleAfterMs: LOCK_STALE_MS,
+    metadata: {
+      actor: "memory",
+      role: "singleton",
+    },
+  })) as {
+    acquired: boolean;
+    stolen?: boolean;
+    lock?: {
+      holderPid: number | null;
+      holderInstanceId: string;
+      staleAfterMs: number;
+      updatedAt: number;
+      stale: boolean;
+      metadata: Record<string, unknown> | null;
+    } | null;
+  };
+  runtime.runtimeLock = result.lock ?? null;
+  runtime.isLockOwner = result.acquired;
+  runtime.lockState = result.acquired ? "held" : "contended";
+  return result;
+}
+
+async function renewLivenessLock(runtime: MemoryExtensionRuntime): Promise<boolean> {
+  const result = (await runtime.ctx.call("gateway.renew_liveness_lock", {
+    lockType: "singleton",
+    holderPid: process.pid,
+    holderInstanceId: runtime.lockHolderInstanceId,
+    staleAfterMs: LOCK_STALE_MS,
+    metadata: {
+      actor: "memory",
+      role: "singleton",
+    },
+  })) as { renewed: boolean };
+  if (result.renewed && runtime.runtimeLock) {
+    runtime.runtimeLock = {
+      ...runtime.runtimeLock,
+      updatedAt: Date.now(),
+      staleAfterMs: LOCK_STALE_MS,
+      stale: false,
+      metadata: { actor: "memory", role: "singleton" },
+    };
+  }
+  return result.renewed;
+}
+
+async function releaseLivenessLock(runtime: MemoryExtensionRuntime): Promise<boolean> {
+  const result = (await runtime.ctx.call("gateway.release_liveness_lock", {
+    lockType: "singleton",
+    holderPid: process.pid,
+    holderInstanceId: runtime.lockHolderInstanceId,
+  })) as { released: boolean };
+  runtime.runtimeLock = null;
+  return result.released;
 }
 
 // ============================================================================
@@ -382,11 +449,12 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         const stats = getStats();
         const s = stats.conversationsByStatus;
         const workItems = getActiveWorkItems();
-        const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
         const actorState = runtime.extensionActor?.getSnapshot().value ?? "stopped";
-        const lockHeldByMe = singletonLock?.ownerPid === process.pid;
-        const lockLabel = singletonLock ? (lockHeldByMe ? "held" : "contended") : runtime.lockState;
-        const lockAgeSec = singletonLock ? Math.max(0, Math.round(singletonLock.ageMs / 1000)) : 0;
+        const lockHeldByMe = runtime.isLockOwner;
+        const lockLabel = runtime.lockState;
+        const lockAgeSec = runtime.runtimeLock
+          ? Math.max(0, Math.round((Date.now() - runtime.runtimeLock.updatedAt) / 1000))
+          : 0;
         const watcherDiag = runtime.watcher?.getDiagnostics() ?? null;
         const docWatcherDiag = runtime.docWatcher?.getDiagnostics() ?? null;
         const schedulerDiag = runtime.scheduler?.getDiagnostics() ?? null;
@@ -441,11 +509,13 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             { label: "Singleton Lock", value: lockLabel },
             {
               label: "Lock Owner PID",
-              value: singletonLock ? String(singletonLock.ownerPid) : "none",
+              value: runtime.runtimeLock?.holderPid
+                ? String(runtime.runtimeLock.holderPid)
+                : "none",
             },
             {
               label: "Lock Age",
-              value: singletonLock ? `${lockAgeSec}s` : "n/a",
+              value: runtime.runtimeLock ? `${lockAgeSec}s` : "n/a",
             },
             { label: "Actor State", value: actorState },
             { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
@@ -932,9 +1002,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
   function health(runtime: MemoryExtensionRuntime | null) {
     try {
       const stats = getStats();
-      const singletonLock = getMemoryExtensionLockStatus(LOCK_STALE_MS);
       return {
-        ok: singletonLock?.ownerPid === process.pid,
+        ok: runtime?.isLockOwner === true,
         details: {
           fileCount: stats.fileCount,
           entryCount: stats.entryCount,
@@ -942,10 +1011,12 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           watchPath: cfg.watchPath,
           singletonLock: {
             state: runtime?.lockState ?? "released",
-            ownerPid: singletonLock?.ownerPid ?? null,
-            heldByCurrentProcess: singletonLock?.ownerPid === process.pid,
-            heartbeatAgeMs: singletonLock?.ageMs ?? null,
-            stale: singletonLock?.stale ?? null,
+            ownerPid: runtime?.runtimeLock?.holderPid ?? null,
+            heldByCurrentProcess: runtime?.isLockOwner === true,
+            heartbeatAgeMs: runtime?.runtimeLock
+              ? Math.max(0, Date.now() - runtime.runtimeLock.updatedAt)
+              : null,
+            stale: runtime?.runtimeLock?.stale ?? null,
           },
         },
       };
@@ -968,6 +1039,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         extensionActor: null,
         isLockOwner: false,
         lockState: "released",
+        lockHolderInstanceId: `memory:${process.pid}:${randomUUID()}`,
+        runtimeLock: null,
         unsubscribeHeartbeat: null,
       };
     },
@@ -1003,26 +1076,21 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         return;
       }
 
-      const lockResult = acquireMemoryExtensionLock(process.pid, LOCK_STALE_MS);
-      runtime.isLockOwner = lockResult.acquired;
-      runtime.lockState = lockResult.acquired ? "held" : "contended";
+      const lockResult = await acquireLivenessLock(runtime);
 
       if (!lockResult.acquired) {
         ctx.log.warn(
-          `[memory] Another memory extension instance holds the singleton lock (owner pid=${lockResult.ownerPid}, heartbeatAge=${Math.round(lockResult.ageMs / 1000)}s). This instance will stay passive.`,
+          `[memory] Another memory extension instance holds the singleton lock (owner pid=${lockResult.lock?.holderPid ?? "unknown"}). This instance will stay passive.`,
         );
         fileLog(
           "WARN",
-          `[memory] Singleton lock contended; owner pid=${lockResult.ownerPid}, heartbeatAge=${Math.round(lockResult.ageMs / 1000)}s`,
+          `[memory] Singleton lock contended; owner pid=${lockResult.lock?.holderPid ?? "unknown"}`,
         );
         return;
       }
 
-      if (lockResult.stolen && lockResult.previousOwnerPid) {
-        fileLog(
-          "WARN",
-          `[memory] Stole stale singleton lock from pid=${lockResult.previousOwnerPid} (age=${Math.round(lockResult.ageMs / 1000)}s)`,
-        );
+      if (lockResult.stolen && lockResult.lock?.holderPid) {
+        fileLog("WARN", `[memory] Stole stale singleton lock for memory runtime`);
       }
 
       try {
@@ -1058,13 +1126,14 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         runtime.extensionActor.start();
         runtime.extensionActor.send({ type: "START" });
 
-        runtime.unsubscribeHeartbeat = ctx.on("gateway.heartbeat", () => {
+        runtime.unsubscribeHeartbeat = ctx.on("gateway.heartbeat", async () => {
           if (!runtime.isLockOwner) return;
 
-          const renewed = renewMemoryExtensionLock(process.pid);
+          const renewed = await renewLivenessLock(runtime);
           if (!renewed) {
             runtime.isLockOwner = false;
             runtime.lockState = "contended";
+            runtime.runtimeLock = null;
             fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
             runtime.scheduler?.stop();
             runtime.scheduler = null;
@@ -1176,7 +1245,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           `[memory] Startup failed after lock acquire: ${error instanceof Error ? error.message : String(error)}`,
         );
         if (runtime.isLockOwner) {
-          releaseMemoryExtensionLock(process.pid);
+          await releaseLivenessLock(runtime);
         }
         runtime.isLockOwner = false;
         runtime.lockState = "released";
@@ -1223,7 +1292,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       runtime.watcher = null;
 
       if (runtime.isLockOwner) {
-        releaseMemoryExtensionLock(process.pid);
+        await releaseLivenessLock(runtime);
       }
       runtime.isLockOwner = false;
       runtime.lockState = "released";

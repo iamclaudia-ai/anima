@@ -47,6 +47,50 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
     }),
   },
   {
+    method: "gateway.acquire_liveness_lock",
+    description: "Acquire or steal a gateway-managed runtime liveness lock for an extension",
+    inputSchema: z.object({
+      extension: z.string().optional().describe("Extension ID. Omitted for extension ctx.call()."),
+      lockType: z.enum(["singleton", "processing", "lease"]).default("singleton"),
+      resourceKey: z.string().optional().describe("Resource key for non-singleton leases"),
+      holderPid: z.number().int().optional().describe("Owning process PID"),
+      holderInstanceId: z.string().describe("Stable instance ID for the lock holder"),
+      staleAfterMs: z.number().int().positive().optional().describe("Staleness threshold in ms"),
+      metadata: z.record(z.unknown()).optional().describe("Extension-defined lock metadata"),
+    }),
+  },
+  {
+    method: "gateway.renew_liveness_lock",
+    description: "Renew a gateway-managed runtime liveness lock for an extension",
+    inputSchema: z.object({
+      extension: z.string().optional().describe("Extension ID. Omitted for extension ctx.call()."),
+      lockType: z.enum(["singleton", "processing", "lease"]).default("singleton"),
+      resourceKey: z.string().optional().describe("Resource key for non-singleton leases"),
+      holderPid: z.number().int().optional().describe("Owning process PID"),
+      holderInstanceId: z.string().describe("Stable instance ID for the lock holder"),
+      staleAfterMs: z.number().int().positive().optional().describe("Staleness threshold in ms"),
+      metadata: z.record(z.unknown()).optional().describe("Extension-defined lock metadata"),
+    }),
+  },
+  {
+    method: "gateway.release_liveness_lock",
+    description: "Release a gateway-managed runtime liveness lock for an extension",
+    inputSchema: z.object({
+      extension: z.string().optional().describe("Extension ID. Omitted for extension ctx.call()."),
+      lockType: z.enum(["singleton", "processing", "lease"]).default("singleton"),
+      resourceKey: z.string().optional().describe("Resource key for non-singleton leases"),
+      holderPid: z.number().int().optional().describe("Owning process PID"),
+      holderInstanceId: z.string().describe("Stable instance ID for the lock holder"),
+    }),
+  },
+  {
+    method: "gateway.list_liveness_locks",
+    description: "List gateway-managed runtime liveness locks",
+    inputSchema: z.object({
+      extension: z.string().optional().describe("Filter by extension ID"),
+    }),
+  },
+  {
     method: "gateway.register_extension",
     description:
       "Register this WebSocket connection as an extension host. " +

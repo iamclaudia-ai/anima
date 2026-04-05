@@ -24,6 +24,12 @@ import { join } from "node:path";
 import { ExtensionManager } from "./extensions";
 import { getDb, closeDb } from "./db/index";
 import { getExtensionProcessLocks } from "./db/extension-locks";
+import {
+  acquireExtensionRuntimeLock,
+  getExtensionRuntimeLocks,
+  releaseExtensionRuntimeLock,
+  renewExtensionRuntimeLock,
+} from "./db/runtime-locks";
 import { homedir } from "node:os";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
@@ -308,38 +314,152 @@ function handleRequest(ws: ServerWebSocket<ClientState>, req: Request): void {
   }
 
   switch (req.method) {
-    case "gateway.list_methods":
-      handleListMethods(ws, req);
-      break;
-    case "gateway.list_extensions":
-      handleListExtensions(ws, req);
-      break;
     case "gateway.subscribe":
       handleSubscribe(ws, req);
-      break;
+      return;
     case "gateway.unsubscribe":
       handleUnsubscribe(ws, req);
-      break;
-    case "gateway.restart_extension":
-      handleRestartExtension(ws, req);
-      break;
+      return;
     case "gateway.register_extension":
       handleRegisterExtension(ws, req);
-      break;
-    default:
-      // Everything else routes through extensions
-      if (extensions.hasMethod(req.method)) {
-        handleExtensionMethod(ws, req);
-      } else {
-        sendError(ws, req.id, `Unknown method: ${req.method}`);
+      return;
+  }
+
+  if (req.method.startsWith("gateway.")) {
+    void (async () => {
+      try {
+        const payload = await executeGatewayMethod(req.method, req.params ?? {}, {
+          connectionId: req.connectionId,
+        });
+        sendResponse(ws, req.id, payload);
+      } catch (error) {
+        sendError(ws, req.id, error instanceof Error ? error.message : String(error));
       }
+    })();
+    return;
+  }
+
+  // Everything else routes through extensions
+  if (extensions.hasMethod(req.method)) {
+    handleExtensionMethod(ws, req);
+  } else {
+    sendError(ws, req.id, `Unknown method: ${req.method}`);
   }
 }
 
-/**
- * gateway.list_methods — list all gateway and extension methods with schemas
- */
-function handleListMethods(ws: ServerWebSocket<ClientState>, req: Request): void {
+export async function executeGatewayMethod(
+  method: string,
+  params: Record<string, unknown>,
+  options: { connectionId?: string; callerExtensionId?: string } = {},
+): Promise<unknown> {
+  const methodDef = BUILTIN_METHODS_BY_NAME.get(method);
+  if (methodDef) {
+    const parsed = methodDef.inputSchema.safeParse(params ?? {});
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map(
+        (i) => `${i.path.join(".") || "params"}: ${i.message}`,
+      );
+      throw new Error(`Invalid params for ${method}: ${issues.join("; ")}`);
+    }
+    params = parsed.data as Record<string, unknown>;
+  }
+
+  switch (method) {
+    case "gateway.list_methods":
+      return buildListMethodsResponse();
+    case "gateway.list_extensions":
+      return { extensions: extensions.getExtensionList() };
+    case "gateway.acquire_liveness_lock": {
+      const extensionId = resolveLockExtensionId(params, options.callerExtensionId);
+      const result = acquireExtensionRuntimeLock({
+        extensionId,
+        lockType: params.lockType as "singleton" | "processing" | "lease",
+        resourceKey: typeof params.resourceKey === "string" ? params.resourceKey : undefined,
+        holderPid: typeof params.holderPid === "number" ? params.holderPid : null,
+        holderInstanceId: params.holderInstanceId as string,
+        staleAfterMs: typeof params.staleAfterMs === "number" ? params.staleAfterMs : undefined,
+        metadata: isRecord(params.metadata) ? params.metadata : undefined,
+      });
+      return result;
+    }
+    case "gateway.renew_liveness_lock": {
+      const extensionId = resolveLockExtensionId(params, options.callerExtensionId);
+      return {
+        renewed: renewExtensionRuntimeLock({
+          extensionId,
+          lockType: params.lockType as string,
+          resourceKey: typeof params.resourceKey === "string" ? params.resourceKey : undefined,
+          holderPid: typeof params.holderPid === "number" ? params.holderPid : null,
+          holderInstanceId: params.holderInstanceId as string,
+          staleAfterMs: typeof params.staleAfterMs === "number" ? params.staleAfterMs : undefined,
+          metadata: isRecord(params.metadata) ? params.metadata : undefined,
+        }),
+      };
+    }
+    case "gateway.release_liveness_lock": {
+      const extensionId = resolveLockExtensionId(params, options.callerExtensionId);
+      return {
+        released: releaseExtensionRuntimeLock({
+          extensionId,
+          lockType: params.lockType as string,
+          resourceKey: typeof params.resourceKey === "string" ? params.resourceKey : undefined,
+          holderPid: typeof params.holderPid === "number" ? params.holderPid : null,
+          holderInstanceId: params.holderInstanceId as string,
+        }),
+      };
+    }
+    case "gateway.list_liveness_locks":
+      return {
+        locks: getExtensionRuntimeLocks(
+          typeof params.extension === "string" ? params.extension : undefined,
+        ),
+      };
+    case "gateway.subscribe":
+    case "gateway.unsubscribe":
+    case "gateway.register_extension":
+      throw new Error(`${method} is only available over a direct client connection`);
+    case "gateway.restart_extension": {
+      const extensionId = params.extension as string;
+      const host = extensions.getHost(extensionId);
+      if (!host) {
+        const available = extensions.getExtensionIds().join(", ");
+        throw new Error(`Extension "${extensionId}" not found. Available: ${available}`);
+      }
+      const registration = await host.restart();
+      log.info("Extension restarted", {
+        extensionId,
+        methods: registration.methods.map((m) => m.name),
+      });
+      return {
+        ok: true,
+        extensionId,
+        methods: registration.methods.map((m) => m.name),
+      };
+    }
+    default:
+      throw new Error(`Unknown method: ${method}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function resolveLockExtensionId(
+  params: Record<string, unknown>,
+  callerExtensionId?: string,
+): string {
+  const extensionId =
+    typeof params.extension === "string" && params.extension.length > 0
+      ? params.extension
+      : callerExtensionId;
+  if (!extensionId) {
+    throw new Error("Missing extension for liveness lock operation");
+  }
+  return extensionId;
+}
+
+function buildListMethodsResponse(): { methods: Array<Record<string, unknown>> } {
   const builtin = BUILTIN_METHODS.map((m) => ({
     method: m.method,
     source: "gateway",
@@ -347,7 +467,6 @@ function handleListMethods(ws: ServerWebSocket<ClientState>, req: Request): void
     inputSchema: zodToJsonSchema(m.inputSchema, m.method),
   }));
   const extensionMethods = extensions.getMethodDefinitions().map((m) => {
-    // Remote extensions don't have Zod schemas — their inputSchema is a plain object
     let inputSchema: unknown;
     try {
       inputSchema = zodToJsonSchema(m.method.inputSchema, m.method.name);
@@ -372,7 +491,14 @@ function handleListMethods(ws: ServerWebSocket<ClientState>, req: Request): void
       outputSchema,
     };
   });
-  sendResponse(ws, req.id, { methods: [...builtin, ...extensionMethods] });
+  return { methods: [...builtin, ...extensionMethods] };
+}
+
+/**
+ * gateway.list_methods — list all gateway and extension methods with schemas
+ */
+function handleListMethods(ws: ServerWebSocket<ClientState>, req: Request): void {
+  sendResponse(ws, req.id, buildListMethodsResponse());
 }
 
 /**
@@ -453,26 +579,13 @@ async function handleRestartExtension(
   ws: ServerWebSocket<ClientState>,
   req: Request,
 ): Promise<void> {
-  const extensionId = req.params?.extension as string;
-  const host = extensions.getHost(extensionId);
-  if (!host) {
-    const available = extensions.getExtensionIds().join(", ");
-    sendError(ws, req.id, `Extension "${extensionId}" not found. Available: ${available}`);
-    return;
-  }
-
   try {
-    const registration = await host.restart();
-    log.info("Extension restarted", {
-      extensionId,
-      methods: registration.methods.map((m) => m.name),
+    const payload = await executeGatewayMethod("gateway.restart_extension", req.params ?? {}, {
+      connectionId: req.connectionId,
     });
-    sendResponse(ws, req.id, {
-      ok: true,
-      extensionId,
-      methods: registration.methods.map((m) => m.name),
-    });
+    sendResponse(ws, req.id, payload);
   } catch (error) {
+    const extensionId = req.params?.extension as string;
     log.error("Failed to restart extension", { extensionId, error: String(error) });
     sendError(ws, req.id, `Failed to restart ${extensionId}: ${error}`);
   }
@@ -524,17 +637,22 @@ function handleRegisterExtension(ws: ServerWebSocket<ClientState>, req: Request)
   // ctx.call handler: route calls from this extension through the gateway hub
   const onCall: OnCallCallback = async (callerExtensionId, method, callParams, meta) => {
     try {
-      const result = await extensions.handleMethod(
-        method,
-        callParams,
-        meta.connectionId,
-        {
-          traceId: meta.traceId,
-          depth: meta.depth,
-          deadlineMs: meta.deadlineMs,
-        },
-        meta.tags,
-      );
+      const result = method.startsWith("gateway.")
+        ? await executeGatewayMethod(method, callParams, {
+            connectionId: meta.connectionId,
+            callerExtensionId,
+          })
+        : await extensions.handleMethod(
+            method,
+            callParams,
+            meta.connectionId,
+            {
+              traceId: meta.traceId,
+              depth: meta.depth,
+              deadlineMs: meta.deadlineMs,
+            },
+            meta.tags,
+          );
       return { ok: true as const, payload: result };
     } catch (error) {
       return { ok: false as const, error: String(error) };
@@ -712,6 +830,7 @@ const server = Bun.serve<ClientState>({
           clients: clients.size,
           extensions: extensions.getHealth(),
           extensionLocks: getExtensionProcessLocks(),
+          runtimeLocks: getExtensionRuntimeLocks(),
           sourceRoutes: extensions.getSourceRoutes(),
           client: getClientHealth(),
         }),
