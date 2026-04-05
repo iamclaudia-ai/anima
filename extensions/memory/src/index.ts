@@ -388,6 +388,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         const lockLabel = singletonLock ? (lockHeldByMe ? "held" : "contended") : runtime.lockState;
         const lockAgeSec = singletonLock ? Math.max(0, Math.round(singletonLock.ageMs / 1000)) : 0;
         const watcherDiag = runtime.watcher?.getDiagnostics() ?? null;
+        const docWatcherDiag = runtime.docWatcher?.getDiagnostics() ?? null;
         const schedulerDiag = runtime.scheduler?.getDiagnostics() ?? null;
         const repoSyncDiag = runtime.repoSync?.getDiagnostics() ?? null;
 
@@ -474,6 +475,27 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             {
               label: "Watcher Current File",
               value: compactHomePath(watcherDiag?.currentFile ?? null),
+            },
+            {
+              label: "Document Watcher Ready",
+              value: docWatcherDiag ? String(docWatcherDiag.ready) : "false",
+            },
+            { label: "Document Watcher State", value: docWatcherDiag?.state ?? "idle" },
+            {
+              label: "Document Watcher Queue",
+              value: String(docWatcherDiag?.queueDepth ?? 0),
+            },
+            {
+              label: "Document Watcher Hot Files",
+              value: String(docWatcherDiag?.hotFiles ?? 0),
+            },
+            {
+              label: "Document Watcher Last Indexed",
+              value: formatElapsedSince(docWatcherDiag?.lastIndexedAt ?? null),
+            },
+            {
+              label: "Document Watcher Last File",
+              value: compactHomePath(docWatcherDiag?.lastIndexedFile ?? null),
             },
             {
               label: "Scheduler Running",
