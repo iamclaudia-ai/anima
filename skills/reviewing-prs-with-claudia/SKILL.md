@@ -52,14 +52,35 @@ git worktree add "$WORKTREE_PATH" "origin/$REVIEW_BRANCH"
 git worktree remove "$WORKTREE_PATH" --force
 ```
 
+### Pre-Review: Check Existing Review State
+
+**Before diving into a full review, always check if the PR has already been reviewed/approved:**
+
+```bash
+# Check existing reviews (approvals, comments, change requests)
+gh pr view <PR> --json reviews --jq '.reviews[] | {author: .author.login, state: .state, submittedAt: .submittedAt}' -R owner/repo
+
+# Check existing inline comments
+gh api repos/owner/repo/pulls/<PR>/comments --jq '.[] | {user: .user.login, path: .path, body: .body[:80]}'
+```
+
+**If the PR is already approved:**
+
+- Tell Michael the PR has been approved (by whom, when)
+- Summarize any existing review feedback and whether it's been addressed
+- **Ask if he still wants a full review** before proceeding
+- If yes, continue with the full review process below
+- If no, just stamp the approval and move on
+
 ### Review Process
 
-1. **Get PR metadata** — `gh pr view <PR> --json title,body,files` for context
-2. **Read the diff** — `gh pr diff <PR>` to understand what changed
-3. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
-4. **Present findings** — Show review findings to Michael for discussion before submitting
-5. **Submit review** — Use `gh comment review` with inline comments
-6. **Clean up worktree** — Always remove when done
+1. **Check existing review state** — See above. Don't duplicate work already done.
+2. **Get PR metadata** — `gh pr view <PR> --json title,body,files` for context
+3. **Read the diff** — `gh pr diff <PR>` to understand what changed
+4. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
+5. **Present findings** — Show review findings to Michael for discussion before submitting
+6. **Submit review** — Use `gh comment review` with inline comments
+7. **Clean up worktree** — Always remove when done
 
 ## Quick Reference
 
