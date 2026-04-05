@@ -9,7 +9,7 @@ Not every extension has been migrated to the new runtime container model yet.
 The current state is:
 
 - the shared runtime and scheduler are in place
-- the two extensions that exposed the systemic failures, `session` and `memory`, are migrated
+- the three most stateful extensions in the critical path, `session`, `memory`, and `voice`, are migrated
 - most other extensions are still compatible with the runtime, but still use the older direct `AnimaExtension` implementation style
 
 ## Fully Migrated
@@ -44,6 +44,19 @@ Primary reason it was migrated first:
 
 - this exposed the original “one stuck task wedges everything” failure very clearly
 
+### `voice`
+
+Status:
+
+- uses `createStandardExtension<VoiceExtensionRuntime>()`
+- uses method execution metadata
+- owns per-connection stream state behind a runtime service instead of loose globals
+
+Primary reason it was migrated next:
+
+- it sits directly on the session event pipeline and browser audio stream path
+- it needed keyed isolation by `connectionId`, not extension-wide serialization
+
 ## On Shared Scheduler, But Not On Runtime Container Yet
 
 These extensions still benefit from the improved extension-host scheduling, because every extension process now runs behind the same `RequestScheduler`.
@@ -71,10 +84,9 @@ These have more local state or more involved startup behavior and should migrate
 
 ### Tricky / Stateful Interactive
 
-- `voice`
 - `imessage`
 
-These are the most important remaining migrations after `session` and `memory`.
+These are the most important remaining migrations after `session`, `memory`, and `voice`.
 
 Why:
 
@@ -113,11 +125,10 @@ Relevant files:
 
 ## Recommended Migration Order
 
-1. `voice`
-2. `imessage`
-3. `hooks`
-4. `scheduler`
-5. simpler extensions as cleanup work
+1. `imessage`
+2. `hooks`
+3. `scheduler`
+4. simpler extensions as cleanup work
 
 ## Migration Rule Of Thumb
 

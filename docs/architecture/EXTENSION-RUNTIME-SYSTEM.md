@@ -9,7 +9,7 @@ This document describes the current Anima extension runtime after the actor-runt
 The important outcome is:
 
 - no single long-running extension request should block unrelated control or read traffic
-- `session` and `memory`, the two extensions that exposed the worst failures, now run on one shared container model
+- `session`, `memory`, and `voice` now run on one shared container model
 - the concurrency fix lives in `packages/extension-host`, not in the pipe transport itself
 
 ## The Original Failure
@@ -57,7 +57,15 @@ Examples:
 
 - `session.list_workspaces` runs on `read + parallel`
 - `session.send_prompt` runs on `long_running + keyed(sessionId)`
+- `voice.speak` runs on `long_running + keyed(connectionId)`
 - `memory.health_check` runs on `control + parallel`
+
+Keyed execution now supports either:
+
+- `keyParam`
+- `keyContext`
+
+That matters for extensions like `voice`, where exclusivity is tied to the request envelope `connectionId` rather than a method parameter.
 
 ### 2. Request Context Isolation
 
@@ -161,6 +169,28 @@ The important splits are:
 
 Memory still has a large single file, but the runtime model is now aligned with the shared platform.
 
+## Voice Architecture
+
+Voice is the main per-connection streaming example.
+
+Key files:
+
+- [index.ts](/Users/michael/Projects/iamclaudia-ai/anima/extensions/voice/src/index.ts)
+- [index.test.ts](/Users/michael/Projects/iamclaudia-ai/anima/extensions/voice/src/index.test.ts)
+
+The important splits are:
+
+- `VoiceConnectionManager` owns per-connection stream state
+- startup and shutdown now go through the shared runtime container helper
+- method execution is keyed by request `connectionId` where appropriate
+- session event subscriptions are cleaned up through runtime-owned unsubscribers
+
+Why this matters:
+
+- one browser connection can stop or speak without serializing unrelated browser connections
+- voice state is no longer stored in loose extension-wide globals
+- the session event pipeline and browser audio pipeline now use the same runtime conventions as `session` and `memory`
+
 ## Agent-Host Boundary
 
 ### Did `agent-host` need changes?
@@ -212,6 +242,7 @@ Fully migrated to the shared runtime container helper:
 
 - `session`
 - `memory`
+- `voice`
 
 Still on the older direct `AnimaExtension` shape:
 
@@ -219,7 +250,6 @@ Still on the older direct `AnimaExtension` shape:
 - `control`
 - `hooks`
 - `scheduler`
-- `voice`
 - `imessage`
 - `disco`
 - `presenter`
@@ -230,23 +260,6 @@ Still on the older direct `AnimaExtension` shape:
 Some of those are low-risk to leave alone for now, but not all of them.
 
 ## Tricky Remaining Extensions
-
-### Voice
-
-Voice is not just a simple method extension.
-
-It has:
-
-- per-connection state
-- long-lived stream state
-- event subscriptions to `session.*`
-- streaming audio lifecycle
-
-That makes it a good candidate for a runtime container with:
-
-- shared voice config/runtime services
-- keyed per-connection state
-- `stream` lane behavior
 
 ### iMessage
 
@@ -313,4 +326,4 @@ Remaining platform work:
 - reduce very large custom extension files, especially `memory` and `voice`
 - standardize source-routing and event-subscription patterns where helpful
 
-The most important stabilization work is already in place because the problematic paths, `session` and `memory`, are now on the shared model.
+The most important stabilization work is already in place because the problematic paths, `session`, `memory`, and `voice`, are now on the shared model.
