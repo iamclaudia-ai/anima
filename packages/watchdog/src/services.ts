@@ -114,9 +114,13 @@ export interface ManagedService {
   lastHealthDetails?: Record<string, unknown> | null;
   activeIncident?: {
     key: string;
+    incidentId: string;
     reason: string | null;
     openedAt: number;
+    firstEvidence?: Record<string, unknown> | null;
     restartRequestedAt?: number | null;
+    restartCompletedAt?: number | null;
+    restartAttemptId?: string | null;
   } | null;
 }
 
@@ -476,6 +480,25 @@ function incidentKeyFor(service: ManagedService, reason: string | null): string 
   return `${service.id}:${reason ?? "unknown"}`;
 }
 
+function buildDurations(
+  service: ManagedService,
+  now = Date.now(),
+): {
+  incidentMs?: number;
+  restartRequestedMs?: number;
+  restartCompletedMs?: number;
+  recoveryMs?: number;
+} {
+  const incident = service.activeIncident;
+  if (!incident) return {};
+  return {
+    incidentMs: now - incident.openedAt,
+    restartRequestedMs: incident.restartRequestedAt ? now - incident.restartRequestedAt : undefined,
+    restartCompletedMs: incident.restartCompletedAt ? now - incident.restartCompletedAt : undefined,
+    recoveryMs: incident.restartCompletedAt ? now - incident.restartCompletedAt : undefined,
+  };
+}
+
 function openIncident(
   service: ManagedService,
   reason: string | null,
@@ -488,19 +511,36 @@ function openIncident(
 
   service.activeIncident = {
     key,
+    incidentId: crypto.randomUUID(),
     reason,
     openedAt: Date.now(),
+    firstEvidence: details ?? null,
     restartRequestedAt: null,
+    restartCompletedAt: null,
+    restartAttemptId: null,
   };
 
   recordRecoveryEvent({
     timestamp: new Date().toISOString(),
     serviceId: service.id,
+    servicePid: service.proc?.pid ?? null,
+    incidentId: service.activeIncident.incidentId,
+    attemptId: null,
     event:
       reason === "memory_stale_lock" || reason === "memory_orphaned_lock"
         ? "memory_stale_lock_detected"
         : "health_check_failed",
     reason,
+    decision: {
+      action: "observe",
+      target: service.id,
+      triggerThreshold: restartThresholdForReason(reason),
+    },
+    outcome: "observed",
+    durations: buildDurations(service),
+    evidence: {
+      before: details,
+    },
     details,
   });
 }
@@ -515,12 +555,65 @@ function markRestartRequested(
   }
   if (service.activeIncident) {
     service.activeIncident.restartRequestedAt = Date.now();
+    service.activeIncident.restartAttemptId = crypto.randomUUID();
   }
+  const restartThreshold = restartThresholdForReason(reason);
+  const recoveryTarget =
+    typeof details.recoveryTarget === "string" ? (details.recoveryTarget as string) : service.id;
   recordRecoveryEvent({
     timestamp: new Date().toISOString(),
     serviceId: service.id,
+    servicePid: service.proc?.pid ?? null,
+    incidentId: service.activeIncident?.incidentId,
+    attemptId: service.activeIncident?.restartAttemptId ?? null,
     event: "restart_requested",
     reason,
+    decision: {
+      action: recoveryTarget === service.id ? "restart_service" : "restart_extension",
+      target: recoveryTarget,
+      triggerThreshold: restartThreshold,
+    },
+    outcome: "restart_in_progress",
+    durations: buildDurations(service),
+    evidence: {
+      before:
+        details.health && typeof details.health === "object"
+          ? (details.health as Record<string, unknown>)
+          : undefined,
+    },
+    details,
+  });
+}
+
+function markRestartCompleted(
+  service: ManagedService,
+  reason: string | null,
+  details: Record<string, unknown>,
+): void {
+  if (service.activeIncident) {
+    service.activeIncident.restartCompletedAt = Date.now();
+  }
+  const recoveryTarget =
+    typeof details.recoveryTarget === "string" ? (details.recoveryTarget as string) : service.id;
+  recordRecoveryEvent({
+    timestamp: new Date().toISOString(),
+    serviceId: service.id,
+    servicePid: service.proc?.pid ?? null,
+    incidentId: service.activeIncident?.incidentId,
+    attemptId: service.activeIncident?.restartAttemptId ?? null,
+    event: "restart_completed",
+    reason,
+    decision: {
+      action: recoveryTarget === service.id ? "restart_service" : "restart_extension",
+      target: recoveryTarget,
+      triggerThreshold: restartThresholdForReason(reason),
+    },
+    outcome: "restart_in_progress",
+    durations: buildDurations(service),
+    evidence: {
+      before: service.activeIncident?.firstEvidence ?? undefined,
+      after: details,
+    },
     details,
   });
 }
@@ -530,11 +623,28 @@ function closeIncident(
   details: Record<string, unknown> | undefined,
 ): void {
   if (!service.activeIncident) return;
+  const outcome = service.activeIncident.restartRequestedAt
+    ? "recovered_after_restart"
+    : "recovered";
   recordRecoveryEvent({
     timestamp: new Date().toISOString(),
     serviceId: service.id,
+    servicePid: service.proc?.pid ?? null,
+    incidentId: service.activeIncident.incidentId,
+    attemptId: service.activeIncident.restartAttemptId ?? null,
     event: "health_restored",
     reason: service.activeIncident.reason,
+    decision: {
+      action: "wait_for_health_restore",
+      target: service.id,
+      triggerThreshold: restartThresholdForReason(service.activeIncident.reason),
+    },
+    outcome,
+    durations: buildDurations(service),
+    evidence: {
+      before: service.activeIncident.firstEvidence ?? undefined,
+      after: details,
+    },
     details,
   });
   service.activeIncident = null;
@@ -597,13 +707,7 @@ export async function monitorServices(): Promise<void> {
           );
           await restartExtensionViaGateway(service, "memory");
           service.lastRestart = Date.now();
-          recordRecoveryEvent({
-            timestamp: new Date().toISOString(),
-            serviceId: service.id,
-            event: "restart_completed",
-            reason,
-            details: { recoveryTarget: "memory" },
-          });
+          markRestartCompleted(service, reason, { recoveryTarget: "memory" });
           service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
         } else {
           log(
@@ -612,12 +716,10 @@ export async function monitorServices(): Promise<void> {
           );
           const useForce = reason === "zero_extensions";
           await startService(service, { force: useForce });
-          recordRecoveryEvent({
-            timestamp: new Date().toISOString(),
-            serviceId: service.id,
-            event: "restart_completed",
-            reason,
-            details: { pid: service.proc?.pid ?? null, forced: useForce, recoveryTarget },
+          markRestartCompleted(service, reason, {
+            pid: service.proc?.pid ?? null,
+            forced: useForce,
+            recoveryTarget,
           });
           service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
         }

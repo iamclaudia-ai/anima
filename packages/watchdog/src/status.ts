@@ -22,10 +22,15 @@ export async function getStatus(): Promise<Record<string, unknown>> {
       consecutiveFailures: service.consecutiveFailures,
       activeIncident: service.activeIncident
         ? {
+            incidentId: service.activeIncident.incidentId,
             reason: service.activeIncident.reason,
             openedAt: new Date(service.activeIncident.openedAt).toISOString(),
+            restartAttemptId: service.activeIncident.restartAttemptId ?? null,
             restartRequestedAt: service.activeIncident.restartRequestedAt
               ? new Date(service.activeIncident.restartRequestedAt).toISOString()
+              : null,
+            restartCompletedAt: service.activeIncident.restartCompletedAt
+              ? new Date(service.activeIncident.restartCompletedAt).toISOString()
               : null,
           }
         : null,
