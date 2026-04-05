@@ -448,6 +448,17 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             },
             { label: "Actor State", value: actorState },
             { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
+            { label: "Watcher State", value: watcherDiag?.state ?? "idle" },
+            { label: "Watcher Queue", value: String(watcherDiag?.queueDepth ?? 0) },
+            { label: "Watcher Hot Files", value: String(watcherDiag?.hotFiles ?? 0) },
+            {
+              label: "Watcher Hottest File",
+              value: compactHomePath(watcherDiag?.hottestFile ?? null),
+            },
+            {
+              label: "Watcher Coalesced Changes",
+              value: String(watcherDiag?.coalescedChanges ?? 0),
+            },
             {
               label: "Last File Change",
               value: formatElapsedSince(watcherDiag?.lastChangedAt ?? null),
@@ -459,6 +470,10 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
             {
               label: "Last Ingest File",
               value: compactHomePath(watcherDiag?.lastIngestFile ?? null),
+            },
+            {
+              label: "Watcher Current File",
+              value: compactHomePath(watcherDiag?.currentFile ?? null),
             },
             {
               label: "Scheduler Running",
