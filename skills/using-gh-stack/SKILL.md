@@ -110,6 +110,22 @@ gh-stack restack       # Rebase current branch + descendants onto parents
 gh-stack restack --dry-run  # Preview rebase plan
 ```
 
+**⚠️ CRITICAL: Restack propagates UPWARD from the current branch.** Always run restack from the **lowest changed branch**, not from the top of the stack:
+
+```bash
+# ✅ Correct: restack from the branch you changed
+gh-stack bottom        # go to the changed branch
+# ... make changes, commit ...
+gh-stack submit        # push this branch
+gh-stack restack       # propagates changes UP through children
+
+# ❌ Wrong: restacking from the top
+gh-stack top
+gh-stack restack       # tries to restack downward first, causes conflicts
+```
+
+If you changed a middle branch, navigate to it first, then restack — it will propagate to all branches above it.
+
 **On rebase conflict:**
 
 ```bash

@@ -258,9 +258,10 @@ gh pr-review review --submit \
 ## Other Useful Commands
 
 ```bash
-# Check which lines are commentable in a file's diff
+# Check which lines are commentable in a file's diff (shows code by default)
 gh comment lines <PR> path/to/file.rb -R owner/repo
-gh comment lines <PR> path/to/file.rb --show-code -R owner/repo
+# Without code context (just line numbers, useful for scripting)
+gh comment lines <PR> path/to/file.rb --show-code=false -R owner/repo
 
 # Add a general PR comment (not inline — appears in conversation tab)
 gh comment add <PR> "General comment here" -R owner/repo
