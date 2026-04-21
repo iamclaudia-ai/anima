@@ -297,12 +297,12 @@ export function createDominatrixExtension(): AnimaExtension {
   const methods: Record<string, (params: Record<string, unknown>) => Promise<unknown>> = {
     // --- Snapshot & page info ---
     "dominatrix.snapshot": (p) => sendCommand("snapshot", p),
-    "dominatrix.get_text": (p) => sendCommand("get-text", p),
-    "dominatrix.get_markdown": (p) => sendCommand("get-markdown", p),
-    "dominatrix.get_url": (p) => sendCommand("get-url", p),
-    "dominatrix.get_title": (p) => sendCommand("get-title", p),
-    "dominatrix.get_html": (p) => sendCommand("get-html", p),
-    "dominatrix.get_source": (p) => sendCommand("get-source", p),
+    "dominatrix.get_text": (p) => sendCommand("get_text", p),
+    "dominatrix.get_markdown": (p) => sendCommand("get_markdown", p),
+    "dominatrix.get_url": (p) => sendCommand("get_url", p),
+    "dominatrix.get_title": (p) => sendCommand("get_title", p),
+    "dominatrix.get_html": (p) => sendCommand("get_html", p),
+    "dominatrix.get_source": (p) => sendCommand("get_source", p),
 
     // --- Interaction ---
     "dominatrix.click": (p) => sendCommand("click", p),
@@ -312,31 +312,33 @@ export function createDominatrixExtension(): AnimaExtension {
     "dominatrix.select": (p) => sendCommand("select", p),
 
     // --- Semantic find ---
-    "dominatrix.find_text": (p) => sendCommand("find-text", p),
-    "dominatrix.find_label": (p) => sendCommand("find-label", p),
-    "dominatrix.find_role": (p) => sendCommand("find-role", p),
-    "dominatrix.find_placeholder": (p) => sendCommand("find-placeholder", p),
+    "dominatrix.find_text": (p) => sendCommand("find_text", p),
+    "dominatrix.find_label": (p) => sendCommand("find_label", p),
+    "dominatrix.find_role": (p) => sendCommand("find_role", p),
+    "dominatrix.find_placeholder": (p) => sendCommand("find_placeholder", p),
 
     // --- Navigation & scrolling ---
     "dominatrix.navigate": (p) => sendCommand("navigate", p),
-    "dominatrix.scroll_down": (p) => sendCommand("scroll-down", p),
-    "dominatrix.scroll_up": (p) => sendCommand("scroll-up", p),
-    "dominatrix.scroll_to": (p) => sendCommand("scroll-to", p),
+    "dominatrix.scroll_down": (p) => sendCommand("scroll_down", p),
+    "dominatrix.scroll_up": (p) => sendCommand("scroll_up", p),
+    "dominatrix.scroll_to": (p) => sendCommand("scroll_to", p),
 
     // --- Wait ---
-    "dominatrix.wait_for_element": (p) => sendCommand("wait-for-element", p),
-    "dominatrix.wait_for_text": (p) => sendCommand("wait-for-text", p),
-    "dominatrix.wait_for_url": (p) => sendCommand("wait-for-url", p),
+    "dominatrix.wait_for_element": (p) => sendCommand("wait_for_element", p),
+    "dominatrix.wait_for_text": (p) => sendCommand("wait_for_text", p),
+    "dominatrix.wait_for_url": (p) => sendCommand("wait_for_url", p),
     "dominatrix.wait": (p) => sendCommand("wait", p),
 
     // --- Debugging ---
     "dominatrix.screenshot": (p) => sendCommand("screenshot", p),
     "dominatrix.exec": (p) => sendCommand("executeScript", p),
     "dominatrix.eval": (p) => sendCommand("evaluateExpression", p),
-    "dominatrix.get_console": (p) => sendCommand("get-console", p),
-    "dominatrix.get_network": (p) => sendCommand("get-network", p),
-    "dominatrix.get_storage": (p) => sendCommand("get-storage", p),
-    "dominatrix.get_cookies": (p) => sendCommand("get-cookies", p),
+    "dominatrix.get_console": (p) => sendCommand("get_console", p),
+    "dominatrix.get_network": (p) => sendCommand("get_network", p),
+    "dominatrix.get_storage": (p) => sendCommand("get_storage", p),
+    "dominatrix.get_cookies": (p) => sendCommand("get_cookies", p),
+    "dominatrix.list_tabs": (p) => sendCommand("list_tabs", p),
+    "dominatrix.get_active_tab": (p) => sendCommand("get_active_tab", p),
 
     // --- Internal ---
     "dominatrix.register": async (p) => {
@@ -581,19 +583,36 @@ export function createDominatrixExtension(): AnimaExtension {
         description: "Get cookies for page domain",
         inputSchema: tabIdParam,
       },
+      {
+        name: "dominatrix.list_tabs",
+        description: "List open Chrome tabs visible to the extension",
+        inputSchema: z.object({}),
+      },
+      {
+        name: "dominatrix.get_active_tab",
+        description: "Get the tab DOMINATRIX will target by default",
+        inputSchema: z.object({}),
+      },
 
       // --- Internal ---
       {
         name: "dominatrix.register",
         description: "Register Chrome extension client",
         inputSchema: registerParam,
+        execution: { lane: "control", concurrency: "parallel" },
       },
       {
         name: "dominatrix.response",
         description: "Handle command response from Chrome extension",
         inputSchema: responseParam,
+        execution: { lane: "control", concurrency: "parallel" },
       },
-      { name: "dominatrix.health_check", description: "Health check", inputSchema: z.object({}) },
+      {
+        name: "dominatrix.health_check",
+        description: "Health check",
+        inputSchema: z.object({}),
+        execution: { lane: "read", concurrency: "parallel" },
+      },
     ],
 
     async start(extensionCtx) {

@@ -358,22 +358,8 @@ function initDominatrix() {
               break;
 
             // --- Storage ---
-            case "getStorage":
+            case "get_storage":
               result = getStorage();
-              break;
-
-            // --- Legacy compat (old action names) ---
-            case "getSnapshot":
-              result = getFullSnapshot();
-              break;
-            case "getHTML":
-              result = getHTML(message.selector);
-              break;
-            case "getText":
-              result = getText();
-              break;
-            case "getMarkdown":
-              result = getMarkdown();
               break;
 
             default:

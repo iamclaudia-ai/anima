@@ -31,7 +31,7 @@ The content script maintains a `refMap: Map<string, Element>` that maps `@e1`, `
 
 ## Commands (New & Updated)
 
-All commands follow the gateway convention: `dominatrix.method-name` with explicit named params via zod schemas. The CLI maps these as `anima dominatrix method-name --param value`.
+All commands follow the gateway convention: `dominatrix.method_name` with explicit named params via zod schemas. The CLI maps these as `anima dominatrix method_name --param value`.
 
 ### Snapshot & Page Info
 
@@ -42,13 +42,13 @@ anima dominatrix snapshot --full       # Full a11y tree JSON (old behavior)
 anima dominatrix snapshot --scope "#main"  # Scope to CSS selector
 
 # Getters (renamed from text/markdown for consistency)
-anima dominatrix get-text              # Page innerText (was: text)
-anima dominatrix get-text --ref @e5    # Text of specific element
-anima dominatrix get-markdown          # Page as Markdown (was: markdown)
-anima dominatrix get-url               # Current URL
-anima dominatrix get-title             # Page title
-anima dominatrix get-html              # Full page HTML (was: html)
-anima dominatrix get-html --selector "div.main"  # Scoped HTML
+anima dominatrix get_text              # Page innerText (was: text)
+anima dominatrix get_text --ref @e5    # Text of specific element
+anima dominatrix get_markdown          # Page as Markdown (was: markdown)
+anima dominatrix get_url               # Current URL
+anima dominatrix get_title             # Page title
+anima dominatrix get_html              # Full page HTML (was: html)
+anima dominatrix get_html --selector "div.main"  # Scoped HTML
 ```
 
 **Gateway methods:**
@@ -56,11 +56,11 @@ anima dominatrix get-html --selector "div.main"  # Scoped HTML
 | Method                    | Schema              | Description                             |
 | ------------------------- | ------------------- | --------------------------------------- |
 | `dominatrix.snapshot`     | `{ full?, scope? }` | Interactive refs (default) or full tree |
-| `dominatrix.get-text`     | `{ ref? }`          | Plain text of page or element           |
-| `dominatrix.get-markdown` | `{ ref? }`          | Markdown of page or element             |
-| `dominatrix.get-url`      | `{}`                | Current page URL                        |
-| `dominatrix.get-title`    | `{}`                | Current page title                      |
-| `dominatrix.get-html`     | `{ selector? }`     | HTML of page or element                 |
+| `dominatrix.get_text`     | `{ ref? }`          | Plain text of page or element           |
+| `dominatrix.get_markdown` | `{ ref? }`          | Markdown of page or element             |
+| `dominatrix.get_url`      | `{}`                | Current page URL                        |
+| `dominatrix.get_title`    | `{}`                | Current page title                      |
+| `dominatrix.get_html`     | `{ selector? }`     | HTML of page or element                 |
 
 ### Interaction (ref-based)
 
@@ -93,24 +93,24 @@ anima dominatrix select --ref @e5 --value "option-1"
 
 ### Semantic Find (NEW)
 
-Find elements by semantic attributes and perform actions. Each `find-*` method locates the element and executes an action in one call.
+Find elements by semantic attributes and perform actions. Each `find_*` method locates the element and executes an action in one call.
 
 ```bash
-anima dominatrix find-text --text "Posts" --action click
-anima dominatrix find-text --text "Email" --action fill --value "user@example.com"
-anima dominatrix find-label --label "Password" --action fill --value "secret"
-anima dominatrix find-role --role button --name "Submit" --action click
-anima dominatrix find-placeholder --placeholder "Search..." --action fill --value "query"
+anima dominatrix find_text --text "Posts" --action click
+anima dominatrix find_text --text "Email" --action fill --value "user@example.com"
+anima dominatrix find_label --label "Password" --action fill --value "secret"
+anima dominatrix find_role --role button --name "Submit" --action click
+anima dominatrix find_placeholder --placeholder "Search..." --action fill --value "query"
 ```
 
 **Gateway methods:**
 
 | Method                        | Schema                            | Description              |
 | ----------------------------- | --------------------------------- | ------------------------ |
-| `dominatrix.find-text`        | `{ text, action, value? }`        | Find by visible text     |
-| `dominatrix.find-label`       | `{ label, action, value? }`       | Find by label/aria-label |
-| `dominatrix.find-role`        | `{ role, name?, action, value? }` | Find by ARIA role        |
-| `dominatrix.find-placeholder` | `{ placeholder, action, value? }` | Find by placeholder      |
+| `dominatrix.find_text`        | `{ text, action, value? }`        | Find by visible text     |
+| `dominatrix.find_label`       | `{ label, action, value? }`       | Find by label/aria-label |
+| `dominatrix.find_role`        | `{ role, name?, action, value? }` | Find by ARIA role        |
+| `dominatrix.find_placeholder` | `{ placeholder, action, value? }` | Find by placeholder      |
 
 ### Navigation & Scrolling
 
@@ -119,11 +119,11 @@ anima dominatrix find-placeholder --placeholder "Search..." --action fill --valu
 anima dominatrix navigate --url "https://example.com"
 
 # Scroll
-anima dominatrix scroll-down --value 500     # Scroll down 500px (default: 300)
-anima dominatrix scroll-up --value 300        # Scroll up
-anima dominatrix scroll-to --ref @e5          # Scroll element into view
-anima dominatrix scroll-to --position top     # Scroll to top
-anima dominatrix scroll-to --position bottom  # Scroll to bottom
+anima dominatrix scroll_down --value 500     # Scroll down 500px (default: 300)
+anima dominatrix scroll_up --value 300        # Scroll up
+anima dominatrix scroll_to --ref @e5          # Scroll element into view
+anima dominatrix scroll_to --position top     # Scroll to top
+anima dominatrix scroll_to --position bottom  # Scroll to bottom
 ```
 
 **Gateway methods:**
@@ -131,16 +131,16 @@ anima dominatrix scroll-to --position bottom  # Scroll to bottom
 | Method                   | Schema                | Description                   |
 | ------------------------ | --------------------- | ----------------------------- |
 | `dominatrix.navigate`    | `{ url }`             | Navigate tab to URL           |
-| `dominatrix.scroll-down` | `{ value? }`          | Scroll down by pixels         |
-| `dominatrix.scroll-up`   | `{ value? }`          | Scroll up by pixels           |
-| `dominatrix.scroll-to`   | `{ ref?, position? }` | Scroll to element or position |
+| `dominatrix.scroll_down` | `{ value? }`          | Scroll down by pixels         |
+| `dominatrix.scroll_up`   | `{ value? }`          | Scroll up by pixels           |
+| `dominatrix.scroll_to`   | `{ ref?, position? }` | Scroll to element or position |
 
 ### Wait (NEW)
 
 ```bash
-anima dominatrix wait-for-element --selector "div.loaded"  # Wait for element
-anima dominatrix wait-for-text --text "Success"            # Wait for text to appear
-anima dominatrix wait-for-url --pattern "**/posts"         # Wait for URL change
+anima dominatrix wait_for_element --selector "div.loaded"  # Wait for element
+anima dominatrix wait_for_text --text "Success"            # Wait for text to appear
+anima dominatrix wait_for_url --pattern "**/posts"         # Wait for URL change
 anima dominatrix wait --ms 2000                            # Wait milliseconds
 ```
 
@@ -148,9 +148,9 @@ anima dominatrix wait --ms 2000                            # Wait milliseconds
 
 | Method                        | Schema                   | Description      |
 | ----------------------------- | ------------------------ | ---------------- |
-| `dominatrix.wait-for-element` | `{ selector, timeout? }` | Wait for element |
-| `dominatrix.wait-for-text`    | `{ text, timeout? }`     | Wait for text    |
-| `dominatrix.wait-for-url`     | `{ pattern, timeout? }`  | Wait for URL     |
+| `dominatrix.wait_for_element` | `{ selector, timeout? }` | Wait for element |
+| `dominatrix.wait_for_text`    | `{ text, timeout? }`     | Wait for text    |
+| `dominatrix.wait_for_url`     | `{ pattern, timeout? }`  | Wait for URL     |
 | `dominatrix.wait`             | `{ ms }`                 | Wait fixed time  |
 
 ### Debugging (existing, renamed)
@@ -158,10 +158,10 @@ anima dominatrix wait --ms 2000                            # Wait milliseconds
 ```bash
 anima dominatrix exec --script "document.title = 'hi'"    # Execute JS (unchanged)
 anima dominatrix eval --expression "document.title"        # Evaluate JS (unchanged)
-anima dominatrix get-console                               # Console logs (was: console)
-anima dominatrix get-network                               # Network requests (was: network)
-anima dominatrix get-storage                               # localStorage/sessionStorage (was: storage)
-anima dominatrix get-cookies                               # Cookies (was: cookies)
+anima dominatrix get_console                               # Console logs (was: console)
+anima dominatrix get_network                               # Network requests (was: network)
+anima dominatrix get_storage                               # localStorage/sessionStorage (was: storage)
+anima dominatrix get_cookies                               # Cookies (was: cookies)
 anima dominatrix screenshot                                # Screenshot (unchanged)
 ```
 
@@ -256,30 +256,30 @@ Update/add message handlers to match new gateway actions:
 2. `click` → resolve `ref` OR `selector`, with ancestor walking for refs
 3. `fill` → resolve `ref` OR `selector`, proper event dispatching (focus → clear → input → change)
 4. New handlers: `check`, `uncheck`, `select`
-5. New handlers: `find-text`, `find-label`, `find-role`, `find-placeholder` (locate + act)
-6. New handlers: `scroll-down`, `scroll-up`, `scroll-to`
-7. New handlers: `wait-for-element`, `wait-for-text`, `wait-for-url`, `wait`
-8. Rename existing: `getText` → `get-text`, `getMarkdown` → `get-markdown`, etc.
-9. New handlers: `get-url`, `get-title` (trivial — `location.href`, `document.title`)
+5. New handlers: `find_text`, `find_label`, `find_role`, `find_placeholder` (locate + act)
+6. New handlers: `scroll_down`, `scroll_up`, `scroll_to`
+7. New handlers: `wait_for_element`, `wait_for_text`, `wait_for_url`, `wait`
+8. Rename existing: `getText` → `get_text`, `getMarkdown` → `get_markdown`, etc.
+9. New handlers: `get_url`, `get_title` (trivial — `location.href`, `document.title`)
 
 ### Phase 3: Gateway Extension Updates
 
 **File: `extensions/dominatrix/src/index.ts`**
 
-Update method definitions and schemas to match the new flat `dominatrix.method-name` convention:
+Update method definitions and schemas to match the new flat `dominatrix.method_name` convention:
 
 1. **Update existing methods:**
    - `dominatrix.snapshot` — add `full` boolean, `scope` string params
    - `dominatrix.click` — add `ref` string param alongside `selector`
    - `dominatrix.fill` — add `ref` string param alongside `selector`
-   - Rename: `dominatrix.text` → `dominatrix.get-text`, etc.
+   - Rename: `dominatrix.text` → `dominatrix.get_text`, etc.
 
 2. **Add new methods (with zod schemas):**
-   - `dominatrix.get-url`, `dominatrix.get-title`
+   - `dominatrix.get_url`, `dominatrix.get_title`
    - `dominatrix.check`, `dominatrix.uncheck`, `dominatrix.select`
-   - `dominatrix.find-text`, `dominatrix.find-label`, `dominatrix.find-role`, `dominatrix.find-placeholder`
-   - `dominatrix.scroll-down`, `dominatrix.scroll-up`, `dominatrix.scroll-to`
-   - `dominatrix.wait-for-element`, `dominatrix.wait-for-text`, `dominatrix.wait-for-url`, `dominatrix.wait`
+   - `dominatrix.find_text`, `dominatrix.find_label`, `dominatrix.find_role`, `dominatrix.find_placeholder`
+   - `dominatrix.scroll_down`, `dominatrix.scroll_up`, `dominatrix.scroll_to`
+   - `dominatrix.wait_for_element`, `dominatrix.wait_for_text`, `dominatrix.wait_for_url`, `dominatrix.wait`
 
 3. **Update `sendCommand` routing** — map method names to content script actions
 
@@ -287,14 +287,14 @@ No CLI changes needed — the CLI is auto-generated from zod schemas.
 
 ### Phase 4: react-grab Integration (DOM → React Source Mapping)
 
-**Goal**: Given a `@ref` from a snapshot, return the React component name and source file path. Enables the workflow: "I see a bug on this button" → `get-source --ref @e35` → `PostEditor.tsx:87`.
+**Goal**: Given a `@ref` from a snapshot, return the React component name and source file path. Enables the workflow: "I see a bug on this button" → `get_source --ref @e35` → `PostEditor.tsx:87`.
 
 **Prerequisites**: The target app must load react-grab in dev mode (script tag, npm import, or `<ReactGrab />` component). Dominatrix does NOT bundle react-grab — it just consumes the API that react-grab exposes on the page.
 
 **How it works**:
 
 1. App loads react-grab → installs `window.__REACT_GRAB__` API
-2. User runs `anima dominatrix get-source --ref @e35`
+2. User runs `anima dominatrix get_source --ref @e35`
 3. Content script resolves `@e35` → DOM element from refMap
 4. Calls `window.__REACT_GRAB__.getSource(element)`
 5. Returns `{ filePath, lineNumber, componentName }`
@@ -315,7 +315,7 @@ It returns the **full component ancestry chain** — from the immediate wrapper 
 **New command**:
 
 ```bash
-anima dominatrix get-source --ref @e12
+anima dominatrix get_source --ref @e12
 # → {
 #   "components": [
 #     { "name": "Card", "file": "/ui/Card/Card.tsx" },
@@ -324,7 +324,7 @@ anima dominatrix get-source --ref @e12
 #   ]
 # }
 
-anima dominatrix get-source --selector ".my-button"
+anima dominatrix get_source --selector ".my-button"
 # → same, but via CSS selector
 
 # Bulk: get source for all interactive elements (enriched snapshot)
@@ -337,12 +337,12 @@ anima dominatrix snapshot --sources
 
 | Method                  | Schema                | Description                              |
 | ----------------------- | --------------------- | ---------------------------------------- |
-| `dominatrix.get-source` | `{ ref?, selector? }` | Get React component ancestry for element |
+| `dominatrix.get_source` | `{ ref?, selector? }` | Get React component ancestry for element |
 
-**Content script handler** (`get-source` action):
+**Content script handler** (`get_source` action):
 
 ```ts
-case "get-source": {
+case "get_source": {
   const el = resolveElement(message.ref, message.selector);
   if (!window.__REACT_GRAB__) {
     return { success: false, error: "react-grab not loaded on this page (dev mode only)" };
@@ -380,8 +380,8 @@ case "get-source": {
 
 **Files to modify**:
 
-- `clients/dominatrix/src/content-script.ts` — add `get-source` handler, optional source enrichment in snapshot
-- `extensions/dominatrix/src/index.ts` — add `dominatrix.get-source` method + schema, update `dominatrix.snapshot` schema with `sources` boolean
+- `clients/dominatrix/src/content-script.ts` — add `get_source` handler, optional source enrichment in snapshot
+- `extensions/dominatrix/src/index.ts` — add `dominatrix.get_source` method + schema, update `dominatrix.snapshot` schema with `sources` boolean
 
 ### Phase 5: Controlling-the-Browser Skill Update
 

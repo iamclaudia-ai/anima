@@ -46,6 +46,7 @@ interface TabInfo {
 
 const GATEWAY_URL = "ws://localhost:30086/ws";
 const RECONNECT_DELAY = 3000;
+const TOKEN_STORAGE_KEY = "gatewayToken";
 
 // ============================================================================
 // Background worker
@@ -88,12 +89,19 @@ class DominatrixBackground {
     chrome.windows.onFocusChanged.addListener((windowId) => {
       if (windowId === chrome.windows.WINDOW_ID_NONE) return;
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.sendRequest("subscribe", {
+        this.sendRequest("gateway.subscribe", {
           events: ["dominatrix.command"],
           exclusive: true,
         });
+        void this.registerClient();
       }
     });
+
+    // The gateway/server extension can restart while this WebSocket stays open.
+    // Periodic registration lets the server-side client registry heal itself.
+    setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) void this.registerClient();
+    }, 30_000);
 
     // Tab event listeners
     chrome.tabs.onCreated.addListener(this.onTabCreated.bind(this));
@@ -148,10 +156,13 @@ class DominatrixBackground {
   // WebSocket connection to gateway
   // --------------------------------------------------------------------------
 
-  private connect() {
+  private async connect() {
     try {
-      console.log("[DOMINATRIX] Connecting to gateway...");
-      this.ws = new WebSocket(GATEWAY_URL);
+      const gatewayUrl = await this.buildGatewayUrl();
+      console.log("[DOMINATRIX] Connecting to gateway...", {
+        authenticated: gatewayUrl.includes("token="),
+      });
+      this.ws = new WebSocket(gatewayUrl);
 
       this.ws.onopen = async () => {
         console.log("[DOMINATRIX] Connected to gateway");
@@ -161,18 +172,12 @@ class DominatrixBackground {
         }
 
         // Subscribe to command events exclusively (last subscriber wins)
-        this.sendRequest("subscribe", {
+        this.sendRequest("gateway.subscribe", {
           events: ["dominatrix.command"],
           exclusive: true,
         });
 
-        // Register ourselves
-        const profileName = await this.getProfileName();
-        this.sendRequest("dominatrix.register", {
-          extensionId: this.extensionId,
-          instanceId: this.instanceId,
-          profileName,
-        });
+        await this.registerClient();
       };
 
       this.ws.onmessage = (event) => {
@@ -184,8 +189,11 @@ class DominatrixBackground {
         console.error("[DOMINATRIX] WebSocket error:", error);
       };
 
-      this.ws.onclose = () => {
-        console.log("[DOMINATRIX] Disconnected from gateway, reconnecting...");
+      this.ws.onclose = (event) => {
+        console.log("[DOMINATRIX] Disconnected from gateway, reconnecting...", {
+          code: event.code,
+          reason: event.reason,
+        });
         this.ws = null;
         this.scheduleReconnect();
       };
@@ -204,6 +212,15 @@ class DominatrixBackground {
     }
   }
 
+  private async buildGatewayUrl(): Promise<string> {
+    const stored = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
+    const token = typeof stored[TOKEN_STORAGE_KEY] === "string" ? stored[TOKEN_STORAGE_KEY] : "";
+    if (!token) return GATEWAY_URL;
+
+    const separator = GATEWAY_URL.includes("?") ? "&" : "?";
+    return `${GATEWAY_URL}${separator}token=${encodeURIComponent(token)}`;
+  }
+
   private sendRequest(method: string, params: Record<string, unknown>) {
     if (this.ws?.readyState !== WebSocket.OPEN) {
       console.warn("[DOMINATRIX] Cannot send: WebSocket not connected");
@@ -217,6 +234,15 @@ class DominatrixBackground {
         params,
       }),
     );
+  }
+
+  private async registerClient() {
+    const profileName = await this.getProfileName();
+    this.sendRequest("dominatrix.register", {
+      extensionId: this.extensionId,
+      instanceId: this.instanceId,
+      profileName,
+    });
   }
 
   private async getProfileName(): Promise<string | undefined> {
@@ -326,15 +352,7 @@ class DominatrixBackground {
       case "wait":
       case "executeScript":
       case "evaluateExpression":
-      case "getStorage":
       case "get_storage":
-        return this.delegateToContentScript(tabId, { ...params, action });
-
-      // --- Legacy content script actions ---
-      case "getSnapshot":
-      case "getHTML":
-      case "getText":
-      case "getMarkdown":
         return this.delegateToContentScript(tabId, { ...params, action });
 
       // --- Browser-level commands (no content script needed) ---
@@ -343,24 +361,21 @@ class DominatrixBackground {
       case "navigate":
         return this.navigate(tabId, params.url as string);
       case "get_console":
-      case "getConsoleLogs":
         return this.getConsoleLogs(tabId);
       case "get_network":
-      case "listNetworkRequests":
         return this.listNetworkRequests(tabId);
       case "get_cookies":
-      case "getCookies":
         return this.getCookies(tabId);
+      case "list_tabs":
+        return this.listTabs();
+      case "get_active_tab":
+        return this.getActiveTab();
       case "wait_for_url":
         return this.waitForUrl(
           tabId,
           params.pattern as string,
           params.timeout as number | undefined,
         );
-      case "listTabs":
-        return this.listTabs();
-      case "getActiveTab":
-        return this.getActiveTab();
 
       default:
         throw new Error(`Unknown command: ${action}`);
@@ -542,6 +557,22 @@ class DominatrixBackground {
     if (message.type === "sidepanel-context" && message.tabId) {
       this.contextTabId = message.tabId;
       console.log("[DOMINATRIX] Context tab set:", this.contextTabId);
+      return false;
+    }
+
+    if (message.type === "gateway-token-updated") {
+      console.log("[DOMINATRIX] Gateway token updated; reconnecting");
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      const current = this.ws;
+      this.ws = null;
+      if (current) {
+        current.onclose = null;
+        current.close();
+      }
+      this.connect();
       return false;
     }
 
