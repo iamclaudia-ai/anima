@@ -135,6 +135,47 @@ git rebase --continue
 gh-stack restack --resume    # Continue restacking remaining branches
 ```
 
+### Changes Across Multiple Branches — Linear Workflow
+
+When you need to make changes to **multiple branches** in a stack (e.g., applying a consistent refactor across PRs 2, 3, and 4), handle **one branch fully** before moving to the next:
+
+```bash
+# ✅ Linear: finish each branch before moving on
+gh-stack bottom            # or navigate to the lowest-changed branch
+# --- Branch 2 ---
+# edit → test → commit
+git push --force-with-lease
+gh-stack restack --yes     # propagates up to 3, 4, ...
+
+gh-stack up                # move to branch 3
+# --- Branch 3 ---
+# edit → test → commit
+git push --force-with-lease
+gh-stack restack --yes     # propagates up to 4, ...
+
+gh-stack up                # move to branch 4
+# ... and so on
+```
+
+```bash
+# ❌ Bouncing: commit across branches, restack at the end
+gh-stack bottom
+# edit → commit (no push)
+gh-stack up
+# edit → commit (no push)
+gh-stack restack --yes     # only pushes the LAST branch; others are unpushed
+# Now you have to navigate back and push each branch separately — messy cleanup.
+```
+
+**Why linear wins:**
+
+1. **Each branch is self-contained** — if something fails mid-stack, all prior branches are fully committed + pushed + in-sync, not half-done.
+2. **Restack after every push** isolates each rebase propagation to a single conceptual change. Easier to debug conflicts when they're not tangled with other pending commits.
+3. **Remote stays consistent** — reviewers see each PR update as its own event, not all branches changing at once.
+4. **No cleanup step** — no "oh wait I still need to push Phase 2 and 3 separately" realization after the fact.
+
+The pattern is: `edit → test → commit → push → restack` per branch, then `up` and repeat.
+
 ### 5. Check Status
 
 ```bash
@@ -223,6 +264,16 @@ gh-stack init --description "My epic"  # Stack description
 ┗━ ⏳ <a href="...">#21730</a> Transcription columns WEB-7409 👈
 </pre>
 ```
+
+### ⚠️ Don't hand-write a second stack section
+
+Because `submit` regenerates the `### 📚 Stacked on` footer on every run, a hand-written `## Stack 📚` section in the PR body is:
+
+- **Redundant** — readers see the same information twice
+- **A maintenance burden** — when one PR's title/scope changes (e.g. Phase 5 rescoped from "Resilience tuning" to "Scheduled-at filter"), you have to edit the hand-written list in every other PR in the stack. The auto-footer updates itself for free.
+- **A source of drift** — the hand-written list quickly disagrees with reality. Reviewers reading both get confused about which is canonical.
+
+**Rule:** describe _this_ PR in its body. Let `submit` describe the stack. If you want to reference a specific sibling PR, link it inline in prose (`see the Phase 1 [bulk-response fidelity patch](link)`) rather than maintaining a parallel list.
 
 ## Metadata
 
