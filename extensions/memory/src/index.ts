@@ -206,8 +206,18 @@ function compactHomePath(path: string | null): string {
   return path.replace(/^\/Users\/\w+/, "~");
 }
 
+function isPidAlive(pid: number | null | undefined): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function acquireLivenessLock(runtime: MemoryExtensionRuntime) {
-  const result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
+  let result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
     lockType: "singleton",
     holderPid: process.pid,
     holderInstanceId: runtime.lockHolderInstanceId,
@@ -228,6 +238,25 @@ async function acquireLivenessLock(runtime: MemoryExtensionRuntime) {
       metadata: Record<string, unknown> | null;
     } | null;
   };
+
+  if (!result.acquired && result.lock?.holderPid && !isPidAlive(result.lock.holderPid)) {
+    fileLog(
+      "WARN",
+      `Detected dead memory lock owner PID ${result.lock.holderPid}; forcing singleton lock takeover`,
+    );
+
+    result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
+      lockType: "singleton",
+      holderPid: process.pid,
+      holderInstanceId: runtime.lockHolderInstanceId,
+      staleAfterMs: 0,
+      metadata: {
+        actor: "memory",
+        role: "singleton",
+      },
+    })) as typeof result;
+  }
+
   runtime.runtimeLock = result.lock ?? null;
   runtime.isLockOwner = result.acquired;
   runtime.lockState = result.acquired ? "held" : "contended";
