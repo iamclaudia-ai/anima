@@ -14,6 +14,7 @@
     "watchdog:reload": "bun run watchdog:deploy && anima watchdog reload",
     "cli": "bun run packages/cli/src/index.ts",
     "migrate:anima": "bun run scripts/migrate-to-anima.ts",
+    "deps:catalog": "bun run scripts/bump-catalog-dependency.ts",
     "deps:drift": "bun run scripts/check-dependency-drift.ts",
     "deps:drift:check": "bun run scripts/check-dependency-drift.ts --fail-on-drift",
     "build": "bun run --filter '*' build",
