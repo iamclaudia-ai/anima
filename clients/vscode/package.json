@@ -1,5 +1,5 @@
 {
-  "name": "anima",
+  "name": "@anima/vscode",
   "displayName": "Anima",
   "version": "0.1.0",
   "description": "Anima platform for Claudia in VS Code",
