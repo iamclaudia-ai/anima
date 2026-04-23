@@ -25,7 +25,7 @@
     "typecheck": "tsc -p ./ --noEmit",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "lint": "eslint src --ext ts"
+    "lint": "oxlint src"
   },
   "dependencies": {
     "@anima/ui": "workspace:*",
@@ -38,10 +38,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^6.x",
-    "@typescript-eslint/parser": "^6.x",
     "bun-plugin-tailwind": "catalog:",
-    "eslint": "^8.x",
     "tailwindcss": "catalog:",
     "typescript": "catalog:"
   },
