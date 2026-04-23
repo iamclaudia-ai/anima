@@ -15,6 +15,7 @@
     "cli": "bun run packages/cli/src/index.ts",
     "migrate:anima": "bun run scripts/migrate-to-anima.ts",
     "deps:catalog": "bun run scripts/bump-catalog-dependency.ts",
+    "deps:outdated": "bun run scripts/outdated-report.ts",
     "deps:drift": "bun run scripts/check-dependency-drift.ts",
     "deps:drift:check": "bun run scripts/check-dependency-drift.ts --fail-on-drift",
     "build": "bun run --filter '*' build",
@@ -56,7 +57,7 @@
     "@types/turndown": "5.0.6",
     "@typescript/native-preview": "7.0.0-dev.20260212.1",
     "bun-plugin-tailwind": "catalog:",
-    "bun-types": "1.3.6",
+    "bun-types": "1.3.13",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.1",
     "oxfmt": "0.34.0",
@@ -88,6 +89,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "zod": "^3.25.76",
-    "zod-to-json-schema": "3.25.1"
+    "zod-to-json-schema": "3.25.1",
+    "@types/node": "^25.6.0"
   }
 }

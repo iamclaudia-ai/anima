@@ -34,7 +34,7 @@
     "ws": "^8.x"
   },
   "devDependencies": {
-    "@types/node": "^20.x",
+    "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/vscode": "^1.85.0",
