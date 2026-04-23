@@ -5,12 +5,12 @@
  * can import them without triggering server startup side effects.
  */
 
-import { z, type ZodTypeAny } from "zod";
+import { z, type ZodType } from "zod";
 
 export type GatewayMethodDefinition = {
   method: string;
   description: string;
-  inputSchema: ZodTypeAny;
+  inputSchema: ZodType;
 };
 
 export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
@@ -56,7 +56,10 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
       holderPid: z.number().int().optional().describe("Owning process PID"),
       holderInstanceId: z.string().describe("Stable instance ID for the lock holder"),
       staleAfterMs: z.number().int().positive().optional().describe("Staleness threshold in ms"),
-      metadata: z.record(z.unknown()).optional().describe("Extension-defined lock metadata"),
+      metadata: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Extension-defined lock metadata"),
     }),
   },
   {
@@ -69,7 +72,10 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
       holderPid: z.number().int().optional().describe("Owning process PID"),
       holderInstanceId: z.string().describe("Stable instance ID for the lock holder"),
       staleAfterMs: z.number().int().positive().optional().describe("Staleness threshold in ms"),
-      metadata: z.record(z.unknown()).optional().describe("Extension-defined lock metadata"),
+      metadata: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Extension-defined lock metadata"),
     }),
   },
   {
@@ -104,7 +110,7 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
             name: z.string().describe("Fully-qualified method name (e.g. 'menubar.notify')"),
             description: z.string().describe("Short description for CLI/help output"),
             inputSchema: z
-              .record(z.unknown())
+              .record(z.string(), z.unknown())
               .optional()
               .describe("JSON Schema for input validation"),
           }),

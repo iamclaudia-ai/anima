@@ -1,4 +1,4 @@
-import type { ZodTypeAny } from "zod";
+import type { ZodType } from "zod/v4";
 import type { LoggerFactoryOptions, LoggerLike } from "./logger";
 
 /**
@@ -208,9 +208,9 @@ export interface ExtensionMethodDefinition {
   /** Short human-readable description for CLI/help output */
   description: string;
   /** Required request schema used by gateway as a pre-dispatch bouncer */
-  inputSchema: ZodTypeAny;
+  inputSchema: ZodType;
   /** Optional output schema (future use) */
-  outputSchema?: ZodTypeAny;
+  outputSchema?: ZodType;
   /** Optional execution policy used by the extension host runtime scheduler */
   execution?: ExtensionMethodExecution;
 }

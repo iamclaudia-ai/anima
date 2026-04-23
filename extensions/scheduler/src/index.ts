@@ -368,7 +368,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         action: z.object({
           type: z.enum(["emit", "extension_call", "notification", "exec"]).default("notification"),
           target: z.string().describe("Event name, method name, or notification message"),
-          payload: z.record(z.unknown()).optional(),
+          payload: z.record(z.string(), z.unknown()).optional(),
         }),
         missedPolicy: z.enum(["fire_once", "skip", "fire_all"]).default("fire_once"),
         concurrency: z
@@ -400,7 +400,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           .object({
             type: z.enum(["emit", "extension_call", "notification", "exec"]),
             target: z.string(),
-            payload: z.record(z.unknown()).optional(),
+            payload: z.record(z.string(), z.unknown()).optional(),
           })
           .optional(),
         missedPolicy: z.enum(["fire_once", "skip", "fire_all"]).optional(),

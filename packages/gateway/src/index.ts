@@ -464,19 +464,19 @@ function buildListMethodsResponse(): { methods: Array<Record<string, unknown>> }
     method: m.method,
     source: "gateway",
     description: m.description,
-    inputSchema: zodToJsonSchema(m.inputSchema, m.method),
+    inputSchema: zodToJsonSchema(m.inputSchema as never, m.method),
   }));
   const extensionMethods = extensions.getMethodDefinitions().map((m) => {
     let inputSchema: unknown;
     try {
-      inputSchema = zodToJsonSchema(m.method.inputSchema, m.method.name);
+      inputSchema = zodToJsonSchema(m.method.inputSchema as never, m.method.name);
     } catch {
       inputSchema = m.method.inputSchema ?? {};
     }
     let outputSchema: unknown;
     if (m.method.outputSchema) {
       try {
-        outputSchema = zodToJsonSchema(m.method.outputSchema, `${m.method.name}.output`);
+        outputSchema = zodToJsonSchema(m.method.outputSchema as never, `${m.method.name}.output`);
       } catch {
         outputSchema = m.method.outputSchema;
       }

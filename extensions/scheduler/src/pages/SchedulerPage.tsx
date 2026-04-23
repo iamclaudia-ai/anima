@@ -627,7 +627,7 @@ export function SchedulerPage() {
   } | null>(null);
 
   const rpc = useCallback(
-    <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> =>
+    <T = unknown,>(method: string, params?: Record<string, unknown>): Promise<T> =>
       call<T>(method, params, { timeoutMs: 10000 }),
     [call],
   );

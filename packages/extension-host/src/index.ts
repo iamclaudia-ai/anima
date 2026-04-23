@@ -263,7 +263,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     const methods = ext.methods.map((m) => {
       let inputSchema: unknown;
       try {
-        inputSchema = zodToJsonSchema(m.inputSchema, m.name);
+        inputSchema = zodToJsonSchema(m.inputSchema as never, m.name);
       } catch {
         inputSchema = m.inputSchema._def; // fallback to raw Zod _def
       }
