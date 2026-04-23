@@ -17,7 +17,6 @@
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
-    "chokidar": "^4.0.3",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
     "xstate": "5.30.0"

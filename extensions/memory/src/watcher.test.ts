@@ -29,7 +29,7 @@ describe("shouldIgnorePath", () => {
     expect(shouldIgnorePath("/tmp/foo.jsonl", fileStats)).toBe(false);
   });
 
-  it("does not ignore unknown paths before chokidar stats are available", () => {
+  it("does not ignore unknown paths before file stats are available", () => {
     expect(shouldIgnorePath("/Users/michael/.claude/projects")).toBe(false);
     expect(shouldIgnorePath("/Users/michael/.claude/projects/foo.txt")).toBe(false);
   });

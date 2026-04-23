@@ -1,12 +1,13 @@
 /**
  * Memory Extension — File Watcher
  *
- * Monitors a single base directory for JSONL file changes using chokidar.
+ * Monitors a single base directory for JSONL file changes using fs.watch.
  * File churn is coalesced through an XState ingestion machine so hot transcript
  * files are processed eventually instead of on every write.
  */
 
-import { watch, type FSWatcher } from "chokidar";
+import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
+import { join } from "node:path";
 import { createActor, fromPromise, setup, assign } from "xstate";
 import { ingestFile, yieldToEventLoop, type IngestResult } from "./ingest";
 
@@ -467,32 +468,32 @@ export class MemoryWatcher {
 
     this.log("INFO", `Starting file watcher on: ${this.config.basePath}`);
 
-    this.watcher = watch(this.config.basePath, {
-      persistent: true,
-      ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: 1000,
-        pollInterval: 200,
+    this.watcher = watch(
+      this.config.basePath,
+      {
+        persistent: true,
+        recursive: true,
       },
-      ignored: shouldIgnorePath,
-    });
+      (eventType, relativePath) => {
+        if (!relativePath) return;
 
-    this.watcher.on("ready", () => {
-      this.ready = true;
-      this.diagnostics.ready = true;
-      this.log("INFO", "File watcher ready");
-    });
+        const filePath = join(this.config.basePath, String(relativePath));
+        const stats = safeStat(filePath);
+        if (shouldIgnorePath(filePath, stats)) return;
+        if (stats?.isDirectory()) return;
 
-    this.watcher.on("add", (path) => {
-      if (!this.ready) return;
-      this.log("INFO", `New file detected: ${path}`);
-      this.noteFileChanged(path);
-    });
+        if (eventType === "rename") {
+          if (!existsSync(filePath)) return;
+          if (!this.ready) return;
+          this.log("INFO", `New file detected: ${filePath}`);
+          this.noteFileChanged(filePath);
+          return;
+        }
 
-    this.watcher.on("change", (path) => {
-      this.log("INFO", `File changed: ${path}`);
-      this.noteFileChanged(path);
-    });
+        this.log("INFO", `File changed: ${filePath}`);
+        this.noteFileChanged(filePath);
+      },
+    );
 
     this.watcher.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -500,6 +501,10 @@ export class MemoryWatcher {
       this.diagnostics.lastError = message;
       this.log("ERROR", `Watcher error: ${message}`);
     });
+
+    this.ready = true;
+    this.diagnostics.ready = true;
+    this.log("INFO", "File watcher ready");
   }
 
   async stop(): Promise<void> {
@@ -525,7 +530,7 @@ export class MemoryWatcher {
 }
 
 /**
- * Chokidar ignore predicate:
+ * Ignore predicate:
  * - never ignore directories (we need recursion to find nested JSONL files)
  * - ignore non-JSONL files only when we can confidently identify a regular file
  */
@@ -537,4 +542,12 @@ export function shouldIgnorePath(
   if (stats?.isFile()) return !path.endsWith(".jsonl");
 
   return false;
+}
+
+function safeStat(path: string): { isFile(): boolean; isDirectory(): boolean } | undefined {
+  try {
+    return statSync(path);
+  } catch {
+    return undefined;
+  }
 }

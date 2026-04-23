@@ -9,7 +9,7 @@
  * Startup flow:
  * 1. Connect to DB
  * 2. Scan all JSONL files in watchPath — incremental import (skip unchanged, import new/grown files)
- * 3. Start chokidar watcher for real-time changes
+ * 3. Start file watchers for real-time changes
  * 4. Register gateway.heartbeat handler for singleton lock renewal
  * 5. Start a scheduler actor for ready/queue progression
  *

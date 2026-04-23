@@ -1,11 +1,12 @@
 /**
  * Memory Document Watcher
  *
- * Watches ~/memory for markdown file changes using chokidar.
+ * Watches ~/memory for markdown file changes using fs.watch.
  * Changes are coalesced so save storms do not continuously re-index the same file.
  */
 
-import { watch, type FSWatcher } from "chokidar";
+import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
+import { join } from "node:path";
 
 const DEFAULT_DEBOUNCE_MS = 1000;
 const HOT_DEBOUNCE_MS = 2500;
@@ -141,42 +142,32 @@ export class DocumentWatcher {
 
     this.log("INFO", `DocumentWatcher: Starting on ${this.memoryRoot}`);
 
-    this.watcher = watch(this.memoryRoot, {
-      persistent: true,
-      ignoreInitial: true,
-      awaitWriteFinish: {
-        stabilityThreshold: 500,
-        pollInterval: 100,
+    this.watcher = watch(
+      this.memoryRoot,
+      {
+        persistent: true,
+        recursive: true,
       },
-      ignored: [
-        "**/libby/**",
-        "**/.git/**",
-        "**/node_modules/**",
-        (path: string, stats?: { isFile(): boolean; isDirectory(): boolean }) => {
-          if (stats?.isDirectory()) return false;
-          if (stats?.isFile()) return !path.endsWith(".md");
-          return false;
-        },
-      ],
-    });
+      (eventType, relativePath) => {
+        if (!relativePath) return;
 
-    this.watcher.on("ready", () => {
-      this.ready = true;
-      this.diagnostics.ready = true;
-      this.syncDiagnostics();
-      this.log("INFO", "DocumentWatcher: Ready");
-    });
+        const filePath = join(this.memoryRoot, String(relativePath));
+        const stats = safeStat(filePath);
+        if (shouldIgnoreDocumentPath(filePath, this.memoryRoot, stats)) return;
+        if (stats?.isDirectory()) return;
 
-    this.watcher.on("add", (path) => {
-      if (!this.ready) return;
-      this.log("INFO", `DocumentWatcher: New file detected: ${path}`);
-      this.noteFileChanged(path);
-    });
+        if (eventType === "rename") {
+          if (!existsSync(filePath)) return;
+          if (!this.ready) return;
+          this.log("INFO", `DocumentWatcher: New file detected: ${filePath}`);
+          this.noteFileChanged(filePath);
+          return;
+        }
 
-    this.watcher.on("change", (path) => {
-      this.log("INFO", `DocumentWatcher: File changed: ${path}`);
-      this.noteFileChanged(path);
-    });
+        this.log("INFO", `DocumentWatcher: File changed: ${filePath}`);
+        this.noteFileChanged(filePath);
+      },
+    );
 
     this.watcher.on("error", (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -184,6 +175,11 @@ export class DocumentWatcher {
       this.diagnostics.lastError = message;
       this.log("ERROR", `DocumentWatcher error: ${message}`);
     });
+
+    this.ready = true;
+    this.diagnostics.ready = true;
+    this.syncDiagnostics();
+    this.log("INFO", "DocumentWatcher: Ready");
   }
 
   async stop(): Promise<void> {
@@ -274,5 +270,38 @@ export class DocumentWatcher {
       }
     }
     this.diagnostics.hottestFile = hottest?.filePath ?? null;
+  }
+}
+
+function shouldIgnoreDocumentPath(
+  path: string,
+  memoryRoot: string,
+  stats?: { isFile(): boolean; isDirectory(): boolean },
+): boolean {
+  if (stats?.isDirectory()) return false;
+
+  const relativePath = path.startsWith(`${memoryRoot}/`) ? path.slice(memoryRoot.length + 1) : path;
+  const normalizedPath = relativePath.replaceAll("\\", "/");
+
+  if (
+    normalizedPath.includes("/libby/") ||
+    normalizedPath.startsWith("libby/") ||
+    normalizedPath.includes("/.git/") ||
+    normalizedPath.startsWith(".git/") ||
+    normalizedPath.includes("/node_modules/") ||
+    normalizedPath.startsWith("node_modules/")
+  ) {
+    return true;
+  }
+
+  if (stats?.isFile()) return !path.endsWith(".md");
+  return false;
+}
+
+function safeStat(path: string): { isFile(): boolean; isDirectory(): boolean } | undefined {
+  try {
+    return statSync(path);
+  } catch {
+    return undefined;
   }
 }
