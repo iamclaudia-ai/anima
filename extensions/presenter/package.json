@@ -16,7 +16,7 @@
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
-    "react-markdown": "10.1.0",
+    "react-markdown": "catalog:",
     "remark-gfm": "4.0.1",
     "zod": "catalog:"
   }
