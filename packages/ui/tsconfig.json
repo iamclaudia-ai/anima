@@ -3,7 +3,6 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "outDir": "dist",
-    "baseUrl": ".",
     "paths": {
       "@anima/shared": ["../shared/src/index.ts"]
     }

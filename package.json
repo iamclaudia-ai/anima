@@ -54,7 +54,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/turndown": "5.0.6",
-    "@typescript/native-preview": "7.0.0-dev.20260212.1",
+    "@typescript/native-preview": "7.0.0-dev.20260423.1",
     "bun-plugin-tailwind": "catalog:",
     "bun-types": "1.3.13",
     "husky": "^9.1.7",
@@ -86,7 +86,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.2",
+    "typescript": "^6.0.3",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.25.2",
     "@types/node": "^25.6.0"

@@ -17,11 +17,14 @@
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/src/**/*.tsx",
+    "packages/*/src/**/*.d.ts",
     "clients/*/src/**/*.ts",
     "clients/*/src/**/*.tsx",
+    "clients/*/src/**/*.d.ts",
     "hooks/**/*.ts",
     "extensions/*/src/**/*.ts",
-    "extensions/*/src/**/*.tsx"
+    "extensions/*/src/**/*.tsx",
+    "extensions/*/src/**/*.d.ts"
   ],
   "exclude": ["node_modules", "**/dist/**", "clients/dominatrix/**"]
 }
