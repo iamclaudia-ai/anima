@@ -38,12 +38,12 @@
     "docs:api:check": "bun run docs:api && (git diff --quiet -- docs/API-REFERENCE.md && git diff --cached --quiet -- docs/API-REFERENCE.md || (echo \"[prepush] docs/API-REFERENCE.md changed after generation. Commit the regenerated file.\"; exit 1))"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.118",
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@google/genai": "1.46.0",
     "dockview": "5.1.0",
     "dockview-react": "5.1.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "sharp": "0.34.5"
   },
   "devDependencies": {
@@ -75,6 +75,7 @@
     ]
   },
   "catalog": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.118",
     "@anthropic-ai/sdk": "^0.81.0",
     "@tailwindcss/typography": "^0.5.19",
     "@types/bun": "latest",
