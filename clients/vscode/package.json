@@ -29,21 +29,21 @@
   },
   "dependencies": {
     "@anima/ui": "workspace:*",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "ws": "^8.x"
   },
   "devDependencies": {
     "@types/node": "^20.x",
-    "@types/react": "^19.2.9",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.x",
     "@typescript-eslint/parser": "^6.x",
-    "bun-plugin-tailwind": "0.1.2",
+    "bun-plugin-tailwind": "catalog:",
     "eslint": "^8.x",
-    "tailwindcss": "4.1.18",
-    "typescript": "^5.x"
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
   },
   "contributes": {
     "commands": [

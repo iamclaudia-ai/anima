@@ -11,10 +11,10 @@
   "dependencies": {
     "@anima/shared": "workspace:*",
     "@openai/codex-sdk": "^0.104.0",
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
-    "@types/bun": "latest"
+    "@anthropic-ai/sdk": "catalog:",
+    "@types/bun": "catalog:"
   }
 }

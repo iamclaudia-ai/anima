@@ -18,6 +18,6 @@
     "@anima/ui": "workspace:*",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   }
 }

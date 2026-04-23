@@ -26,12 +26,12 @@
     "@anima/voice": "workspace:*",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.24.6"
+    "zod": "catalog:",
+    "zod-to-json-schema": "catalog:"
   },
   "devDependencies": {
-    "@tailwindcss/typography": "^0.5.19",
-    "bun-plugin-tailwind": "0.1.2",
-    "tailwindcss": "^4.0.0"
+    "@tailwindcss/typography": "catalog:",
+    "bun-plugin-tailwind": "catalog:",
+    "tailwindcss": "catalog:"
   }
 }

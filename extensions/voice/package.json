@@ -11,6 +11,6 @@
   "dependencies": {
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   }
 }
