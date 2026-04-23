@@ -16,7 +16,7 @@
     "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
-    "@types/chrome": "^0.0.278",
+    "@types/chrome": "0.1.40",
     "typescript": "catalog:"
   }
 }

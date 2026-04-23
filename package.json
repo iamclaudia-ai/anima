@@ -51,7 +51,6 @@
   "devDependencies": {
     "@tailwindcss/typography": "catalog:",
     "@types/bun": "catalog:",
-    "@types/chrome": "0.1.37",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/turndown": "5.0.6",

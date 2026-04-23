@@ -20,6 +20,6 @@
     "chokidar": "^4.0.3",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "xstate": "5.28.0"
+    "xstate": "5.30.0"
   }
 }
