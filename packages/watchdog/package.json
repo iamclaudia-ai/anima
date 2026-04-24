@@ -6,5 +6,8 @@
     "start": "bun run src/index.ts",
     "build": "bun build --compile src/index.ts --outfile dist/anima-watchdog",
     "deploy": "bun run build && mkdir -p ~/.anima/bin && cp dist/anima-watchdog ~/.anima/bin/watchdog && echo '✅ Deployed to ~/.anima/bin/watchdog'"
+  },
+  "dependencies": {
+    "@anima/shared": "workspace:*"
   }
 }

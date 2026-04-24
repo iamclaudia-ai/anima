@@ -11,15 +11,15 @@
  * are committed to git.
  *
  * Uses a dedicated workspace at ~/libby for Libby's sessions.
- * One session is reused across sequential processing — this means:
- * - Less overhead (one CLI process, not one per conversation)
- * - Natural cross-conversation coherence
- * - System prompt sent once as the first message, transcripts follow
- * - Single long-lived session — relies on auto-compaction for context management
+ * Each conversation gets a fresh Claude session so:
+ * - JSONL history stays bounded per transcript
+ * - prior transcripts do not leak into the next run's context
+ * - the only long-lived identity is the in-flight session ID recorded on
+ *   the conversation row for crash recovery
  *
  * The worker sleeps when idle and can be woken via AbortController
- * when new conversations are queued. Survives crashes: on startup,
- * any conversations stuck in "processing" are reset to "queued".
+ * when new conversations are queued. Survives crashes by best-effort
+ * recovery of in-flight sessions before falling back to requeueing work.
  */
 
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
@@ -32,6 +32,7 @@ import {
   getQueuedCount,
   getEntriesForConversation,
   getProcessingConversations,
+  resetConversationToQueued,
   updateConversationStatus,
   updateConversationProcessed,
   getPreviousConversationContext,
@@ -100,16 +101,32 @@ export interface RepoSyncRequester {
   requestSync(reason?: string): void;
 }
 
+interface SessionHistoryBlock {
+  type: "text" | "thinking" | "image" | "file" | "tool_use";
+  content?: string;
+}
+
+interface SessionHistoryMessage {
+  role: "user" | "assistant" | "compaction_boundary";
+  blocks: SessionHistoryBlock[];
+}
+
+interface SessionRuntimeInfo {
+  id: string;
+  isActive: boolean;
+  isProcessRunning: boolean;
+}
+
 // ============================================================================
 // Libby Session (RPC via ctx.call)
 // ============================================================================
 
 /**
- * A persistent session for Libby's processing.
+ * A per-conversation session for Libby's processing.
  *
  * Uses ctx.call() RPC to communicate with the gateway — proper
  * request/response instead of fire-and-forget WebSocket messages.
- * Creates one session and reuses it for sequential prompts.
+ * Creates one session for one transcript.
  * The system prompt is sent as the first message to establish Libby's identity.
  */
 class LibbySession {
@@ -325,14 +342,17 @@ export class LibbyWorker {
     while (this.running) {
       try {
         // Safety: if something is already processing (e.g. zombie from a crashed worker),
-        // don't start another one — wait for it to clear or be reset on next restart.
+        // don't start another one until we reconcile the in-flight work.
         const alreadyProcessing = getProcessingConversations();
         if (alreadyProcessing.length > 0) {
-          this.log(
-            "INFO",
-            `Libby: Waiting — ${alreadyProcessing.length} conversation(s) already processing`,
-          );
-          await this.sleep(WORKER_SLEEP_MS);
+          const handled = await this.reconcileProcessingConversations(alreadyProcessing);
+          if (!handled) {
+            this.log(
+              "INFO",
+              `Libby: Waiting — ${alreadyProcessing.length} conversation(s) already processing`,
+            );
+            await this.sleep(WORKER_SLEEP_MS);
+          }
           continue;
         }
 
@@ -349,6 +369,66 @@ export class LibbyWorker {
         // Brief pause before retrying to avoid tight error loops
         await this.sleep(5000);
       }
+    }
+  }
+
+  private async reconcileProcessingConversations(
+    processing: Array<{ id: number; sessionId: string | null }>,
+  ): Promise<boolean> {
+    if (!this.ctx) return false;
+
+    let handled = false;
+    for (const conv of processing) {
+      if (!conv.sessionId) {
+        resetConversationToQueued(conv.id);
+        this.log("WARN", `Libby: Reset conversation ${conv.id} — missing recovery session ID`);
+        handled = true;
+        continue;
+      }
+
+      const session = await this.getLibbySessionInfo(conv.sessionId);
+      if (session?.isProcessRunning) continue;
+
+      const rawResponse = await recoverLibbyResponse(this.ctx, conv.sessionId);
+      if (rawResponse) {
+        this.log("INFO", `Libby: Recovered completed response for conversation ${conv.id}`);
+        await finalizeLibbyConversation(
+          conv.id,
+          rawResponse,
+          getQueuedCount(),
+          this.log,
+          this.repoSync ?? undefined,
+          this.ctx,
+        );
+      } else {
+        resetConversationToQueued(conv.id);
+        this.log(
+          "WARN",
+          `Libby: Requeued conversation ${conv.id} — no recoverable response for session ${conv.sessionId}`,
+        );
+      }
+
+      try {
+        await this.ctx.call("session.close_session", { sessionId: conv.sessionId });
+      } catch {
+        // Session may already be closed or absent in agent-host.
+      }
+
+      handled = true;
+    }
+
+    return handled;
+  }
+
+  private async getLibbySessionInfo(sessionId: string): Promise<SessionRuntimeInfo | null> {
+    if (!this.ctx) return null;
+    try {
+      const info = (await this.ctx.call("session.get_info", { sessionId })) as {
+        session?: SessionRuntimeInfo | null;
+      };
+      return info.session || null;
+    } catch {
+      return null;
     }
   }
 
@@ -478,54 +558,15 @@ ${transcript.text}`;
       // Send transcript — Libby uses tools to write files, then responds with SUMMARY/SKIP
       const startTime = Date.now();
       const rawResponse = await this.session.processTranscript(prompt);
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      this.log(
-        "INFO",
-        `Libby: [${conv.id}] Response received in ${elapsed}s (${rawResponse.length} chars)`,
+      await finalizeLibbyConversation(
+        conv.id,
+        rawResponse,
+        queuedRemaining,
+        this.log,
+        this.repoSync ?? undefined,
+        this.ctx,
+        startTime,
       );
-
-      // Parse Libby's response — either SKIP or SUMMARY
-      const result = parseLibbyResponse(rawResponse);
-
-      if (result.skipped) {
-        updateConversationProcessed(conv.id, "skipped", result.summary);
-        this.log("INFO", `Libby: [${conv.id}] Skipped in ${elapsed}s — ${result.summary}`);
-      } else {
-        // Git commit the memory changes
-        const filesWritten = await commitMemoryChanges(conv.id, result.summary, this.log);
-
-        // Verification: flag for review if something looks wrong
-        const reviewReason = await verifyProcessing(
-          conv.id,
-          result.summary,
-          filesWritten,
-          this.log,
-        );
-
-        if (reviewReason) {
-          updateConversationProcessed(conv.id, "review", result.summary, filesWritten);
-          this.log(
-            "WARN",
-            `Libby: [${conv.id}] Flagged for review in ${elapsed}s — ${reviewReason}`,
-          );
-        } else {
-          updateConversationProcessed(conv.id, "archived", result.summary, filesWritten);
-          this.log(
-            "INFO",
-            `Libby: [${conv.id}] Archived in ${elapsed}s — ${filesWritten.length} files changed`,
-          );
-        }
-
-        if (filesWritten.length > 0) {
-          this.repoSync?.requestSync(`conversation:${conv.id}`);
-        }
-      }
-
-      this.ctx?.emit("memory.conversation_processed", {
-        conversationId: conv.id,
-        status: result.skipped ? "skipped" : "archived",
-        queued: queuedRemaining - 1,
-      });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.log("ERROR", `Libby: Failed conversation ${conv.id}: ${msg}`);
@@ -570,6 +611,41 @@ interface LibbyResult {
   summary: string;
 }
 
+function extractAssistantText(message: SessionHistoryMessage): string {
+  return message.blocks
+    .filter((block) => block.type === "text" && typeof block.content === "string")
+    .map((block) => block.content?.trim() || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function extractRecoveredLibbyResponse(messages: SessionHistoryMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    const text = extractAssistantText(message);
+    if (text) return text;
+  }
+  return null;
+}
+
+async function recoverLibbyResponse(
+  ctx: ExtensionContext,
+  sessionId: string,
+): Promise<string | null> {
+  try {
+    const history = (await ctx.call("session.get_history", {
+      sessionId,
+      cwd: LIBBY_CWD,
+      limit: 50,
+      offset: 0,
+    })) as { messages?: SessionHistoryMessage[] };
+    return extractRecoveredLibbyResponse(history.messages || []);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse Libby's response text into a result.
  * Libby responds with either "SKIP: reason" or "SUMMARY: one-liner"
@@ -593,6 +669,54 @@ function parseLibbyResponse(rawText: string): LibbyResult {
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
   const lastLine = lines[lines.length - 1]?.trim() || "Processed by Libby";
   return { skipped: false, summary: lastLine };
+}
+
+async function finalizeLibbyConversation(
+  conversationId: number,
+  rawResponse: string,
+  queuedRemaining: number,
+  log: (level: string, msg: string) => void,
+  repoSync?: RepoSyncRequester,
+  ctx?: ExtensionContext,
+  startTimeMs?: number,
+): Promise<void> {
+  const elapsed =
+    typeof startTimeMs === "number" ? ((Date.now() - startTimeMs) / 1000).toFixed(1) : "recovered";
+  log(
+    "INFO",
+    `Libby: [${conversationId}] Response received in ${elapsed}s (${rawResponse.length} chars)`,
+  );
+
+  const result = parseLibbyResponse(rawResponse);
+
+  if (result.skipped) {
+    updateConversationProcessed(conversationId, "skipped", result.summary);
+    log("INFO", `Libby: [${conversationId}] Skipped in ${elapsed}s — ${result.summary}`);
+  } else {
+    const filesWritten = await commitMemoryChanges(conversationId, result.summary, log);
+    const reviewReason = await verifyProcessing(conversationId, result.summary, filesWritten, log);
+
+    if (reviewReason) {
+      updateConversationProcessed(conversationId, "review", result.summary, filesWritten);
+      log("WARN", `Libby: [${conversationId}] Flagged for review in ${elapsed}s — ${reviewReason}`);
+    } else {
+      updateConversationProcessed(conversationId, "archived", result.summary, filesWritten);
+      log(
+        "INFO",
+        `Libby: [${conversationId}] Archived in ${elapsed}s — ${filesWritten.length} files changed`,
+      );
+    }
+
+    if (filesWritten.length > 0) {
+      repoSync?.requestSync(`conversation:${conversationId}`);
+    }
+  }
+
+  ctx?.emit("memory.conversation_processed", {
+    conversationId,
+    status: result.skipped ? "skipped" : "archived",
+    queued: Math.max(queuedRemaining - 1, 0),
+  });
 }
 
 // ============================================================================

@@ -43,7 +43,6 @@ describe("watchdog health checks", () => {
         JSON.stringify({
           status: "ok",
           extensions: { session: { ok: true } },
-          runtimeLocks: [],
         }),
         {
           status: 200,
@@ -67,42 +66,5 @@ describe("watchdog health checks", () => {
       }),
     );
     expect(result.healthy).toBe(true);
-  });
-
-  it("marks gateway unhealthy when memory lock heartbeat is stale", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          status: "ok",
-          extensions: { memory: { ok: true } },
-          runtimeLocks: [
-            {
-              extensionId: "memory",
-              lockType: "singleton",
-              resourceKey: "__default__",
-              holderPid: process.pid,
-              holderInstanceId: "memory:test",
-              acquiredAt: Date.now() - 600_000,
-              updatedAt: Date.now() - 600_000,
-              staleAfterMs: 180_000,
-              metadata: { actor: "memory", role: "singleton" },
-              stale: true,
-            },
-          ],
-        }),
-        {
-          status: 200,
-        },
-      )) as unknown as typeof fetch;
-
-    const result = await checkHealth(makeService());
-    expect(result.healthy).toBe(false);
-    expect(result.reason).toBe("memory_stale_lock");
-    expect(result.details).toMatchObject({
-      memoryLock: {
-        holderPid: process.pid,
-        stale: true,
-      },
-    });
   });
 });

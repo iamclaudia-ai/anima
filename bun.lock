@@ -322,6 +322,9 @@
     "packages/watchdog": {
       "name": "@anima/watchdog",
       "version": "0.1.0",
+      "dependencies": {
+        "@anima/shared": "workspace:*",
+      },
     },
   },
   "catalog": {

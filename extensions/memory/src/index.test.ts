@@ -58,26 +58,8 @@ function setupSchema(): void {
   `);
 }
 
-function createTestContext(options: { preheldLockPid?: number | null } = {}): ExtensionContext {
+function createTestContext(): ExtensionContext {
   const listeners = new Map<string, (event: GatewayEvent) => void | Promise<void>>();
-  let runtimeLock: {
-    holderPid: number | null;
-    holderInstanceId: string;
-    staleAfterMs: number;
-    updatedAt: number;
-    stale: boolean;
-    metadata: Record<string, unknown> | null;
-  } | null =
-    options.preheldLockPid != null
-      ? {
-          holderPid: options.preheldLockPid,
-          holderInstanceId: `memory:${options.preheldLockPid}`,
-          staleAfterMs: 60_000,
-          updatedAt: Date.now(),
-          stale: false,
-          metadata: { actor: "memory", role: "singleton" } as Record<string, unknown>,
-        }
-      : null;
 
   return {
     on(pattern, handler) {
@@ -85,43 +67,7 @@ function createTestContext(options: { preheldLockPid?: number | null } = {}): Ex
       return () => listeners.delete(pattern);
     },
     emit() {},
-    async call(method, params) {
-      if (method === "gateway.acquire_liveness_lock") {
-        if (!runtimeLock) {
-          runtimeLock = {
-            holderPid: (params?.holderPid as number | null) ?? null,
-            holderInstanceId: params?.holderInstanceId as string,
-            staleAfterMs: (params?.staleAfterMs as number) ?? 180_000,
-            updatedAt: Date.now(),
-            stale: false,
-            metadata: (params?.metadata as Record<string, unknown>) ?? null,
-          };
-          return { acquired: true, lock: runtimeLock };
-        }
-        return { acquired: false, lock: runtimeLock };
-      }
-      if (method === "gateway.renew_liveness_lock") {
-        if (
-          runtimeLock &&
-          runtimeLock.holderPid === ((params?.holderPid as number | null) ?? null) &&
-          runtimeLock.holderInstanceId === (params?.holderInstanceId as string)
-        ) {
-          runtimeLock = { ...runtimeLock, updatedAt: Date.now(), stale: false };
-          return { renewed: true };
-        }
-        return { renewed: false };
-      }
-      if (method === "gateway.release_liveness_lock") {
-        if (
-          runtimeLock &&
-          runtimeLock.holderPid === ((params?.holderPid as number | null) ?? null) &&
-          runtimeLock.holderInstanceId === (params?.holderInstanceId as string)
-        ) {
-          runtimeLock = null;
-          return { released: true };
-        }
-        return { released: false };
-      }
+    async call() {
       return {};
     },
     connectionId: null,
@@ -182,7 +128,7 @@ async function waitFor(
   throw new Error(`Timed out after ${timeoutMs}ms`);
 }
 
-describe("memory health lock status", () => {
+describe("memory health status", () => {
   let tempDir: string;
 
   beforeEach(() => {
@@ -197,29 +143,30 @@ describe("memory health lock status", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("reports degraded status when singleton lock is held by another process", async () => {
+  it("reports healthy status after startup", async () => {
     const ext = createMemoryExtension({ watch: false, watchPath: join(tempDir, "logs") });
-    const blocker = Bun.spawn(["sleep", "30"], {
-      stdout: "ignore",
-      stderr: "ignore",
-    });
 
     try {
-      await ext.start(createTestContext({ preheldLockPid: blocker.pid }));
+      await ext.start(createTestContext());
+      await waitFor(async () => {
+        const health = (await ext.handleMethod("memory.health_check", {})) as {
+          status: string;
+        };
+        return health.status === "healthy";
+      });
 
       const health = (await ext.handleMethod("memory.health_check", {})) as {
         status: string;
         metrics: Array<{ label: string; value: string }>;
       };
 
-      expect(health.status).toBe("degraded");
-      const lockMetric = health.metrics.find((m) => m.label === "Singleton Lock");
-      expect(lockMetric?.value).toBe("contended");
+      expect(health.status).toBe("healthy");
+      const actorMetric = health.metrics.find((m) => m.label === "Actor State");
+      expect(actorMetric?.value).toBe("running");
       const watcherMetric = health.metrics.find((m) => m.label === "Last File Change");
       expect(watcherMetric?.value).toBe("n/a");
     } finally {
       await ext.stop();
-      blocker.kill();
     }
   });
 

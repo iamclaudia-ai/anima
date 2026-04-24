@@ -19,7 +19,7 @@
 import { setup, assign, fromPromise } from "xstate";
 import type { ExtensionContext } from "@anima/shared";
 import { existsSync } from "node:fs";
-import { getDb, getProcessingConversations, resetConversationToQueued } from "./db";
+import { getDb } from "./db";
 import { recoverStuckFiles, ingestDirectoryCooperative, type IngestResult } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import type { MemoryConfig } from "./index";
@@ -95,15 +95,9 @@ export const memoryExtensionMachine = setup({
           totalRecovered += recovered;
         }
 
-        // Step 2: Reset stuck conversations
-        const processing = getProcessingConversations();
-        if (processing.length > 0) {
-          for (const conv of processing) {
-            resetConversationToQueued(conv.id);
-          }
-          context.fileLog("INFO", `Reset ${processing.length} conversations stuck in processing`);
-          totalRecovered += processing.length;
-        }
+        // Step 2: Leave in-flight Libby conversations alone.
+        // The worker reconciles processing rows against the session layer and
+        // either recovers the response or requeues the work once recovery fails.
 
         // Step 3: Clean up stale file locks (older than 5 min)
         const result = getDb()

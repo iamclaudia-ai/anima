@@ -10,8 +10,7 @@
  * 1. Connect to DB
  * 2. Scan all JSONL files in watchPath — incremental import (skip unchanged, import new/grown files)
  * 3. Start file watchers for real-time changes
- * 4. Register gateway.heartbeat handler for singleton lock renewal
- * 5. Start a scheduler actor for ready/queue progression
+ * 4. Start a scheduler actor for ready/queue progression
  *
  * All files are keyed relative to watchPath, so importing from
  * ~/.claude/projects-backup and watching ~/.claude/projects produce
@@ -27,7 +26,6 @@ import type {
 } from "@anima/shared";
 import { createStandardExtension } from "@anima/extension-host";
 import { existsSync, readFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -120,8 +118,6 @@ const DEFAULT_CONFIG: Required<MemoryConfig> = {
   exclude: [],
 };
 
-const LOCK_STALE_MS = 3 * 60 * 1000;
-
 interface MemoryExtensionRuntime {
   ctx: ExtensionContext;
   watcher: MemoryWatcher | null;
@@ -130,18 +126,6 @@ interface MemoryExtensionRuntime {
   repoSync: RepoSyncService | null;
   scheduler: MemoryScheduler | null;
   extensionActor: ActorRefFrom<typeof memoryExtensionMachine> | null;
-  isLockOwner: boolean;
-  lockState: "held" | "contended" | "released";
-  lockHolderInstanceId: string;
-  runtimeLock: {
-    holderPid: number | null;
-    holderInstanceId: string;
-    staleAfterMs: number;
-    updatedAt: number;
-    stale: boolean;
-    metadata: Record<string, unknown> | null;
-  } | null;
-  unsubscribeHeartbeat: (() => void) | null;
 }
 
 // ============================================================================
@@ -204,96 +188,6 @@ function formatElapsedSince(iso: string | null): string {
 function compactHomePath(path: string | null): string {
   if (!path) return "n/a";
   return path.replace(/^\/Users\/\w+/, "~");
-}
-
-function isPidAlive(pid: number | null | undefined): boolean {
-  if (!pid || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function acquireLivenessLock(runtime: MemoryExtensionRuntime) {
-  let result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
-    lockType: "singleton",
-    holderPid: process.pid,
-    holderInstanceId: runtime.lockHolderInstanceId,
-    staleAfterMs: LOCK_STALE_MS,
-    metadata: {
-      actor: "memory",
-      role: "singleton",
-    },
-  })) as {
-    acquired: boolean;
-    stolen?: boolean;
-    lock?: {
-      holderPid: number | null;
-      holderInstanceId: string;
-      staleAfterMs: number;
-      updatedAt: number;
-      stale: boolean;
-      metadata: Record<string, unknown> | null;
-    } | null;
-  };
-
-  if (!result.acquired && result.lock?.holderPid && !isPidAlive(result.lock.holderPid)) {
-    fileLog(
-      "WARN",
-      `Detected dead memory lock owner PID ${result.lock.holderPid}; forcing singleton lock takeover`,
-    );
-
-    result = (await runtime.ctx.call("gateway.acquire_liveness_lock", {
-      lockType: "singleton",
-      holderPid: process.pid,
-      holderInstanceId: runtime.lockHolderInstanceId,
-      staleAfterMs: 0,
-      metadata: {
-        actor: "memory",
-        role: "singleton",
-      },
-    })) as typeof result;
-  }
-
-  runtime.runtimeLock = result.lock ?? null;
-  runtime.isLockOwner = result.acquired;
-  runtime.lockState = result.acquired ? "held" : "contended";
-  return result;
-}
-
-async function renewLivenessLock(runtime: MemoryExtensionRuntime): Promise<boolean> {
-  const result = (await runtime.ctx.call("gateway.renew_liveness_lock", {
-    lockType: "singleton",
-    holderPid: process.pid,
-    holderInstanceId: runtime.lockHolderInstanceId,
-    staleAfterMs: LOCK_STALE_MS,
-    metadata: {
-      actor: "memory",
-      role: "singleton",
-    },
-  })) as { renewed: boolean };
-  if (result.renewed && runtime.runtimeLock) {
-    runtime.runtimeLock = {
-      ...runtime.runtimeLock,
-      updatedAt: Date.now(),
-      staleAfterMs: LOCK_STALE_MS,
-      stale: false,
-      metadata: { actor: "memory", role: "singleton" },
-    };
-  }
-  return result.renewed;
-}
-
-async function releaseLivenessLock(runtime: MemoryExtensionRuntime): Promise<boolean> {
-  const result = (await runtime.ctx.call("gateway.release_liveness_lock", {
-    lockType: "singleton",
-    holderPid: process.pid,
-    holderInstanceId: runtime.lockHolderInstanceId,
-  })) as { released: boolean };
-  runtime.runtimeLock = null;
-  return result.released;
 }
 
 // ============================================================================
@@ -479,15 +373,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         const s = stats.conversationsByStatus;
         const workItems = getActiveWorkItems();
         const actorState = runtime.extensionActor?.getSnapshot().value ?? "stopped";
-        const lockHeldByMe = runtime.isLockOwner;
-        const lockLabel = runtime.lockState;
-        const lockAgeSec = runtime.runtimeLock
-          ? Math.max(0, Math.round((Date.now() - runtime.runtimeLock.updatedAt) / 1000))
-          : 0;
         const watcherDiag = runtime.watcher?.getDiagnostics() ?? null;
         const docWatcherDiag = runtime.docWatcher?.getDiagnostics() ?? null;
         const schedulerDiag = runtime.scheduler?.getDiagnostics() ?? null;
         const repoSyncDiag = runtime.repoSync?.getDiagnostics() ?? null;
+        const isRunning = actorState === "running";
 
         const statusDisplay: Record<
           string,
@@ -532,20 +422,9 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
         const response: HealthCheckResponse = {
           ok: true,
-          status: lockHeldByMe ? "healthy" : "degraded",
+          status: isRunning ? "healthy" : "degraded",
           label: "Memory (Transcript Ingestion + Libby)",
           metrics: [
-            { label: "Singleton Lock", value: lockLabel },
-            {
-              label: "Lock Owner PID",
-              value: runtime.runtimeLock?.holderPid
-                ? String(runtime.runtimeLock.holderPid)
-                : "none",
-            },
-            {
-              label: "Lock Age",
-              value: runtime.runtimeLock ? `${lockAgeSec}s` : "n/a",
-            },
             { label: "Actor State", value: actorState },
             { label: "Watcher Ready", value: watcherDiag ? String(watcherDiag.ready) : "false" },
             { label: "Watcher State", value: watcherDiag?.state ?? "idle" },
@@ -1031,22 +910,18 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
   function health(runtime: MemoryExtensionRuntime | null) {
     try {
       const stats = getStats();
+      const actorState = runtime?.extensionActor?.getSnapshot().value ?? "stopped";
       return {
-        ok: runtime?.isLockOwner === true,
+        ok: actorState === "running",
         details: {
           fileCount: stats.fileCount,
           entryCount: stats.entryCount,
           conversations: stats.conversationsByStatus,
           watchPath: cfg.watchPath,
-          singletonLock: {
-            state: runtime?.lockState ?? "released",
-            ownerPid: runtime?.runtimeLock?.holderPid ?? null,
-            heldByCurrentProcess: runtime?.isLockOwner === true,
-            heartbeatAgeMs: runtime?.runtimeLock
-              ? Math.max(0, Date.now() - runtime.runtimeLock.updatedAt)
-              : null,
-            stale: runtime?.runtimeLock?.stale ?? null,
-          },
+          actorState,
+          watcherActive: runtime?.watcher !== null,
+          workerActive: runtime?.worker !== null,
+          schedulerActive: runtime?.scheduler !== null,
         },
       };
     } catch {
@@ -1066,11 +941,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         repoSync: null,
         scheduler: null,
         extensionActor: null,
-        isLockOwner: false,
-        lockState: "released",
-        lockHolderInstanceId: `memory:${process.pid}:${randomUUID()}`,
-        runtimeLock: null,
-        unsubscribeHeartbeat: null,
       };
     },
     methods: methods.map((definition) => ({
@@ -1105,23 +975,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         return;
       }
 
-      const lockResult = await acquireLivenessLock(runtime);
-
-      if (!lockResult.acquired) {
-        ctx.log.warn(
-          `[memory] Another memory extension instance holds the singleton lock (owner pid=${lockResult.lock?.holderPid ?? "unknown"}). This instance will stay passive.`,
-        );
-        fileLog(
-          "WARN",
-          `[memory] Singleton lock contended; owner pid=${lockResult.lock?.holderPid ?? "unknown"}`,
-        );
-        return;
-      }
-
-      if (lockResult.stolen && lockResult.lock?.holderPid) {
-        fileLog("WARN", `[memory] Stole stale singleton lock for memory runtime`);
-      }
-
       try {
         runtime.extensionActor = createActor(memoryExtensionMachine, {
           input: {
@@ -1154,30 +1007,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
         runtime.extensionActor.start();
         runtime.extensionActor.send({ type: "START" });
-
-        runtime.unsubscribeHeartbeat = ctx.on("gateway.heartbeat", async () => {
-          if (!runtime.isLockOwner) return;
-
-          const renewed = await renewLivenessLock(runtime);
-          if (!renewed) {
-            runtime.isLockOwner = false;
-            runtime.lockState = "contended";
-            runtime.runtimeLock = null;
-            fileLog("ERROR", "[memory] Lost singleton lock; stopping memory actor and worker");
-            runtime.scheduler?.stop();
-            runtime.scheduler = null;
-            const repoSyncStop = runtime.repoSync?.stop();
-            if (repoSyncStop) void repoSyncStop.catch(() => {});
-            runtime.repoSync = null;
-            const stopPromise = runtime.worker?.stop();
-            if (stopPromise) void stopPromise.catch(() => {});
-            runtime.worker = null;
-            runtime.extensionActor?.send({ type: "STOP" });
-            return;
-          }
-
-          runtime.extensionActor?.send({ type: "HEARTBEAT" });
-        });
 
         const actor = runtime.extensionActor;
         const startWorkerWhenRunning = async () => {
@@ -1271,13 +1100,8 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       } catch (error) {
         fileLog(
           "ERROR",
-          `[memory] Startup failed after lock acquire: ${error instanceof Error ? error.message : String(error)}`,
+          `[memory] Startup failed: ${error instanceof Error ? error.message : String(error)}`,
         );
-        if (runtime.isLockOwner) {
-          await releaseLivenessLock(runtime);
-        }
-        runtime.isLockOwner = false;
-        runtime.lockState = "released";
         throw error;
       }
     },
@@ -1285,11 +1109,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       const runtime = instance.runtime;
       const ctx = runtime.ctx;
       ctx.log.info("[memory] Stopping memory extension...");
-
-      if (runtime.unsubscribeHeartbeat) {
-        runtime.unsubscribeHeartbeat();
-        runtime.unsubscribeHeartbeat = null;
-      }
 
       if (runtime.docWatcher) {
         await runtime.docWatcher.stop();
@@ -1319,12 +1138,6 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       }
 
       runtime.watcher = null;
-
-      if (runtime.isLockOwner) {
-        await releaseLivenessLock(runtime);
-      }
-      runtime.isLockOwner = false;
-      runtime.lockState = "released";
 
       closeDb();
       traceLog = noopLogger;

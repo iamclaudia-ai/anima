@@ -17,7 +17,6 @@ import {
 import type { ServiceConfig } from "./constants";
 import { log } from "./logger";
 import { recordRecoveryEvent } from "./recovery-journal";
-import { createGatewayClient } from "@anima/shared";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -338,39 +337,6 @@ export interface HealthCheckResult {
   details?: Record<string, unknown>;
 }
 
-function toGatewayWsUrl(healthUrl: string): string {
-  const url = new URL(healthUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = "/ws";
-  const token = getGatewayToken();
-  if (token) {
-    url.searchParams.set("token", token);
-  }
-  return url.toString();
-}
-
-async function restartExtensionViaGateway(
-  gatewayService: ManagedService,
-  extensionId: string,
-): Promise<void> {
-  if (!gatewayService.healthUrl) {
-    throw new Error("Gateway health URL is required for targeted extension restart");
-  }
-
-  const client = createGatewayClient({
-    url: toGatewayWsUrl(gatewayService.healthUrl),
-    requestTimeoutMs: 5000,
-    autoReconnect: false,
-  });
-
-  try {
-    await client.connect();
-    await client.call("gateway.restart_extension", { extension: extensionId }, { timeoutMs: 5000 });
-  } finally {
-    client.disconnect(1000, "watchdog restart complete");
-  }
-}
-
 export async function checkHealth(service: ManagedService): Promise<HealthCheckResult> {
   // No healthUrl — process-alive is the only check
   if (!service.healthUrl) {
@@ -390,76 +356,10 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
 
     // If this service requires extensions to be loaded, check for that
     if (service.requireExtensions) {
-      const body = (await res.json()) as {
-        extensions?: Record<string, unknown>;
-        runtimeLocks?: Array<{
-          extensionId: string;
-          lockType: string;
-          resourceKey: string;
-          holderPid: number | null;
-          holderInstanceId: string;
-          acquiredAt: number;
-          updatedAt: number;
-          staleAfterMs: number;
-          metadata: Record<string, unknown> | null;
-          stale: boolean;
-        }>;
-      };
+      const body = (await res.json()) as { extensions?: Record<string, unknown> };
       const extensionCount = body.extensions ? Object.keys(body.extensions).length : 0;
       if (extensionCount === 0) {
         return { healthy: false, reason: "zero_extensions", details: { extensionCount } };
-      }
-
-      if (service.id === "gateway") {
-        const memoryLock =
-          body.runtimeLocks?.find(
-            (lock) =>
-              lock.extensionId === "memory" &&
-              lock.lockType === "singleton" &&
-              lock.resourceKey === "__default__",
-          ) ?? null;
-        if (memoryLock?.stale) {
-          return {
-            healthy: false,
-            reason: "memory_stale_lock",
-            details: { memoryLock },
-          };
-        }
-        if (memoryLock) {
-          return { healthy: true, details: { memoryLock } };
-        }
-      }
-    } else if (service.id === "gateway") {
-      const body = (await res.json()) as {
-        runtimeLocks?: Array<{
-          extensionId: string;
-          lockType: string;
-          resourceKey: string;
-          holderPid: number | null;
-          holderInstanceId: string;
-          acquiredAt: number;
-          updatedAt: number;
-          staleAfterMs: number;
-          metadata: Record<string, unknown> | null;
-          stale: boolean;
-        }>;
-      };
-      const memoryLock =
-        body.runtimeLocks?.find(
-          (lock) =>
-            lock.extensionId === "memory" &&
-            lock.lockType === "singleton" &&
-            lock.resourceKey === "__default__",
-        ) ?? null;
-      if (memoryLock?.stale) {
-        return {
-          healthy: false,
-          reason: "memory_stale_lock",
-          details: { memoryLock },
-        };
-      }
-      if (memoryLock) {
-        return { healthy: true, details: { memoryLock } };
       }
     }
 
@@ -470,9 +370,6 @@ export async function checkHealth(service: ManagedService): Promise<HealthCheckR
 }
 
 function restartThresholdForReason(reason: string | null): number {
-  if (reason === "memory_stale_lock" || reason === "memory_orphaned_lock") {
-    return 1;
-  }
   return UNHEALTHY_RESTART_THRESHOLD;
 }
 
@@ -526,10 +423,7 @@ function openIncident(
     servicePid: service.proc?.pid ?? null,
     incidentId: service.activeIncident.incidentId,
     attemptId: null,
-    event:
-      reason === "memory_stale_lock" || reason === "memory_orphaned_lock"
-        ? "memory_stale_lock_detected"
-        : "health_check_failed",
+    event: "health_check_failed",
     reason,
     decision: {
       action: "observe",
@@ -692,37 +586,25 @@ export async function monitorServices(): Promise<void> {
         const timeSinceRestart = Date.now() - service.lastRestart;
         if (timeSinceRestart < service.restartBackoff) continue;
 
-        const recoveryTarget =
-          service.id === "gateway" && reason === "memory_stale_lock" ? "memory" : service.id;
+        const recoveryTarget = service.id;
         markRestartRequested(service, reason, {
           consecutiveFailures: service.consecutiveFailures,
           restartBackoff: service.restartBackoff,
           recoveryTarget,
           health: health.details ?? undefined,
         });
-        if (service.id === "gateway" && reason === "memory_stale_lock") {
-          log(
-            "WARN",
-            `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason}) — restarting memory extension via gateway...`,
-          );
-          await restartExtensionViaGateway(service, "memory");
-          service.lastRestart = Date.now();
-          markRestartCompleted(service, reason, { recoveryTarget: "memory" });
-          service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
-        } else {
-          log(
-            "WARN",
-            `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
-          );
-          const useForce = reason === "zero_extensions";
-          await startService(service, { force: useForce });
-          markRestartCompleted(service, reason, {
-            pid: service.proc?.pid ?? null,
-            forced: useForce,
-            recoveryTarget,
-          });
-          service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
-        }
+        log(
+          "WARN",
+          `${service.name} unhealthy for ${service.consecutiveFailures} checks (${reason ?? "unknown"}) — restarting...`,
+        );
+        const useForce = reason === "zero_extensions";
+        await startService(service, { force: useForce });
+        markRestartCompleted(service, reason, {
+          pid: service.proc?.pid ?? null,
+          forced: useForce,
+          recoveryTarget,
+        });
+        service.restartBackoff = Math.min(service.restartBackoff * 2, 30000);
       }
     } else {
       // Healthy — reset counters

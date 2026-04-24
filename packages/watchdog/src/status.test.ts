@@ -29,23 +29,17 @@ describe("watchdog status", () => {
     gateway.proc = { pid: 12345, exitCode: null } as typeof gateway.proc;
     gateway.consecutiveFailures = 2;
     gateway.lastRestart = Date.now() - 10_000;
-    gateway.lastHealthReason = "memory_stale_lock";
+    gateway.lastHealthReason = "zero_extensions";
     gateway.lastHealthDetails = {
-      memoryLock: {
-        extensionId: "memory",
-        stale: true,
-      },
+      extensionCount: 0,
     };
     gateway.activeIncident = {
-      key: "gateway:memory_stale_lock",
+      key: "gateway:zero_extensions",
       incidentId: "incident-123",
-      reason: "memory_stale_lock",
+      reason: "zero_extensions",
       openedAt: Date.now() - 15_000,
       firstEvidence: {
-        memoryLock: {
-          extensionId: "memory",
-          stale: true,
-        },
+        extensionCount: 0,
       },
       restartRequestedAt: Date.now() - 8_000,
       restartCompletedAt: Date.now() - 4_000,
@@ -56,10 +50,10 @@ describe("watchdog status", () => {
     expect(status.gateway).toMatchObject({
       pid: 12345,
       consecutiveFailures: 2,
-      lastHealthReason: "memory_stale_lock",
+      lastHealthReason: "zero_extensions",
       activeIncident: {
         incidentId: "incident-123",
-        reason: "memory_stale_lock",
+        reason: "zero_extensions",
         restartAttemptId: "attempt-456",
       },
     });

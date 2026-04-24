@@ -166,14 +166,14 @@ The important splits are:
 - scheduler progression is no longer tied to gateway heartbeat for business logic
 - repo sync is no longer on the same critical path as Libby processing
 - the extension now runs on the same shared runtime container helper as session
-- liveness ownership is now gateway-managed through runtime locks, not a memory-private lock table
+- extension singleton ownership is gateway-managed through `extension_process_locks`
 
-Memory now uses gateway-owned liveness locks for recovery-relevant ownership:
+Memory no longer maintains a second extension-level singleton lock:
 
-- memory acquires and renews a gateway runtime lock through `ctx.call("gateway.acquire_liveness_lock")`
-- gateway exposes runtime lock state in `/health` as `runtimeLocks`
-- watchdog consumes that gateway-reported state instead of inspecting memory tables directly
-- recovery for a stale memory singleton now goes through `gateway.restart_extension("memory")` when gateway itself is healthy
+- gateway owns the lifetime of the memory extension host process
+- memory startup does not enter a separate passive mode behind a runtime lock
+- watchdog does not special-case memory runtime locks for recovery
+- memory is responsible only for its internal runtime services and cleanup (`watcher`, `scheduler`, `repoSync`, `LibbyWorker`)
 
 Memory still has a large single file, but the runtime model is now aligned with the shared platform.
 
