@@ -7,6 +7,7 @@ type SessionResumer = {
   resume: (params: {
     sessionId: string;
     cwd: string;
+    agent?: string;
     model?: string;
     lastActivity?: string;
   }) => Promise<{ sessionId: string }>;
@@ -58,6 +59,7 @@ export async function restorePersistedSessions(
       await sessionHost.resume({
         sessionId: record.id,
         cwd: record.cwd,
+        agent: record.agent,
         model: record.model,
         lastActivity,
       });

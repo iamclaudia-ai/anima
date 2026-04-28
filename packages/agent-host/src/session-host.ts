@@ -1,8 +1,8 @@
 /**
  * Session Host — manages SDKSession instances inside the agent-host server.
  *
- * This is the agent-host equivalent of SessionManager from the session extension.
- * Key differences:
+ * This owns provider SDK sessions for logical sessions managed by the session
+ * extension. Key details:
  * - Lives in the agent-host process (separate from gateway/extensions)
  * - Broadcasts events to WebSocket clients instead of ctx.emit()
  * - Uses EventBuffer for reconnection replay
@@ -75,6 +75,7 @@ export interface SessionDefaults {
 /** Serializable session metadata for persistence */
 export interface SessionRecord {
   id: string;
+  agent?: string;
   cwd: string;
   model: string;
   createdAt: string;
@@ -113,6 +114,19 @@ type AgentRuntimeFactory = {
   resume: (sessionId: string, options: ResumeSessionOptions) => AgentRuntimeSession;
 };
 
+export type AgentRuntimeProviders = Record<string, AgentRuntimeFactory>;
+
+const DEFAULT_AGENT = "claude";
+
+function createDefaultProviders(): AgentRuntimeProviders {
+  return {
+    [DEFAULT_AGENT]: {
+      create: createSDKSession,
+      resume: resumeSDKSession,
+    },
+  };
+}
+
 // ── SessionHost ──────────────────────────────────────────────
 
 /**
@@ -123,16 +137,14 @@ type AgentRuntimeFactory = {
  */
 export class SessionHost extends EventEmitter {
   private sessions = new Map<string, AgentRuntimeSession>();
+  private sessionAgents = new Map<string, string>();
   private eventBuffers = new Map<string, EventBuffer>();
   private defaults: SessionDefaults = {};
-  private deps: AgentRuntimeFactory;
+  private providers: AgentRuntimeProviders;
 
-  constructor(deps?: Partial<AgentRuntimeFactory>) {
+  constructor(options?: { providers?: AgentRuntimeProviders }) {
     super();
-    this.deps = {
-      create: deps?.create || createSDKSession,
-      resume: deps?.resume || resumeSDKSession,
-    };
+    this.providers = options?.providers || createDefaultProviders();
   }
 
   /**
@@ -146,9 +158,8 @@ export class SessionHost extends EventEmitter {
    * Create a new Claude session.
    */
   async create(params: SessionCreateParams): Promise<{ sessionId: string }> {
-    if (params.agent && params.agent !== "claude") {
-      throw new Error(`Unsupported session agent: ${params.agent}`);
-    }
+    const agent = params.agent || DEFAULT_AGENT;
+    const provider = this.resolveProvider(agent);
 
     const resolvedModel = params.model ?? this.defaults.model;
     if (!resolvedModel) {
@@ -163,14 +174,15 @@ export class SessionHost extends EventEmitter {
       effort: params.effort ?? this.defaults.effort,
     };
 
-    const session = this.deps.create(options);
+    const session = provider.create(options);
     await session.start();
 
     this.sessions.set(session.id, session);
+    this.sessionAgents.set(session.id, agent);
     this.eventBuffers.set(session.id, new EventBuffer());
     this.wireSession(session);
 
-    log.info("Created session", { sessionId: session.id.slice(0, 8) });
+    log.info("Created session", { agent, sessionId: session.id.slice(0, 8) });
     return { sessionId: session.id };
   }
 
@@ -178,6 +190,9 @@ export class SessionHost extends EventEmitter {
    * Resume an existing Claude session.
    */
   async resume(params: SessionResumeParams): Promise<{ sessionId: string }> {
+    const agent = params.agent || DEFAULT_AGENT;
+    const provider = this.resolveProvider(agent);
+
     // Check if already active
     const existing = this.sessions.get(params.sessionId);
     if (existing?.isActive) {
@@ -197,16 +212,17 @@ export class SessionHost extends EventEmitter {
       effort: params.effort ?? this.defaults.effort,
     };
 
-    const session = this.deps.resume(params.sessionId, options);
+    const session = provider.resume(params.sessionId, options);
     await session.start();
 
     this.sessions.set(session.id, session);
+    this.sessionAgents.set(session.id, agent);
     if (!this.eventBuffers.has(session.id)) {
       this.eventBuffers.set(session.id, new EventBuffer());
     }
     this.wireSession(session);
 
-    log.info("Resumed session", { sessionId: session.id.slice(0, 8) });
+    log.info("Resumed session", { agent, sessionId: session.id.slice(0, 8) });
     return { sessionId: session.id };
   }
 
@@ -221,9 +237,8 @@ export class SessionHost extends EventEmitter {
     model?: string,
     agent?: string,
   ): Promise<void> {
-    if (agent && agent !== "claude") {
-      throw new Error(`Unsupported session agent: ${agent}`);
-    }
+    const resolvedAgent = agent || this.sessionAgents.get(sessionId) || DEFAULT_AGENT;
+    this.resolveProvider(resolvedAgent);
 
     let session = this.sessions.get(sessionId);
 
@@ -234,6 +249,7 @@ export class SessionHost extends EventEmitter {
       }
       log.info("Auto-resuming session", {
         sessionId: sessionId.slice(0, 8),
+        agent: resolvedAgent,
         cwd,
         model: model || this.defaults.model,
       });
@@ -244,6 +260,7 @@ export class SessionHost extends EventEmitter {
       await this.resume({
         sessionId,
         cwd,
+        agent: resolvedAgent,
         model: resumeModel,
         thinking: this.defaults.thinking,
         effort: this.defaults.effort,
@@ -293,6 +310,7 @@ export class SessionHost extends EventEmitter {
 
     await session.close();
     this.sessions.delete(sessionId);
+    this.sessionAgents.delete(sessionId);
     // Keep event buffer around briefly for clients that haven't seen close yet
     log.info("Closed session", { sessionId: sessionId.slice(0, 8) });
   }
@@ -322,6 +340,7 @@ export class SessionHost extends EventEmitter {
       .filter((info) => info.isProcessRunning)
       .map((info) => ({
         id: info.id,
+        agent: this.sessionAgents.get(info.id) || DEFAULT_AGENT,
         cwd: info.cwd,
         model: info.model,
         createdAt: info.createdAt,
@@ -377,6 +396,14 @@ export class SessionHost extends EventEmitter {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  private resolveProvider(agent: string): AgentRuntimeFactory {
+    const provider = this.providers[agent];
+    if (!provider) {
+      throw new Error(`Unsupported session agent: ${agent}`);
+    }
+    return provider;
+  }
 
   /**
    * Wire a session's events to the event buffer and emit for WebSocket broadcast.
@@ -436,6 +463,7 @@ export class SessionHost extends EventEmitter {
 
     session.on("closed", () => {
       this.sessions.delete(sessionId);
+      this.sessionAgents.delete(sessionId);
       this.eventBuffers.delete(sessionId);
       log.info("Cleaned up session buffers", { sessionId: sessionId.slice(0, 8) });
     });

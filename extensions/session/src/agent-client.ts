@@ -7,7 +7,7 @@
  *
  * Features:
  * - Request/response RPC over WebSocket
- * - Session event streaming (emits "session.event" like SessionManager)
+ * - Session event streaming (emits "session.event" for session lifecycle wiring)
  * - Auto-reconnect with exponential backoff
  * - Event replay on reconnection (gap-free streaming)
  */
@@ -427,14 +427,14 @@ export class AgentHostClient extends EventEmitter {
 
   /**
    * Handle a streaming session event.
-   * Updates lastSeenSeq and emits "session.event" in the same format
-   * as SessionManager, so the session extension's event wiring works unchanged.
+   * Updates lastSeenSeq and emits "session.event" in the format expected by
+   * the session extension's event wiring.
    */
   private handleSessionEvent(msg: SessionEventMessage): void {
     // Track sequence for reconnection replay
     this.lastSeenSeq.set(msg.sessionId, msg.seq);
 
-    // Emit in the same format as SessionManager.wireSession
+    // Emit in the same format as the session extension's event bridge expects.
     this.emit("session.event", {
       eventName: `session.${msg.sessionId}.${msg.event.type}`,
       sessionId: msg.sessionId,

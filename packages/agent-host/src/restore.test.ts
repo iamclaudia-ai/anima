@@ -75,40 +75,48 @@ describe("restorePersistedSessions", () => {
     let nextId = 1;
 
     const hostA = new SessionHost({
-      create: (options) =>
-        new FakeSession(
-          `s${nextId++}`,
-          options.cwd,
-          options.model ?? "default",
-          prompted,
-        ) as unknown as AgentRuntimeSession,
-      resume: (sessionId, options) =>
-        new FakeSession(
-          sessionId,
-          options.cwd,
-          options.model ?? "default",
-          prompted,
-        ) as unknown as AgentRuntimeSession,
+      providers: {
+        claude: {
+          create: (options) =>
+            new FakeSession(
+              `s${nextId++}`,
+              options.cwd,
+              options.model ?? "default",
+              prompted,
+            ) as unknown as AgentRuntimeSession,
+          resume: (sessionId, options) =>
+            new FakeSession(
+              sessionId,
+              options.cwd,
+              options.model ?? "default",
+              prompted,
+            ) as unknown as AgentRuntimeSession,
+        },
+      },
     });
 
     const { sessionId } = await hostA.create({ cwd: "/repo", model: "claude-opus-4-6" });
     mod.saveState(hostA.getSessionRecords());
 
     const hostB = new SessionHost({
-      create: (options) =>
-        new FakeSession(
-          `s${nextId++}`,
-          options.cwd,
-          options.model ?? "default",
-          prompted,
-        ) as unknown as AgentRuntimeSession,
-      resume: (sessionId, options) =>
-        new FakeSession(
-          sessionId,
-          options.cwd,
-          options.model ?? "default",
-          prompted,
-        ) as unknown as AgentRuntimeSession,
+      providers: {
+        claude: {
+          create: (options) =>
+            new FakeSession(
+              `s${nextId++}`,
+              options.cwd,
+              options.model ?? "default",
+              prompted,
+            ) as unknown as AgentRuntimeSession,
+          resume: (sessionId, options) =>
+            new FakeSession(
+              sessionId,
+              options.cwd,
+              options.model ?? "default",
+              prompted,
+            ) as unknown as AgentRuntimeSession,
+        },
+      },
     });
 
     const state = mod.loadState();

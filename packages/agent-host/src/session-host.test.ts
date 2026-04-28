@@ -46,7 +46,12 @@ describe("SessionHost", () => {
   it("cleans up event buffers when a session closes", async () => {
     const fake = new FakeSession("s-cleanup");
     const host = new SessionHost({
-      create: () => fake as unknown as AgentRuntimeSession,
+      providers: {
+        claude: {
+          create: () => fake as unknown as AgentRuntimeSession,
+          resume: () => fake as unknown as AgentRuntimeSession,
+        },
+      },
     });
 
     await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
@@ -62,9 +67,14 @@ describe("SessionHost", () => {
     const fake = new FakeSession("draft-session-1");
     const created: Array<unknown> = [];
     const host = new SessionHost({
-      create: (options) => {
-        created.push(options);
-        return fake as unknown as AgentRuntimeSession;
+      providers: {
+        claude: {
+          create: (options) => {
+            created.push(options);
+            return fake as unknown as AgentRuntimeSession;
+          },
+          resume: () => fake as unknown as AgentRuntimeSession,
+        },
       },
     });
 
@@ -95,10 +105,14 @@ describe("SessionHost", () => {
     };
 
     const host = new SessionHost({
-      create: () => fake as unknown as AgentRuntimeSession,
-      resume: (sessionId, options) => {
-        resumed.push({ sessionId, options });
-        return fake as unknown as AgentRuntimeSession;
+      providers: {
+        claude: {
+          create: () => fake as unknown as AgentRuntimeSession,
+          resume: (sessionId, options) => {
+            resumed.push({ sessionId, options });
+            return fake as unknown as AgentRuntimeSession;
+          },
+        },
       },
     });
 
@@ -123,10 +137,14 @@ describe("SessionHost", () => {
     };
 
     const host = new SessionHost({
-      create: () => fake as unknown as AgentRuntimeSession,
-      resume: (sessionId, options) => {
-        resumed.push({ sessionId, options });
-        return fake as unknown as AgentRuntimeSession;
+      providers: {
+        claude: {
+          create: () => fake as unknown as AgentRuntimeSession,
+          resume: (sessionId, options) => {
+            resumed.push({ sessionId, options });
+            return fake as unknown as AgentRuntimeSession;
+          },
+        },
       },
     });
 
@@ -153,9 +171,14 @@ describe("SessionHost", () => {
 
     let createCalls = 0;
     const host = new SessionHost({
-      create: () => {
-        createCalls += 1;
-        return (createCalls === 1 ? stale : fresh) as unknown as AgentRuntimeSession;
+      providers: {
+        claude: {
+          create: () => {
+            createCalls += 1;
+            return (createCalls === 1 ? stale : fresh) as unknown as AgentRuntimeSession;
+          },
+          resume: () => stale as unknown as AgentRuntimeSession,
+        },
       },
     });
 
@@ -177,9 +200,14 @@ describe("SessionHost", () => {
 
     let createCalls = 0;
     const host = new SessionHost({
-      create: () => {
-        createCalls += 1;
-        return (createCalls === 1 ? running : idle) as unknown as AgentRuntimeSession;
+      providers: {
+        claude: {
+          create: () => {
+            createCalls += 1;
+            return (createCalls === 1 ? running : idle) as unknown as AgentRuntimeSession;
+          },
+          resume: () => running as unknown as AgentRuntimeSession,
+        },
       },
     });
 
@@ -188,5 +216,44 @@ describe("SessionHost", () => {
 
     const records = host.getSessionRecords();
     expect(records.map((r) => r.id)).toEqual(["s-running"]);
+    expect(records.map((r) => r.agent)).toEqual(["claude"]);
+  });
+
+  it("routes sessions through the requested agent provider", async () => {
+    const fake = new FakeSession("alt-session");
+    fake.isProcessRunning = true;
+    const created: Array<unknown> = [];
+    const host = new SessionHost({
+      providers: {
+        alt: {
+          create: (options) => {
+            created.push(options);
+            return fake as unknown as AgentRuntimeSession;
+          },
+          resume: () => fake as unknown as AgentRuntimeSession,
+        },
+      },
+    });
+
+    await host.create({ agent: "alt", cwd: "/repo", model: "alt-model" });
+
+    expect(created).toEqual([
+      {
+        sessionId: undefined,
+        cwd: "/repo",
+        model: "alt-model",
+        systemPrompt: undefined,
+        thinking: undefined,
+        effort: undefined,
+      },
+    ]);
+    expect(host.getSessionRecords().map((r) => r.agent)).toEqual(["alt"]);
+  });
+
+  it("rejects unsupported session agents", async () => {
+    const host = new SessionHost({ providers: {} });
+    await expect(host.create({ agent: "missing", cwd: "/repo", model: "x" })).rejects.toThrow(
+      "Unsupported session agent: missing",
+    );
   });
 });
