@@ -8,19 +8,18 @@
  * - Uses EventBuffer for reconnection replay
  * - Persists session registry to disk for crash recovery
  *
- * SDKSession and its dependencies (MessageChannel, query()) are imported
- * directly from the session extension's sdk-session module.
+ * Provider SDK sessions live in agent-host so extension processes do not own
+ * long-running LLM runtime state.
  */
 
 import { EventEmitter } from "node:events";
 import {
-  SDKSession,
   createSDKSession,
   resumeSDKSession,
   type CreateSessionOptions,
   type ResumeSessionOptions,
   type StreamEvent,
-} from "../../../extensions/session/src/sdk-session";
+} from "./providers/anthropic/sdk-session";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
 import type { SessionEventMessage } from "./protocol";
 import { createLogger } from "@anima/shared";
@@ -82,6 +81,38 @@ export interface SessionRecord {
   lastActivity: string;
 }
 
+export interface AgentRuntimeSessionInfo {
+  id: string;
+  cwd: string;
+  model: string;
+  isActive: boolean;
+  isProcessRunning: boolean;
+  createdAt: string;
+  lastActivity: string;
+  healthy: boolean;
+  stale: boolean;
+}
+
+export interface AgentRuntimeSession {
+  readonly id: string;
+  readonly isActive: boolean;
+  readonly isProcessRunning: boolean;
+  start(): Promise<void>;
+  prompt(content: string | unknown[]): Promise<void> | void;
+  interrupt(): void;
+  close(): Promise<void>;
+  setPermissionMode(mode: string): void;
+  sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
+  getInfo(): AgentRuntimeSessionInfo;
+  on(eventName: "sse", listener: (event: StreamEvent) => void): this;
+  on(eventName: "process_started" | "process_ended" | "closed", listener: () => void): this;
+}
+
+type AgentRuntimeFactory = {
+  create: (options: CreateSessionOptions) => AgentRuntimeSession;
+  resume: (sessionId: string, options: ResumeSessionOptions) => AgentRuntimeSession;
+};
+
 // ── SessionHost ──────────────────────────────────────────────
 
 /**
@@ -91,15 +122,12 @@ export interface SessionRecord {
  * Each session gets its own EventBuffer for reconnection replay.
  */
 export class SessionHost extends EventEmitter {
-  private sessions = new Map<string, SDKSession>();
+  private sessions = new Map<string, AgentRuntimeSession>();
   private eventBuffers = new Map<string, EventBuffer>();
   private defaults: SessionDefaults = {};
-  private deps: {
-    create: typeof createSDKSession;
-    resume: typeof resumeSDKSession;
-  };
+  private deps: AgentRuntimeFactory;
 
-  constructor(deps?: { create?: typeof createSDKSession; resume?: typeof resumeSDKSession }) {
+  constructor(deps?: Partial<AgentRuntimeFactory>) {
     super();
     this.deps = {
       create: deps?.create || createSDKSession,
@@ -272,7 +300,7 @@ export class SessionHost extends EventEmitter {
   /**
    * List all active sessions.
    */
-  list(): Array<ReturnType<SDKSession["getInfo"]>> {
+  list(): AgentRuntimeSessionInfo[] {
     return Array.from(this.sessions.values()).map((s) => s.getInfo());
   }
 
@@ -357,7 +385,7 @@ export class SessionHost extends EventEmitter {
    * 1. Buffered with a monotonic sequence number
    * 2. Emitted as "session.event" for the WebSocket server to broadcast
    */
-  private wireSession(session: SDKSession): void {
+  private wireSession(session: AgentRuntimeSession): void {
     const sessionId = session.id;
 
     session.on("sse", (event: StreamEvent) => {

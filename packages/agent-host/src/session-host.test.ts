@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
-import { SessionHost } from "./session-host";
+import { SessionHost, type AgentRuntimeSession } from "./session-host";
 
 class FakeSession extends EventEmitter {
   public isProcessRunning = false;
@@ -46,8 +46,7 @@ describe("SessionHost", () => {
   it("cleans up event buffers when a session closes", async () => {
     const fake = new FakeSession("s-cleanup");
     const host = new SessionHost({
-      create: () =>
-        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      create: () => fake as unknown as AgentRuntimeSession,
     });
 
     await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
@@ -65,7 +64,7 @@ describe("SessionHost", () => {
     const host = new SessionHost({
       create: (options) => {
         created.push(options);
-        return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+        return fake as unknown as AgentRuntimeSession;
       },
     });
 
@@ -96,11 +95,10 @@ describe("SessionHost", () => {
     };
 
     const host = new SessionHost({
-      create: () =>
-        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      create: () => fake as unknown as AgentRuntimeSession,
       resume: (sessionId, options) => {
         resumed.push({ sessionId, options });
-        return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+        return fake as unknown as AgentRuntimeSession;
       },
     });
 
@@ -125,11 +123,10 @@ describe("SessionHost", () => {
     };
 
     const host = new SessionHost({
-      create: () =>
-        fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+      create: () => fake as unknown as AgentRuntimeSession,
       resume: (sessionId, options) => {
         resumed.push({ sessionId, options });
-        return fake as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+        return fake as unknown as AgentRuntimeSession;
       },
     });
 
@@ -158,9 +155,7 @@ describe("SessionHost", () => {
     const host = new SessionHost({
       create: () => {
         createCalls += 1;
-        return (createCalls === 1
-          ? stale
-          : fresh) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+        return (createCalls === 1 ? stale : fresh) as unknown as AgentRuntimeSession;
       },
     });
 
@@ -184,9 +179,7 @@ describe("SessionHost", () => {
     const host = new SessionHost({
       create: () => {
         createCalls += 1;
-        return (createCalls === 1
-          ? running
-          : idle) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession;
+        return (createCalls === 1 ? running : idle) as unknown as AgentRuntimeSession;
       },
     });
 

@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SessionHost } from "./session-host";
+import { SessionHost, type AgentRuntimeSession } from "./session-host";
 import { restorePersistedSessions } from "./restore";
 
 class FakeSession extends EventEmitter {
@@ -81,14 +81,14 @@ describe("restorePersistedSessions", () => {
           options.cwd,
           options.model ?? "default",
           prompted,
-        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        ) as unknown as AgentRuntimeSession,
       resume: (sessionId, options) =>
         new FakeSession(
           sessionId,
           options.cwd,
           options.model ?? "default",
           prompted,
-        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        ) as unknown as AgentRuntimeSession,
     });
 
     const { sessionId } = await hostA.create({ cwd: "/repo", model: "claude-opus-4-6" });
@@ -101,14 +101,14 @@ describe("restorePersistedSessions", () => {
           options.cwd,
           options.model ?? "default",
           prompted,
-        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        ) as unknown as AgentRuntimeSession,
       resume: (sessionId, options) =>
         new FakeSession(
           sessionId,
           options.cwd,
           options.model ?? "default",
           prompted,
-        ) as unknown as import("../../../extensions/session/src/sdk-session").SDKSession,
+        ) as unknown as AgentRuntimeSession,
     });
 
     const state = mod.loadState();

@@ -241,7 +241,7 @@ describe("SDKSession", () => {
       expect(idxCustom).toBeLessThan(idxGlobal);
       expect(idxGlobal).toBeLessThan(idxParent);
       expect(idxParent).toBeLessThan(idxProject);
-      expect(capturedOptions?.settingSources).toEqual(["user", "project"]);
+      expect(capturedOptions?.settingSources).toEqual(["user", "project", "local"]);
 
       await session.close();
     } finally {
@@ -281,7 +281,7 @@ describe("SDKSession", () => {
 
       const systemPrompt = (capturedOptions?.systemPrompt as string | undefined) || "";
       expect(systemPrompt).not.toContain("<available_skills>");
-      expect(capturedOptions?.settingSources).toEqual(["user", "project"]);
+      expect(capturedOptions?.settingSources).toEqual(["user", "project", "local"]);
 
       await session.close();
     } finally {
