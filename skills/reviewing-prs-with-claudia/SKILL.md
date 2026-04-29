@@ -16,7 +16,6 @@ Two complementary `gh` CLI extensions for professional PR reviews from the termi
 
 - Submitting a PR review with inline line-specific comments
 - Adding comments to specific file:line locations in a PR diff
-- Batch reviewing with multiple comments in one operation
 - Listing, resolving, or replying to review threads
 - Managing pending reviews (start → add comments → submit)
 
@@ -48,7 +47,7 @@ git worktree add "$WORKTREE_PATH" "origin/$REVIEW_BRANCH"
 
 # 4. Submit review using gh comment (see below)
 
-# 5. ALWAYS clean up when done
+# 5. CLEAN UP — only after the review is live AND verified (see step 8 in Review Process)
 git worktree remove "$WORKTREE_PATH" --force
 ```
 
@@ -77,17 +76,18 @@ gh api repos/owner/repo/pulls/<PR>/comments --jq '.[] | {user: .user.login, path
 1. **Check existing review state** — See above. Don't duplicate work already done.
 2. **Get PR metadata** — `gh pr view <PR> --json title,body,files` for context
 3. **Read the diff** — `gh pr diff <PR>` to understand what changed
-4. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
-5. **Present findings** — Show review findings to Michael for discussion before submitting
-6. **Submit review** — Use `gh comment review` with inline comments
-7. **Clean up worktree** — Always remove when done
+4. **Read the Linear ticket** — `linctl issue get <KEY>` if the PR mentions one. The ticket often lists the **expected files** for a feature; cross-check that they're all in the diff. Missing files = the PR description is making promises the diff doesn't keep.
+5. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
+6. **Present findings** — Show review findings to Michael for discussion before submitting
+7. **Submit review** — Use `gh comment review` with `--comment` flags (see [Submitting Reviews](#submitting-reviews-recommended-pattern))
+8. **VERIFY the comments landed** — After submission, query the API to confirm inline comments actually attached. **If you see 0 of your comments, the submission silently failed** (see [Verifying a Submission](#verifying-a-submission)).
+9. **Clean up worktree** — Only after the review is live AND verified. Don't tear down on "I think we're done."
 
-## Quick Reference
+## Submitting Reviews (Recommended Pattern)
 
-### Submit a Review with Inline Comments (Most Common)
+### Single command: body + inline comments + decision
 
 ```bash
-# Single command: body + inline comments + decision
 gh comment review <PR> "Review summary here" \
   --comment "path/to/file.rb:42:Your comment on line 42" \
   --comment "path/to/file.ts:10:15:Comment spanning lines 10-15" \
@@ -106,6 +106,31 @@ file:start:end:message      # Line range (multi-line comment)
 
 **Important:** Line numbers refer to lines in the NEW version of the file (right side of the diff). The extension handles the diff position mapping automatically.
 
+### Multi-Comment Reviews — Use Temp Files for Long Messages
+
+When inline comments are long or contain code blocks, backticks, suggestion blocks, or other shell-hostile characters, **write each comment body to a temp file** and inject with `$(cat ...)`. This is the pattern that worked when the YAML batch form silently failed (see warning below).
+
+```bash
+# 1. Write each comment body to its own file
+cat > /tmp/c1.txt <<'EOF'
+This `useRoles()` pattern is duplicated three times in this file.
+Extract to a `useCanManage()` hook?
+EOF
+
+cat > /tmp/c2.txt <<'EOF'
+Eager loading note — see line 15 for the N+1.
+EOF
+
+# 2. Submit the review, injecting each body via $(cat)
+gh comment review <PR> "$(cat /tmp/body.txt)" \
+  --comment "client/src/Foo.tsx:42:$(cat /tmp/c1.txt)" \
+  --comment "app/models/bar.rb:15:20:$(cat /tmp/c2.txt)" \
+  --event COMMENT \
+  -R owner/repo
+```
+
+**Why this beats inline HEREDOC:** when you have 4+ long comments, inline HEREDOCs become unreadable and easy to misnest. Temp files keep each comment isolated and reviewable. The skill author's own dogfooding session (PR #23577) needed this pattern after the YAML form parsed to 0 comments.
+
 ### Examples
 
 ```bash
@@ -123,15 +148,15 @@ gh comment review 123 "Needs fixes before merge" \
   -R beehiiv/swarm
 
 # Comment only (no approval/rejection)
-gh comment review 123 \
+gh comment review 123 "Discussion items" \
   --comment "app/models/user.rb:55:Consider eager loading here" \
   --event COMMENT \
   -R beehiiv/swarm
 ```
 
-### Shell Escaping with HEREDOC
+### Shell Escaping with HEREDOC (Single Body or Comment)
 
-When your review body or inline comments contain backticks, quotes, or special characters (very common in code reviews!), **always use HEREDOC** to avoid shell escaping issues:
+For a single review body or a single inline comment with shell-hostile characters, inline HEREDOC works:
 
 ```bash
 gh comment review <PR> "$(cat <<'EOF'
@@ -147,35 +172,34 @@ EOF
   -R beehiiv/swarm
 ```
 
-**Why HEREDOC?** Without it, backticks trigger command substitution, parentheses cause parse errors, and quotes need careful escaping. The `<<'EOF'` (quoted) form prevents ALL shell interpolation.
+The `<<'EOF'` (quoted) form prevents ALL shell interpolation — backticks, parentheses, quotes all pass through verbatim.
 
-**Alternative:** Write to temp files and use `$(cat /tmp/body.txt)` — works but HEREDOC is cleaner for inline use.
+For 2+ long comments, prefer the temp-file pattern above.
 
-### Batch Review from YAML
+## Verifying a Submission
 
-For complex reviews with many comments, use a YAML config:
-
-```yaml
-# /tmp/review.yaml
-review:
-  body: "Architecture review — looks good overall"
-  event: "APPROVE"
-  comments:
-    - file: "app/models/episode.rb"
-      line: 170
-      message: "Nice association-aware optimization here"
-    - file: "app/workers/publish_worker.rb"
-      line: 37
-      end_line: 38
-      message: "Potential race condition — see detailed comment"
-    - file: "client/src/utils.ts"
-      line: 25
-      message: "Copy nit: episode is already scheduled at this point"
-```
+**Always verify after submitting.** The most common silent failure is a malformed YAML batch that creates a review with 0 attached comments.
 
 ```bash
-gh comment batch <PR> /tmp/review.yaml -R beehiiv/swarm
+# Did MY inline comments actually attach?
+gh api repos/<owner>/<repo>/pulls/<PR>/comments \
+  --jq '.[] | select(.user.login == "<your-login>") | {path, line, body: .body[:80]}'
 ```
+
+Expected: one entry per `--comment` you passed. If you see 0, the inline comments didn't attach — diagnose and re-submit using the `--comment` form. **Don't tell Michael the review is done until you've seen your own comments come back from the API.**
+
+## ⚠️ Avoid `gh comment batch` (YAML Form) — Schema is Fragile
+
+The `gh comment batch <PR> review.yaml` form **silently parses to 0 comments** when the YAML schema doesn't match what the installed binary expects (versions drift between the README and the local extension). The review summary still posts, but every inline comment is dropped — and there's no error.
+
+**If you must use it, ALWAYS dry-run first:**
+
+```bash
+gh comment batch <PR> /tmp/review.yaml --dry-run --verbose -R owner/repo
+# Look for: "Comments to process: N" — if it says 0, the schema is wrong
+```
+
+**Recommendation: just use `gh comment review --comment ...` (above).** It's the documented primary path, accepts identical content, and never silently drops comments.
 
 ## Reading & Managing Reviews
 
@@ -258,10 +282,14 @@ gh pr-review review --submit \
 ## Other Useful Commands
 
 ```bash
-# Check which lines are commentable in a file's diff (shows code by default)
+# Check which lines are commentable in a file's diff
+# Default SHOWS the code at each line — leave this default ON so you can see what you're commenting on
 gh comment lines <PR> path/to/file.rb -R owner/repo
-# Without code context (just line numbers, useful for scripting)
-gh comment lines <PR> path/to/file.rb --show-code=false -R owner/repo
+
+# Avoid --show-code=false — gives you naked line numbers without the code,
+# which makes it easy to comment on the wrong line.
+# Only useful if you're scripting / piping into another tool.
+# gh comment lines <PR> path/to/file.rb --show-code=false -R owner/repo
 
 # Add a general PR comment (not inline — appears in conversation tab)
 gh comment add <PR> "General comment here" -R owner/repo
@@ -318,9 +346,19 @@ EOF
 
 ## Troubleshooting
 
+### Review posted but inline comments didn't appear
+
+**Most common cause:** used `gh comment batch` with a YAML schema the local binary didn't recognize → review created with 0 comments. The summary body still posts.
+
+**Recovery:**
+
+1. Verify with the API query in [Verifying a Submission](#verifying-a-submission)
+2. Re-submit ONLY the inline comments using `gh comment review` with `--comment` flags. Use a one-liner body like `"(Inline notes referenced in my previous review body 👆)"` so the second review chain reads clean.
+3. **Don't** try to delete the first review — it'll just confuse PR notifications.
+
 ### "HTTP 422" on inline comments
 
-The line number must exist in the PR diff. Use `gh comment lines <PR> <file>` to see which lines are commentable.
+The line number must exist in the PR diff. Use `gh comment lines <PR> <file>` (with code shown — default) to see which lines are commentable.
 
 ### Comments not appearing inline
 
