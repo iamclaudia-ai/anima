@@ -20,6 +20,8 @@ export interface CreateSessionOptions {
   thinking?: boolean;
   /** Thinking effort level, when supported */
   effort?: ThinkingEffort;
+  /** Runtime sandbox mode, when supported */
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
 
 export interface ResumeSessionOptions {
@@ -33,6 +35,8 @@ export interface ResumeSessionOptions {
   thinking?: boolean;
   /** Thinking effort level, when supported */
   effort?: ThinkingEffort;
+  /** Runtime sandbox mode, when supported */
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
 
 export interface AgentRuntimeSessionInfo {

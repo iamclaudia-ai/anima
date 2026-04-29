@@ -1,9 +1,11 @@
 import { EventEmitter } from "node:events";
-import { createLogger } from "@anima/shared";
+import { createLogger, type ThinkingEffort } from "@anima/shared";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdirSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
+import { createCodexProvider } from "./providers/codex/session";
+import type { AgentRuntimeProviders, AgentRuntimeSession, StreamEvent } from "./provider-types";
 
 const log = createLogger("TaskHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -57,12 +59,16 @@ export interface TaskRecord {
 }
 
 interface ActiveTask extends TaskRecord {
-  abortController: AbortController;
-  threadId: string | null;
-  items: any[];
+  runtime: AgentRuntimeSession;
 }
 
 export interface TaskHostConfig {
+  providers?: AgentRuntimeProviders;
+  preambles?: {
+    task?: string;
+    review?: string;
+    test?: string;
+  };
   codex?: {
     apiKey?: string;
     cliPath?: string;
@@ -83,6 +89,13 @@ export interface TaskHostConfig {
 function normalizeMode(mode?: string): TaskMode {
   if (mode === "review" || mode === "test") return mode;
   return "general";
+}
+
+function normalizeEffort(effort?: string): ThinkingEffort | undefined {
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "max") {
+    return effort;
+  }
+  return undefined;
 }
 
 function ensureDir(path: string): void {
@@ -110,36 +123,24 @@ function sanitizeBranchSuffix(value: string): string {
   return value.replace(/[^A-Za-z0-9._/-]+/g, "-");
 }
 
-function summarizeItem(item: any): Record<string, unknown> {
-  const base: Record<string, unknown> = { type: item.type, id: item.id };
-  if (item.type === "agent_message") base.text = item.text;
-  if (item.type === "command_execution") {
-    base.command = item.command;
-    base.exitCode = item.exit_code;
-    base.status = item.status;
-  }
-  if (item.type === "file_change") {
-    base.changes = item.changes;
-    base.status = item.status;
-  }
-  return base;
-}
-
 let taskCounter = 0;
 function newTaskId(): string {
   return `task_${Date.now().toString(36)}_${(++taskCounter).toString(36)}`;
 }
 
 export class TaskHost extends EventEmitter {
-  private codex: any | null = null;
   private records = new Map<string, TaskRecord>();
   private activeTasks = new Map<string, ActiveTask>();
   private buffers = new Map<string, EventBuffer>();
   private outputDir: string;
+  private providers: AgentRuntimeProviders;
 
   constructor(private cfg: TaskHostConfig = {}) {
     super();
-    this.outputDir = join(process.env.ANIMA_DATA_DIR || join(homedir(), ".anima"), "codex");
+    this.outputDir = join(process.env.ANIMA_DATA_DIR || join(homedir(), ".anima"), "tasks");
+    this.providers = cfg.providers || {
+      codex: createCodexProvider(cfg.codex),
+    };
     ensureDir(this.outputDir);
   }
 
@@ -301,38 +302,6 @@ export class TaskHost extends EventEmitter {
     };
   }
 
-  private async ensureCodex(): Promise<any> {
-    if (this.codex) return this.codex;
-    const apiKey = this.cfg.codex?.apiKey || process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("Codex API key missing for task agent");
-    const candidates = [
-      join(process.cwd(), "node_modules", "@openai", "codex-sdk"),
-      join(process.cwd(), "node_modules", ".bun", "node_modules", "@openai", "codex-sdk"),
-      join(process.cwd(), "extensions", "codex", "node_modules", "@openai", "codex-sdk"),
-    ];
-
-    let moduleImpl: { Codex?: new (opts: Record<string, unknown>) => any } | null = null;
-    for (const candidate of candidates) {
-      try {
-        moduleImpl = (await import(candidate)) as {
-          Codex?: new (opts: Record<string, unknown>) => any;
-        };
-        break;
-      } catch {
-        // try next
-      }
-    }
-    if (!moduleImpl?.Codex) {
-      throw new Error("Failed to load @openai/codex-sdk for agent-host task runtime");
-    }
-
-    this.codex = new moduleImpl.Codex({
-      apiKey,
-      ...(this.cfg.codex?.cliPath ? { codexPathOverride: this.cfg.codex.cliPath } : {}),
-    });
-    return this.codex;
-  }
-
   private initOutput(taskId: string, mode: TaskMode, prompt: string): string {
     const path = join(this.outputDir, `${taskId}.md`);
     writeFileSync(
@@ -391,7 +360,7 @@ export class TaskHost extends EventEmitter {
   interrupt(taskId: string): boolean {
     const active = this.activeTasks.get(taskId);
     if (!active) return false;
-    active.abortController.abort();
+    active.runtime.interrupt();
     return true;
   }
 
@@ -405,7 +374,8 @@ export class TaskHost extends EventEmitter {
     parentRepoPath?: string;
     continuedFromTaskId?: string;
   }> {
-    if (params.agent !== "codex") {
+    const provider = this.providers[params.agent];
+    if (!provider) {
       throw new Error(`Unsupported task agent: ${params.agent}`);
     }
 
@@ -436,9 +406,14 @@ export class TaskHost extends EventEmitter {
 
     const active: ActiveTask = {
       ...record,
-      abortController: new AbortController(),
-      threadId: null,
-      items: [],
+      runtime: provider.create({
+        sessionId: taskId,
+        cwd: runtime.cwd,
+        model: params.model || (params.agent === "codex" ? this.cfg.codex?.model : undefined),
+        effort: normalizeEffort(params.effort),
+        sandbox:
+          params.sandbox || (params.agent === "codex" ? this.cfg.codex?.sandboxMode : undefined),
+      }),
     };
     this.activeTasks.set(taskId, active);
 
@@ -455,27 +430,12 @@ export class TaskHost extends EventEmitter {
       outputFile,
     });
 
-    const sdk = await this.ensureCodex();
-    const threadOptions = {
-      workingDirectory: runtime.cwd,
-      skipGitRepoCheck: true,
-      model: params.model || this.cfg.codex?.model,
-      sandboxMode: params.sandbox || this.cfg.codex?.sandboxMode || "workspace-write",
-      modelReasoningEffort: params.effort || this.cfg.codex?.effort || "medium",
-      approvalPolicy: this.cfg.codex?.autoApprove === false ? "on-request" : "never",
-      webSearchEnabled: false,
-    };
-
-    const thread = sdk.startThread(threadOptions);
+    const preambles = this.cfg.preambles || this.cfg.codex?.preambles;
     const preamble =
-      mode === "review"
-        ? this.cfg.codex?.preambles?.review
-        : mode === "test"
-          ? this.cfg.codex?.preambles?.test
-          : this.cfg.codex?.preambles?.task;
+      mode === "review" ? preambles?.review : mode === "test" ? preambles?.test : preambles?.task;
     const fullPrompt = preamble ? `${preamble}\n\n${prompt}` : prompt;
 
-    void this.runTaskStream(thread, active, fullPrompt);
+    void this.runTaskSession(active, fullPrompt);
 
     return {
       taskId,
@@ -489,45 +449,22 @@ export class TaskHost extends EventEmitter {
     };
   }
 
-  private async runTaskStream(thread: any, task: ActiveTask, prompt: string): Promise<void> {
-    try {
-      const { events } = await thread.runStreamed(prompt, {
-        signal: task.abortController.signal,
-      });
-
-      for await (const event of events) {
-        this.bridgeEvent(task, event);
-      }
-
-      if (task.status === "running" && !task.abortController.signal.aborted) {
-        task.status = "completed";
-        task.updatedAt = new Date().toISOString();
-        this.records.set(task.taskId, { ...task });
-        this.emitTaskEvent(task.taskId, {
-          type: "stop",
-          taskId: task.taskId,
-          status: task.status,
-          cwd: task.cwd,
-          worktreePath: task.worktreePath,
-          parentRepoPath: task.parentRepoPath,
-          continuedFromTaskId: task.continuedFromTaskId,
-          git: this.getGitState(task),
-          result: task.resultText || "",
-          items: task.items.map(summarizeItem),
-          outputFile: task.outputFile,
-        });
-      }
-    } catch (err: unknown) {
-      if (task.status !== "running") return;
-      const message = err instanceof Error ? err.message : String(err);
-      const isAbort =
-        message.toLowerCase().includes("abort") || message.toLowerCase().includes("cancel");
-      task.status = isAbort ? "interrupted" : "failed";
-      task.error = isAbort ? undefined : message;
+  private async runTaskSession(task: ActiveTask, prompt: string): Promise<void> {
+    let finished = false;
+    const finish = async (
+      status: TaskStatus,
+      payload: { error?: string; result?: string } = {},
+    ): Promise<void> => {
+      if (finished || task.status !== "running") return;
+      finished = true;
+      task.status = status;
+      task.error = payload.error;
       task.updatedAt = new Date().toISOString();
-      this.records.set(task.taskId, { ...task });
+      const { runtime: _runtime, ...record } = task;
+      this.records.set(task.taskId, record);
+
       this.emitTaskEvent(task.taskId, {
-        type: isAbort ? "stop" : "error",
+        type: status === "failed" ? "error" : "stop",
         taskId: task.taskId,
         status: task.status,
         cwd: task.cwd,
@@ -536,61 +473,71 @@ export class TaskHost extends EventEmitter {
         continuedFromTaskId: task.continuedFromTaskId,
         git: this.getGitState(task),
         error: task.error,
-        result: task.resultText || "",
+        result: payload.result || task.resultText || "",
         outputFile: task.outputFile,
       });
-    } finally {
+
       this.activeTasks.delete(task.taskId);
+      try {
+        await task.runtime.close();
+      } catch {
+        // best effort cleanup
+      }
+    };
+
+    task.runtime.on("sse", (event) => {
+      this.bridgeRuntimeEvent(task, event);
+      if (event.type === "turn_stop") {
+        const stopReason = String(event.stop_reason || "");
+        void finish(stopReason === "abort" ? "interrupted" : "completed");
+      } else if (event.type === "process_died") {
+        void finish("failed", { error: String(event.reason || "Task runtime failed") });
+      }
+    });
+
+    try {
+      await task.runtime.start();
+      await task.runtime.prompt(prompt);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isAbort =
+        message.toLowerCase().includes("abort") || message.toLowerCase().includes("cancel");
+      await finish(isAbort ? "interrupted" : "failed", {
+        error: isAbort ? undefined : message,
+      });
     }
   }
 
-  private bridgeEvent(task: ActiveTask, event: any): void {
-    if (event.type === "thread.started") {
-      task.threadId = event.thread_id;
-      return;
-    }
-
-    if (event.type === "item.updated" && event.item.type === "agent_message") {
+  private bridgeRuntimeEvent(task: ActiveTask, event: StreamEvent): void {
+    if (event.type === "content_block_delta") {
+      const delta = event.delta as { type?: string; text?: string } | undefined;
+      if (delta?.type !== "text_delta" || !delta.text) return;
+      task.resultText = `${task.resultText || ""}${delta.text}`;
+      if (task.outputFile) this.appendOutput(task.outputFile, delta.text);
       this.emitTaskEvent(task.taskId, {
         type: "delta",
         taskId: task.taskId,
-        text: event.item.text,
+        text: delta.text,
       });
       return;
     }
 
-    if (event.type === "item.completed") {
-      task.items.push(event.item);
-      if (event.item.type === "agent_message") {
-        task.resultText = `${task.resultText || ""}${task.resultText ? "\n" : ""}${event.item.text}`;
-        if (task.outputFile) this.appendOutput(task.outputFile, `${event.item.text}\n`);
-      }
-      this.emitTaskEvent(task.taskId, {
-        type: "item",
-        taskId: task.taskId,
-        itemType: event.item.type,
-        item: summarizeItem(event.item),
-      });
+    if (
+      event.type === "message_start" ||
+      event.type === "content_block_start" ||
+      event.type === "content_block_stop" ||
+      event.type === "message_stop" ||
+      event.type === "turn_stop" ||
+      event.type === "process_died"
+    ) {
       return;
     }
 
-    if (event.type === "turn.failed" || event.type === "error") {
-      const error = event.type === "turn.failed" ? event.error.message : event.message;
-      task.status = "failed";
-      task.error = error;
-      task.updatedAt = new Date().toISOString();
-      this.records.set(task.taskId, { ...task });
-      this.emitTaskEvent(task.taskId, {
-        type: "error",
-        taskId: task.taskId,
-        cwd: task.cwd,
-        worktreePath: task.worktreePath,
-        parentRepoPath: task.parentRepoPath,
-        continuedFromTaskId: task.continuedFromTaskId,
-        git: this.getGitState(task),
-        error,
-        outputFile: task.outputFile,
-      });
-    }
+    this.emitTaskEvent(task.taskId, {
+      type: "item",
+      taskId: task.taskId,
+      itemType: event.type,
+      item: event,
+    });
   }
 }

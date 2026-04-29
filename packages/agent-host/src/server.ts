@@ -131,27 +131,28 @@ export async function createAgentHostServer(
   const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
   const configuredImageProcessing = sessionExtConfig.imageProcessing;
   const configuredSkills = sessionExtConfig.skills;
+  const providers = {
+    claude: createAnthropicProvider({
+      imageProcessing:
+        configuredImageProcessing &&
+        typeof configuredImageProcessing === "object" &&
+        !Array.isArray(configuredImageProcessing)
+          ? (configuredImageProcessing as AnimaConfig["session"]["imageProcessing"])
+          : config.session.imageProcessing,
+      skillsPaths:
+        configuredSkills &&
+        typeof configuredSkills === "object" &&
+        !Array.isArray(configuredSkills) &&
+        Array.isArray((configuredSkills as { paths?: unknown }).paths)
+          ? (configuredSkills as { paths: string[] }).paths || []
+          : config.session.skills.paths,
+    }),
+    codex: createCodexProvider(config.agentHost?.codex),
+  };
   const sessionHost =
     options.sessionHost ??
     new SessionHost({
-      providers: {
-        claude: createAnthropicProvider({
-          imageProcessing:
-            configuredImageProcessing &&
-            typeof configuredImageProcessing === "object" &&
-            !Array.isArray(configuredImageProcessing)
-              ? (configuredImageProcessing as AnimaConfig["session"]["imageProcessing"])
-              : config.session.imageProcessing,
-          skillsPaths:
-            configuredSkills &&
-            typeof configuredSkills === "object" &&
-            !Array.isArray(configuredSkills) &&
-            Array.isArray((configuredSkills as { paths?: unknown }).paths)
-              ? (configuredSkills as { paths: string[] }).paths || []
-              : config.session.skills.paths,
-        }),
-        codex: createCodexProvider(loadedConfig?.agentHost?.codex),
-      },
+      providers,
     });
   const sessionModel =
     typeof sessionExtConfig.model === "string" && sessionExtConfig.model.trim().length > 0
@@ -181,6 +182,7 @@ export async function createAgentHostServer(
     options.taskHost ??
     new TaskHost({
       codex: loadedConfig?.agentHost?.codex,
+      providers,
     });
 
   // Load persisted session registry (for crash recovery)

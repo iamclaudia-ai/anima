@@ -112,6 +112,8 @@ export class CodexSession extends EventEmitter {
 
   private cwd: string;
   private model: string;
+  private effort: CodexProviderConfig["effort"];
+  private sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
 
   constructor(
     id: string,
@@ -122,6 +124,8 @@ export class CodexSession extends EventEmitter {
     this.id = id;
     this.cwd = options.cwd || config.cwd || process.cwd();
     this.model = options.model || config.model || "gpt-5.2-codex";
+    this.effort = normalizeEffort(options.effort, config.effort);
+    this.sandboxMode = options.sandbox || config.sandboxMode || "workspace-write";
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"
@@ -153,8 +157,8 @@ export class CodexSession extends EventEmitter {
       workingDirectory: this.cwd,
       skipGitRepoCheck: true,
       model: this.model,
-      sandboxMode: this.config.sandboxMode || "workspace-write",
-      modelReasoningEffort: normalizeEffort(undefined, this.config.effort),
+      sandboxMode: this.sandboxMode,
+      modelReasoningEffort: this.effort,
       approvalPolicy: this.config.autoApprove === false ? "on-request" : "never",
       webSearchEnabled: false,
     });
