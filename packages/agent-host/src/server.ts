@@ -20,6 +20,8 @@ import { restorePersistedSessions } from "./restore";
 import type { BufferedEvent } from "./event-buffer";
 import type { ThinkingEffort } from "@anima/shared";
 import { TaskHost, type TaskRecord } from "./task-host";
+import { createAnthropicProvider } from "./providers/anthropic/sdk-session";
+import { createCodexProvider } from "./providers/codex/session";
 
 export interface SessionHostLike {
   on: (eventName: "session.event", listener: (msg: SessionEventMessage) => void) => unknown;
@@ -117,7 +119,6 @@ export async function createAgentHostServer(
   const log =
     options.logger ??
     createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
-  const sessionHost = options.sessionHost ?? new SessionHost();
   const loadConfigFn = options.loadConfig ?? loadConfig;
   const loadStateFn = options.loadState ?? loadState;
   const saveStateFn = options.saveState ?? saveState;
@@ -128,6 +129,30 @@ export async function createAgentHostServer(
   const config = loadConfigFn();
   loadedConfig = config;
   const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
+  const configuredImageProcessing = sessionExtConfig.imageProcessing;
+  const configuredSkills = sessionExtConfig.skills;
+  const sessionHost =
+    options.sessionHost ??
+    new SessionHost({
+      providers: {
+        claude: createAnthropicProvider({
+          imageProcessing:
+            configuredImageProcessing &&
+            typeof configuredImageProcessing === "object" &&
+            !Array.isArray(configuredImageProcessing)
+              ? (configuredImageProcessing as AnimaConfig["session"]["imageProcessing"])
+              : config.session.imageProcessing,
+          skillsPaths:
+            configuredSkills &&
+            typeof configuredSkills === "object" &&
+            !Array.isArray(configuredSkills) &&
+            Array.isArray((configuredSkills as { paths?: unknown }).paths)
+              ? (configuredSkills as { paths: string[] }).paths || []
+              : config.session.skills.paths,
+        }),
+        codex: createCodexProvider(loadedConfig?.agentHost?.codex),
+      },
+    });
   const sessionModel =
     typeof sessionExtConfig.model === "string" && sessionExtConfig.model.trim().length > 0
       ? sessionExtConfig.model.trim()

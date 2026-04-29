@@ -26,7 +26,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { createLogger, loadConfig } from "@anima/shared";
+import { createLogger } from "@anima/shared";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -59,44 +59,25 @@ import type {
   PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ThinkingEffort, ImageProcessingConfig } from "@anima/shared";
+import type { CreateSessionOptions, ResumeSessionOptions, StreamEvent } from "../../provider-types";
 import { processContent } from "./image-processor";
 import { formatSkillsForPrompt, loadSkills } from "./skills";
 
 // ── Types ────────────────────────────────────────────────────
 
-/** Emitted SSE event — the unwrapped inner Anthropic event */
-export interface StreamEvent {
-  type: string;
-  [key: string]: unknown;
+export interface AnthropicProviderConfig {
+  imageProcessing?: ImageProcessingConfig;
+  skillsPaths?: string[];
 }
 
-export interface CreateSessionOptions {
-  /** Optional caller-supplied session ID */
-  sessionId?: string;
-  /** Working directory for Claude CLI */
-  cwd: string;
-  /** Model to use */
-  model?: string;
-  /** System prompt (first prompt only) */
-  systemPrompt?: string;
-  /** Enable adaptive thinking */
-  thinking?: boolean;
-  /** Thinking effort level */
-  effort?: ThinkingEffort;
-}
-
-export interface ResumeSessionOptions {
-  /** Working directory for Claude CLI */
-  cwd: string;
-  /** Model to use */
-  model?: string;
-  /** Last observed activity timestamp (ISO) for restore hydration */
-  lastActivity?: string;
-  /** Enable adaptive thinking */
-  thinking?: boolean;
-  /** Thinking effort level */
-  effort?: ThinkingEffort;
-}
+const DEFAULT_IMAGE_PROCESSING_CONFIG: ImageProcessingConfig = {
+  enabled: true,
+  maxWidth: 1600,
+  maxHeight: 1600,
+  maxFileSizeBytes: 1024 * 1024,
+  format: "webp",
+  quality: 85,
+};
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -252,7 +233,7 @@ export class SDKSession extends EventEmitter {
     id: string,
     options: CreateSessionOptions | ResumeSessionOptions,
     isResume: boolean,
-    deps?: { queryFactory?: typeof query },
+    deps?: { queryFactory?: typeof query; config?: AnthropicProviderConfig },
   ) {
     super();
     this.queryFactory = deps?.queryFactory || query;
@@ -271,35 +252,8 @@ export class SDKSession extends EventEmitter {
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.effort = options.effort;
     this.isFirstPrompt = !isResume;
-
-    // Load image processing config from global settings
-    const globalConfig = loadConfig();
-    const sessionExtConfig = (globalConfig.extensions?.session?.config || {}) as Record<
-      string,
-      unknown
-    >;
-    const configuredImageProcessing = sessionExtConfig.imageProcessing;
-    const configuredSkills = sessionExtConfig.skills;
-    this.imageProcessingConfig =
-      configuredImageProcessing &&
-      typeof configuredImageProcessing === "object" &&
-      !Array.isArray(configuredImageProcessing)
-        ? (configuredImageProcessing as ImageProcessingConfig)
-        : {
-            enabled: true,
-            maxWidth: 1600,
-            maxHeight: 1600,
-            maxFileSizeBytes: 1024 * 1024,
-            format: "webp",
-            quality: 85,
-          };
-    this.skillsPaths =
-      configuredSkills &&
-      typeof configuredSkills === "object" &&
-      !Array.isArray(configuredSkills) &&
-      Array.isArray((configuredSkills as { paths?: unknown }).paths)
-        ? (configuredSkills as { paths: string[] }).paths || []
-        : [];
+    this.imageProcessingConfig = deps?.config?.imageProcessing || DEFAULT_IMAGE_PROCESSING_CONFIG;
+    this.skillsPaths = deps?.config?.skillsPaths || [];
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"
@@ -1038,11 +992,26 @@ export class SDKSession extends EventEmitter {
 
 // ── Factory Functions ────────────────────────────────────────
 
-export function createSDKSession(options: CreateSessionOptions): SDKSession {
+export function createSDKSession(
+  options: CreateSessionOptions,
+  config?: AnthropicProviderConfig,
+): SDKSession {
   const id = options.sessionId || randomUUID();
-  return new SDKSession(id, options, false);
+  return new SDKSession(id, options, false, { config });
 }
 
-export function resumeSDKSession(sessionId: string, options: ResumeSessionOptions): SDKSession {
-  return new SDKSession(sessionId, options, true);
+export function resumeSDKSession(
+  sessionId: string,
+  options: ResumeSessionOptions,
+  config?: AnthropicProviderConfig,
+): SDKSession {
+  return new SDKSession(sessionId, options, true, { config });
+}
+
+export function createAnthropicProvider(config: AnthropicProviderConfig = {}) {
+  return {
+    create: (options: CreateSessionOptions): SDKSession => createSDKSession(options, config),
+    resume: (sessionId: string, options: ResumeSessionOptions): SDKSession =>
+      resumeSDKSession(sessionId, options, config),
+  };
 }

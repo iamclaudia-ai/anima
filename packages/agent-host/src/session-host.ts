@@ -13,19 +13,29 @@
  */
 
 import { EventEmitter } from "node:events";
-import {
-  createSDKSession,
-  resumeSDKSession,
-  type CreateSessionOptions,
-  type ResumeSessionOptions,
-  type StreamEvent,
-} from "./providers/anthropic/sdk-session";
+import { createAnthropicProvider } from "./providers/anthropic/sdk-session";
 import { EventBuffer, type BufferedEvent } from "./event-buffer";
 import type { SessionEventMessage } from "./protocol";
 import { createLogger } from "@anima/shared";
 import type { ThinkingEffort } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import type {
+  AgentRuntimeFactory,
+  AgentRuntimeProviders,
+  AgentRuntimeSession,
+  AgentRuntimeSessionInfo,
+  CreateSessionOptions,
+  ResumeSessionOptions,
+  StreamEvent,
+} from "./provider-types";
+
+export type {
+  AgentRuntimeFactory,
+  AgentRuntimeProviders,
+  AgentRuntimeSession,
+  AgentRuntimeSessionInfo,
+} from "./provider-types";
 
 const log = createLogger("SessionHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -82,48 +92,11 @@ export interface SessionRecord {
   lastActivity: string;
 }
 
-export interface AgentRuntimeSessionInfo {
-  id: string;
-  cwd: string;
-  model: string;
-  isActive: boolean;
-  isProcessRunning: boolean;
-  createdAt: string;
-  lastActivity: string;
-  healthy: boolean;
-  stale: boolean;
-}
-
-export interface AgentRuntimeSession {
-  readonly id: string;
-  readonly isActive: boolean;
-  readonly isProcessRunning: boolean;
-  start(): Promise<void>;
-  prompt(content: string | unknown[]): Promise<void> | void;
-  interrupt(): void;
-  close(): Promise<void>;
-  setPermissionMode(mode: string): void;
-  sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
-  getInfo(): AgentRuntimeSessionInfo;
-  on(eventName: "sse", listener: (event: StreamEvent) => void): this;
-  on(eventName: "process_started" | "process_ended" | "closed", listener: () => void): this;
-}
-
-type AgentRuntimeFactory = {
-  create: (options: CreateSessionOptions) => AgentRuntimeSession;
-  resume: (sessionId: string, options: ResumeSessionOptions) => AgentRuntimeSession;
-};
-
-export type AgentRuntimeProviders = Record<string, AgentRuntimeFactory>;
-
 const DEFAULT_AGENT = "claude";
 
 function createDefaultProviders(): AgentRuntimeProviders {
   return {
-    [DEFAULT_AGENT]: {
-      create: createSDKSession,
-      resume: resumeSDKSession,
-    },
+    [DEFAULT_AGENT]: createAnthropicProvider(),
   };
 }
 
