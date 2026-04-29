@@ -14,11 +14,11 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { AgentHostClient } from "./agent-client";
 import type { AgentHostSessionInfo, SessionRuntimeConfig } from "./session-types";
-import type { SessionTask } from "./lifecycle/task-workflow";
+import type { SessionSubagent } from "./lifecycle/subagent-workflow";
 import { closeDb } from "./workspace";
 import { closeSessionDb } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
-import { wireTaskEvents } from "./lifecycle/task-events";
+import { wireSubagentEvents } from "./lifecycle/subagent-events";
 import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodHandlers } from "./session-dispatch";
 import { getRuntime, initRuntime, resetRuntime } from "./runtime";
@@ -136,8 +136,8 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         sessionConfig,
         config,
         sessionActors: new SessionActorRegistry(),
-        tasks: new Map<string, SessionTask>(),
-        taskNotificationsSent: new Set<string>(),
+        subagents: new Map<string, SessionSubagent>(),
+        subagentNotificationsSent: new Set<string>(),
         dispatchMethod: handleMethod,
       });
 
@@ -157,11 +157,11 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         return await handler(params, instance.ctx);
       },
     })),
-    events: ["stream.*", "session.task.*"],
+    events: ["stream.*", "session.subagent.*"],
     sourceRoutes: [],
 
     async start(instance): Promise<void> {
-      instance.runtime.unsubscribers.push(wireTaskEvents());
+      instance.runtime.unsubscribers.push(wireSubagentEvents());
       instance.runtime.unsubscribers.push(wireSessionEvents());
 
       try {

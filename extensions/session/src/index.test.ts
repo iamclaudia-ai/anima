@@ -72,10 +72,7 @@ describe("session extension", () => {
   let listSpy: ReturnType<typeof spyOn>;
   let setPermissionModeSpy: ReturnType<typeof spyOn>;
   let sendToolResultSpy: ReturnType<typeof spyOn>;
-  let startTaskSpy: ReturnType<typeof spyOn>;
-  let getTaskSpy: ReturnType<typeof spyOn>;
-  let listTasksSpy: ReturnType<typeof spyOn>;
-  let interruptTaskSpy: ReturnType<typeof spyOn>;
+  let spawnSubagentSpy: ReturnType<typeof spyOn>;
   let listWorkspacesSpy: ReturnType<typeof spyOn>;
   let getWorkspaceSpy: ReturnType<typeof spyOn>;
   let getOrCreateWorkspaceSpy: ReturnType<typeof spyOn>;
@@ -83,9 +80,11 @@ describe("session extension", () => {
   let connectSpy: ReturnType<typeof spyOn>;
   let disconnectSpy: ReturnType<typeof spyOn>;
   let homedirSpy: ReturnType<typeof spyOn>;
+  let lastAgentClient: AgentHostClient | null;
 
   beforeEach(() => {
     clearConfigCache();
+    lastAgentClient = null;
     mkdirSync(join(testHome, ".anima"), { recursive: true });
     writeFileSync(
       join(testHome, ".anima", "anima.json"),
@@ -137,42 +136,21 @@ describe("session extension", () => {
       true,
     );
     sendToolResultSpy = spyOn(AgentHostClient.prototype, "sendToolResult").mockResolvedValue(true);
-    startTaskSpy = spyOn(AgentHostClient.prototype, "startTask").mockImplementation(
-      function (this: AgentHostClient) {
-        setTimeout(() => {
-          this.emit("task.event", {
-            taskId: "ctask_123",
-            eventName: "task.ctask_123.delta",
-            type: "delta",
-            text: "delta",
-          });
-        }, 0);
-        return Promise.resolve({
-          taskId: "ctask_123",
+    spawnSubagentSpy = spyOn(AgentHostClient.prototype, "spawnSubagent").mockImplementation(
+      async function (
+        this: AgentHostClient,
+        params: { subagentId?: string; parentSessionId: string },
+      ) {
+        lastAgentClient = this;
+        return {
+          subagentId: params.subagentId || "subagent_123",
+          sessionId: params.subagentId || "subagent_123",
+          parentSessionId: params.parentSessionId,
           status: "running",
-          outputFile: "/tmp/ctask_123.md",
-          message: "started",
-        });
+          message: "spawned",
+        };
       },
     );
-    getTaskSpy = spyOn(AgentHostClient.prototype, "getTask").mockResolvedValue({
-      task: null,
-    });
-    listTasksSpy = spyOn(AgentHostClient.prototype, "listTasks").mockResolvedValue({
-      tasks: [
-        {
-          taskId: "ctask_123",
-          sessionId,
-          agent: "codex",
-          prompt: "review this",
-          mode: "general",
-          status: "running",
-          startedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ],
-    });
-    interruptTaskSpy = spyOn(AgentHostClient.prototype, "interruptTask").mockResolvedValue(true);
     listWorkspacesSpy = spyOn(workspace, "listWorkspaces").mockReturnValue([
       {
         id: "ws-1",
@@ -246,10 +224,7 @@ describe("session extension", () => {
     listSpy.mockRestore();
     setPermissionModeSpy.mockRestore();
     sendToolResultSpy.mockRestore();
-    startTaskSpy.mockRestore();
-    getTaskSpy.mockRestore();
-    listTasksSpy.mockRestore();
-    interruptTaskSpy.mockRestore();
+    spawnSubagentSpy.mockRestore();
     listWorkspacesSpy.mockRestore();
     getWorkspaceSpy.mockRestore();
     getOrCreateWorkspaceSpy.mockRestore();
@@ -728,7 +703,7 @@ describe("session extension", () => {
     await ext.stop();
   });
 
-  it("starts codex-backed tasks via session.start_task and remaps events", async () => {
+  it("spawns child agents as child sessions and routes their stream", async () => {
     const emitted: Array<{
       eventName: string;
       payload: Record<string, unknown>;
@@ -738,7 +713,7 @@ describe("session extension", () => {
     const ext = createSessionExtension();
     await ext.start(
       createTestContext({
-        connectionId: "conn-task-1",
+        connectionId: "conn-subagent-1",
         tags: ["voice.speak"],
         emit: (eventName, payload, options) => {
           emitted.push({
@@ -750,74 +725,64 @@ describe("session extension", () => {
       }),
     );
 
-    const started = (await ext.handleMethod("session.start_task", {
-      sessionId,
+    const started = (await ext.handleMethod("session.spawn_agent", {
+      parentSessionId: sessionId,
       agent: "codex",
       prompt: "review this",
-      mode: "general",
-      worktree: true,
+      purpose: "subagent",
     })) as Record<string, unknown>;
 
-    expect(started.taskId).toBe("ctask_123");
+    const subagentId = String(started.subagentId);
+    expect(subagentId).toMatch(/[0-9a-f-]{36}/);
     expect(started.status).toBe("running");
-    expect(startTaskSpy).toHaveBeenCalledWith(
+    expect(spawnSubagentSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId,
+        parentSessionId: sessionId,
         cwd: "/repo/project",
-        worktree: true,
+        agent: "codex",
+        subagentId,
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const mapped = emitted.find((e) => e.eventName === "session.task.ctask_123.delta");
+    lastAgentClient?.emit("session.event", {
+      eventName: `session.${subagentId}.content_block_delta`,
+      sessionId: subagentId,
+      type: "content_block_delta",
+      delta: { type: "text_delta", text: "delta" },
+    });
+
+    const mapped = emitted.find((e) => e.eventName === `session.${subagentId}.content_block_delta`);
     expect(mapped).toBeDefined();
     expect(mapped?.options).toEqual({
       source: "gateway.caller",
-      connectionId: "conn-task-1",
+      connectionId: "conn-subagent-1",
       tags: ["voice.speak"],
     });
-    expect(mapped?.payload).toMatchObject({
-      taskId: "ctask_123",
-      sessionId,
-      agent: "codex",
-      status: "running",
-    });
 
-    const listed = (await ext.handleMethod("session.list_tasks", {})) as {
-      tasks: Array<{ taskId: string }>;
+    const listed = (await ext.handleMethod("session.list_subagents", {})) as {
+      subagents: Array<{ subagentId: string }>;
     };
-    expect(listed.tasks.map((t) => t.taskId)).toContain("ctask_123");
+    expect(listed.subagents.map((s) => s.subagentId)).toContain(subagentId);
 
     await ext.stop();
   });
 
-  it("sends a user_notification to parent session when task completes", async () => {
-    startTaskSpy.mockImplementationOnce(function (this: AgentHostClient) {
-      setTimeout(() => {
-        this.emit("task.event", {
-          taskId: "ctask_notify",
-          eventName: "task.ctask_notify.stop",
-          type: "stop",
-          status: "completed",
-          outputFile: "/tmp/ctask_notify.md",
-        });
-      }, 0);
-      return Promise.resolve({
-        taskId: "ctask_notify",
-        status: "running",
-        outputFile: "/tmp/ctask_notify.md",
-        message: "started",
-      });
-    });
-
+  it("sends a user_notification to parent session when subagent completes", async () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
 
-    await ext.handleMethod("session.start_task", {
-      sessionId,
+    const started = (await ext.handleMethod("session.spawn_agent", {
+      parentSessionId: sessionId,
       agent: "codex",
       prompt: "do thing",
-      mode: "general",
+      purpose: "subagent",
+    })) as { subagentId: string };
+
+    lastAgentClient?.emit("session.event", {
+      eventName: `session.${started.subagentId}.turn_stop`,
+      sessionId: started.subagentId,
+      type: "turn_stop",
+      stop_reason: "end_turn",
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
 

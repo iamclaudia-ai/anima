@@ -19,7 +19,6 @@ import type {
   AgentHostClientMessage as ClientMessage,
   AgentHostResponseMessage as ResponseMessage,
   AgentHostSessionEventMessage as SessionEventMessage,
-  AgentHostTaskEventMessage as TaskEventMessage,
 } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -40,7 +39,6 @@ export class AgentHostClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private pendingRequests = new Map<string, PendingRequest>();
   private lastSeenSeq = new Map<string, number>();
-  private lastSeenTaskSeq = new Map<string, number>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectBackoff = 1000;
   private isConnecting = false;
@@ -86,18 +84,10 @@ export class AgentHostClient extends EventEmitter {
           const resumeSessions = Array.from(this.lastSeenSeq.entries()).map(
             ([sessionId, lastSeq]) => ({ sessionId, lastSeq }),
           );
-          const resumeTasks = Array.from(this.lastSeenTaskSeq.entries()).map(
-            ([taskId, lastSeq]) => ({
-              taskId,
-              lastSeq,
-            }),
-          );
-
           const authMsg: ClientMessage = {
             type: "auth",
             extensionId: this.extensionId,
             ...(resumeSessions.length > 0 ? { resumeSessions } : {}),
-            ...(resumeTasks.length > 0 ? { resumeTasks } : {}),
           };
 
           ws.send(JSON.stringify(authMsg));
@@ -244,75 +234,37 @@ export class AgentHostClient extends EventEmitter {
     return (result as unknown[]) || [];
   }
 
-  async startTask(params: {
-    sessionId: string;
-    agent: string;
+  async spawnSubagent(params: {
+    parentSessionId: string;
+    subagentId?: string;
+    agent?: string;
     prompt: string;
-    mode?: "general" | "review" | "test";
     cwd?: string;
-    worktree?: boolean;
-    continue?: string;
     model?: string;
+    systemPrompt?: string;
+    thinking?: boolean;
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-    files?: string[];
     metadata?: Record<string, unknown>;
   }): Promise<{
-    taskId: string;
+    subagentId: string;
+    sessionId: string;
+    parentSessionId: string;
     status: string;
-    outputFile?: string;
     message: string;
-    cwd?: string;
-    worktreePath?: string;
-    parentRepoPath?: string;
-    continuedFromTaskId?: string;
   }> {
     const result = await this.sendRequest({
-      type: "task.start",
+      type: "subagent.spawn",
       requestId: "",
       params,
     });
     return result as {
-      taskId: string;
+      subagentId: string;
+      sessionId: string;
+      parentSessionId: string;
       status: string;
-      outputFile?: string;
       message: string;
-      cwd?: string;
-      worktreePath?: string;
-      parentRepoPath?: string;
-      continuedFromTaskId?: string;
     };
-  }
-
-  async getTask(taskId: string): Promise<unknown> {
-    const result = await this.sendRequest({
-      type: "task.get",
-      requestId: "",
-      taskId,
-    });
-    return result;
-  }
-
-  async listTasks(filters?: {
-    sessionId?: string;
-    status?: "running" | "completed" | "failed" | "interrupted";
-    agent?: string;
-  }): Promise<unknown> {
-    const result = await this.sendRequest({
-      type: "task.list",
-      requestId: "",
-      ...filters,
-    });
-    return result;
-  }
-
-  async interruptTask(taskId: string): Promise<boolean> {
-    const result = (await this.sendRequest({
-      type: "task.interrupt",
-      requestId: "",
-      taskId,
-    })) as { ok?: boolean } | undefined;
-    return result?.ok !== false;
   }
 
   /**
@@ -403,8 +355,6 @@ export class AgentHostClient extends EventEmitter {
       this.handleResponse(msg as unknown as ResponseMessage);
     } else if (msg.type === "session.event") {
       this.handleSessionEvent(msg as unknown as SessionEventMessage);
-    } else if (msg.type === "task.event") {
-      this.handleTaskEvent(msg as unknown as TaskEventMessage);
     }
   }
 
@@ -438,15 +388,6 @@ export class AgentHostClient extends EventEmitter {
     this.emit("session.event", {
       eventName: `session.${msg.sessionId}.${msg.event.type}`,
       sessionId: msg.sessionId,
-      ...msg.event,
-    });
-  }
-
-  private handleTaskEvent(msg: TaskEventMessage): void {
-    this.lastSeenTaskSeq.set(msg.taskId, msg.seq);
-    this.emit("task.event", {
-      taskId: msg.taskId,
-      eventName: `task.${msg.taskId}.${msg.event.type}`,
       ...msg.event,
     });
   }

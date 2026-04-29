@@ -1,39 +1,35 @@
 import { z } from "zod";
 import type { ExtensionMethodDefinition } from "@anima/shared";
 
-const StartTaskSchema = z.object({
-  sessionId: z.string().describe("Parent session UUID"),
-  agent: z.string().describe("Target delegated agent/provider (currently codex supported)"),
-  prompt: z.string().min(1).describe("Task prompt"),
-  mode: z.enum(["general", "review", "test"]).optional().default("general"),
+const SpawnAgentSchema = z.object({
+  parentSessionId: z.string().describe("Parent session UUID"),
+  agent: z.string().optional().describe("Child agent/provider; defaults to the parent agent"),
+  prompt: z.string().min(1).describe("Initial child-agent prompt"),
+  purpose: z.enum(["subagent", "review", "test"]).optional().default("subagent"),
   cwd: z.string().optional().describe("Working directory override"),
-  worktree: z
-    .boolean()
-    .optional()
-    .describe("Create a git worktree in /tmp/worktrees/<task_id> and run task there"),
-  continue: z
+  model: z.string().optional().describe("Model override"),
+  systemPrompt: z
     .string()
     .optional()
-    .describe("Reuse /tmp/worktrees/<task_id> if present; otherwise run in resolved cwd"),
-  model: z.string().optional().describe("Model override"),
+    .describe("Optional provider-specific system prompt/instructions"),
+  thinking: z.boolean().optional().describe("Provider-specific thinking toggle"),
   effort: z.string().optional().describe("Effort/reasoning override"),
   sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
-  files: z.array(z.string()).optional().describe("Optional file list for review mode"),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-const GetTaskSchema = z.object({
-  taskId: z.string().describe("Task ID"),
+const GetSubagentSchema = z.object({
+  subagentId: z.string().describe("Subagent session ID"),
 });
 
-const ListTasksSchema = z.object({
-  sessionId: z.string().optional().describe("Filter by session ID"),
+const ListSubagentsSchema = z.object({
+  parentSessionId: z.string().optional().describe("Filter by parent session ID"),
   status: z.enum(["running", "completed", "failed", "interrupted"]).optional(),
   agent: z.string().optional().describe("Filter by agent/provider"),
 });
 
-const InterruptTaskSchema = z.object({
-  taskId: z.string().describe("Task ID"),
+const InterruptSubagentSchema = z.object({
+  subagentId: z.string().describe("Subagent session ID"),
 });
 
 export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
@@ -139,7 +135,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     name: "session.send_notification",
     description:
       "Inject a notification into a session as a user message wrapped in <user_notification> tags. " +
-      "Used by async task agents/extensions to notify the session when background work completes.",
+      "Used by child agents/extensions to notify the session when background work completes.",
     inputSchema: z.object({
       sessionId: z.string().describe("Session UUID to notify"),
       text: z
@@ -161,27 +157,27 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
-    name: "session.start_task",
-    description: "Start a delegated task using a specific agent/provider",
-    inputSchema: StartTaskSchema,
-    execution: { lane: "long_running", concurrency: "keyed", keyParam: "sessionId" },
+    name: "session.spawn_agent",
+    description: "Spawn a child agent session and send its initial prompt",
+    inputSchema: SpawnAgentSchema,
+    execution: { lane: "long_running", concurrency: "keyed", keyParam: "parentSessionId" },
   },
   {
-    name: "session.get_task",
-    description: "Get delegated task status by task ID",
-    inputSchema: GetTaskSchema,
+    name: "session.get_subagent",
+    description: "Get child-agent session status by subagent ID",
+    inputSchema: GetSubagentSchema,
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
-    name: "session.list_tasks",
-    description: "List delegated tasks with optional filters",
-    inputSchema: ListTasksSchema,
+    name: "session.list_subagents",
+    description: "List child-agent sessions with optional filters",
+    inputSchema: ListSubagentsSchema,
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
-    name: "session.interrupt_task",
-    description: "Interrupt a delegated task by task ID",
-    inputSchema: InterruptTaskSchema,
+    name: "session.interrupt_subagent",
+    description: "Interrupt a child-agent session by subagent ID",
+    inputSchema: InterruptSubagentSchema,
     execution: { lane: "write", concurrency: "serial" },
   },
   {

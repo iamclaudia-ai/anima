@@ -7,7 +7,7 @@ import { createLogger } from "@anima/shared";
 const log = createLogger("SessionStore", join(homedir(), ".anima", "logs", "session.log"));
 
 export type RuntimeStatus = "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
-export type SessionPurpose = "chat" | "task" | "review" | "test";
+export type SessionPurpose = "chat" | "subagent" | "review" | "test";
 
 interface SessionRow {
   id: number;
@@ -83,7 +83,9 @@ function toStoredSession(row: SessionRow): StoredSession {
       : "idle";
   const purposeRaw = row.purpose || "chat";
   const purpose: SessionPurpose =
-    purposeRaw === "task" || purposeRaw === "review" || purposeRaw === "test" ? purposeRaw : "chat";
+    purposeRaw === "subagent" || purposeRaw === "review" || purposeRaw === "test"
+      ? purposeRaw
+      : "chat";
   return {
     id: row.provider_session_id,
     workspaceId: row.workspace_id,
@@ -378,7 +380,7 @@ export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
   });
 }
 
-export function listTaskSessions(filters?: {
+export function listSubagentSessions(filters?: {
   parentSessionId?: string;
   status?: "running" | "completed" | "failed" | "interrupted";
   agent?: string;

@@ -56,6 +56,8 @@ export interface SessionCreateParams {
   thinking?: boolean;
   /** Thinking effort level */
   effort?: ThinkingEffort;
+  /** Runtime sandbox mode, when supported */
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
 
 export interface SessionResumeParams {
@@ -145,6 +147,7 @@ export class SessionHost extends EventEmitter {
       systemPrompt: params.systemPrompt,
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
+      sandbox: params.sandbox,
     };
 
     const session = provider.create(options);

@@ -367,17 +367,17 @@ export class WebhookServer {
       return;
     }
 
-    // Trigger delegated code review task via session API
+    // Trigger delegated code review through a child session.
     try {
       const commitLines = (payload.commits || [])
         .slice(-10)
         .map((commit: any) => `- ${commit.id?.slice(0, 8) || "unknown"} ${commit.message || ""}`)
         .join("\n");
 
-      await this.ctx.call("session.start_task", {
-        sessionId: this.automationSessionId,
+      await this.ctx.call("session.spawn_agent", {
+        parentSessionId: this.automationSessionId,
         agent: "codex",
-        mode: "review",
+        purpose: "review",
         prompt:
           `Review recent main branch push for ${payload.repository?.name || "repository"}.\n` +
           `Ref: ${payload.ref || "unknown"}\n\n` +
@@ -400,10 +400,10 @@ export class WebhookServer {
     }
 
     try {
-      await this.ctx.call("session.start_task", {
-        sessionId: this.automationSessionId,
+      await this.ctx.call("session.spawn_agent", {
+        parentSessionId: this.automationSessionId,
         agent: "codex",
-        mode: "review",
+        purpose: "review",
         prompt:
           `Review PR #${payload.number}: ${payload.pull_request?.title || ""}\n` +
           `URL: ${payload.pull_request?.html_url || "unknown"}\n\n` +

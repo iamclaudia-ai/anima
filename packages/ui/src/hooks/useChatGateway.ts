@@ -41,15 +41,14 @@ export interface SessionInfo {
   gitBranch?: string;
 }
 
-export interface TaskInfo {
-  taskId: string;
-  sessionId: string;
+export interface SubagentInfo {
+  subagentId: string;
+  parentSessionId: string;
   agent: string;
-  mode: string;
+  purpose: string;
   status: "running" | "completed" | "failed" | "interrupted";
   prompt?: string;
   cwd?: string;
-  outputFile?: string;
   error?: string;
   startedAt?: string;
   updatedAt?: string;
@@ -110,7 +109,7 @@ export interface UseChatGatewayReturn {
   hasMore: boolean;
   workspace: WorkspaceInfo | null;
   sessions: SessionInfo[];
-  tasks: TaskInfo[];
+  subagents: SubagentInfo[];
   /** Whether user is scrolled to bottom (for auto-scroll indicator) */
   isAtBottom: boolean;
   sendPrompt(text: string, attachments: Attachment[], tags?: string[]): void;
@@ -154,7 +153,7 @@ export function useChatGateway(
   const [hasMore, setHasMore] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [tasks, setTasks] = useState<TaskInfo[]>([]);
+  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   const [hookState, setHookState] = useState<Record<string, unknown>>({});
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -187,13 +186,13 @@ export function useChatGateway(
     };
   }, []);
 
-  const normalizeTask = useCallback((raw: Record<string, unknown>): TaskInfo | null => {
-    const taskId = typeof raw.taskId === "string" ? raw.taskId : null;
-    const taskSessionId = typeof raw.sessionId === "string" ? raw.sessionId : null;
-    if (!taskId || !taskSessionId) return null;
+  const normalizeSubagent = useCallback((raw: Record<string, unknown>): SubagentInfo | null => {
+    const subagentId = typeof raw.subagentId === "string" ? raw.subagentId : null;
+    const parentSessionId = typeof raw.parentSessionId === "string" ? raw.parentSessionId : null;
+    if (!subagentId || !parentSessionId) return null;
 
     const statusRaw = typeof raw.status === "string" ? raw.status : "running";
-    const status: TaskInfo["status"] =
+    const status: SubagentInfo["status"] =
       statusRaw === "completed" ||
       statusRaw === "failed" ||
       statusRaw === "interrupted" ||
@@ -202,14 +201,13 @@ export function useChatGateway(
         : "running";
 
     return {
-      taskId,
-      sessionId: taskSessionId,
+      subagentId,
+      parentSessionId,
       agent: typeof raw.agent === "string" ? raw.agent : "codex",
-      mode: typeof raw.mode === "string" ? raw.mode : "general",
+      purpose: typeof raw.purpose === "string" ? raw.purpose : "subagent",
       status,
       prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
       cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
-      outputFile: typeof raw.outputFile === "string" ? raw.outputFile : undefined,
       error: typeof raw.error === "string" ? raw.error : undefined,
       startedAt: typeof raw.startedAt === "string" ? raw.startedAt : undefined,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
@@ -217,7 +215,7 @@ export function useChatGateway(
     };
   }, []);
 
-  const sortTasks = useCallback((items: TaskInfo[]): TaskInfo[] => {
+  const sortSubagents = useCallback((items: SubagentInfo[]): SubagentInfo[] => {
     return [...items].sort((a, b) => {
       if (a.status === "running" && b.status !== "running") return -1;
       if (a.status !== "running" && b.status === "running") return 1;
@@ -836,7 +834,7 @@ export function useChatGateway(
             setSessionId(mostRecent.sessionId);
             subscribeToSession(mostRecent.sessionId);
             sendRequest("session.get_history", { sessionId: mostRecent.sessionId, limit: 50 });
-            sendRequest("session.list_tasks", { sessionId: mostRecent.sessionId });
+            sendRequest("session.list_subagents", { parentSessionId: mostRecent.sessionId });
           }
         }
       }
@@ -848,13 +846,13 @@ export function useChatGateway(
           setSessionId(newSessionId);
           subscribeToSession(newSessionId);
           setMessages(() => []);
-          setTasks(() => []);
+          setSubagents(() => []);
           setUsage(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
           console.log(`[Session] Created: ${newSessionId}`);
-          sendRequest("session.list_tasks", { sessionId: newSessionId });
+          sendRequest("session.list_subagents", { parentSessionId: newSessionId });
           // Refresh session list
           if (workspaceRef.current?.cwd) {
             sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
@@ -869,14 +867,14 @@ export function useChatGateway(
           setSessionId(switchedSessionId);
           subscribeToSession(switchedSessionId);
           setMessages(() => []);
-          setTasks(() => []);
+          setSubagents(() => []);
           setUsage(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
           console.log(`[Session] Switched to: ${switchedSessionId}`);
           sendRequest("session.get_history", { sessionId: switchedSessionId, limit: 50 });
-          sendRequest("session.list_tasks", { sessionId: switchedSessionId });
+          sendRequest("session.list_subagents", { parentSessionId: switchedSessionId });
           if (workspaceRef.current?.cwd) {
             sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
           }
@@ -893,7 +891,7 @@ export function useChatGateway(
           const infoSessionId = payload.sessionId as string;
           setSessionId(infoSessionId);
           subscribeToSession(infoSessionId);
-          sendRequest("session.list_tasks", { sessionId: infoSessionId });
+          sendRequest("session.list_subagents", { parentSessionId: infoSessionId });
         }
         if (payload.workspaceId && payload.workspaceName) {
           setWorkspace((prev) =>
@@ -908,26 +906,35 @@ export function useChatGateway(
         }
       }
 
-      // ── session.list_tasks ──
-      if (method === "session.list_tasks") {
-        const taskList = Array.isArray(payload.tasks)
-          ? payload.tasks
+      // ── session.list_subagents ──
+      if (method === "session.list_subagents") {
+        const subagentList = Array.isArray(payload.subagents)
+          ? payload.subagents
               .map((item) =>
                 item && typeof item === "object"
-                  ? normalizeTask(item as Record<string, unknown>)
+                  ? normalizeSubagent(item as Record<string, unknown>)
                   : null,
               )
-              .filter((item): item is TaskInfo => Boolean(item))
+              .filter((item): item is SubagentInfo => Boolean(item))
           : [];
         const currentSessionId = sessionIdRef.current;
-        setTasks(() =>
-          sortTasks(
-            taskList.filter((task) => !currentSessionId || task.sessionId === currentSessionId),
+        setSubagents(() =>
+          sortSubagents(
+            subagentList.filter(
+              (subagent) => !currentSessionId || subagent.parentSessionId === currentSessionId,
+            ),
           ),
         );
       }
     },
-    [normalizeTask, normalizeUsage, sendRequest, setMessages, sortTasks, subscribeToSession],
+    [
+      normalizeSubagent,
+      normalizeUsage,
+      sendRequest,
+      setMessages,
+      sortSubagents,
+      subscribeToSession,
+    ],
   );
 
   const handleGatewayEvent = useCallback(
@@ -947,76 +954,44 @@ export function useChatGateway(
       // Extract the eventType (everything after "session.{sessionId}.")
       const parts = eventName.split(".");
 
-      // Task events: "session.task.{taskId}.{eventType}"
-      if (parts[0] === "session" && parts[1] === "task" && parts.length >= 4) {
-        const taskEventType = parts[3];
-        const eventPayload = (payload ?? {}) as Record<string, unknown>;
-        const taskSessionId =
-          typeof eventPayload.sessionId === "string" ? (eventPayload.sessionId as string) : null;
-        const currentSessionId = sessionIdRef.current;
-        if (!taskSessionId || !currentSessionId || taskSessionId !== currentSessionId) {
-          return;
-        }
-
-        const taskId = typeof eventPayload.taskId === "string" ? eventPayload.taskId : parts[2];
-        const nestedPayload =
-          eventPayload.payload && typeof eventPayload.payload === "object"
-            ? (eventPayload.payload as Record<string, unknown>)
-            : {};
-        const updateAt = new Date().toISOString();
-
-        setTasks((prev) => {
-          const next = [...prev];
-          const idx = next.findIndex((task) => task.taskId === taskId);
-          const base: TaskInfo =
-            idx >= 0
-              ? next[idx]
-              : {
-                  taskId,
-                  sessionId: taskSessionId,
-                  agent: typeof eventPayload.agent === "string" ? eventPayload.agent : "codex",
-                  mode: "general",
-                  status: "running",
-                };
-
-          const merged: TaskInfo = {
-            ...base,
-            sessionId: taskSessionId,
-            agent: typeof eventPayload.agent === "string" ? eventPayload.agent : base.agent,
-            status:
-              eventPayload.status === "running" ||
-              eventPayload.status === "completed" ||
-              eventPayload.status === "failed" ||
-              eventPayload.status === "interrupted"
-                ? (eventPayload.status as TaskInfo["status"])
-                : base.status,
-            mode: typeof nestedPayload.mode === "string" ? nestedPayload.mode : base.mode,
-            outputFile:
-              typeof nestedPayload.outputFile === "string"
-                ? nestedPayload.outputFile
-                : base.outputFile,
-            error: typeof nestedPayload.error === "string" ? nestedPayload.error : base.error,
-            updatedAt: updateAt,
-          };
-
-          if (taskEventType === "delta" && typeof nestedPayload.text === "string") {
-            const appended = `${merged.previewText || ""}${nestedPayload.text}`;
-            merged.previewText = appended.length > 280 ? appended.slice(-280) : appended;
-          }
-
-          if (idx >= 0) next[idx] = merged;
-          else next.push(merged);
-          return sortTasks(next);
-        });
-        return;
-      }
-
       if (parts[0] === "session" && parts.length >= 3) {
         const eventSessionId = parts[1] || null;
-        if (!eventSessionId || eventSessionId !== sessionIdRef.current) {
+        if (!eventSessionId) {
           return;
         }
         const eventType = parts.slice(2).join(".");
+        const eventPayload = (payload ?? {}) as Record<string, unknown>;
+
+        if (eventSessionId !== sessionIdRef.current) {
+          setSubagents((prev) => {
+            const idx = prev.findIndex((subagent) => subagent.subagentId === eventSessionId);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            const current = next[idx];
+            const merged: SubagentInfo = { ...current, updatedAt: new Date().toISOString() };
+
+            if (eventType === "content_block_delta") {
+              const delta = eventPayload.delta as { type?: string; text?: string } | undefined;
+              if (delta?.type === "text_delta" && delta.text) {
+                const appended = `${merged.previewText || ""}${delta.text}`;
+                merged.previewText = appended.length > 280 ? appended.slice(-280) : appended;
+              }
+            } else if (eventType === "turn_stop") {
+              merged.status = eventPayload.stop_reason === "abort" ? "interrupted" : "completed";
+            } else if (eventType === "process_died") {
+              merged.status = "failed";
+              merged.error =
+                typeof eventPayload.reason === "string" ? eventPayload.reason : "Runtime failed";
+            } else {
+              return prev;
+            }
+
+            next[idx] = merged;
+            return sortSubagents(next);
+          });
+          return;
+        }
+
         handleStreamEvent(eventType, (payload ?? {}) as Record<string, unknown>);
       }
 
@@ -1035,7 +1010,7 @@ export function useChatGateway(
         }
       }
     },
-    [client, handleStreamEvent, sortTasks],
+    [client, handleStreamEvent, sortSubagents],
   );
 
   useEffect(() => {
@@ -1088,7 +1063,7 @@ export function useChatGateway(
       setSessionId(opts.sessionId);
       subscribeToSession(opts.sessionId);
       sendRequest("session.get_history", { sessionId: opts.sessionId, limit: 50 });
-      sendRequest("session.list_tasks", { sessionId: opts.sessionId });
+      sendRequest("session.list_subagents", { parentSessionId: opts.sessionId });
       // Look up workspace for CWD context (needed for send-prompt auto-resume)
       if (opts.workspaceId) {
         sendRequest("session.get_workspace", { id: opts.workspaceId });
@@ -1243,7 +1218,7 @@ export function useChatGateway(
         void client?.unsubscribe([`session.${subscribedSessionRef.current}.*`]).catch(() => {});
         subscribedSessionRef.current = null;
       }
-      setTasks(() => []);
+      setSubagents(() => []);
       sendRequest("session.create_session", { cwd: workspace.cwd });
     },
     [client, sendRequest, workspace?.cwd],
@@ -1279,7 +1254,7 @@ export function useChatGateway(
     hasMore,
     workspace,
     sessions,
-    tasks,
+    subagents,
     isAtBottom,
     sendPrompt,
     sendToolResult,

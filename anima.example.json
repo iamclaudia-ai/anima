@@ -142,7 +142,7 @@
   "agentHost": {
     "url": "ws://localhost:30087/ws",
     "port": 30087,
-    // Codex task-agent settings for delegated session.start_task(agent="codex")
+    // Codex provider settings for sessions and delegated subagents
     "codex": {
       "apiKey": "${OPENAI_API_KEY}",
       "model": "gpt-5.2-codex",

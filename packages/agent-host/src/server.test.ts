@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:net";
-import { createAgentHostServer, type SessionHostLike, type TaskHostLike } from "./server";
-import type { SessionEventMessage, TaskEventMessage } from "./protocol";
+import { createAgentHostServer, type SessionHostLike } from "./server";
+import type { SessionEventMessage } from "./protocol";
 import type { BufferedEvent } from "./event-buffer";
 import type { AnimaConfig } from "@anima/shared";
 import type { SessionDefaults } from "./session-host";
-import type { TaskRecord } from "./task-host";
 
 async function getFreePort(): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -92,15 +91,16 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
 
   setDefaults(_defaults: SessionDefaults): void {}
 
-  async create(_params: {
+  async create(params: {
     sessionId?: string;
     cwd: string;
+    agent?: string;
     model?: string;
     systemPrompt?: string;
     thinking?: boolean;
     effort?: string;
   }): Promise<{ sessionId: string }> {
-    const sessionId = `s${this.nextId++}`;
+    const sessionId = params.sessionId || `s${this.nextId++}`;
     this.sessions.set(sessionId, { id: sessionId });
     return { sessionId };
   }
@@ -170,79 +170,6 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
 
   setBufferedEvents(sessionId: string, events: BufferedEvent[]): void {
     this.bufferedEvents.set(sessionId, events);
-  }
-}
-
-class FakeTaskHost extends EventEmitter implements TaskHostLike {
-  private tasks = new Map<string, TaskRecord>();
-  private bufferedEvents = new Map<string, BufferedEvent[]>();
-  private nextId = 1;
-
-  async start(params: {
-    sessionId: string;
-    agent: string;
-    prompt: string;
-    mode?: string;
-    cwd?: string;
-    worktree?: boolean;
-    continue?: string;
-    model?: string;
-    effort?: string;
-    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-    files?: string[];
-    metadata?: Record<string, unknown>;
-  }): Promise<{
-    taskId: string;
-    status: string;
-    outputFile?: string;
-    message: string;
-    cwd?: string;
-    worktreePath?: string;
-    parentRepoPath?: string;
-    continuedFromTaskId?: string;
-  }> {
-    const taskId = `t${this.nextId++}`;
-    const now = new Date().toISOString();
-    this.tasks.set(taskId, {
-      taskId,
-      sessionId: params.sessionId,
-      agent: params.agent,
-      cwd: params.cwd || "/repo",
-      mode: (params.mode as "general" | "review" | "test") || "general",
-      status: "running",
-      prompt: params.prompt,
-      startedAt: now,
-      updatedAt: now,
-    });
-    return { taskId, status: "running", message: "started" };
-  }
-
-  get(taskId: string): TaskRecord | null {
-    return this.tasks.get(taskId) || null;
-  }
-
-  list(filters?: { sessionId?: string; status?: string; agent?: string }): TaskRecord[] {
-    return Array.from(this.tasks.values()).filter((task) => {
-      if (filters?.sessionId && task.sessionId !== filters.sessionId) return false;
-      if (filters?.status && task.status !== filters.status) return false;
-      if (filters?.agent && task.agent !== filters.agent) return false;
-      return true;
-    });
-  }
-
-  interrupt(taskId: string): boolean {
-    const task = this.tasks.get(taskId);
-    if (!task) return false;
-    task.status = "interrupted";
-    return true;
-  }
-
-  getEventsAfter(taskId: string, lastSeq: number): BufferedEvent[] {
-    return (this.bufferedEvents.get(taskId) ?? []).filter((e) => e.seq > lastSeq);
-  }
-
-  setBufferedEvents(taskId: string, events: BufferedEvent[]): void {
-    this.bufferedEvents.set(taskId, events);
   }
 }
 
@@ -445,18 +372,20 @@ describe("agent-host server", () => {
     expect(sessions).toHaveLength(2);
   });
 
-  it("routes task lifecycle and broadcasts task events to subscribed clients", async () => {
+  it("spawns subagents as normal sessions and broadcasts their session stream", async () => {
     if (serverCtx) {
       await serverCtx.stop();
     }
 
     const fakeHost = new FakeSessionHost();
-    const fakeTaskHost = new FakeTaskHost();
+    const promptCalls: Array<{ sessionId: string; content: string | unknown[] }> = [];
+    fakeHost.prompt = async (sessionId: string, content: string | unknown[]) => {
+      promptCalls.push({ sessionId, content });
+    };
 
     serverCtx = await createAgentHostServer({
       port: await getFreePort(),
       sessionHost: fakeHost,
-      taskHost: fakeTaskHost,
       loadConfig: () => fakeConfig,
       loadState: () => ({ updatedAt: new Date().toISOString(), sessions: [] }),
       saveState: () => {},
@@ -468,45 +397,40 @@ describe("agent-host server", () => {
     client.send({ type: "auth", extensionId: "session" });
 
     client.send({
-      type: "task.start",
-      requestId: "task-start-1",
+      type: "subagent.spawn",
+      requestId: "subagent-spawn-1",
       params: {
-        sessionId: "s-test",
+        parentSessionId: "s-test",
+        subagentId: "subagent-1",
         agent: "codex",
         prompt: "hello",
+        cwd: "/repo",
       },
     });
 
-    const startRes = await client.waitFor(
-      (msg) => msg.type === "res" && msg.requestId === "task-start-1",
+    const spawnRes = await client.waitFor(
+      (msg) => msg.type === "res" && msg.requestId === "subagent-spawn-1",
     );
-    const startedTaskId = String(((startRes.payload ?? {}) as { taskId?: string }).taskId || "");
-    expect(startedTaskId).toBe("t1");
+    const subagentId = String(
+      ((spawnRes.payload ?? {}) as { subagentId?: string }).subagentId || "",
+    );
+    expect(subagentId).toBe("subagent-1");
+    expect(promptCalls).toEqual([{ sessionId: "subagent-1", content: "hello" }]);
 
-    const taskEvent: TaskEventMessage = {
-      type: "task.event",
-      taskId: startedTaskId,
-      event: { type: "delta", text: "working" },
+    const subagentEvent: SessionEventMessage = {
+      type: "session.event",
+      sessionId: subagentId,
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "working" } },
       seq: 1,
     };
-    fakeTaskHost.emit("task.event", taskEvent);
+    fakeHost.emit("session.event", subagentEvent);
 
     await client.waitFor(
       (msg) =>
-        msg.type === "task.event" &&
-        msg.taskId === startedTaskId &&
-        (msg.event as { type?: string } | undefined)?.type === "delta",
+        msg.type === "session.event" &&
+        msg.sessionId === subagentId &&
+        (msg.event as { type?: string } | undefined)?.type === "content_block_delta",
     );
-
-    client.send({
-      type: "task.interrupt",
-      requestId: "task-stop-1",
-      taskId: startedTaskId,
-    });
-    const stopRes = await client.waitFor(
-      (msg) => msg.type === "res" && msg.requestId === "task-stop-1",
-    );
-    expect(stopRes.ok).toBe(true);
 
     client.close();
   });

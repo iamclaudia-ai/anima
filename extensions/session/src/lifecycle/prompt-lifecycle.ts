@@ -24,6 +24,9 @@ type SessionEventListener = (event: {
 interface StoredSessionLike {
   workspaceId: string;
   model: string;
+  agent: string;
+  purpose: "chat" | "subagent" | "review" | "test";
+  parentSessionId: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -158,6 +161,9 @@ async function ensureSessionBootstrapped(params: {
   effort: "low" | "medium" | "high" | "max";
   baseSystemPrompt?: string;
   includeAllSummaries: boolean;
+  purpose?: "chat" | "subagent" | "review" | "test";
+  parentSessionId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }): Promise<void> {
   const rt = getRuntime();
   if (resolveSessionPath(params.sessionId, params.cwd)) return;
@@ -184,9 +190,11 @@ async function ensureSessionBootstrapped(params: {
     providerSessionId: params.sessionId,
     model: params.model,
     agent: params.agent,
-    purpose: "chat",
+    purpose: params.purpose || "chat",
+    parentSessionId: params.parentSessionId,
     runtimeStatus: "idle",
     metadata: {
+      ...(params.metadata || {}),
       bootstrapSystemPrompt: params.baseSystemPrompt,
       bootstrapThinking: params.thinking,
       bootstrapEffort: params.effort,
@@ -321,6 +329,9 @@ async function bootstrapSessionStage(state: PromptLifecycleState): Promise<void>
     effort: bootstrap.effort,
     baseSystemPrompt: bootstrap.baseSystemPrompt,
     includeAllSummaries: state.workspaceResult.workspace.general,
+    purpose: state.existing?.purpose,
+    parentSessionId: state.existing?.parentSessionId,
+    metadata: state.existing?.metadata,
   });
 }
 

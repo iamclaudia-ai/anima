@@ -5,14 +5,18 @@ import { homedir } from "node:os";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@anima/shared";
 import { rotatePersistentSessions } from "./persistent-sessions";
-import { normalizeTaskMode, type TaskStatus } from "./lifecycle/task-workflow";
-import { startTask, getTask, listTasks, interruptTask } from "./lifecycle/task-workflow";
-import { sendSessionNotification } from "./lifecycle/task-events";
+import {
+  getSubagent,
+  listSubagents,
+  normalizeSubagentPurpose,
+  spawnSubagent,
+  type SubagentStatus,
+} from "./lifecycle/subagent-workflow";
+import { sendSessionNotification } from "./lifecycle/subagent-events";
 import { listSessions, getHistory, getMemoryContext } from "./lifecycle/session-query";
 import { switchSession, resetSession } from "./lifecycle/session-activation";
 import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
 import type { AgentHostSessionInfo } from "./session-types";
-import type { SessionTask } from "./lifecycle/task-workflow";
 import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 
@@ -122,22 +126,14 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
       }
       return { activeSessions };
     },
-    "session.get_task": async (params) => {
-      const rt = getRuntime();
-      const result = (await rt.bridge.getTask(params.taskId as string)) as {
-        task?: SessionTask | null;
-      };
-      const hostTask = (result?.task || null) as SessionTask | null;
-      if (hostTask) {
-        rt.tasks.set(hostTask.taskId, hostTask);
-      }
-      const storedTask = getTask(params.taskId as string);
-      return { task: hostTask || storedTask || null };
+    "session.get_subagent": async (params) => {
+      const subagent = getSubagent(params.subagentId as string);
+      return { subagent };
     },
-    "session.list_tasks": async (params) =>
-      listTasks({
-        sessionId: params.sessionId as string | undefined,
-        status: params.status as TaskStatus | undefined,
+    "session.list_subagents": async (params) =>
+      listSubagents({
+        parentSessionId: params.parentSessionId as string | undefined,
+        status: params.status as SubagentStatus | undefined,
         agent: params.agent as string | undefined,
       }),
     "session.list_workspaces": async () => {
@@ -287,21 +283,20 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       );
       return { ok };
     },
-    "session.start_task": async (params) => {
+    "session.spawn_agent": async (params) => {
       const rt = getRuntime();
-      return await startTask(
+      return await spawnSubagent(
         {
-          sessionId: params.sessionId as string,
-          agent: params.agent as string,
+          parentSessionId: params.parentSessionId as string,
+          agent: params.agent as string | undefined,
           prompt: params.prompt as string,
-          mode: normalizeTaskMode(params.mode as string | undefined),
+          purpose: normalizeSubagentPurpose(params.purpose as string | undefined),
           cwd: params.cwd as string | undefined,
-          worktree: params.worktree as boolean | undefined,
-          continue: params.continue as string | undefined,
           model: params.model as string | undefined,
+          systemPrompt: params.systemPrompt as string | undefined,
+          thinking: params.thinking as boolean | undefined,
           effort: params.effort as string | undefined,
           sandbox: params.sandbox as "read-only" | "workspace-write" | "danger-full-access",
-          files: params.files as string[] | undefined,
           metadata: params.metadata as Record<string, unknown> | undefined,
         },
         {
@@ -310,7 +305,12 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         },
       );
     },
-    "session.interrupt_task": async (params) => interruptTask(params.taskId as string),
+    "session.interrupt_subagent": async (params) => {
+      const rt = getRuntime();
+      const subagentId = params.subagentId as string;
+      const ok = await rt.bridge.interruptSession(subagentId);
+      return { ok, subagentId };
+    },
     "session.send_notification": async (params) => {
       const rt = getRuntime();
       const sessionId = params.sessionId as string;

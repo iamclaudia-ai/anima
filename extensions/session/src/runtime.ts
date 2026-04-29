@@ -10,7 +10,7 @@
 
 import type { ExtensionContext } from "@anima/shared";
 import type { SessionRuntimeConfig } from "./session-types";
-import type { SessionTask } from "./lifecycle/task-workflow";
+import type { SessionSubagent } from "./lifecycle/subagent-workflow";
 import type { SessionActorRegistry } from "./session-actor-registry";
 import type { SessionAgentBridge } from "./session-agent-bridge";
 import type { SessionRegistry } from "./session-registry";
@@ -28,10 +28,10 @@ export interface SessionRuntime {
   config: Record<string, unknown>;
   /** Per-session prompt/session actors */
   sessionActors: SessionActorRegistry;
-  /** In-memory task cache */
-  tasks: Map<string, SessionTask>;
-  /** Prevents duplicate task completion notifications */
-  taskNotificationsSent: Set<string>;
+  /** In-memory child session cache */
+  subagents: Map<string, SessionSubagent>;
+  /** Prevents duplicate subagent completion notifications */
+  subagentNotificationsSent: Set<string>;
   /** Late-bound method dispatcher (set after dispatch is ready) */
   dispatchMethod: (method: string, params: Record<string, unknown>) => Promise<unknown>;
 }

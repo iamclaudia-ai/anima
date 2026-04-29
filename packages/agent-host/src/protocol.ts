@@ -8,6 +8,5 @@ export type {
   AgentHostClientMessage as ClientMessage,
   AgentHostResponseMessage as ResponseMessage,
   AgentHostSessionEventMessage as SessionEventMessage,
-  AgentHostTaskEventMessage as TaskEventMessage,
   AgentHostServerMessage as ServerMessage,
 } from "@anima/shared";

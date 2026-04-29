@@ -5,7 +5,7 @@ import * as os from "node:os";
 import {
   closeSessionDb,
   getStoredSession,
-  listTaskSessions,
+  listSubagentSessions,
   listWorkspaceSessions,
   setWorkspaceActiveSession,
   upsertSession,
@@ -34,7 +34,7 @@ describe("session store", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("persists chat sessions and task child sessions", () => {
+  it("persists chat sessions and subagent child sessions", () => {
     upsertSession({
       id: "ses_parent",
       workspaceId: "ws_1",
@@ -48,9 +48,9 @@ describe("session store", () => {
     setWorkspaceActiveSession("ws_1", "ses_parent");
 
     upsertSession({
-      id: "task_1",
+      id: "subagent_1",
       workspaceId: "ws_1",
-      providerSessionId: "task_1",
+      providerSessionId: "subagent_1",
       model: "gpt-5.2-codex",
       agent: "codex",
       purpose: "review",
@@ -64,11 +64,11 @@ describe("session store", () => {
     expect(chat[0]?.sessionId).toBe("ses_parent");
     expect(chat[0]?.firstPrompt).toBe("hello");
 
-    const tasks = listTaskSessions({ parentSessionId: "ses_parent" });
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0]?.id).toBe("task_1");
-    expect(tasks[0]?.purpose).toBe("review");
-    expect(tasks[0]?.runtimeStatus).toBe("running");
+    const subagents = listSubagentSessions({ parentSessionId: "ses_parent" });
+    expect(subagents).toHaveLength(1);
+    expect(subagents[0]?.id).toBe("subagent_1");
+    expect(subagents[0]?.purpose).toBe("review");
+    expect(subagents[0]?.runtimeStatus).toBe("running");
 
     const parent = getStoredSession("ses_parent");
     expect(parent?.id).toBe("ses_parent");

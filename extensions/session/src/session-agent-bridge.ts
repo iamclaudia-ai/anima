@@ -2,7 +2,6 @@ import type { AgentHostSessionInfo } from "./session-types";
 import type { AgentHostClient } from "./agent-client";
 
 type SessionEventListener = (event: any) => void;
-type TaskEventListener = (event: any) => void;
 
 export class SessionAgentBridge {
   constructor(private readonly client: AgentHostClient) {}
@@ -70,46 +69,26 @@ export class SessionAgentBridge {
     return await this.client.sendToolResult(sessionId, toolUseId, content, isError);
   }
 
-  async startTask(params: {
-    sessionId: string;
-    agent: string;
+  async spawnSubagent(params: {
+    parentSessionId: string;
+    subagentId?: string;
+    agent?: string;
     prompt: string;
-    mode?: "general" | "review" | "test";
     cwd?: string;
-    worktree?: boolean;
-    continue?: string;
     model?: string;
+    systemPrompt?: string;
+    thinking?: boolean;
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-    files?: string[];
     metadata?: Record<string, unknown>;
   }): Promise<{
-    taskId: string;
+    subagentId: string;
+    sessionId: string;
+    parentSessionId: string;
     status: string;
-    outputFile?: string;
     message: string;
-    cwd?: string;
-    worktreePath?: string;
-    parentRepoPath?: string;
-    continuedFromTaskId?: string;
   }> {
-    return await this.client.startTask(params);
-  }
-
-  async getTask(taskId: string): Promise<unknown> {
-    return await this.client.getTask(taskId);
-  }
-
-  async listTasks(filters?: {
-    sessionId?: string;
-    status?: "running" | "completed" | "failed" | "interrupted";
-    agent?: string;
-  }): Promise<unknown> {
-    return await this.client.listTasks(filters);
-  }
-
-  async interruptTask(taskId: string): Promise<boolean> {
-    return await this.client.interruptTask(taskId);
+    return await this.client.spawnSubagent(params);
   }
 
   onSessionEvent(listener: SessionEventListener): void {
@@ -118,13 +97,5 @@ export class SessionAgentBridge {
 
   offSessionEvent(listener: SessionEventListener): void {
     this.client.removeListener("session.event", listener);
-  }
-
-  onTaskEvent(listener: TaskEventListener): void {
-    this.client.on("task.event", listener);
-  }
-
-  offTaskEvent(listener: TaskEventListener): void {
-    this.client.removeListener("task.event", listener);
   }
 }

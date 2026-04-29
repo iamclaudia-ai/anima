@@ -75,7 +75,7 @@ export interface AgentHostConfig {
   url: string;
   /** Agent-host HTTP port (for watchdog health checks) */
   port: number;
-  /** Task-agent configuration (currently Codex-backed) */
+  /** Codex provider configuration */
   codex?: {
     apiKey?: string;
     cliPath?: string;
@@ -85,7 +85,7 @@ export interface AgentHostConfig {
     autoApprove?: boolean;
     personality?: string;
     cwd?: string;
-    preambles?: { task?: string; review?: string; test?: string };
+    preambles?: { subagent?: string; review?: string; test?: string };
   };
 }
 
