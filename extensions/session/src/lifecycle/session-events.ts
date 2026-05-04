@@ -1,4 +1,4 @@
-import { touchSession } from "../session-store";
+import { touchSession, updateSessionRuntime } from "../session-store";
 import { toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
 
@@ -28,6 +28,9 @@ export function wireSessionEvents(): () => void {
         rt.sessionActors.appendResponseText(sessionId, delta.text);
       }
     } else if (payload.type === "turn_stop") {
+      updateSessionRuntime(sessionId, "completed", {
+        lastAssistantMessageAt: new Date().toISOString(),
+      });
       rt.sessionActors.completeTurn(
         sessionId,
         (payload as { stop_reason?: string }).stop_reason || "unknown",

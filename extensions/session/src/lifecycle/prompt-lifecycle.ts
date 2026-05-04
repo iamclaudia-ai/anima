@@ -1,12 +1,17 @@
 import { createLogger, PERSISTENT_SESSION_ID, shortId, withTimeout } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { touchSession } from "../session-store";
+import { updateSessionRuntime, type RuntimeStatus } from "../session-store";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
 import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
 import { resolvePersistentSessionForCwd } from "../persistent-sessions";
 import { getRuntime } from "../runtime";
+import {
+  buildElapsedTimeReminder,
+  buildSessionStartReminder,
+  withTimeReminder,
+} from "./time-context";
 
 const log = createLogger("SessionExt:Prompt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -27,6 +32,7 @@ interface StoredSessionLike {
   agent: string;
   purpose: "chat" | "subagent" | "review" | "test";
   parentSessionId: string | null;
+  runtimeStatus: RuntimeStatus;
   metadata: Record<string, unknown> | null;
 }
 
@@ -41,7 +47,7 @@ interface WorkspaceResultLike {
   created: boolean;
 }
 
-interface SessionBootstrapMetadata {
+interface SessionBootstrapMetadata extends Record<string, unknown> {
   bootstrapSystemPrompt?: string;
   bootstrapThinking?: boolean;
   bootstrapEffort?: "low" | "medium" | "high" | "max";
@@ -71,6 +77,7 @@ interface PromptLifecycleState {
   existingMetadata: SessionBootstrapMetadata | null;
   workspaceResult?: WorkspaceResultLike;
   requestContext?: RequestContext;
+  userMessageAtIso?: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -123,7 +130,9 @@ async function buildBootstrapSystemPrompt(params: {
 }): Promise<string | undefined> {
   const rt = getRuntime();
   const { cwd, baseSystemPrompt, includeAllSummaries } = params;
-  let systemPrompt = baseSystemPrompt;
+  let systemPrompt = baseSystemPrompt
+    ? `${baseSystemPrompt}\n\n${buildSessionStartReminder()}`
+    : buildSessionStartReminder();
 
   await transitionConversation(cwd);
 
@@ -279,6 +288,7 @@ async function resolveSessionStage(input: PromptLifecycleInput): Promise<PromptL
 
 async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
   const rt = getRuntime();
+  state.userMessageAtIso = new Date().toISOString();
   const activeSessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
   const activeSession = activeSessions.find((session) => session.id === state.sessionId);
   if (
@@ -304,13 +314,16 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       agent: state.agent,
       purpose: "chat",
       runtimeStatus: "idle",
+      metadata: { lastUserMessageAt: state.userMessageAtIso },
     });
     rt.registry.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
     return;
   }
 
   if (state.existing) {
-    touchSession(state.sessionId);
+    updateSessionRuntime(state.sessionId, state.existing.runtimeStatus, {
+      lastUserMessageAt: state.userMessageAtIso,
+    });
   }
 }
 
@@ -331,7 +344,10 @@ async function bootstrapSessionStage(state: PromptLifecycleState): Promise<void>
     includeAllSummaries: state.workspaceResult.workspace.general,
     purpose: state.existing?.purpose,
     parentSessionId: state.existing?.parentSessionId,
-    metadata: state.existing?.metadata,
+    metadata: {
+      ...(state.existing?.metadata || {}),
+      ...(state.userMessageAtIso ? { lastUserMessageAt: state.userMessageAtIso } : {}),
+    },
   });
 }
 
@@ -367,9 +383,13 @@ async function dispatchStreamingPromptStage(
 ): Promise<{ status: "streaming"; sessionId: string }> {
   const rt = getRuntime();
   const promptStart = Date.now();
+  const content = withTimeReminder(
+    state.content,
+    buildElapsedTimeReminder({ metadata: state.existingMetadata }),
+  );
   await rt.bridge.prompt(
     state.sessionId,
-    state.content,
+    content,
     state.effectiveCwd,
     state.resolvedModel,
     state.agent,
@@ -397,11 +417,15 @@ async function dispatchNonStreamingPromptStage(
   const rt = getRuntime();
   const promptStart = Date.now();
   const turnResultPromise = rt.sessionActors.beginTurn(state.sessionId, 300_000);
+  const content = withTimeReminder(
+    state.content,
+    buildElapsedTimeReminder({ metadata: state.existingMetadata }),
+  );
 
   try {
     await rt.bridge.prompt(
       state.sessionId,
-      state.content,
+      content,
       state.effectiveCwd,
       state.resolvedModel,
       state.agent,

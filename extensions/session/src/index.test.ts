@@ -3,6 +3,7 @@ import type { ExtensionContext } from "@anima/shared";
 import { clearConfigCache } from "@anima/shared";
 import { createSessionExtension } from "./index";
 import { AgentHostClient } from "./agent-client";
+import { getStoredSession, upsertSession } from "./session-store";
 import * as workspace from "./workspace";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -621,7 +622,7 @@ describe("session extension", () => {
       agent: "claude",
       cwd: "/repo/project",
       model: "claude-opus-4-6",
-      systemPrompt: undefined,
+      systemPrompt: expect.stringContaining("Current local date and time:"),
       thinking: false,
       effort: "medium",
     });
@@ -699,6 +700,104 @@ describe("session extension", () => {
     });
 
     expect(createSpy).not.toHaveBeenCalled();
+
+    await ext.stop();
+  });
+
+  it("tracks session message timestamps and skips elapsed reminder without prior assistant metadata", async () => {
+    let capturedContent: string | unknown[] | undefined;
+    promptSpy.mockImplementationOnce(function (
+      this: AgentHostClient,
+      sid: string,
+      content: string | unknown[],
+    ) {
+      capturedContent = content;
+      this.emit("session.event", {
+        eventName: `session.${sid}.content_block_delta`,
+        sessionId: sid,
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "fresh answer" },
+      });
+      this.emit("session.event", {
+        eventName: `session.${sid}.turn_stop`,
+        sessionId: sid,
+        type: "turn_stop",
+      });
+      return Promise.resolve();
+    });
+
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    const created = (await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    })) as { sessionId: string };
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: created.sessionId,
+      cwd: "/repo/project",
+      content: "hello",
+    });
+
+    expect(capturedContent).toBe("hello");
+    const stored = getStoredSession(created.sessionId);
+    expect(Date.parse(String(stored?.metadata?.lastUserMessageAt))).toBeGreaterThan(0);
+    expect(Date.parse(String(stored?.metadata?.lastAssistantMessageAt))).toBeGreaterThan(0);
+    expect(stored?.metadata?.lastAssistantMessagePreview).toBeUndefined();
+
+    await ext.stop();
+  });
+
+  it("injects elapsed time reminder when prior assistant output is stale", async () => {
+    let capturedContent: string | unknown[] | undefined;
+    promptSpy.mockImplementationOnce(function (
+      this: AgentHostClient,
+      sid: string,
+      content: string | unknown[],
+    ) {
+      capturedContent = content;
+      this.emit("session.event", {
+        eventName: `session.${sid}.turn_stop`,
+        sessionId: sid,
+        type: "turn_stop",
+      });
+      return Promise.resolve();
+    });
+
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    const created = (await ext.handleMethod("session.create_session", {
+      cwd: "/repo/project",
+    })) as { sessionId: string };
+    const stored = getStoredSession(created.sessionId);
+    expect(stored).toBeTruthy();
+    upsertSession({
+      id: created.sessionId,
+      workspaceId: stored!.workspaceId,
+      providerSessionId: created.sessionId,
+      model: stored!.model,
+      agent: stored!.agent,
+      purpose: stored!.purpose,
+      runtimeStatus: stored!.runtimeStatus,
+      metadata: {
+        ...(stored!.metadata || {}),
+        lastAssistantMessageAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: created.sessionId,
+      cwd: "/repo/project",
+      content: "hello again",
+    });
+
+    expect(typeof capturedContent).toBe("string");
+    expect(capturedContent as string).toContain("<system-reminder>");
+    expect(capturedContent as string).toContain("Current local date and time:");
+    expect(capturedContent as string).toContain("Time since last assistant message:");
+    expect(capturedContent as string).not.toContain("Last assistant message preview:");
+    expect(capturedContent as string).toContain("hello again");
 
     await ext.stop();
   });
