@@ -33,7 +33,86 @@ interface VendorSpec {
   slug: string;
   /** Bare specifiers to NOT inline; the importmap resolves these on the client. */
   externals: string[];
+  /**
+   * Explicit named exports for CJS packages (React, react-dom). Bun's
+   * `export * from "<cjs>"` puts everything onto an internal object via
+   * `__reExport` but never emits ESM named exports — so consumers doing
+   * `import { Fragment } from "react"` would fail at module evaluation.
+   * Listing names triggers Bun's `export { x } from "<cjs>"` path which
+   * properly destructures the CJS namespace into ESM named exports.
+   *
+   * Omit for ESM packages — `export *` works for them.
+   */
+  namedExports?: string[];
 }
+
+/** React 19 public API. Keep in sync with React's index.js exports. */
+const REACT_EXPORTS = [
+  "Children",
+  "Component",
+  "Fragment",
+  "Profiler",
+  "PureComponent",
+  "StrictMode",
+  "Suspense",
+  "act",
+  "cache",
+  "captureOwnerStack",
+  "cloneElement",
+  "createContext",
+  "createElement",
+  "createRef",
+  "forwardRef",
+  "isValidElement",
+  "lazy",
+  "memo",
+  "startTransition",
+  "use",
+  "useActionState",
+  "useCallback",
+  "useContext",
+  "useDebugValue",
+  "useDeferredValue",
+  "useEffect",
+  "useId",
+  "useImperativeHandle",
+  "useInsertionEffect",
+  "useLayoutEffect",
+  "useMemo",
+  "useOptimistic",
+  "useReducer",
+  "useRef",
+  "useState",
+  "useSyncExternalStore",
+  "useTransition",
+  "version",
+];
+
+/** react-dom public API (top-level, sans the /client and /server subpaths). */
+const REACT_DOM_EXPORTS = [
+  "createPortal",
+  "flushSync",
+  "preconnect",
+  "prefetchDNS",
+  "preinit",
+  "preinitModule",
+  "preload",
+  "preloadModule",
+  "requestFormReset",
+  "unstable_batchedUpdates",
+  "useFormState",
+  "useFormStatus",
+  "version",
+];
+
+/** react-dom/client — just root creation. */
+const REACT_DOM_CLIENT_EXPORTS = ["createRoot", "hydrateRoot"];
+
+/** react/jsx-runtime — production JSX transform helpers. */
+const REACT_JSX_RUNTIME_EXPORTS = ["Fragment", "jsx", "jsxs"];
+
+/** react/jsx-dev-runtime — dev JSX transform helpers. */
+const REACT_JSX_DEV_RUNTIME_EXPORTS = ["Fragment", "jsxDEV"];
 
 /**
  * Order matters only for log readability — each spec is independently buildable.
@@ -45,16 +124,33 @@ interface VendorSpec {
  * browser-safe bits they need (mostly types, which are erased anyway).
  */
 const VENDOR_SPECS: VendorSpec[] = [
-  { specifier: "react", slug: "react", externals: [] },
-  { specifier: "react/jsx-runtime", slug: "react-jsx-runtime", externals: ["react"] },
-  { specifier: "react/jsx-dev-runtime", slug: "react-jsx-dev-runtime", externals: ["react"] },
-  { specifier: "react-dom", slug: "react-dom", externals: ["react"] },
+  { specifier: "react", slug: "react", externals: [], namedExports: REACT_EXPORTS },
+  {
+    specifier: "react/jsx-runtime",
+    slug: "react-jsx-runtime",
+    externals: ["react"],
+    namedExports: REACT_JSX_RUNTIME_EXPORTS,
+  },
+  {
+    specifier: "react/jsx-dev-runtime",
+    slug: "react-jsx-dev-runtime",
+    externals: ["react"],
+    namedExports: REACT_JSX_DEV_RUNTIME_EXPORTS,
+  },
+  {
+    specifier: "react-dom",
+    slug: "react-dom",
+    externals: ["react"],
+    namedExports: REACT_DOM_EXPORTS,
+  },
   {
     specifier: "react-dom/client",
     slug: "react-dom-client",
     externals: ["react", "react-dom"],
+    namedExports: REACT_DOM_CLIENT_EXPORTS,
   },
   {
+    // ESM workspace package — `export *` works fine, no enumeration needed.
     specifier: "@anima/ui",
     slug: "anima-ui",
     externals: [
@@ -78,9 +174,17 @@ const cache = new Map<string, VendorBundle>();
 function ensureEntryFile(spec: VendorSpec): string {
   mkdirSync(ENTRY_DIR, { recursive: true });
   const path = join(ENTRY_DIR, `${spec.slug}.ts`);
-  // Re-export everything from the upstream module. `export *` covers named
-  // exports; Bun's interop layer handles default re-export at consume time.
-  const contents = `export * from ${JSON.stringify(spec.specifier)};\n`;
+  const target = JSON.stringify(spec.specifier);
+  let contents: string;
+  if (spec.namedExports && spec.namedExports.length > 0) {
+    // Explicit named re-export — required for CJS sources where Bun's
+    // `export *` doesn't expose names as ESM exports.
+    const names = spec.namedExports.join(", ");
+    contents = `export { ${names} } from ${target};\nexport { default } from ${target};\n`;
+  } else {
+    // Pure ESM source — `export *` is sufficient.
+    contents = `export * from ${target};\n`;
+  }
   writeFileSync(path, contents);
   return path;
 }
