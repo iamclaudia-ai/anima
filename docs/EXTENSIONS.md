@@ -728,7 +728,14 @@ Extensions that track connected clients (like DOMINATRIX tracking Chrome extensi
 
 ## Web Pages (Client-Side Routes)
 
-Extensions can serve web pages via the gateway's SPA.
+Extensions can serve web pages via the gateway's SPA. Web contributions are
+**loaded dynamically at runtime** — the gateway scans `extensions/*/src/routes.ts`
+on startup, builds each extension into its own browser bundle on demand, and
+the SPA dynamic-imports them after fetching the contribution list. There is
+no compile-time link from the gateway to any extension.
+
+For the full architecture (vendor bundles, importmap, shared-deps contract,
+Bun quirks) see [`WEB-BUNDLER.md`](./WEB-BUNDLER.md).
 
 ### Add routes.ts
 
@@ -748,33 +755,50 @@ export default {
 } satisfies ExtensionWebContribution;
 ```
 
-### Export from package.json
+That's it. The gateway picks up the new `routes.ts` on next restart — no
+generator to run, no `package.json` edits in the gateway, no manual
+registration. The SPA fetches `/api/web-contributions`, finds your
+extension, dynamic-imports `/extensions/my-feature/web-bundle.js`, and
+mounts the routes.
+
+### package.json
+
+For monorepo extensions:
 
 ```json
 {
-  "exports": {
-    ".": "./src/index.ts",
-    "./routes": "./src/routes.ts"
-  },
   "dependencies": {
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
-    "zod": "^3.25.76"
+    "zod": "catalog:"
   }
 }
 ```
 
-### Register in the web shell
+Use the bun catalog for shared deps (`react`, `react-dom`, `zod`, etc.) so
+every extension pins to the same version as the rest of the monorepo. The
+catalog lives in the root `package.json`.
 
-Route modules are collected through `packages/gateway/src/web/extension-web-contributions.generated.ts`.
-Refresh it after adding or removing an extension route file:
+> Note for future external extensions: when extensions ship as
+> standalone npm packages, shared deps (`react`, `react-dom`, `@anima/ui`,
+> `@anima/shared`) should be declared as `peerDependencies` so the host
+> Anima install provides them. See the "Future: external extensions"
+> section in [`WEB-BUNDLER.md`](./WEB-BUNDLER.md).
 
-```bash
-bun run web:routes
-```
+### Shared modules and the importmap
 
-`@anima/gateway` runs this generator before `dev` and `build`, so normal gateway startup picks up new route modules automatically.
+Extension bundles externalize React, react-dom, react-dom/client, the JSX
+runtimes, and `@anima/ui`. The browser's importmap resolves those bare
+specifiers to `/vendor/<slug>.js` URLs, so every extension shares one
+module instance with the SPA shell. This is what makes hooks like
+`useRouter()` and `useGatewayClient()` work across the SPA / extension
+boundary — they're reading from the same React context provider.
+
+If your extension imports something from `@anima/ui` and the import
+silently returns undefined, check that the symbol is actually exported
+from `@anima/ui`'s `index.ts`. The importmap can only resolve names that
+exist in the shared bundle.
 
 ### Convention
 

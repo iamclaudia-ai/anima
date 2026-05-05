@@ -324,11 +324,24 @@ Extensions can declare web pages:
 ```
 extensions/<name>/src/
   index.ts       # Server: createMyExtension() → AnimaExtension
-  routes.ts      # Client: export const myRoutes: Route[]
+  routes.ts      # Client: default export ExtensionWebContribution
   pages/         # React page components
 ```
 
-Routes use feature paths (e.g., `/control`); chat owns `/`. The web shell (`packages/gateway/src/web/index.tsx`) imports routes from all extensions and feeds them to the `Router` component.
+Routes use feature paths (e.g., `/control`); chat owns `/`. Web contributions
+are **loaded dynamically at runtime** — the gateway has no compile-time
+dependency on any extension. The SPA shell fetches `/api/web-contributions`
+on bootstrap, dynamic-imports each extension's bundle (built lazily by
+`packages/gateway/src/web/extension-bundler.ts` and served at
+`/extensions/<id>/web-bundle.js`), and aggregates routes/panels/layouts.
+
+Shared deps (React, react-dom, `@anima/ui`) are externalized from every
+bundle and resolved by an importmap to `/vendor/<slug>.js`, so the SPA
+and all extensions share single module instances — critical for React
+contexts (`Router`, `GatewayClient`) to work across the boundary.
+
+See [`WEB-BUNDLER.md`](./WEB-BUNDLER.md) for the full bundler architecture,
+the shared-externals contract, and notes on Bun's CJS-interop quirks.
 
 ### Health Checks
 
