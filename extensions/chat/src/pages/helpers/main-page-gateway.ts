@@ -1,22 +1,34 @@
-import type { SessionInfo, WorkspaceInfo } from "@anima/ui";
+import type { SessionInfo } from "@anima/ui";
 
 export type GatewayCaller = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 
-export interface MainPageBootstrapResult {
-  workspaces: WorkspaceInfo[];
-  activeWorkspace: WorkspaceInfo | null;
+export interface ListSessionsResult {
   sessions: SessionInfo[];
-  activeSessionId: string | null;
+  total: number;
+  hasMore: boolean;
 }
 
+/**
+ * Fetch sessions for a workspace. When `limit` is omitted, returns all
+ * sessions (legacy behavior). With `limit`/`offset` set, the server
+ * paginates and `hasMore` reflects whether further pages remain.
+ */
 export async function loadSessionsForWorkspace(
   callGateway: GatewayCaller,
   cwd: string,
-): Promise<SessionInfo[]> {
-  const payload = (await callGateway("session.list_sessions", { cwd })) as {
-    sessions?: SessionInfo[];
-  } | null;
-  return payload?.sessions ?? [];
+  options?: { limit?: number; offset?: number },
+): Promise<ListSessionsResult> {
+  const payload = (await callGateway("session.list_sessions", {
+    cwd,
+    ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+    ...(options?.offset !== undefined ? { offset: options.offset } : {}),
+  })) as { sessions?: SessionInfo[]; total?: number; hasMore?: boolean } | null;
+  const sessions = payload?.sessions ?? [];
+  return {
+    sessions,
+    total: payload?.total ?? sessions.length,
+    hasMore: payload?.hasMore ?? false,
+  };
 }
 
 export async function createSessionForWorkspace(
@@ -27,43 +39,4 @@ export async function createSessionForWorkspace(
     sessionId?: string;
   } | null;
   return payload?.sessionId ?? null;
-}
-
-export async function loadMainPageBootstrapData(
-  callGateway: GatewayCaller,
-  options: {
-    workspaceId?: string;
-    sessionId?: string;
-    hasActiveSession: boolean;
-  },
-): Promise<MainPageBootstrapResult> {
-  const payload = (await callGateway("session.list_workspaces")) as {
-    workspaces?: WorkspaceInfo[];
-  } | null;
-  const workspaces = payload?.workspaces ?? [];
-  const activeWorkspace = options.workspaceId
-    ? (workspaces.find((workspace) => workspace.id === options.workspaceId) ?? null)
-    : (workspaces[0] ?? null);
-
-  if (!activeWorkspace) {
-    return {
-      workspaces,
-      activeWorkspace: null,
-      sessions: [],
-      activeSessionId: null,
-    };
-  }
-
-  const sessions = await loadSessionsForWorkspace(callGateway, activeWorkspace.cwd);
-  const activeSessionId =
-    options.sessionId && !options.hasActiveSession
-      ? (sessions.find((session) => session.sessionId === options.sessionId)?.sessionId ?? null)
-      : null;
-
-  return {
-    workspaces,
-    activeWorkspace,
-    sessions,
-    activeSessionId,
-  };
 }

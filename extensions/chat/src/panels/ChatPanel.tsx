@@ -25,7 +25,7 @@ export function ChatPanel() {
         {activeWorkspace && (
           <button
             type="button"
-            onClick={onNewSession}
+            onClick={() => onNewSession()}
             className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
           >
             Create new session

@@ -30,7 +30,6 @@ import type { WorkspaceInfo, SessionInfo } from "@anima/ui";
 import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
-  loadMainPageBootstrapData,
   loadSessionsForWorkspace,
 } from "../pages/helpers/main-page-gateway";
 
@@ -86,7 +85,10 @@ function setLatestSessionId(workspaceId: string, sessionId: string): void {
 export interface ChatPageContextValue {
   // Data
   workspaces: WorkspaceInfo[];
-  sessions: SessionInfo[];
+  /** Sessions keyed by workspace.id. Empty array if not loaded yet. */
+  sessionsByWorkspace: Record<string, SessionInfo[]>;
+  /** Whether each workspace has more sessions on the server, keyed by workspace.id. */
+  hasMoreByWorkspace: Record<string, boolean>;
   activeWorkspace: WorkspaceInfo | null;
   activeSessionId: string | null;
   isConnected: boolean;
@@ -100,11 +102,17 @@ export interface ChatPageContextValue {
   // Handlers — all the actions a panel can take
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo) => void;
-  onNewSession: () => void;
+  /** Create a new session in `workspace` (defaults to the active one). */
+  onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
   onCloseCreateWorkspaceModal: () => void;
   onCreateWorkspace: (cwd: string, name?: string, general?: boolean) => Promise<void>;
   onGetDirectories: (path: string) => Promise<{ path: string; directories: string[] }>;
+  /**
+   * Fetch the next page of sessions for a workspace and append to the cache.
+   * Idempotent — caller can spam-click "Show more" without duplicating loads.
+   */
+  onLoadMoreSessions: (workspaceId: string) => Promise<void>;
 }
 
 const ChatPageContext = createContext<ChatPageContextValue | null>(null);
@@ -126,7 +134,9 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const sessionId = params.sessionId;
 
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsByWorkspace, setSessionsByWorkspace] = useState<Record<string, SessionInfo[]>>({});
+  const [hasMoreByWorkspace, setHasMoreByWorkspace] = useState<Record<string, boolean>>({});
+  const loadingMoreRef = useRef<Set<string>>(new Set());
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
@@ -134,6 +144,12 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const { call, isConnected } = useGatewayClient();
   const activeWorkspaceRef = useRef<WorkspaceInfo | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+
+  // Active workspace's sessions — derived. Used by URL-driven session
+  // selection ("latest" → most recent of the active workspace).
+  const activeWorkspaceSessions = activeWorkspace
+    ? (sessionsByWorkspace[activeWorkspace.id] ?? [])
+    : [];
 
   const chatBridge = useMemo(
     () =>
@@ -155,25 +171,60 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [call],
   );
 
-  // Bootstrap on mount
+  // Initial page size for each workspace's session list. "Show more" fetches
+  // another page of the same size. Tuned to the NavigationDrawer's default
+  // visible-session count.
+  const SESSIONS_PAGE_SIZE = 5;
+
+  // Replace just one workspace's sessions + hasMore (immutable update).
+  const setSessionsForWorkspace = useCallback(
+    (workspaceId: string, sessions: SessionInfo[], hasMore: boolean) => {
+      setSessionsByWorkspace((prev) => ({ ...prev, [workspaceId]: sessions }));
+      setHasMoreByWorkspace((prev) => ({ ...prev, [workspaceId]: hasMore }));
+    },
+    [],
+  );
+
+  // Bootstrap: load workspaces, then fan out a parallel paginated
+  // `session.list_sessions` for each so the new NavigationDrawer renders
+  // every workspace's first page immediately. Subsequent pages load via
+  // `onLoadMoreSessions` when the user clicks "Show more".
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const data = await loadMainPageBootstrapData(callGateway, {
-          workspaceId,
-          sessionId,
-          hasActiveSession: activeSessionIdRef.current !== null,
-        });
+        const wsResult = await callGateway<{ workspaces?: WorkspaceInfo[] }>(
+          "session.list_workspaces",
+        );
         if (cancelled) return;
-        setWorkspaces(data.workspaces);
-        setSessions(data.sessions);
-        if (!activeWorkspaceRef.current && data.activeWorkspace) {
-          setActiveWorkspace(data.activeWorkspace);
-          activeWorkspaceRef.current = data.activeWorkspace;
+        const list = wsResult?.workspaces ?? [];
+        setWorkspaces(list);
+
+        // Pick the active workspace from URL or fall back to first.
+        const initialActive =
+          (workspaceId ? list.find((w) => w.id === workspaceId) : null) ?? list[0] ?? null;
+        if (initialActive && !activeWorkspaceRef.current) {
+          setActiveWorkspace(initialActive);
+          activeWorkspaceRef.current = initialActive;
         }
-        if (data.activeSessionId) {
-          setActiveSessionId(data.activeSessionId);
+
+        // Fan out per-workspace first-page loads in parallel.
+        const entries = await Promise.all(
+          list.map(async (ws) => {
+            const result = await loadSessionsForWorkspace(callGateway, ws.cwd, {
+              limit: SESSIONS_PAGE_SIZE,
+              offset: 0,
+            }).catch(() => ({ sessions: [] as SessionInfo[], total: 0, hasMore: false }));
+            return [ws.id, result] as const;
+          }),
+        );
+        if (cancelled) return;
+        setSessionsByWorkspace(Object.fromEntries(entries.map(([id, r]) => [id, r.sessions])));
+        setHasMoreByWorkspace(Object.fromEntries(entries.map(([id, r]) => [id, r.hasMore])));
+
+        // Resolve active session from URL.
+        if (sessionId && sessionId !== "latest" && !activeSessionIdRef.current) {
+          setActiveSessionId(sessionId);
         }
       } catch {
         // ignore bootstrap errors; connection status handled by gateway hook
@@ -184,18 +235,48 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     };
   }, [callGateway, workspaceId, sessionId]);
 
+  const onLoadMoreSessions = useCallback(
+    async (workspaceId: string) => {
+      // Idempotent — bail if we're already fetching for this workspace.
+      if (loadingMoreRef.current.has(workspaceId)) return;
+      const ws = workspaces.find((w) => w.id === workspaceId);
+      if (!ws) return;
+      const current = sessionsByWorkspace[workspaceId] ?? [];
+      loadingMoreRef.current.add(workspaceId);
+      try {
+        const next = await loadSessionsForWorkspace(callGateway, ws.cwd, {
+          limit: SESSIONS_PAGE_SIZE,
+          offset: current.length,
+        });
+        setSessionsByWorkspace((prev) => ({
+          ...prev,
+          [workspaceId]: [...(prev[workspaceId] ?? []), ...next.sessions],
+        }));
+        setHasMoreByWorkspace((prev) => ({ ...prev, [workspaceId]: next.hasMore }));
+      } catch {
+        // best-effort; user can click again
+      } finally {
+        loadingMoreRef.current.delete(workspaceId);
+      }
+    },
+    [callGateway, workspaces, sessionsByWorkspace],
+  );
+
   const onWorkspaceSelect = useCallback(
     (workspace: WorkspaceInfo) => {
       setActiveWorkspace(workspace);
       activeWorkspaceRef.current = workspace;
       setActiveSessionId(null);
-      setSessions([]);
       navigate(`/workspace/${workspace.id}/session/latest`);
-      void loadSessionsForWorkspace(callGateway, workspace.cwd)
-        .then((payload) => setSessions(payload))
+      // Refresh first page in case anything changed externally.
+      void loadSessionsForWorkspace(callGateway, workspace.cwd, {
+        limit: SESSIONS_PAGE_SIZE,
+        offset: 0,
+      })
+        .then((result) => setSessionsForWorkspace(workspace.id, result.sessions, result.hasMore))
         .catch(() => undefined);
     },
-    [callGateway],
+    [callGateway, setSessionsForWorkspace],
   );
 
   const onSessionSelect = useCallback((session: SessionInfo) => {
@@ -205,29 +286,53 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const onNewSession = useCallback(() => {
-    if (!activeWorkspaceRef.current) return;
-    const workspace = activeWorkspaceRef.current;
-    void createSessionForWorkspace(callGateway, workspace.cwd)
-      .then((payload) => {
-        const nextSessionId = payload;
-        if (!nextSessionId) return;
-        setActiveSessionId(nextSessionId);
-        navigate(`/workspace/${workspace.id}/session/${nextSessionId}`);
-        const optimisticSession: SessionInfo = {
-          sessionId: nextSessionId,
-          created: new Date().toISOString(),
-          modified: new Date().toISOString(),
-        };
-        setSessions((prev) =>
-          mergeSessionsPreferLocal([], [optimisticSession, ...prev], nextSessionId),
-        );
-        return loadSessionsForWorkspace(callGateway, workspace.cwd).then((sessionsPayload) => {
-          setSessions((prev) => mergeSessionsPreferLocal(sessionsPayload, prev, nextSessionId));
-        });
-      })
-      .catch(() => undefined);
-  }, [callGateway]);
+  const onNewSession = useCallback(
+    (workspace?: WorkspaceInfo) => {
+      const target = workspace ?? activeWorkspaceRef.current;
+      if (!target) return;
+      void createSessionForWorkspace(callGateway, target.cwd)
+        .then((nextSessionId) => {
+          if (!nextSessionId) return;
+          // Selecting and navigating to the new session — same workspace as
+          // the create (whether it's the active one or not).
+          setActiveWorkspace(target);
+          activeWorkspaceRef.current = target;
+          setActiveSessionId(nextSessionId);
+          navigate(`/workspace/${target.id}/session/${nextSessionId}`);
+          const optimistic: SessionInfo = {
+            sessionId: nextSessionId,
+            created: new Date().toISOString(),
+            modified: new Date().toISOString(),
+          };
+          setSessionsByWorkspace((prev) => ({
+            ...prev,
+            [target.id]: mergeSessionsPreferLocal(
+              [],
+              [optimistic, ...(prev[target.id] ?? [])],
+              nextSessionId,
+            ),
+          }));
+          // Reconcile with the server in the background — refresh just the
+          // first page; older sessions stay paged out until "Show more".
+          return loadSessionsForWorkspace(callGateway, target.cwd, {
+            limit: SESSIONS_PAGE_SIZE,
+            offset: 0,
+          }).then((result) => {
+            setSessionsByWorkspace((prev) => ({
+              ...prev,
+              [target.id]: mergeSessionsPreferLocal(
+                result.sessions,
+                prev[target.id] ?? [],
+                nextSessionId,
+              ),
+            }));
+            setHasMoreByWorkspace((prev) => ({ ...prev, [target.id]: result.hasMore }));
+          });
+        })
+        .catch(() => undefined);
+    },
+    [callGateway],
+  );
 
   const onNewWorkspace = useCallback(() => setShowCreateWorkspaceModal(true), []);
   const onCloseCreateWorkspaceModal = useCallback(() => setShowCreateWorkspaceModal(false), []);
@@ -257,7 +362,11 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
         }
 
         const newWorkspace = wsResult.workspace;
-        const existingSessions = await loadSessionsForWorkspace(callGateway, newWorkspace.cwd);
+        const existingPage = await loadSessionsForWorkspace(callGateway, newWorkspace.cwd, {
+          limit: SESSIONS_PAGE_SIZE,
+          offset: 0,
+        });
+        const existingSessions = existingPage.sessions;
 
         let sessionIdToUse: string;
         if (existingSessions.length > 0) {
@@ -285,23 +394,29 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
         setActiveSessionId(sessionIdToUse);
         navigate(`/workspace/${newWorkspace.id}/session/${sessionIdToUse}`);
 
-        setSessions(
+        const reconciled =
           existingSessions.length > 0
-            ? existingSessions
-            : mergeSessionsPreferLocal(
-                await loadSessionsForWorkspace(callGateway, newWorkspace.cwd),
-                sessionIdToUse
-                  ? [
-                      {
-                        sessionId: sessionIdToUse,
-                        created: new Date().toISOString(),
-                        modified: new Date().toISOString(),
-                      },
-                    ]
-                  : [],
-                sessionIdToUse,
-              ),
-        );
+            ? { sessions: existingSessions, hasMore: existingPage.hasMore }
+            : await loadSessionsForWorkspace(callGateway, newWorkspace.cwd, {
+                limit: SESSIONS_PAGE_SIZE,
+                offset: 0,
+              }).then((result) => ({
+                sessions: mergeSessionsPreferLocal(
+                  result.sessions,
+                  sessionIdToUse
+                    ? [
+                        {
+                          sessionId: sessionIdToUse,
+                          created: new Date().toISOString(),
+                          modified: new Date().toISOString(),
+                        },
+                      ]
+                    : [],
+                  sessionIdToUse,
+                ),
+                hasMore: result.hasMore,
+              }));
+        setSessionsForWorkspace(newWorkspace.id, reconciled.sessions, reconciled.hasMore);
 
         setShowCreateWorkspaceModal(false);
       } catch (error) {
@@ -310,7 +425,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
         setIsCreatingWorkspace(false);
       }
     },
-    [callGateway],
+    [callGateway, setSessionsForWorkspace],
   );
 
   // Persist active session as the workspace's "latest"
@@ -338,8 +453,8 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       const latestSessionId = getLatestSessionId(workspaceId);
       if (latestSessionId) {
         setActiveSessionId(latestSessionId);
-      } else if (sessions.length > 0) {
-        const mostRecent = sessions[0];
+      } else if (activeWorkspaceSessions.length > 0) {
+        const mostRecent = activeWorkspaceSessions[0];
         if (mostRecent && mostRecent.sessionId !== activeSessionId) {
           setActiveSessionId(mostRecent.sessionId);
         }
@@ -349,26 +464,33 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     } else if (sessionId && sessionId !== "latest" && sessionId !== activeSessionId) {
       setActiveSessionId(sessionId);
     }
-  }, [sessionId, activeSessionId, workspaceId, sessions]);
+  }, [sessionId, activeSessionId, workspaceId, activeWorkspaceSessions]);
 
-  // Handle workspace prop change
+  // Handle workspace prop change — refresh first page for the workspace the
+  // URL is now pointing at (covers external nav like a deep link).
   useEffect(() => {
     if (workspaceId && workspaces.length > 0) {
       const targetWorkspace = workspaces.find((ws) => ws.id === workspaceId);
       if (targetWorkspace && targetWorkspace.id !== activeWorkspace?.id) {
         setActiveWorkspace(targetWorkspace);
         activeWorkspaceRef.current = targetWorkspace;
-        void loadSessionsForWorkspace(callGateway, targetWorkspace.cwd)
-          .then((payload) => setSessions(payload))
+        void loadSessionsForWorkspace(callGateway, targetWorkspace.cwd, {
+          limit: SESSIONS_PAGE_SIZE,
+          offset: 0,
+        })
+          .then((result) =>
+            setSessionsForWorkspace(targetWorkspace.id, result.sessions, result.hasMore),
+          )
           .catch(() => undefined);
       }
     }
-  }, [workspaceId, workspaces, activeWorkspace, callGateway]);
+  }, [workspaceId, workspaces, activeWorkspace, callGateway, setSessionsForWorkspace]);
 
   const value = useMemo<ChatPageContextValue>(
     () => ({
       workspaces,
-      sessions,
+      sessionsByWorkspace,
+      hasMoreByWorkspace,
       activeWorkspace,
       activeSessionId,
       isConnected,
@@ -382,10 +504,12 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onCloseCreateWorkspaceModal,
       onCreateWorkspace,
       onGetDirectories,
+      onLoadMoreSessions,
     }),
     [
       workspaces,
-      sessions,
+      sessionsByWorkspace,
+      hasMoreByWorkspace,
       activeWorkspace,
       activeSessionId,
       isConnected,
@@ -399,6 +523,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onCloseCreateWorkspaceModal,
       onCreateWorkspace,
       onGetDirectories,
+      onLoadMoreSessions,
     ],
   );
 
