@@ -34,10 +34,18 @@ function getDirectories(path: string): string[] {
     const stat = statSync(expandedPath);
     if (!stat.isDirectory()) return [];
     const entries = readdirSync(expandedPath, { withFileTypes: true });
+    // Include dot-folders — many real dev workspaces live in them
+    // (~/.hammerspoon, ~/.config/*, ~/.claude/*, etc.). Sort dot-folders
+    // after regular folders for readability.
     return entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
-      .sort();
+      .sort((a, b) => {
+        const aHidden = a.startsWith(".");
+        const bHidden = b.startsWith(".");
+        if (aHidden !== bHidden) return aHidden ? 1 : -1;
+        return a.localeCompare(b);
+      });
   } catch (error) {
     log.warn("Failed to read directories", { path, error: String(error) });
     return [];
