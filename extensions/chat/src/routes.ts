@@ -33,7 +33,7 @@ export const chatLayouts: Record<string, LayoutDefinition> = {
     // when we wire that up; for now mobile users land directly on chat.
     default: {
       direction: "horizontal",
-      children: [{ panel: "chat.nav", size: 280 }, { panel: "chat.main" }],
+      children: [{ panel: "chat.nav", size: 300 }, { panel: "chat.main" }],
     },
     mobile: { panel: "chat.main" },
     provider: ChatPageProvider,

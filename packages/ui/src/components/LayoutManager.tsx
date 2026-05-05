@@ -173,6 +173,21 @@ export function LayoutManager({
 
         api.addPanel(addOptions);
       }
+
+      // Pin requested sizes after all panels exist. `initialWidth` on
+      // addPanel only applies to the panel being added, and dockview falls
+      // back to a 50/50 split when subsequent siblings don't specify a width.
+      // Setting the size in a second pass — once the container is fully
+      // populated — gives us a reliable initial splitter position.
+      for (const req of requests) {
+        if (req.size === undefined) continue;
+        const panel = api.getPanel(req.id);
+        if (!panel) continue;
+        // Horizontal splits → width; vertical → height. We only support
+        // horizontal-with-size today; revisit when a vertical-with-size
+        // layout shows up.
+        panel.api.setSize({ width: req.size });
+      }
     },
     [layout, registry],
   );
