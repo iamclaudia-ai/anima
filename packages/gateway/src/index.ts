@@ -802,7 +802,10 @@ const server = Bun.serve<ClientState>({
   fetch(req, server) {
     const url = new URL(req.url);
 
-    // WebSocket upgrade — only on /ws
+    // WebSocket upgrade — also exposed as an explicit /ws route below so that
+    // Bun.serve's routes map (which runs before fetch()) doesn't let the SPA
+    // wildcard "/*" hijack the upgrade. Keeping this branch in place is
+    // belt-and-suspenders in case the request reaches the fetch handler.
     if (url.pathname === "/ws") {
       const auth = authenticateRequest(req);
       if (!auth.ok) {
@@ -947,6 +950,29 @@ const server = Bun.serve<ClientState>({
         headers: { "Content-Type": "application/json" },
       });
     },
+    // WebSocket upgrade — registered explicitly so Bun.serve's routes
+    // map (which runs before fetch()) doesn't let the SPA wildcard "/*"
+    // serve HTML instead of upgrading the connection.
+    "/ws": (req: globalThis.Request, server: globalThis.Bun.Server<ClientState>) => {
+      const auth = authenticateRequest(req);
+      if (!auth.ok) {
+        return new globalThis.Response(JSON.stringify({ error: auth.message }), {
+          status: auth.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const upgraded = server.upgrade(req, {
+        data: {
+          id: generateId(),
+          connectedAt: new Date(),
+          subscriptions: new Set<string>(),
+          lastPong: Date.now(),
+        },
+      });
+      if (upgraded) return undefined as unknown as globalThis.Response;
+      return new globalThis.Response("WebSocket upgrade failed", { status: 400 });
+    },
+
     // SPA bundle — gateway's own web shell, built with the same shared-dep
     // externals as extension bundles so React/react-dom/@anima/ui module
     // instances are shared across the SPA and every extension.
