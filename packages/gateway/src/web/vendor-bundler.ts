@@ -33,86 +33,7 @@ interface VendorSpec {
   slug: string;
   /** Bare specifiers to NOT inline; the importmap resolves these on the client. */
   externals: string[];
-  /**
-   * Explicit named exports for CJS packages (React, react-dom). Bun's
-   * `export * from "<cjs>"` puts everything onto an internal object via
-   * `__reExport` but never emits ESM named exports — so consumers doing
-   * `import { Fragment } from "react"` would fail at module evaluation.
-   * Listing names triggers Bun's `export { x } from "<cjs>"` path which
-   * properly destructures the CJS namespace into ESM named exports.
-   *
-   * Omit for ESM packages — `export *` works for them.
-   */
-  namedExports?: string[];
 }
-
-/** React 19 public API. Keep in sync with React's index.js exports. */
-const REACT_EXPORTS = [
-  "Children",
-  "Component",
-  "Fragment",
-  "Profiler",
-  "PureComponent",
-  "StrictMode",
-  "Suspense",
-  "act",
-  "cache",
-  "captureOwnerStack",
-  "cloneElement",
-  "createContext",
-  "createElement",
-  "createRef",
-  "forwardRef",
-  "isValidElement",
-  "lazy",
-  "memo",
-  "startTransition",
-  "use",
-  "useActionState",
-  "useCallback",
-  "useContext",
-  "useDebugValue",
-  "useDeferredValue",
-  "useEffect",
-  "useId",
-  "useImperativeHandle",
-  "useInsertionEffect",
-  "useLayoutEffect",
-  "useMemo",
-  "useOptimistic",
-  "useReducer",
-  "useRef",
-  "useState",
-  "useSyncExternalStore",
-  "useTransition",
-  "version",
-];
-
-/** react-dom public API (top-level, sans the /client and /server subpaths). */
-const REACT_DOM_EXPORTS = [
-  "createPortal",
-  "flushSync",
-  "preconnect",
-  "prefetchDNS",
-  "preinit",
-  "preinitModule",
-  "preload",
-  "preloadModule",
-  "requestFormReset",
-  "unstable_batchedUpdates",
-  "useFormState",
-  "useFormStatus",
-  "version",
-];
-
-/** react-dom/client — just root creation. */
-const REACT_DOM_CLIENT_EXPORTS = ["createRoot", "hydrateRoot"];
-
-/** react/jsx-runtime — production JSX transform helpers. */
-const REACT_JSX_RUNTIME_EXPORTS = ["Fragment", "jsx", "jsxs"];
-
-/** react/jsx-dev-runtime — dev JSX transform helpers. */
-const REACT_JSX_DEV_RUNTIME_EXPORTS = ["Fragment", "jsxDEV"];
 
 /**
  * Order matters only for log readability — each spec is independently buildable.
@@ -122,35 +43,22 @@ const REACT_JSX_DEV_RUNTIME_EXPORTS = ["Fragment", "jsxDEV"];
  * Note: @anima/shared is intentionally NOT in this list — it imports node:crypto
  * and other Node-only APIs that fail in a browser build. Extensions inline the
  * browser-safe bits they need (mostly types, which are erased anyway).
+ *
+ * Named-export lists are discovered at runtime via dynamic import — see
+ * discoverNamedExports — so this list never needs hand-maintenance when React
+ * adds/removes APIs across versions.
  */
 const VENDOR_SPECS: VendorSpec[] = [
-  { specifier: "react", slug: "react", externals: [], namedExports: REACT_EXPORTS },
-  {
-    specifier: "react/jsx-runtime",
-    slug: "react-jsx-runtime",
-    externals: ["react"],
-    namedExports: REACT_JSX_RUNTIME_EXPORTS,
-  },
-  {
-    specifier: "react/jsx-dev-runtime",
-    slug: "react-jsx-dev-runtime",
-    externals: ["react"],
-    namedExports: REACT_JSX_DEV_RUNTIME_EXPORTS,
-  },
-  {
-    specifier: "react-dom",
-    slug: "react-dom",
-    externals: ["react"],
-    namedExports: REACT_DOM_EXPORTS,
-  },
+  { specifier: "react", slug: "react", externals: [] },
+  { specifier: "react/jsx-runtime", slug: "react-jsx-runtime", externals: ["react"] },
+  { specifier: "react/jsx-dev-runtime", slug: "react-jsx-dev-runtime", externals: ["react"] },
+  { specifier: "react-dom", slug: "react-dom", externals: ["react"] },
   {
     specifier: "react-dom/client",
     slug: "react-dom-client",
     externals: ["react", "react-dom"],
-    namedExports: REACT_DOM_CLIENT_EXPORTS,
   },
   {
-    // ESM workspace package — `export *` works fine, no enumeration needed.
     specifier: "@anima/ui",
     slug: "anima-ui",
     externals: [
@@ -163,6 +71,28 @@ const VENDOR_SPECS: VendorSpec[] = [
   },
 ];
 
+/**
+ * Dynamic-import the specifier in the gateway runtime to discover its named
+ * exports. Bun's CJS interop unifies both CJS and ESM into a flat namespace,
+ * so `Object.keys(mod)` gives us every name a browser-side `import { name }`
+ * could ask for. Without this, `export *` from a CJS module (React) emits
+ * `__reExport(internalObj, ...)` and never exposes ESM named exports — the
+ * browser then fails at module evaluation with "does not provide an export
+ * named X" the first time anything tries to `import { Fragment } from "react"`.
+ */
+async function discoverNamedExports(specifier: string): Promise<string[]> {
+  try {
+    const mod = (await import(specifier)) as Record<string, unknown>;
+    return Object.keys(mod).filter((key) => key !== "default");
+  } catch (error) {
+    log.warn("Failed to discover named exports for vendor module", {
+      specifier,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export interface VendorBundle {
   slug: string;
   specifier: string;
@@ -171,20 +101,16 @@ export interface VendorBundle {
 
 const cache = new Map<string, VendorBundle>();
 
-function ensureEntryFile(spec: VendorSpec): string {
+async function writeEntryFile(spec: VendorSpec, names: string[]): Promise<string> {
   mkdirSync(ENTRY_DIR, { recursive: true });
   const path = join(ENTRY_DIR, `${spec.slug}.ts`);
   const target = JSON.stringify(spec.specifier);
-  let contents: string;
-  if (spec.namedExports && spec.namedExports.length > 0) {
-    // Explicit named re-export — required for CJS sources where Bun's
-    // `export *` doesn't expose names as ESM exports.
-    const names = spec.namedExports.join(", ");
-    contents = `export { ${names} } from ${target};\nexport { default } from ${target};\n`;
-  } else {
-    // Pure ESM source — `export *` is sufficient.
-    contents = `export * from ${target};\n`;
-  }
+  // Explicit named re-export works correctly for both CJS and ESM sources
+  // with Bun. `export *` would silently drop named exports from CJS modules.
+  const contents =
+    names.length > 0
+      ? `export { ${names.join(", ")} } from ${target};\nexport { default } from ${target};\n`
+      : `export * from ${target};\nexport { default } from ${target};\n`;
   writeFileSync(path, contents);
   return path;
 }
@@ -198,7 +124,8 @@ export async function buildVendorBundles(): Promise<Map<string, VendorBundle>> {
   for (const spec of VENDOR_SPECS) {
     if (cache.has(spec.slug)) continue;
 
-    const entryPath = ensureEntryFile(spec);
+    const names = await discoverNamedExports(spec.specifier);
+    const entryPath = await writeEntryFile(spec, names);
 
     try {
       const result = await Bun.build({
