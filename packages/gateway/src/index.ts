@@ -1067,7 +1067,7 @@ const server = Bun.serve<ClientState>({
 
     // Vendor JS bundles — shared deps (React, @anima/ui, etc.) served once
     // and resolved by the SPA importmap. Built at startup by buildVendorBundles().
-    "/vendor/*": (req: globalThis.Request) => {
+    "/vendor/*": async (req: globalThis.Request) => {
       const url = new URL(req.url);
       const tail = url.pathname.slice("/vendor/".length);
       if (!tail.endsWith(".js")) {
@@ -1077,7 +1077,13 @@ const server = Bun.serve<ClientState>({
       if (!slug || slug.includes("/") || slug.includes("..")) {
         return new globalThis.Response("Not found", { status: 404 });
       }
-      const bundle = getVendorBundle(slug);
+      // Await the shared in-flight build so first-load requests that race the
+      // startup warm-up don't permanently 503 the SPA module graph.
+      let bundle = getVendorBundle(slug);
+      if (!bundle) {
+        await buildVendorBundles();
+        bundle = getVendorBundle(slug);
+      }
       if (!bundle) {
         return new globalThis.Response("Vendor bundle not ready", { status: 503 });
       }

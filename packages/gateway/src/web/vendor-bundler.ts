@@ -110,6 +110,14 @@ export interface VendorBundle {
 
 const cache = new Map<string, VendorBundle>();
 
+/**
+ * In-flight build promise. Memoizes `buildVendorBundles()` so concurrent
+ * callers (startup warm-up + first /vendor/* request) share one build pass
+ * instead of racing. Cleared after settle so a future explicit rebuild
+ * (e.g. dev tooling) can re-enter.
+ */
+let inFlight: Promise<Map<string, VendorBundle>> | null = null;
+
 async function writeEntryFile(spec: VendorSpec, names: string[]): Promise<string> {
   mkdirSync(ENTRY_DIR, { recursive: true });
   const path = join(ENTRY_DIR, `${spec.slug}.ts`);
@@ -130,6 +138,18 @@ async function writeEntryFile(spec: VendorSpec, names: string[]): Promise<string
  * the existing static-import SPA path stays operational.
  */
 export async function buildVendorBundles(): Promise<Map<string, VendorBundle>> {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    try {
+      return await buildVendorBundlesImpl();
+    } finally {
+      inFlight = null;
+    }
+  })();
+  return inFlight;
+}
+
+async function buildVendorBundlesImpl(): Promise<Map<string, VendorBundle>> {
   for (const spec of VENDOR_SPECS) {
     if (cache.has(spec.slug)) continue;
 
