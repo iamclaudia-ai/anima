@@ -335,6 +335,11 @@ on bootstrap, dynamic-imports each extension's bundle (built lazily by
 `packages/gateway/src/web/extension-bundler.ts` and served at
 `/extensions/<id>/web-bundle.js`), and aggregates routes/panels/layouts.
 
+The contribution list is derived from **enabled server extensions** that
+also have a `src/routes.ts(x)` on disk — `anima.json` is the single source
+of truth. A bare `routes.ts` without a registered server-side `index.ts`
+won't be discovered.
+
 Shared deps (React, react-dom, `@anima/ui`) are externalized from every
 bundle and resolved by an importmap to `/vendor/<slug>.js`, so the SPA
 and all extensions share single module instances — critical for React
