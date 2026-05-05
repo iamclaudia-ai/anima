@@ -63,7 +63,7 @@ export interface ExtensionHost {
     },
   ): Promise<unknown>;
 
-  callMcpTool?(name: string, args: Record<string, unknown>): Promise<unknown>;
+  callMcpTool(name: string, args: Record<string, unknown>): Promise<unknown>;
 
   sendEvent(event: GatewayEvent): void;
 

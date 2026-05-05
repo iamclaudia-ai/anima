@@ -15,6 +15,9 @@ describe("ExtensionManager integration", () => {
         allEvents.push(event);
       },
       async callMethod() {},
+      async callMcpTool() {
+        return { content: [] };
+      },
       async routeToSource() {},
       async health() {
         return { ok: true };
@@ -42,6 +45,9 @@ describe("ExtensionManager integration", () => {
         }
       },
       async callMethod() {},
+      async callMcpTool() {
+        return { content: [] };
+      },
       async routeToSource() {},
       async health() {
         return { ok: true };

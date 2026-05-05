@@ -291,9 +291,7 @@ export class ExtensionManager {
       throw new Error(`MCP tool owner is not running: ${extensionId}`);
     }
 
-    const result = host.callMcpTool
-      ? await host.callMcpTool(name, args)
-      : await host.callMethod("__mcpCall", { name, args });
+    const result = await host.callMcpTool(name, args);
     return normalizeMcpToolResult(result);
   }
 

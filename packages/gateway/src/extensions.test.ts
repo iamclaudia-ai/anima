@@ -8,6 +8,9 @@ function createRemoteHostMock(overrides: Partial<ExtensionHost> = {}): Extension
     async callMethod() {
       return { ok: true };
     },
+    async callMcpTool() {
+      return { content: [] };
+    },
     sendEvent() {},
     async routeToSource() {},
     async health() {
