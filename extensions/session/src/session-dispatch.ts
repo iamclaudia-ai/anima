@@ -108,7 +108,11 @@ async function healthCheckDetailed(): Promise<HealthCheckResponse> {
 
 export function createSessionReadHandlers(): Record<string, SessionMethodHandler> {
   return {
-    "session.list_sessions": async (params) => listSessions(params.cwd as string),
+    "session.list_sessions": async (params) =>
+      listSessions(params.cwd as string, {
+        limit: params.limit as number | undefined,
+        offset: params.offset as number | undefined,
+      }),
     "session.get_history": async (params) =>
       getHistory({
         sessionId: params.sessionId as string,

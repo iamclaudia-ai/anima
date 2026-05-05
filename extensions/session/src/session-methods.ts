@@ -81,6 +81,15 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     description: "List sessions for a workspace (DB-backed metadata, filesystem-enriched)",
     inputSchema: z.object({
       cwd: z.string().describe("Workspace CWD"),
+      limit: z
+        .number()
+        .optional()
+        .describe("Max sessions to return (omit for all). Sessions are sorted by modified desc."),
+      offset: z
+        .number()
+        .optional()
+        .default(0)
+        .describe("Number of sessions to skip from the front"),
     }),
     execution: { lane: "read", concurrency: "parallel" },
   },

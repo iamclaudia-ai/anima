@@ -11,7 +11,10 @@ import { getRuntime } from "../runtime";
 
 const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "session.log"));
 
-export function listSessions(cwd: string): { sessions: SessionIndexEntry[] } {
+export function listSessions(
+  cwd: string,
+  options?: { limit?: number; offset?: number },
+): { sessions: SessionIndexEntry[]; total: number; hasMore: boolean } {
   const rt = getRuntime();
   const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
   const discovered = discoverSessions(cwd);
@@ -34,21 +37,32 @@ export function listSessions(cwd: string): { sessions: SessionIndexEntry[] } {
     });
   }
 
-  const sessions =
+  const all =
     discovered.length > 0
       ? discovered
       : workspaceResult.created
         ? []
         : listWorkspaceSessions(workspaceResult.workspace.id);
 
-  log.info("Listed sessions", { cwd, count: sessions.length });
-  return {
-    sessions: sessions.sort((a, b) => {
-      const aTime = a.modified || a.created || "";
-      const bTime = b.modified || b.created || "";
-      return bTime.localeCompare(aTime);
-    }),
-  };
+  const sorted = all.sort((a, b) => {
+    const aTime = a.modified || a.created || "";
+    const bTime = b.modified || b.created || "";
+    return bTime.localeCompare(aTime);
+  });
+
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit;
+  const sliced = limit === undefined ? sorted.slice(offset) : sorted.slice(offset, offset + limit);
+  const hasMore = offset + sliced.length < sorted.length;
+
+  log.info("Listed sessions", {
+    cwd,
+    total: sorted.length,
+    returned: sliced.length,
+    offset,
+    limit: limit ?? "all",
+  });
+  return { sessions: sliced, total: sorted.length, hasMore };
 }
 
 export function getHistory(params: {
