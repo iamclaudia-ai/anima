@@ -77,10 +77,19 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
 
 // ── Navigation ───────────────────────────────────────────────
 
-/** Navigate without full page reload */
-export function navigate(path: string): void {
+/**
+ * Navigate without full page reload. Pass `{ replace: true }` to replace the
+ * current history entry instead of pushing a new one — useful for redirects
+ * (e.g., resolving `/session/latest` → `/session/<id>`) so the user's back
+ * button doesn't bounce them through the placeholder URL.
+ */
+export function navigate(path: string, options?: { replace?: boolean }): void {
   if (window.location.pathname === path) return;
-  window.history.pushState(null, "", path);
+  if (options?.replace) {
+    window.history.replaceState(null, "", path);
+  } else {
+    window.history.pushState(null, "", path);
+  }
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
