@@ -204,6 +204,15 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
+    name: "session.set_workspace_pinned",
+    description: "Pin or unpin a workspace (pinned workspaces sort to the top)",
+    inputSchema: z.object({
+      id: z.string().describe("Workspace ID"),
+      pinned: z.boolean().describe("True to pin, false to unpin"),
+    }),
+    execution: { lane: "write", concurrency: "serial" },
+  },
+  {
     name: "session.get_or_create_workspace",
     description: "Get or create workspace for CWD",
     inputSchema: z.object({

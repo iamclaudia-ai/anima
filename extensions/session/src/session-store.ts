@@ -113,6 +113,7 @@ function ensureSessionTable(currentDb: Database): void {
       name TEXT NOT NULL,
       cwd TEXT NOT NULL UNIQUE,
       general INTEGER NOT NULL DEFAULT 0,
+      pinned INTEGER NOT NULL DEFAULT 0,
       active_session_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -124,6 +125,9 @@ function ensureSessionTable(currentDb: Database): void {
   }>;
   if (!workspaceColumns.some((column) => column.name === "general")) {
     currentDb.exec("ALTER TABLE workspaces ADD COLUMN general INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!workspaceColumns.some((column) => column.name === "pinned")) {
+    currentDb.exec("ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
 
   currentDb.exec(`

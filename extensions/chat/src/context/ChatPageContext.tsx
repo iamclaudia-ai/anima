@@ -113,6 +113,8 @@ export interface ChatPageContextValue {
    * Idempotent — caller can spam-click "Show more" without duplicating loads.
    */
   onLoadMoreSessions: (workspaceId: string) => Promise<void>;
+  /** Toggle the workspace's pinned flag and re-sort the workspace list. */
+  onPinWorkspace: (workspace: WorkspaceInfo, pinned: boolean) => Promise<void>;
 }
 
 const ChatPageContext = createContext<ChatPageContextValue | null>(null);
@@ -337,6 +339,36 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const onNewWorkspace = useCallback(() => setShowCreateWorkspaceModal(true), []);
   const onCloseCreateWorkspaceModal = useCallback(() => setShowCreateWorkspaceModal(false), []);
 
+  const onPinWorkspace = useCallback(
+    async (workspace: WorkspaceInfo, pinned: boolean) => {
+      // Optimistic flip so the dot + sort order update immediately;
+      // the server is the source of truth so we re-fetch to settle.
+      setWorkspaces((prev) => {
+        const next = prev.map((w) => (w.id === workspace.id ? { ...w, pinned } : w));
+        // Re-sort: pinned first, then by updatedAt desc — match server ordering.
+        return next.sort((a, b) => {
+          if ((a.pinned ?? false) !== (b.pinned ?? false)) return a.pinned ? -1 : 1;
+          return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+        });
+      });
+      try {
+        await callGateway("session.set_workspace_pinned", { id: workspace.id, pinned });
+        // Refresh from server to ensure we match canonical ordering.
+        const wsResult = await callGateway<{ workspaces?: WorkspaceInfo[] }>(
+          "session.list_workspaces",
+        );
+        if (wsResult?.workspaces) setWorkspaces(wsResult.workspaces);
+      } catch (error) {
+        console.error("Failed to pin workspace", error);
+        // Revert on failure.
+        setWorkspaces((prev) =>
+          prev.map((w) => (w.id === workspace.id ? { ...w, pinned: !pinned } : w)),
+        );
+      }
+    },
+    [callGateway],
+  );
+
   const onGetDirectories = useCallback(
     async (path: string): Promise<{ path: string; directories: string[] }> => {
       const result = await callGateway<{ path: string; directories: string[] }>(
@@ -505,6 +537,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onCreateWorkspace,
       onGetDirectories,
       onLoadMoreSessions,
+      onPinWorkspace,
     }),
     [
       workspaces,
@@ -524,6 +557,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onCreateWorkspace,
       onGetDirectories,
       onLoadMoreSessions,
+      onPinWorkspace,
     ],
   );
 

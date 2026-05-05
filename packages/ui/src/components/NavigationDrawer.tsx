@@ -23,6 +23,8 @@ import {
   LogOut,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   Puzzle,
   Search,
@@ -160,7 +162,10 @@ function SessionRow({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
+      // Full-width highlight (no rounded corners, no left margin) — the
+      // text gets the indent via pl-9 instead, so the active session reads
+      // as a flat row across the entire sidebar.
+      className={`flex w-full items-center justify-between gap-2 py-1.5 pl-9 pr-3 text-left text-sm transition-colors ${
         isActive
           ? "bg-gray-100 text-gray-900"
           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -224,19 +229,24 @@ function WorkspaceItem({
 
   return (
     <div>
-      {/* Workspace header row */}
-      <div
-        className={`group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${
-          isActive ? "bg-gray-100" : "hover:bg-gray-50"
-        }`}
-      >
+      {/* Workspace header row — never highlighted; only the active session
+          inside it gets the highlight (matches Codex). */}
+      <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-gray-50">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex-shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
+          className="relative flex-shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
           title={expanded ? "Collapse" : "Expand"}
         >
           {expanded ? <FolderOpen className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+          {workspace.pinned && (
+            // Pinned indicator — small blue dot on the upper-right corner
+            // of the folder icon, like a notification badge.
+            <span
+              className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-blue-500"
+              aria-label="Pinned"
+            />
+          )}
         </button>
         <button
           type="button"
@@ -274,8 +284,8 @@ function WorkspaceItem({
               className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg"
             >
               <WorkspaceMenuItem
-                icon={Pencil}
-                label="Pin project"
+                icon={workspace.pinned ? PinOff : Pin}
+                label={workspace.pinned ? "Unpin project" : "Pin project"}
                 onClick={() => {
                   setMenuOpen(false);
                   onMenuAction?.("pin", workspace);
@@ -328,11 +338,12 @@ function WorkspaceItem({
         </div>
       </div>
 
-      {/* Sessions list — indented under the workspace */}
+      {/* Sessions list — full-width rows; the indent lives on each row's
+          left padding so the active highlight runs edge-to-edge. */}
       {expanded && (
-        <div className="ml-6 mt-0.5 space-y-0.5">
+        <div className="mt-0.5 space-y-0.5">
           {sessions.length === 0 ? (
-            <div className="px-3 py-1 text-xs text-gray-400">No sessions yet</div>
+            <div className="py-1 pl-9 pr-3 text-xs text-gray-400">No sessions yet</div>
           ) : (
             sessions.map((session) => (
               <SessionRow
@@ -348,7 +359,7 @@ function WorkspaceItem({
               type="button"
               onClick={handleLoadMore}
               disabled={loadingMore}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+              className="py-1 pl-9 pr-3 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
             >
               {loadingMore ? "Loading…" : "Show more"}
             </button>

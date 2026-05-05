@@ -24,6 +24,8 @@ export interface Workspace {
   name: string;
   cwd: string;
   general: boolean;
+  /** User-pinned — sorts to the top of the workspace list with a visual badge. */
+  pinned: boolean;
   cwdDisplay: string; // Normalized path with ~ for display
   createdAt: string;
   updatedAt: string;
@@ -35,6 +37,7 @@ interface WorkspaceRow {
   name: string;
   cwd: string;
   general: number;
+  pinned: number;
   active_session_id: string | null; // Still in schema but we ignore it
   created_at: string;
   updated_at: string;
@@ -58,6 +61,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     name: row.name,
     cwd: row.cwd, // Keep full path for operations
     general: row.general === 1,
+    pinned: row.pinned === 1,
     cwdDisplay: normalizePathForDisplay(row.cwd), // Normalized for display
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -92,6 +96,7 @@ function getDb(): Database {
       name TEXT NOT NULL,
       cwd TEXT NOT NULL UNIQUE,
       general INTEGER NOT NULL DEFAULT 0,
+      pinned INTEGER NOT NULL DEFAULT 0,
       active_session_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -101,6 +106,9 @@ function getDb(): Database {
   const columns = db.query("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === "general")) {
     db.exec("ALTER TABLE workspaces ADD COLUMN general INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some((column) => column.name === "pinned")) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
 
   log.info("Opened workspace database", { path: dbPath });
@@ -164,8 +172,24 @@ export function listWorkspaces(): Workspace[] {
     return workspace;
   });
 
-  // Sort by updatedAt descending (most recent first)
-  return workspaces.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  // Pinned workspaces float to the top; within each group, sort by updatedAt
+  // descending (most recent first).
+  return workspaces.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
+/**
+ * Pin or unpin a workspace. Pinned workspaces sort to the top of
+ * `listWorkspaces()` regardless of last-activity time.
+ */
+export function setWorkspacePinned(id: string, pinned: boolean): Workspace | null {
+  const result = getDb()
+    .query("UPDATE workspaces SET pinned = ? WHERE id = ?")
+    .run(pinned ? 1 : 0, id);
+  if (result.changes === 0) return null;
+  return getWorkspace(id);
 }
 
 export function getWorkspace(id: string): Workspace | null {

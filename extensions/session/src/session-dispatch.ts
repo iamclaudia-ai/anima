@@ -351,6 +351,14 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       const rt = getRuntime();
       return { deleted: rt.registry.deleteWorkspace(params.cwd as string) };
     },
+    "session.set_workspace_pinned": async (params) => {
+      const rt = getRuntime();
+      const workspace = rt.registry.setWorkspacePinned(
+        params.id as string,
+        params.pinned as boolean,
+      );
+      return { workspace };
+    },
   };
 }
 

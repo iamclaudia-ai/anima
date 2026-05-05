@@ -27,6 +27,8 @@ export interface WorkspaceInfo {
   name: string;
   cwd: string;
   general: boolean;
+  /** User-pinned — sorts to the top of the workspace list with a visual badge. */
+  pinned?: boolean;
   cwdDisplay: string; // Normalized path with ~ for display
   createdAt: string;
   updatedAt: string;

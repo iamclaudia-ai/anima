@@ -12,6 +12,7 @@ import {
   getWorkspace,
   getWorkspaceByCwd,
   listWorkspaces,
+  setWorkspacePinned,
 } from "./workspace";
 
 export class SessionRegistry {
@@ -33,6 +34,10 @@ export class SessionRegistry {
 
   deleteWorkspace(cwd: string): boolean {
     return deleteWorkspace(cwd);
+  }
+
+  setWorkspacePinned(id: string, pinned: boolean) {
+    return setWorkspacePinned(id, pinned);
   }
 
   getStoredSession(id: string): StoredSession | null {

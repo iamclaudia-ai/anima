@@ -29,10 +29,16 @@ export function NavPanel() {
     onCreateWorkspace,
     onGetDirectories,
     onLoadMoreSessions,
+    onPinWorkspace,
   } = useChatPage();
 
-  // Stub — real backend support will land per-action.
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
+    if (action === "pin") {
+      void onPinWorkspace(workspace, !(workspace.pinned ?? false));
+      return;
+    }
+    // Other actions (Open in Finder, Worktree, Rename, Archive, Remove)
+    // remain stubs until backend support lands.
     console.log("[nav] workspace menu action (stub)", action, workspace.id);
   };
 
