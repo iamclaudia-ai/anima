@@ -50,8 +50,16 @@ interface VendorSpec {
  */
 const VENDOR_SPECS: VendorSpec[] = [
   { specifier: "react", slug: "react", externals: [] },
-  { specifier: "react/jsx-runtime", slug: "react-jsx-runtime", externals: ["react"] },
-  { specifier: "react/jsx-dev-runtime", slug: "react-jsx-dev-runtime", externals: ["react"] },
+  // jsx-runtime intentionally inlines its own React copy. Externalizing react
+  // here triggers a Bun CJS-to-ESM lifting bug: React's source has
+  //   var React = require("react"); ... React = { react_stack_bottom_frame: ... };
+  // which Bun converts into `import * as React from "react"` (immutable
+  // binding) + the later reassignment, throwing "Assignment to constant
+  // variable" at module evaluation. Inlined React is fine for jsx-runtime —
+  // element creation is pure (no hook state), and React's runtime type tags
+  // use Symbol.for("react.*") which are globally cached across copies.
+  { specifier: "react/jsx-runtime", slug: "react-jsx-runtime", externals: [] },
+  { specifier: "react/jsx-dev-runtime", slug: "react-jsx-dev-runtime", externals: [] },
   { specifier: "react-dom", slug: "react-dom", externals: ["react"] },
   {
     specifier: "react-dom/client",
