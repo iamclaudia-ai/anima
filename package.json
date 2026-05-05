@@ -7,7 +7,6 @@
     "extensions/*"
   ],
   "scripts": {
-    "web:routes": "bun run scripts/generate-extension-web-contributions.ts",
     "dev": "bun run --filter @anima/gateway dev",
     "restart": "lsof -ti:30086 | xargs kill -9 2>/dev/null; sleep 0.5 && bun run dev",
     "watchdog": "bun run packages/watchdog/src/index.ts",
