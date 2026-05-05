@@ -97,6 +97,13 @@ export const BUILTIN_METHODS: GatewayMethodDefinition[] = [
     }),
   },
   {
+    method: "gateway.list_web_contributions",
+    description:
+      "List extensions that contribute web routes. Returns each extension's " +
+      "dynamic-import bundle URL so the SPA can lazy-load contributions at runtime.",
+    inputSchema: z.object({}),
+  },
+  {
     method: "gateway.register_extension",
     description:
       "Register this WebSocket connection as an extension host. " +

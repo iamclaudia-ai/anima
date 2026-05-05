@@ -1,0 +1,153 @@
+/**
+ * Per-extension JS bundler for the web SPA.
+ *
+ * Each extension's `src/routes.ts` is bundled into a standalone ESM module
+ * that the SPA can dynamically import (Phase 2). Shared dependencies (React,
+ * @anima/ui, etc.) are externalized — the browser resolves them via importmap
+ * to vendor bundles served by the gateway, so each shared dep ships exactly
+ * once regardless of how many extensions depend on it.
+ *
+ * Bundles are built lazily on first request and cached in memory keyed by
+ * extension ID. To force a rebuild, restart the gateway (or call
+ * clearExtensionBundleCache).
+ */
+
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { createLogger } from "@anima/shared";
+
+const log = createLogger("ExtensionBundler", join(homedir(), ".anima", "logs", "gateway.log"));
+
+// Project root: from packages/gateway/src/web/extension-bundler.ts → up 4 levels.
+const PROJECT_ROOT = join(import.meta.dir, "..", "..", "..", "..");
+
+/**
+ * Bare specifiers shared with vendor bundles + importmap. Every extension
+ * bundle externalizes these so the runtime resolves them to vendor URLs.
+ *
+ * Keep this in sync with VENDOR_SPECS in vendor-bundler.ts.
+ *
+ * Note: @anima/shared is NOT externalized — it pulls in node:crypto and
+ * other Node-only APIs that don't survive a browser build. Extensions inline
+ * whatever browser-safe slices they import (mostly types, which are erased).
+ */
+export const SHARED_EXTERNALS = [
+  "react",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+  "react-dom",
+  "react-dom/client",
+  "@anima/ui",
+];
+
+/**
+ * Bun.build's `external: [...]` config does package-name *prefix* matching —
+ * `["react"]` also externalizes `react/jsx-runtime`, which would turn the
+ * jsx-runtime vendor bundle into an infinite-loop re-export. We need exact
+ * specifier matching, which means going through a plugin's onResolve hook.
+ */
+export function exactExternalsPlugin(specifiers: readonly string[]): Bun.BunPlugin {
+  const set = new Set(specifiers);
+  return {
+    name: "exact-externals",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, (args) => {
+        if (set.has(args.path)) {
+          return { path: args.path, external: true };
+        }
+        return undefined;
+      });
+    },
+  };
+}
+
+export interface ExtensionBundle {
+  js: string;
+  builtAt: number;
+}
+
+const cache = new Map<string, ExtensionBundle>();
+const inFlight = new Map<string, Promise<ExtensionBundle | null>>();
+
+/** Resolve the path to an extension's routes entry, if any. */
+export function getExtensionRoutesPath(extensionId: string): string | null {
+  const candidates = [
+    join(PROJECT_ROOT, "extensions", extensionId, "src", "routes.ts"),
+    join(PROJECT_ROOT, "extensions", extensionId, "src", "routes.tsx"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Build (or return cached) JS bundle for an extension's web contribution.
+ * Returns null when the extension has no routes.ts or the build fails —
+ * callers should treat null as "this extension contributes no web routes."
+ */
+export async function buildExtensionBundle(extensionId: string): Promise<ExtensionBundle | null> {
+  const cached = cache.get(extensionId);
+  if (cached) return cached;
+
+  const existing = inFlight.get(extensionId);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<ExtensionBundle | null> => {
+    const entryPath = getExtensionRoutesPath(extensionId);
+    if (!entryPath) {
+      log.info("Extension has no routes entry; skipping web bundle", { extensionId });
+      return null;
+    }
+
+    try {
+      const result = await Bun.build({
+        entrypoints: [entryPath],
+        target: "browser",
+        format: "esm",
+        plugins: [exactExternalsPlugin(SHARED_EXTERNALS)],
+        minify: false,
+        sourcemap: "none",
+        root: PROJECT_ROOT,
+      });
+
+      if (!result.success || result.outputs.length === 0) {
+        log.error("Extension bundle failed", {
+          extensionId,
+          logs: result.logs.map((entry) => String(entry)),
+        });
+        return null;
+      }
+
+      const jsOutput =
+        result.outputs.find((output) => output.kind === "entry-point") ?? result.outputs[0];
+      if (!jsOutput) {
+        log.error("Extension bundle had no usable output", { extensionId });
+        return null;
+      }
+
+      const js = await jsOutput.text();
+      const bundle: ExtensionBundle = { js, builtAt: Date.now() };
+      cache.set(extensionId, bundle);
+      log.info("Built extension web bundle", { extensionId, bytes: js.length });
+      return bundle;
+    } catch (error) {
+      log.error("Extension bundle threw", {
+        extensionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    } finally {
+      inFlight.delete(extensionId);
+    }
+  })();
+
+  inFlight.set(extensionId, promise);
+  return promise;
+}
+
+/** Clear all cached bundles. Useful for tests or manual cache busting. */
+export function clearExtensionBundleCache(): void {
+  cache.clear();
+}

@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+/* Tailwind content sources.
+   Explicit @source globs (vs. Tailwind's import-graph default) so that
+   classes living inside extension components are scanned regardless of
+   how the gateway entry imports them. Required ahead of dynamic-import
+   extension bundles, where extensions are no longer statically reachable
+   from the gateway entrypoint. */
+@source "../../../../extensions/*/src/**/*.{ts,tsx}";
+
 @theme inline {
   --font-serif: Georgia, "Times New Roman", serif;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

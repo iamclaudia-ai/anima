@@ -36,6 +36,8 @@ import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
 import { WebSocketExtensionHost } from "./ws-extension-host";
 import type { ExtensionRegistration, OnCallCallback } from "./extension-host";
 import { handleGatewayMcpRequest } from "./mcp-proxy";
+import { buildExtensionBundle, getExtensionRoutesPath } from "./web/extension-bundler";
+import { buildVendorBundles, getVendorBundle } from "./web/vendor-bundler";
 
 // Web UI — served as SPA fallback for all non-WS routes
 import index from "./web/index.html";
@@ -370,6 +372,16 @@ export async function executeGatewayMethod(
       return buildListMethodsResponse();
     case "gateway.list_extensions":
       return { extensions: extensions.getExtensionList() };
+    case "gateway.list_web_contributions":
+      return {
+        contributions: extensions
+          .getExtensionList()
+          .filter((ext) => getExtensionRoutesPath(ext.id) !== null)
+          .map((ext) => ({
+            extensionId: ext.id,
+            jsUrl: `/extensions/${ext.id}/web-bundle.js`,
+          })),
+      };
     case "gateway.acquire_liveness_lock": {
       const extensionId = resolveLockExtensionId(params, options.callerExtensionId);
       const result = acquireExtensionRuntimeLock({
@@ -931,6 +943,61 @@ const server = Bun.serve<ClientState>({
         headers: { "Content-Type": "application/json" },
       });
     },
+    // Vendor JS bundles — shared deps (React, @anima/ui, etc.) served once
+    // and resolved by the SPA importmap. Built at startup by buildVendorBundles().
+    "/vendor/*": (req: globalThis.Request) => {
+      const url = new URL(req.url);
+      const tail = url.pathname.slice("/vendor/".length);
+      if (!tail.endsWith(".js")) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+      const slug = tail.slice(0, -".js".length);
+      if (!slug || slug.includes("/") || slug.includes("..")) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+      const bundle = getVendorBundle(slug);
+      if (!bundle) {
+        return new globalThis.Response("Vendor bundle not ready", { status: 503 });
+      }
+      return new globalThis.Response(bundle.js, {
+        headers: {
+          "Content-Type": "application/javascript; charset=utf-8",
+          // Vendor bundles are stable for the gateway's lifetime; the SPA
+          // re-fetches on reload anyway. Short cache lets restarts pick up
+          // dep upgrades without manual cache busting.
+          "Cache-Control": "public, max-age=60",
+        },
+      });
+    },
+
+    // Per-extension web bundles — lazy-built on first request, cached for
+    // the lifetime of the gateway process. Returns 404 when an extension
+    // has no routes.ts; 503 when the build fails (degrade gracefully —
+    // one bad extension shouldn't take down the whole UI).
+    "/extensions/*": async (req: globalThis.Request) => {
+      const url = new URL(req.url);
+      // Match: /extensions/<id>/web-bundle.js
+      const tail = url.pathname.slice("/extensions/".length);
+      const match = tail.match(/^([a-z0-9_-]+)\/web-bundle\.js$/);
+      if (!match) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+      const extensionId = match[1] as string;
+      if (getExtensionRoutesPath(extensionId) === null) {
+        return new globalThis.Response("Extension has no web contribution", { status: 404 });
+      }
+      const bundle = await buildExtensionBundle(extensionId);
+      if (!bundle) {
+        return new globalThis.Response("Extension bundle build failed", { status: 503 });
+      }
+      return new globalThis.Response(bundle.js, {
+        headers: {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+        },
+      });
+    },
+
     // PWA icons — must be before SPA fallback
     "/icons/*": (req: globalThis.Request) => {
       const url = new URL(req.url);
@@ -1089,6 +1156,15 @@ log.info(`
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
+
+// Fire-and-forget vendor bundle build. Failures here don't block startup —
+// /vendor/*.js requests will 503 until builds land. Phase 2 will gate the
+// SPA importmap on these; today nothing consumes them yet.
+buildVendorBundles().catch((error) => {
+  log.error("Vendor bundle build failed at startup", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
 
 // ── Ping/Pong — Connection Liveness ─────────────────────────────────
 // Every 30s, send a ping to all WS clients and prune those that haven't

@@ -6,6 +6,7 @@ tmp/
 # Build output
 dist/
 *.tsbuildinfo
+.web-vendor-entries/
 
 # Bun
 bun.lockb
