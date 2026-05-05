@@ -115,6 +115,13 @@ export interface ChatPageContextValue {
   onLoadMoreSessions: (workspaceId: string) => Promise<void>;
   /** Toggle the workspace's pinned flag and re-sort the workspace list. */
   onPinWorkspace: (workspace: WorkspaceInfo, pinned: boolean) => Promise<void>;
+  /**
+   * Re-scan filesystem transcripts for a workspace and replace its session
+   * cache with the freshly-discovered first page. `session.list_sessions`
+   * already calls `discoverSessions` + upserts under the hood, so this is
+   * just a forced re-fetch from the UI's perspective.
+   */
+  onRefreshSessions: (workspace: WorkspaceInfo) => Promise<void>;
 }
 
 const ChatPageContext = createContext<ChatPageContextValue | null>(null);
@@ -339,6 +346,21 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const onNewWorkspace = useCallback(() => setShowCreateWorkspaceModal(true), []);
   const onCloseCreateWorkspaceModal = useCallback(() => setShowCreateWorkspaceModal(false), []);
 
+  const onRefreshSessions = useCallback(
+    async (workspace: WorkspaceInfo) => {
+      try {
+        const result = await loadSessionsForWorkspace(callGateway, workspace.cwd, {
+          limit: SESSIONS_PAGE_SIZE,
+          offset: 0,
+        });
+        setSessionsForWorkspace(workspace.id, result.sessions, result.hasMore);
+      } catch (error) {
+        console.error("Failed to refresh sessions", error);
+      }
+    },
+    [callGateway, setSessionsForWorkspace],
+  );
+
   const onPinWorkspace = useCallback(
     async (workspace: WorkspaceInfo, pinned: boolean) => {
       // Optimistic flip so the dot + sort order update immediately;
@@ -538,6 +560,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onGetDirectories,
       onLoadMoreSessions,
       onPinWorkspace,
+      onRefreshSessions,
     }),
     [
       workspaces,
@@ -558,6 +581,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onGetDirectories,
       onLoadMoreSessions,
       onPinWorkspace,
+      onRefreshSessions,
     ],
   );
 

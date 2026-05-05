@@ -27,6 +27,7 @@ import {
   PinOff,
   Plus,
   Puzzle,
+  RefreshCw,
   Search,
   Settings as SettingsIcon,
   SquarePlus,
@@ -40,6 +41,7 @@ import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
 export type WorkspaceMenuAction =
   | "pin"
+  | "refresh"
   | "openInFinder"
   | "createWorktree"
   | "rename"
@@ -289,6 +291,14 @@ function WorkspaceItem({
                 onClick={() => {
                   setMenuOpen(false);
                   onMenuAction?.("pin", workspace);
+                }}
+              />
+              <WorkspaceMenuItem
+                icon={RefreshCw}
+                label="Refresh sessions"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onMenuAction?.("refresh", workspace);
                 }}
               />
               <WorkspaceMenuItem

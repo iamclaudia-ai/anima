@@ -30,11 +30,16 @@ export function NavPanel() {
     onGetDirectories,
     onLoadMoreSessions,
     onPinWorkspace,
+    onRefreshSessions,
   } = useChatPage();
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
     if (action === "pin") {
       void onPinWorkspace(workspace, !(workspace.pinned ?? false));
+      return;
+    }
+    if (action === "refresh") {
+      void onRefreshSessions(workspace);
       return;
     }
     // Other actions (Open in Finder, Worktree, Rename, Archive, Remove)
