@@ -1,4 +1,4 @@
-import { Volume2, VolumeX, ChevronLeft } from "lucide-react";
+import { Volume2, VolumeX, ChevronLeft, Menu } from "lucide-react";
 import { useBridge } from "../bridge";
 import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
@@ -17,6 +17,8 @@ interface HeaderProps {
   voiceEnabled?: boolean;
   /** Toggle voice on/off */
   onToggleVoice?: () => void;
+  /** Open the navigation drawer (mobile hamburger). When provided, renders a menu button on the left. */
+  onOpenMenu?: () => void;
 }
 
 export function Header({
@@ -30,6 +32,7 @@ export function Header({
   onBack,
   voiceEnabled,
   onToggleVoice,
+  onOpenMenu,
 }: HeaderProps) {
   const bridge = useBridge();
 
@@ -38,6 +41,16 @@ export function Header({
       <div className="flex items-center justify-between">
         {/* Left side: Back button + Workspace info */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
+          {onOpenMenu && (
+            <button
+              onClick={onOpenMenu}
+              className="text-gray-500 hover:text-gray-800 transition-colors flex-shrink-0"
+              title="Open navigation"
+              aria-label="Open navigation"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          )}
           {onBack && (
             <button
               onClick={onBack}

@@ -24,12 +24,14 @@ interface ClaudiaChatProps {
   gatewayOptions?: UseChatGatewayOptions;
   /** Optional back navigation callback */
   onBack?: () => void;
+  /** Optional hamburger callback — when provided, Header renders a menu button (mobile nav). */
+  onOpenMenu?: () => void;
 }
 
-export function ClaudiaChat({ bridge, gatewayOptions, onBack }: ClaudiaChatProps) {
+export function ClaudiaChat({ bridge, gatewayOptions, onBack, onOpenMenu }: ClaudiaChatProps) {
   return (
     <BridgeContext.Provider value={bridge}>
-      <ChatInner gatewayOptions={gatewayOptions} onBack={onBack} />
+      <ChatInner gatewayOptions={gatewayOptions} onBack={onBack} onOpenMenu={onOpenMenu} />
     </BridgeContext.Provider>
   );
 }
@@ -37,9 +39,11 @@ export function ClaudiaChat({ bridge, gatewayOptions, onBack }: ClaudiaChatProps
 function ChatInner({
   gatewayOptions,
   onBack,
+  onOpenMenu,
 }: {
   gatewayOptions?: UseChatGatewayOptions;
   onBack?: () => void;
+  onOpenMenu?: () => void;
 }) {
   const bridge = useBridge();
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
@@ -183,6 +187,7 @@ function ChatInner({
           onBack={onBack}
           voiceEnabled={voiceEnabled}
           onToggleVoice={toggleVoice}
+          onOpenMenu={onOpenMenu}
         />
 
         {bridge.showContextBar && <ContextBar context={editorContext} />}
