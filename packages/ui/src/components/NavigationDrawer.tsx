@@ -285,7 +285,7 @@ function WorkspaceItem({
             >
               <WorkspaceMenuItem
                 icon={workspace.pinned ? PinOff : Pin}
-                label={workspace.pinned ? "Unpin project" : "Pin project"}
+                label={workspace.pinned ? "Unpin workspace" : "Pin workspace"}
                 onClick={() => {
                   setMenuOpen(false);
                   onMenuAction?.("pin", workspace);
@@ -309,7 +309,7 @@ function WorkspaceItem({
               />
               <WorkspaceMenuItem
                 icon={Pencil}
-                label="Rename project"
+                label="Rename workspace"
                 onClick={() => {
                   setMenuOpen(false);
                   onMenuAction?.("rename", workspace);
