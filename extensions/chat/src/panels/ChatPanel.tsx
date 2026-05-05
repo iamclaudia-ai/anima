@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { ClaudiaChat, useIsMobile } from "@anima/ui";
+import { Menu, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
 
@@ -41,22 +42,7 @@ export function ChatPanel() {
             className="absolute top-3 left-3 rounded-md p-2 text-gray-600 hover:bg-gray-100"
             aria-label="Open navigation"
           >
-            <span className="sr-only">Open navigation</span>
-            {/* Inline hamburger glyph keeps this slot from depending on Header */}
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
+            <Menu className="h-5 w-5" />
           </button>
         )}
         <p className="text-gray-400">
@@ -109,19 +95,7 @@ export function ChatPanel() {
               className="absolute top-2 right-2 z-10 rounded-md p-1.5 text-gray-500 hover:bg-gray-100"
               aria-label="Close navigation"
             >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <X className="h-5 w-5" />
             </button>
             <NavPanel />
           </div>
