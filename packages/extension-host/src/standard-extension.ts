@@ -1,6 +1,8 @@
 import type {
   AnimaExtension,
   ExtensionContext,
+  ExtensionMcpToolDefinition,
+  ExtensionMcpToolResult,
   ExtensionMethodDefinition,
   GatewayEvent,
 } from "@anima/shared";
@@ -23,6 +25,7 @@ export interface StandardExtensionDefinition<TRuntime = void> {
   id: string;
   name: string;
   methods: StandardExtensionMethod<TRuntime>[];
+  mcpTools?: ExtensionMcpToolDefinition[];
   events: string[];
   sourceRoutes?: string[];
   createRuntime?: (
@@ -50,11 +53,15 @@ export function createStandardExtension<TRuntime = void>(
     const handlers = new Map(
       definition.methods.map((method) => [method.definition.name, method.handle]),
     );
+    const mcpToolHandlers = new Map(
+      (definition.mcpTools ?? []).map((tool) => [tool.name, tool.handle]),
+    );
 
     return {
       id: definition.id,
       name: definition.name,
       methods: definition.methods.map((method) => method.definition),
+      mcpTools: definition.mcpTools,
       events: definition.events,
       sourceRoutes: definition.sourceRoutes,
       async start(extensionContext: ExtensionContext): Promise<void> {
@@ -83,6 +90,20 @@ export function createStandardExtension<TRuntime = void>(
         }
         return await handler(params, instance);
       },
+      async handleMcpTool(
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<ExtensionMcpToolResult> {
+        if (!instance) {
+          throw new Error(`Extension ${definition.id} has not started`);
+        }
+        const handler = mcpToolHandlers.get(name);
+        if (!handler) {
+          throw new Error(`Unknown MCP tool: ${name}`);
+        }
+        const result = await handler(args, instance.ctx);
+        return normalizeMcpToolResult(result);
+      },
       async handleSourceResponse(source: string, event: GatewayEvent): Promise<void> {
         if (!definition.handleSourceResponse) {
           throw new Error("Extension does not handle source responses");
@@ -96,5 +117,28 @@ export function createStandardExtension<TRuntime = void>(
         return definition.health?.(instance) ?? { ok: true };
       },
     };
+  };
+}
+
+function normalizeMcpToolResult(result: unknown): ExtensionMcpToolResult {
+  if (
+    result &&
+    typeof result === "object" &&
+    Array.isArray((result as ExtensionMcpToolResult).content)
+  ) {
+    return result as ExtensionMcpToolResult;
+  }
+
+  if (typeof result === "string") {
+    return { content: [{ type: "text", text: result }] };
+  }
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(result),
+      },
+    ],
   };
 }

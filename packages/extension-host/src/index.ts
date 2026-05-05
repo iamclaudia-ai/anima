@@ -12,7 +12,12 @@
  * keeping stdio pipes to the gateway intact.
  */
 
-import type { AnimaExtension, ExtensionContext, GatewayEvent } from "@anima/shared";
+import type {
+  AnimaExtension,
+  ExtensionContext,
+  ExtensionMcpToolDefinition,
+  GatewayEvent,
+} from "@anima/shared";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createLogger, matchesEventPattern } from "@anima/shared";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -260,6 +265,17 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     // Register first — makes methods available to other extensions immediately.
     // start() runs after, so extensions can set up ctx.on() handlers for
     // gateway.extensions_ready without worrying about load order.
+    const serializeSchema = (schema: ExtensionMcpToolDefinition["inputSchema"]): unknown => {
+      if (schema && typeof schema === "object" && "safeParse" in schema) {
+        try {
+          return zodToJsonSchema(schema as never);
+        } catch {
+          return (schema as { _def?: unknown })._def ?? {};
+        }
+      }
+      return schema;
+    };
+
     const methods = ext.methods.map((m) => {
       let inputSchema: unknown;
       try {
@@ -269,6 +285,13 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
       }
       return { name: m.name, description: m.description, inputSchema };
     });
+    const mcpTools = (ext.mcpTools ?? []).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: serializeSchema(tool.inputSchema),
+      annotations: tool.annotations,
+      _meta: tool.meta,
+    }));
 
     write({
       type: "register",
@@ -276,6 +299,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         id: ext.id,
         name: ext.name,
         methods,
+        mcpTools,
         events: ext.events,
         sourceRoutes: ext.sourceRoutes || [],
       },
@@ -345,6 +369,24 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
             }
           } else {
             writeResponse(id, false, "Extension does not handle source responses");
+          }
+        });
+        return;
+      }
+
+      if (method === "__mcpCall") {
+        await envelopeContext.run(context, async () => {
+          if (!activeExtension.handleMcpTool) {
+            writeResponse(id, false, "Extension does not expose MCP tools");
+            return;
+          }
+          try {
+            const name = params.name as string;
+            const args = (params.args as Record<string, unknown>) || {};
+            const result = await activeExtension.handleMcpTool(name, args);
+            writeResponse(id, true, result);
+          } catch (error) {
+            writeResponse(id, false, String(error));
           }
         });
         return;

@@ -2,8 +2,7 @@
 /**
  * Sync existing ~/memory files into the section registry database
  *
- * Run manually: bun packages/memory-mcp/src/sync.ts
- * Or via MCP: memory_sync tool
+ * Run manually: bun extensions/memory/mcp/sync.ts
  */
 
 import { listMemoryFiles, parseMemoryFile, getMemoryRoot } from "./storage.js";

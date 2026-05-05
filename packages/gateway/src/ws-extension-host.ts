@@ -142,6 +142,10 @@ export class WebSocketExtensionHost implements ExtensionHost {
     });
   }
 
+  async callMcpTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    return this.callMethod("__mcpCall", { name, args });
+  }
+
   sendEvent(event: GatewayEvent): void {
     if (this.closed) return;
 

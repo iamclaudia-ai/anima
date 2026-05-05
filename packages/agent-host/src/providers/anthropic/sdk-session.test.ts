@@ -294,6 +294,44 @@ describe("SDKSession", () => {
     }
   });
 
+  it("passes configured extension MCP server into query options", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-mcp`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+
+    const session = new SDKSession(sessionId, { cwd: "/repo/test", model: "claude-test" }, false, {
+      queryFactory: ((args: { options: Record<string, unknown> }) => {
+        capturedOptions = args.options;
+        return fakeQuery as unknown;
+      }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      config: {
+        extensionMcp: {
+          enabled: true,
+          serverName: "anima",
+          url: "http://localhost:30086/mcp",
+          headers: { Authorization: "Bearer test-token" },
+          alwaysLoad: true,
+        },
+      },
+    });
+
+    await session.start();
+    await session.prompt("hello");
+
+    expect(capturedOptions?.mcpServers).toEqual({
+      anima: {
+        type: "http",
+        url: "http://localhost:30086/mcp",
+        headers: { Authorization: "Bearer test-token" },
+        alwaysLoad: true,
+      },
+    });
+    expect(capturedOptions?.strictMcpConfig).toBe(true);
+
+    await session.close();
+  });
+
   it("interrupt emits synthetic stop events for open messages/blocks", async () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-2`;

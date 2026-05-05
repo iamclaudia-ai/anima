@@ -35,6 +35,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
 import { WebSocketExtensionHost } from "./ws-extension-host";
 import type { ExtensionRegistration, OnCallCallback } from "./extension-host";
+import { handleGatewayMcpRequest } from "./mcp-proxy";
 
 // Web UI — served as SPA fallback for all non-WS routes
 import index from "./web/index.html";
@@ -601,6 +602,13 @@ function handleRegisterExtension(ws: ServerWebSocket<ClientState>, req: Request)
     id: string;
     name: string;
     methods: Array<{ name: string; description: string; inputSchema?: Record<string, unknown> }>;
+    mcpTools?: Array<{
+      name: string;
+      description: string;
+      inputSchema?: Record<string, unknown>;
+      annotations?: Record<string, unknown>;
+      _meta?: Record<string, unknown>;
+    }>;
     events: string[];
     sourceRoutes: string[];
   };
@@ -630,6 +638,13 @@ function handleRegisterExtension(ws: ServerWebSocket<ClientState>, req: Request)
     id: params.id,
     name: params.name,
     methods: params.methods.map((m) => ({ name: m.name, description: m.description })),
+    mcpTools: params.mcpTools?.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
+      annotations: tool.annotations,
+      _meta: tool._meta,
+    })),
     events: params.events,
     sourceRoutes: params.sourceRoutes,
   };
@@ -806,7 +821,11 @@ const server = Bun.serve<ClientState>({
     }
 
     // Protected API routes — require auth
-    if (url.pathname === "/health" || url.pathname.startsWith("/audiobooks/")) {
+    if (
+      url.pathname === "/health" ||
+      url.pathname === "/mcp" ||
+      url.pathname.startsWith("/audiobooks/")
+    ) {
       const auth = authenticateRequest(req);
       if (!auth.ok) {
         return new globalThis.Response(JSON.stringify({ error: auth.message }), {
@@ -889,6 +908,13 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
+    },
+
+    "/mcp": async (req: globalThis.Request) => {
+      if (!["GET", "POST", "DELETE"].includes(req.method)) {
+        return new globalThis.Response("Method not allowed", { status: 405 });
+      }
+      return await handleGatewayMcpRequest(req, extensions, log);
     },
 
     // PWA files

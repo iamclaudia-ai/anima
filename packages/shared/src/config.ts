@@ -75,6 +75,13 @@ export interface AgentHostConfig {
   url: string;
   /** Agent-host HTTP port (for watchdog health checks) */
   port: number;
+  /** Automatic MCP tools exposed by gateway-loaded extensions */
+  extensionMcp?: {
+    enabled?: boolean;
+    serverName?: string;
+    url?: string;
+    alwaysLoad?: boolean;
+  };
   /** Codex provider configuration */
   codex?: {
     apiKey?: string;

@@ -182,4 +182,37 @@ describe("createStandardExtension", () => {
     await ext.stop();
     expect(seen).toEqual(["create:conn-standard", "start:vanilla", "stop:2"]);
   });
+
+  it("routes MCP tool handlers through the started extension context", async () => {
+    const factory = createStandardExtension({
+      id: "standard-mcp",
+      name: "Standard MCP",
+      methods: [],
+      mcpTools: [
+        {
+          name: "standard_echo",
+          description: "Echo through MCP",
+          inputSchema: z.object({ text: z.string() }),
+          handle(args, ctx) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `${ctx.connectionId}:${String(args.text)}`,
+                },
+              ],
+            };
+          },
+        },
+      ],
+      events: [],
+    });
+
+    const ext = factory({});
+    await ext.start(createTestContext());
+    await expect(ext.handleMcpTool?.("standard_echo", { text: "hello" })).resolves.toEqual({
+      content: [{ type: "text", text: "conn-standard:hello" }],
+    });
+    await expect(ext.handleMcpTool?.("missing", {})).rejects.toThrow("Unknown MCP tool");
+  });
 });

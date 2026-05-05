@@ -5,11 +5,15 @@
  * Supports source-based routing for responses (e.g., "imessage/+1555..." -> iMessage extension)
  */
 
-import type { ExtensionMethodDefinition, GatewayEvent } from "@anima/shared";
+import type {
+  ExtensionMcpToolResult,
+  ExtensionMethodDefinition,
+  GatewayEvent,
+} from "@anima/shared";
 import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionHost, ExtensionRegistration } from "./extension-host";
+import type { ExtensionHost, ExtensionRegistration, RemoteMcpToolInfo } from "./extension-host";
 
 const log = createLogger("ExtensionManager", join(homedir(), ".anima", "logs", "gateway.log"));
 const HEALTH_CHECK_TIMEOUT_MS = 15_000;
@@ -23,6 +27,7 @@ export class ExtensionManager {
   private remoteRegistrations = new Map<string, ExtensionRegistration>();
   private remoteSourceRoutes = new Map<string, ExtensionHost>();
   private remoteGenerations = new Map<string, string | null>();
+  private mcpToolOwners = new Map<string, string>();
 
   /**
    * Register a remote (out-of-process) extension.
@@ -51,6 +56,18 @@ export class ExtensionManager {
       generationToken ?? host.getGenerationToken() ?? null,
     );
 
+    for (const tool of registration.mcpTools ?? []) {
+      const previousOwner = this.mcpToolOwners.get(tool.name);
+      if (previousOwner && previousOwner !== registration.id) {
+        log.warn("MCP tool name collision; latest registration wins", {
+          tool: tool.name,
+          previousOwner,
+          extensionId: registration.id,
+        });
+      }
+      this.mcpToolOwners.set(tool.name, registration.id);
+    }
+
     // Register source routes for remote extension
     for (const prefix of registration.sourceRoutes) {
       this.remoteSourceRoutes.set(prefix, host);
@@ -68,6 +85,17 @@ export class ExtensionManager {
     const reg = this.remoteRegistrations.get(extensionId);
     if (reg) {
       this.remoteRegistrations.delete(extensionId);
+      for (const tool of reg.mcpTools ?? []) {
+        if (this.mcpToolOwners.get(tool.name) === extensionId) {
+          this.mcpToolOwners.delete(tool.name);
+          const fallback = Array.from(this.remoteRegistrations.entries())
+            .reverse()
+            .find(([, candidate]) => candidate.mcpTools?.some((t) => t.name === tool.name));
+          if (fallback) {
+            this.mcpToolOwners.set(tool.name, fallback[0]);
+          }
+        }
+      }
       for (const prefix of reg.sourceRoutes) {
         // If another extension also declares this prefix, restore the most
         // recently registered owner; otherwise remove the route.
@@ -235,6 +263,40 @@ export class ExtensionManager {
     return false;
   }
 
+  getMcpTools(): Array<RemoteMcpToolInfo & { extensionId: string; extensionName: string }> {
+    const tools: Array<RemoteMcpToolInfo & { extensionId: string; extensionName: string }> = [];
+    for (const reg of this.remoteRegistrations.values()) {
+      for (const tool of reg.mcpTools ?? []) {
+        tools.push({
+          ...tool,
+          extensionId: reg.id,
+          extensionName: reg.name,
+        });
+      }
+    }
+    return tools;
+  }
+
+  async handleMcpTool(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<ExtensionMcpToolResult> {
+    const extensionId = this.mcpToolOwners.get(name);
+    if (!extensionId) {
+      throw new Error(`Unknown MCP tool: ${name}`);
+    }
+
+    const host = this.remoteHosts.get(extensionId);
+    if (!host) {
+      throw new Error(`MCP tool owner is not running: ${extensionId}`);
+    }
+
+    const result = host.callMcpTool
+      ? await host.callMcpTool(name, args)
+      : await host.callMethod("__mcpCall", { name, args });
+    return normalizeMcpToolResult(result);
+  }
+
   /**
    * Get extension list for discovery (used by Mission Control)
    */
@@ -315,6 +377,7 @@ export class ExtensionManager {
     this.remoteHosts.clear();
     this.remoteRegistrations.clear();
     this.remoteGenerations.clear();
+    this.mcpToolOwners.clear();
     this.remoteSourceRoutes.clear();
     this.sourceRoutes.clear();
   }
@@ -329,7 +392,26 @@ export class ExtensionManager {
     this.remoteHosts.clear();
     this.remoteRegistrations.clear();
     this.remoteGenerations.clear();
+    this.mcpToolOwners.clear();
     this.remoteSourceRoutes.clear();
     this.sourceRoutes.clear();
   }
+}
+
+function normalizeMcpToolResult(result: unknown): ExtensionMcpToolResult {
+  if (
+    result &&
+    typeof result === "object" &&
+    Array.isArray((result as ExtensionMcpToolResult).content)
+  ) {
+    return result as ExtensionMcpToolResult;
+  }
+
+  if (typeof result === "string") {
+    return { content: [{ type: "text", text: result }] };
+  }
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(result) }],
+  };
 }

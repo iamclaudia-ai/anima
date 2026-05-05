@@ -332,6 +332,11 @@ anima memory.health_check
 
 ```
 extensions/memory/
+├── mcp/
+│   ├── index.ts           # Extension-exported MCP tools (recall, remember, read, list)
+│   ├── db.ts              # Read-only FTS/transcript lookup for MCP calls
+│   ├── storage.ts         # ~/memory markdown read/write helpers
+│   └── sections.ts        # Section consistency registry
 ├── src/
 │   ├── index.ts           # Extension entry (startup, methods, lifecycle)
 │   ├── watcher.ts         # Chokidar file watcher (real-time monitoring)
@@ -344,6 +349,26 @@ packages/gateway/
 └── migrations/
     └── 002-memory.sql     # Schema (file_states, entries, conversations)
 ```
+
+## MCP Tools
+
+The memory extension exports MCP tools through the Anima extension contract. There is no separate `memory-mcp` workspace package and no required `claude.json` or `.mcp.json` configuration.
+
+At startup, the memory extension registers its MCP tool metadata with the gateway. Agent-host automatically configures Claude SDK sessions with the gateway MCP endpoint, so Claude sees tools such as:
+
+- `mcp__anima__memory_recall`
+- `mcp__anima__memory_remember`
+- `mcp__anima__memory_read`
+- `mcp__anima__memory_list`
+- `mcp__anima__memory_transcript`
+
+Tool call path:
+
+```
+Claude SDK -> gateway /mcp -> memory extension -> extensions/memory/mcp handler
+```
+
+The gateway is only a protocol adapter/router here. Memory search, file writes, transcript lookup, and section registry logic stay inside the memory extension.
 
 ## Phase 2: Libby — Conversation Processing
 
@@ -476,7 +501,7 @@ From Chroma Research ("Context Rot: How Long-Term AI Memory Goes Stale"):
 
 4. **Transcripts are the immutable historical record** — the raw JSONL session logs are never modified. Everything Libby writes to `~/memory/` is derived and can be regenerated.
 
-5. **Future: vector search + temporal decay** — the memory-mcp already plans semantic search. Temporal decay and MMR would improve retrieval quality as the memory corpus grows.
+5. **Future: vector search + temporal decay** — the memory MCP tools can add semantic search. Temporal decay and MMR would improve retrieval quality as the memory corpus grows.
 
 ### Sources
 

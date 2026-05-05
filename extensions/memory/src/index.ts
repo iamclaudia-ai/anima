@@ -61,6 +61,7 @@ import { ingestMemoryDocument, scanAndIngestMemoryDirCooperative } from "./docum
 import { DocumentWatcher } from "./document-watcher";
 import { RepoSyncService } from "./repo-sync";
 import { MemoryScheduler } from "./scheduler";
+import { memoryMcpTools } from "../mcp/index";
 
 const noopLogger: LoggerLike = {
   info() {},
@@ -948,6 +949,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       handle: async (params, instance) =>
         await handleMemoryMethod(instance.runtime, definition.name, params),
     })),
+    mcpTools: memoryMcpTools,
     events: [
       "memory.ingested",
       "memory.conversation_ready",

@@ -22,11 +22,21 @@ export interface RemoteMethodInfo {
   description: string;
 }
 
+/** Serialized MCP tool info from the host's register message */
+export interface RemoteMcpToolInfo {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+}
+
 /** Registration data sent by the host after extension.start() */
 export interface ExtensionRegistration {
   id: string;
   name: string;
   methods: RemoteMethodInfo[];
+  mcpTools?: RemoteMcpToolInfo[];
   events: string[];
   sourceRoutes: string[];
 }
@@ -52,6 +62,8 @@ export interface ExtensionHost {
       tags?: string[];
     },
   ): Promise<unknown>;
+
+  callMcpTool?(name: string, args: Record<string, unknown>): Promise<unknown>;
 
   sendEvent(event: GatewayEvent): void;
 
@@ -204,6 +216,10 @@ export class ExtensionHostProcess implements ExtensionHost {
     },
   ): Promise<unknown> {
     return this.sendRequest(method, params, connectionId, meta);
+  }
+
+  async callMcpTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    return this.sendRequest("__mcpCall", { name, args });
   }
 
   /**

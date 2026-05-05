@@ -1,8 +1,7 @@
-#!/usr/bin/env bun
 /**
- * Claudia Memory MCP Server
+ * Claudia Memory MCP Tools
  *
- * Provides memory tools for Claude Code sessions:
+ * Provides extension-owned MCP tools for Claude Code sessions:
  * - memory_recall: FTS5 full-text search across all memories
  * - memory_remember: Store new memories to ~/memory
  * - memory_read: Read specific memory files
@@ -14,13 +13,7 @@
  * relationships, projects, core identity, personas).
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { ExtensionMcpToolDefinition, ExtensionMcpToolResult } from "@anima/shared";
 
 import { getSectionRegistry } from "./sections.js";
 import {
@@ -46,7 +39,9 @@ import { hasFtsTable, searchFts, getTranscript, extractConversationId } from "./
 // Tool Definitions
 // ============================================================================
 
-const TOOLS: Tool[] = [
+type MemoryMcpToolMetadata = Omit<ExtensionMcpToolDefinition, "handle">;
+
+const TOOLS: MemoryMcpToolMetadata[] = [
   {
     name: "memory_recall",
     description: `Search Claudia's memories — conversations, milestones, insights, relationships, projects, and more.
@@ -441,33 +436,16 @@ async function handleList(params: ListParams): Promise<string> {
 }
 
 // ============================================================================
-// MCP Server
+// Extension MCP export
 // ============================================================================
 
-async function main() {
-  const server = new Server(
-    {
-      name: "anima-memory",
-      version: "0.2.0",
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    },
-  );
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS,
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-
+export const memoryMcpTools: ExtensionMcpToolDefinition[] = TOOLS.map((tool) => ({
+  ...tool,
+  async handle(args): Promise<ExtensionMcpToolResult> {
     try {
       let result: string;
 
-      switch (name) {
+      switch (tool.name) {
         case "memory_recall":
           result = await handleRecall((args ?? {}) as unknown as RecallParams);
           break;
@@ -478,7 +456,7 @@ async function main() {
           result = await handleRead((args ?? {}) as unknown as ReadParams);
           break;
         case "memory_list":
-          result = await handleList(args as ListParams);
+          result = await handleList((args ?? {}) as ListParams);
           break;
         case "memory_transcript":
           result = await handleTranscript(
@@ -491,7 +469,7 @@ async function main() {
           );
           break;
         default:
-          throw new Error(`Unknown tool: ${name}`);
+          throw new Error(`Unknown tool: ${tool.name}`);
       }
 
       return {
@@ -504,12 +482,5 @@ async function main() {
         isError: true,
       };
     }
-  });
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  console.error("Claudia Memory MCP server running (v0.2.0 — FTS5)");
-}
-
-main().catch(console.error);
+  },
+}));

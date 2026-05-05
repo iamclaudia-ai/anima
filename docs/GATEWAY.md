@@ -32,6 +32,7 @@ Deep-dive into the gateway's startup, message routing, and extension communicati
        │   "extension":{        │
        │     "id":"voice",      │
        │     "methods":[...],   │
+       │     "mcpTools":[...],  │
        │     "events":[...]}}   │
        │◄───────────────────────┤
        │                        │
@@ -60,6 +61,8 @@ The `/health` payload includes:
 - `extensions`
 - `extensionLocks` for gateway-owned extension host process locks
 - `runtimeLocks` for gateway-owned extension liveness/recovery locks
+
+The gateway also serves `/mcp`, a Streamable HTTP MCP endpoint backed by MCP tools declared by loaded extensions.
 
 ### Extension Host Spawn (start.ts)
 
@@ -112,7 +115,7 @@ Each extension process runs directly with `bun --hot` (native HMR) by default. E
 
 The important startup nuance is that registration happens before `start()` completes. That gives extensions a two-phase lifecycle:
 
-1. register methods/events/source routes immediately
+1. register methods/events/source routes/MCP tools immediately
 2. do dependent startup work only after `gateway.extensions_ready`
 
 This is how extensions like iMessage can safely call `session.send_prompt` during catchup without depending on load order.
@@ -345,7 +348,7 @@ Gateway -> Host (stdin):
   {"type":"event","event":"session.content_block_delta","payload":{...}}
 
 Host -> Gateway (stdout):
-  {"type":"register","extension":{"id":"voice","methods":[...],"events":[...]}}
+  {"type":"register","extension":{"id":"voice","methods":[...],"mcpTools":[...],"events":[...]}}
   {"type":"res","id":"abc","ok":true,"payload":{...}}
   {"type":"event","event":"voice.audio_chunk","payload":{...}}
   {"type":"error","error":"Fatal: ..."}
@@ -394,6 +397,23 @@ Extensions run directly as `bun --hot extensions/<id>/src/index.ts <config>`. Ea
 ```
 
 On host spawn/restart, generation token changes. Registration updates the current generation, and stale-generation events from older host lifecycles are ignored by the gateway.
+
+### Extension MCP Tool Registration
+
+Extensions can declare MCP tools in the same extension object that declares methods and events. The extension host serializes their schemas into the registration payload. The gateway stores those tool definitions in `ExtensionManager` and exposes them through a single gateway MCP endpoint:
+
+```
+Claude SDK query()
+  -> agent-host mcpServers.anima
+  -> GET/POST http://localhost:30086/mcp
+  -> gateway MCP proxy
+  -> ExtensionHost.callMcpTool("__mcpCall")
+  -> extension handleMcpTool()
+```
+
+The gateway does not import extension tool code. It only owns the MCP protocol adapter and routes calls to the extension that registered the tool. This keeps capabilities self-contained: adding an extension can add gateway methods, web UI routes, source routes, events, and MCP tools without editing Claude's external MCP config.
+
+Agent-host configures the gateway MCP endpoint automatically for Claude SDK sessions. By default it uses `http://localhost:<gateway.port>/mcp` and sends the gateway bearer token as an Authorization header. This replaces manual `claude.json` or `.mcp.json` setup for extension-provided tools.
 
 ### Auto-Restart on Crash
 

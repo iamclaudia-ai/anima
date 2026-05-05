@@ -17,6 +17,7 @@
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
+    "gray-matter": "^4.0.3",
     "react-markdown": "catalog:",
     "remark-gfm": "4.0.1",
     "xstate": "5.30.0"

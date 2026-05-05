@@ -68,6 +68,13 @@ import { formatSkillsForPrompt, loadSkills } from "./skills";
 export interface AnthropicProviderConfig {
   imageProcessing?: ImageProcessingConfig;
   skillsPaths?: string[];
+  extensionMcp?: {
+    enabled: boolean;
+    serverName: string;
+    url: string;
+    headers?: Record<string, string>;
+    alwaysLoad?: boolean;
+  };
 }
 
 const DEFAULT_IMAGE_PROCESSING_CONFIG: ImageProcessingConfig = {
@@ -216,6 +223,7 @@ export class SDKSession extends EventEmitter {
   private isFirstPrompt: boolean;
   private imageProcessingConfig: ImageProcessingConfig;
   private skillsPaths: string[];
+  private extensionMcp?: AnthropicProviderConfig["extensionMcp"];
 
   // Timestamps for health reporting
   private createdAt = Date.now();
@@ -254,6 +262,7 @@ export class SDKSession extends EventEmitter {
     this.isFirstPrompt = !isResume;
     this.imageProcessingConfig = deps?.config?.imageProcessing || DEFAULT_IMAGE_PROCESSING_CONFIG;
     this.skillsPaths = deps?.config?.skillsPaths || [];
+    this.extensionMcp = deps?.config?.extensionMcp;
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"
@@ -516,6 +525,22 @@ export class SDKSession extends EventEmitter {
 
       // Load filesystem settings so SDK can discover user, project, and local project config.
       settingSources: ["user", "project", "local"],
+
+      ...(this.extensionMcp?.enabled
+        ? {
+            mcpServers: {
+              [this.extensionMcp.serverName]: {
+                type: "http",
+                url: this.extensionMcp.url,
+                ...(this.extensionMcp.headers ? { headers: this.extensionMcp.headers } : {}),
+                ...(this.extensionMcp.alwaysLoad === undefined
+                  ? {}
+                  : { alwaysLoad: this.extensionMcp.alwaysLoad }),
+              },
+            },
+            strictMcpConfig: true,
+          }
+        : {}),
 
       // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum
       disallowedTools: DISALLOWED_TOOLS,

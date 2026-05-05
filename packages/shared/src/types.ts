@@ -181,6 +181,8 @@ export interface ExtensionContext {
 export interface AnimaExtension {
   /** Extension method definitions (inputSchema required for validation + discovery) */
   methods: ExtensionMethodDefinition[];
+  /** MCP tools exposed by this extension for automatic agent configuration */
+  mcpTools?: ExtensionMcpToolDefinition[];
   /** Unique extension ID (e.g., "voice", "memory") */
   id: string;
   /** Human-readable name */
@@ -196,6 +198,8 @@ export interface AnimaExtension {
   stop(): Promise<void>;
   /** Handle a method call from a client */
   handleMethod(method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** Handle an MCP tool call routed through the gateway MCP proxy */
+  handleMcpTool?(name: string, args: Record<string, unknown>): Promise<ExtensionMcpToolResult>;
   /** Handle a response that needs to be routed back to a source this extension owns */
   handleSourceResponse?(source: string, event: GatewayEvent): Promise<void>;
   /** Health check */
@@ -213,6 +217,35 @@ export interface ExtensionMethodDefinition {
   outputSchema?: ZodType;
   /** Optional execution policy used by the extension host runtime scheduler */
   execution?: ExtensionMethodExecution;
+}
+
+export interface ExtensionMcpToolDefinition {
+  /** MCP tool name exposed by the gateway MCP proxy */
+  name: string;
+  /** Short tool description shown to the agent */
+  description: string;
+  /** Zod schema or already-serialized JSON schema for MCP input */
+  inputSchema: ZodType | Record<string, unknown>;
+  /** Optional MCP annotations forwarded to tools/list */
+  annotations?: Record<string, unknown>;
+  /** Optional MCP _meta forwarded to tools/list */
+  meta?: Record<string, unknown>;
+  /** Tool handler executed inside the owning extension process */
+  handle: (
+    args: Record<string, unknown>,
+    ctx: ExtensionContext,
+  ) =>
+    | Promise<ExtensionMcpToolResult | string | unknown>
+    | ExtensionMcpToolResult
+    | string
+    | unknown;
+}
+
+export interface ExtensionMcpToolResult {
+  content: Array<Record<string, unknown>>;
+  isError?: boolean;
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
 }
 
 export type ExtensionMethodLane = "control" | "read" | "write" | "long_running" | "stream";

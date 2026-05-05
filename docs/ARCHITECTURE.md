@@ -55,6 +55,7 @@ The gateway is a pure message hub. Single Bun.serve instance handling HTTP, WebS
 fetch(req):
   /ws      → WebSocket upgrade → handleMessage()
   /health  → JSON status (extensions, connections)
+  /mcp     → Gateway-hosted MCP proxy for extension tools
   /*       → SPA fallback (index.html, Tailwind + Bun bundling)
 
 websocket:
@@ -102,6 +103,7 @@ Events flow through two channels:
 | `src/index.ts`          | Bun.serve, WS handlers, event routing                 |
 | `src/extensions.ts`     | ExtensionManager, method/event routing, ctx.call()    |
 | `src/extension-host.ts` | ExtensionHostProcess, spawns extensions, NDJSON stdio |
+| `src/mcp-proxy.ts`      | Gateway MCP endpoint backed by extension MCP tools    |
 | `src/start.ts`          | Config-driven extension loading                       |
 | `src/db/`               | SQLite (migrations only, data owned by extensions)    |
 | `src/web/`              | SPA shell (index.html + route collector)              |
@@ -233,18 +235,43 @@ interface ExtensionMethodDefinition {
   inputSchema: ZodTypeAny;
 }
 
+interface ExtensionMcpToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: ZodTypeAny | Record<string, unknown>;
+  handle(args: Record<string, unknown>, ctx: ExtensionContext): Promise<unknown>;
+}
+
 interface AnimaExtension {
   id: string;
   name: string;
   methods: ExtensionMethodDefinition[];
+  mcpTools?: ExtensionMcpToolDefinition[];
   events: string[];
   sourceRoutes?: string[];
   start(ctx: ExtensionContext): Promise<void>;
   stop(): Promise<void>;
   handleMethod(method: string, params: Record<string, unknown>): Promise<unknown>;
+  handleMcpTool?(name: string, args: Record<string, unknown>): Promise<unknown>;
   health(): HealthCheckResponse;
 }
 ```
+
+### Extension MCP Tools
+
+Extensions can export MCP tools alongside gateway methods. The gateway includes serialized MCP tool metadata in extension registration, stores it in the `ExtensionManager`, and serves a single gateway MCP endpoint at `/mcp`.
+
+Runtime path:
+
+```
+Claude SDK query()
+  → agent-host mcpServers.anima (http://localhost:30086/mcp)
+  → gateway MCP proxy
+  → owning extension host (__mcpCall)
+  → extension mcpTools handler
+```
+
+This keeps tool implementation self-contained in the extension process while avoiding external `claude.json` or `.mcp.json` setup. The agent-host configures the gateway MCP endpoint automatically for Claude sessions.
 
 ### ExtensionContext
 
@@ -334,6 +361,8 @@ The session extension uses `AgentHostClient` — a WebSocket client that connect
 - **Event handlers**: `session.event` and `task.event` translate agent-host events to gateway events
 
 All SDK runtime (Claude `query()`, Codex tasks) lives in agent-host — the session extension just routes requests and events.
+
+Claude sessions also receive extension-provided MCP tools automatically. Agent-host injects the gateway `/mcp` endpoint into `query()` options as an HTTP MCP server, using the gateway bearer token from config. Tool discovery and calls are handled by the gateway proxy, then routed to the extension that declared the tool.
 
 ### Provider-Aware Routing
 
@@ -487,6 +516,7 @@ packages/
       start.ts            Config-driven extension loading
       extensions.ts       ExtensionManager, method/event routing, ctx.call()
       extension-host.ts   ExtensionHostProcess, spawns extensions, NDJSON stdio
+      mcp-proxy.ts        MCP endpoint for extension-exported tools
       db/                 SQLite (migrations)
       web/                SPA shell (index.html + route collector)
 
@@ -517,8 +547,6 @@ packages/
       hooks/              useChatGateway, useGatewayClient, useAudioPlayback
       components/         ClaudiaChat, MessageList, NavigationDrawer
 
-  memory-mcp/           # MCP server for persistent memory system
-
 extensions/
   session/src/          # Session lifecycle, SDK engine, workspace CRUD
   chat/src/             # Web pages: /, /workspace/:workspaceId/session/:sessionId
@@ -527,6 +555,7 @@ extensions/
   control/src/          # System dashboard, health checks
   hooks/src/            # Event-driven scripts
   memory/src/           # Transcript ingestion + Libby processing
+  memory/mcp/           # Memory MCP tools exported through the extension contract
 
 clients/
   ios/                  # Native Swift voice mode app

@@ -92,6 +92,15 @@ export async function createAgentHostServer(
   const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
   const configuredImageProcessing = sessionExtConfig.imageProcessing;
   const configuredSkills = sessionExtConfig.skills;
+  const extensionMcpConfig = config.agentHost.extensionMcp ?? {};
+  const extensionMcpEnabled = extensionMcpConfig.enabled !== false;
+  const extensionMcpUrl =
+    typeof extensionMcpConfig.url === "string" && extensionMcpConfig.url.trim().length > 0
+      ? extensionMcpConfig.url.trim()
+      : `http://localhost:${config.gateway.port}/mcp`;
+  const extensionMcpHeaders = config.gateway.token
+    ? { Authorization: `Bearer ${config.gateway.token}` }
+    : undefined;
   const providers = {
     claude: createAnthropicProvider({
       imageProcessing:
@@ -107,6 +116,13 @@ export async function createAgentHostServer(
         Array.isArray((configuredSkills as { paths?: unknown }).paths)
           ? (configuredSkills as { paths: string[] }).paths || []
           : config.session.skills.paths,
+      extensionMcp: {
+        enabled: extensionMcpEnabled,
+        serverName: extensionMcpConfig.serverName || "anima",
+        url: extensionMcpUrl,
+        headers: extensionMcpHeaders,
+        alwaysLoad: extensionMcpConfig.alwaysLoad,
+      },
     }),
     codex: createCodexProvider(config.agentHost?.codex),
   };

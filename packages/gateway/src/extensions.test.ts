@@ -235,6 +235,38 @@ describe("ExtensionManager", () => {
     expect(manager.getSourceRoutes()).toEqual({});
   });
 
+  it("discovers and routes MCP tools to their owning extension", async () => {
+    const manager = new ExtensionManager();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    manager.registerRemote(
+      createRemoteRegistration({
+        id: "memory",
+        name: "Memory",
+        methods: [{ name: "memory.health_check", description: "Health" }],
+        sourceRoutes: [],
+        mcpTools: [
+          {
+            name: "memory_recall",
+            description: "Recall memories",
+            inputSchema: { type: "object", properties: { query: { type: "string" } } },
+          },
+        ],
+      }),
+      createRemoteHostMock({
+        async callMcpTool(name, args) {
+          calls.push({ name, args });
+          return { content: [{ type: "text", text: "found" }] };
+        },
+      }),
+    );
+
+    expect(manager.getMcpTools().map((tool) => tool.name)).toEqual(["memory_recall"]);
+    await expect(manager.handleMcpTool("memory_recall", { query: "test" })).resolves.toEqual({
+      content: [{ type: "text", text: "found" }],
+    });
+    expect(calls).toEqual([{ name: "memory_recall", args: { query: "test" } }]);
+  });
+
   it("reports remote host health and kills remote hosts", async () => {
     const manager = new ExtensionManager();
     let killed = 0;
