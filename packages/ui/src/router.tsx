@@ -8,6 +8,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
 import type { LayoutDefinition, LayoutNode } from "@anima/shared";
+import type { PanelDefinition } from "@anima/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
 import { LayoutManager } from "./components/LayoutManager";
 
@@ -25,6 +26,29 @@ export interface Route {
   icon?: string;
   /** Browser tab title — shown as "title — Anima". Falls back to label. */
   title?: string;
+}
+
+export interface PanelContribution extends PanelDefinition {
+  /** React component to render in this panel. */
+  // biome-ignore lint: Panel components have varying prop signatures from extension pages
+  component: ComponentType<any>;
+}
+
+export interface ExtensionWebContribution {
+  /** Extension ID that owns this browser contribution. */
+  id: string;
+  /** Optional display name for gateway UI surfaces. */
+  name?: string;
+  /** Stable ordering hint for route/panel aggregation. Lower values sort first. */
+  order?: number;
+  /** Allows a contribution module to exist without being mounted yet. */
+  enabled?: boolean;
+  /** Client-side routes contributed by this extension. */
+  routes?: Route[];
+  /** Layout panels contributed by this extension. */
+  panels?: PanelContribution[];
+  /** Named layout definitions contributed by this extension. */
+  layouts?: Record<string, LayoutDefinition>;
 }
 
 interface RouterState {

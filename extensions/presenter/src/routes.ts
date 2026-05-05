@@ -7,7 +7,7 @@
  *   /present/:id            — Standalone: fullscreen with optional notes (N key)
  */
 
-import type { Route } from "@anima/ui";
+import type { ExtensionWebContribution, Route } from "@anima/ui";
 import { PresenterPage } from "./pages/PresenterPage";
 import { PresenterNotesPage } from "./pages/PresenterNotesPage";
 import { DisplayPage } from "./pages/DisplayPage";
@@ -19,3 +19,10 @@ export const presenterRoutes: Route[] = [
   { path: "/present/:id/display", component: DisplayPage, label: "Display" },
   { path: "/present/:id", component: PresenterPage, label: "Present" },
 ];
+
+export default {
+  id: "presenter",
+  name: "Presenter",
+  order: 30,
+  routes: presenterRoutes,
+} satisfies ExtensionWebContribution;

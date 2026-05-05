@@ -27,7 +27,7 @@ export type {
 
 // Router
 export { Router, Link, useRouter, navigate, matchPath, useDocumentTitle } from "./router";
-export type { Route } from "./router";
+export type { ExtensionWebContribution, PanelContribution, Route } from "./router";
 
 // Hooks
 export { useChatGateway } from "./hooks/useChatGateway";

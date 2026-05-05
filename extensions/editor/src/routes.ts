@@ -6,6 +6,7 @@
  */
 
 import type { PanelDefinition } from "@anima/shared";
+import type { ExtensionWebContribution } from "@anima/ui";
 import { EditorPanel } from "./panels/EditorPanel";
 
 export const editorPanels: (PanelDefinition & { component: React.ComponentType })[] = [
@@ -14,3 +15,12 @@ export const editorPanels: (PanelDefinition & { component: React.ComponentType }
 
 // No routes — editor panels are embedded in other extensions' layouts
 export const editorRoutes: never[] = [];
+
+export default {
+  id: "editor",
+  name: "Editor",
+  order: 80,
+  enabled: false,
+  routes: editorRoutes,
+  panels: editorPanels,
+} satisfies ExtensionWebContribution;

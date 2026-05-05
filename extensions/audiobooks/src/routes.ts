@@ -2,7 +2,7 @@
  * Audiobooks Extension — route declarations
  */
 
-import type { Route } from "@anima/ui";
+import type { ExtensionWebContribution, Route } from "@anima/ui";
 import { Library } from "./pages/Library";
 import { BookDetail } from "./pages/BookDetail";
 import { ChapterPlayer } from "./pages/ChapterPlayer";
@@ -14,3 +14,10 @@ export const audiobooksRoutes: Route[] = [
   // Static file serving (handled by gateway, not React router)
   { path: "/audiobooks/static/:path*", static: "~/romance-novels" },
 ];
+
+export default {
+  id: "audiobooks",
+  name: "Audiobooks",
+  order: 50,
+  routes: audiobooksRoutes,
+} satisfies ExtensionWebContribution;

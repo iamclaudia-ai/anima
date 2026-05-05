@@ -6,7 +6,7 @@
  * Routes: URL patterns mapped to either a layout or a component.
  */
 
-import type { Route } from "@anima/ui";
+import type { ExtensionWebContribution, Route } from "@anima/ui";
 import type { PanelDefinition, LayoutDefinition } from "@anima/shared";
 import { MainPage } from "./pages/MainPage";
 import { ChatPanel } from "./panels/ChatPanel";
@@ -42,3 +42,12 @@ export const chatRoutes: Route[] = [
     label: "Chat",
   },
 ];
+
+export default {
+  id: "chat",
+  name: "Chat",
+  order: 40,
+  routes: chatRoutes,
+  panels: chatPanels,
+  layouts: chatLayouts,
+} satisfies ExtensionWebContribution;

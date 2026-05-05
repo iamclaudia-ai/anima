@@ -6,20 +6,14 @@ import {
   GlobalNotifications,
   LoginGate,
 } from "@anima/ui";
-import type { PanelRegistry } from "@anima/ui";
+import type { PanelRegistry, Route } from "@anima/ui";
 import type { LayoutDefinition } from "@anima/shared";
+import { extensionWebContributions } from "./extension-web-contributions.generated";
 import "@anima/ui/styles";
 
-// ── Extension route imports ─────────────────────────────────
-import { chatRoutes, chatPanels, chatLayouts } from "@anima/ext-chat/routes";
-import { controlRoutes } from "@anima/ext-control/routes";
-import { memoryRoutes } from "@anima/memory/routes";
-import { audiobooksRoutes } from "@anima/ext-audiobooks/routes";
-import { presenterRoutes } from "@anima/ext-presenter/routes";
-import { schedulerRoutes } from "@anima/ext-scheduler/routes";
-import { bogartRoutes } from "@anima/ext-bogart/routes";
-// Editor panel disabled — code-server iframe not yet configured for embedding.
-// import { editorPanels } from "@anima/ext-editor/routes";
+const webContributions = [...extensionWebContributions]
+  .filter((contribution) => contribution.enabled !== false)
+  .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.id.localeCompare(b.id));
 
 // ── Hash-to-path redirect (PWA / legacy links) ─────────────
 if (window.location.hash.startsWith("#/")) {
@@ -45,33 +39,27 @@ if (import.meta.env?.DEV) {
   document.head.appendChild(script);
 }
 
-// ── Aggregate routes from all extensions ────────────────────
-const allRoutes = [
-  ...controlRoutes,
-  ...memoryRoutes,
-  ...presenterRoutes,
-  ...chatRoutes,
-  ...audiobooksRoutes,
-  ...schedulerRoutes,
-  ...bogartRoutes,
-];
+// ── Aggregate routes from all extension web contributions ───
+const allRoutes: Route[] = webContributions.flatMap((contribution) => contribution.routes ?? []);
 
 // ── Build panel registry from all extensions ────────────────
-// Editor panels disabled until code-server iframe embedding is sorted out.
 const panelRegistry: PanelRegistry = new Map();
-for (const panel of [...chatPanels]) {
-  panelRegistry.set(panel.id, {
-    id: panel.id,
-    title: panel.title,
-    icon: panel.icon,
-    component: panel.component,
-  });
+for (const contribution of webContributions) {
+  for (const panel of contribution.panels ?? []) {
+    panelRegistry.set(panel.id, {
+      id: panel.id,
+      title: panel.title,
+      icon: panel.icon,
+      component: panel.component,
+    });
+  }
 }
 
 // ── Merge layout definitions from all extensions ────────────
-const allLayouts: Record<string, LayoutDefinition> = {
-  ...chatLayouts,
-};
+const allLayouts: Record<string, LayoutDefinition> = Object.assign(
+  {},
+  ...webContributions.map((contribution) => contribution.layouts ?? {}),
+);
 
 // ── Render ──────────────────────────────────────────────────
 createRoot(document.getElementById("root")!).render(

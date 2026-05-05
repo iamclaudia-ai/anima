@@ -734,12 +734,18 @@ Extensions can serve web pages via the gateway's SPA.
 
 ```typescript
 // extensions/my-feature/src/routes.ts
-import type { Route } from "@anima/ui";
+import type { ExtensionWebContribution, Route } from "@anima/ui";
 import { MyPage } from "./pages/MyPage";
 
 export const myFeatureRoutes: Route[] = [
   { path: "/my-feature", component: MyPage, label: "My Feature" },
 ];
+
+export default {
+  id: "my-feature",
+  name: "My Feature",
+  routes: myFeatureRoutes,
+} satisfies ExtensionWebContribution;
 ```
 
 ### Export from package.json
@@ -761,13 +767,14 @@ export const myFeatureRoutes: Route[] = [
 
 ### Register in the web shell
 
-Add to `packages/gateway/src/web/index.tsx`:
+Route modules are collected through `packages/gateway/src/web/extension-web-contributions.generated.ts`.
+Refresh it after adding or removing an extension route file:
 
-```typescript
-import { myFeatureRoutes } from "@anima/ext-my-feature/routes";
-
-const allRoutes = [...controlRoutes, ...chatRoutes, ...myFeatureRoutes];
+```bash
+bun run web:routes
 ```
+
+`@anima/gateway` runs this generator before `dev` and `build`, so normal gateway startup picks up new route modules automatically.
 
 ### Convention
 
