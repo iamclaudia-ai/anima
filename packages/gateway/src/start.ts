@@ -7,6 +7,7 @@
  */
 
 import { executeGatewayMethod, extensions, handleExtensionEvent } from "./index";
+import { getExtensionRoutesPath } from "./web/extension-bundler";
 import {
   getEnabledExtensions,
   createLogger,
@@ -161,6 +162,15 @@ async function spawnOutOfProcessExtension(
     try {
       const moduleSpec = resolveExtensionEntrypoint(id);
       if (!moduleSpec) {
+        // No server-side index.ts. If the extension has a routes.ts(x), it's
+        // a UI-only extension — register it for web bundle + static path
+        // discovery without spawning a host process.
+        if (getExtensionRoutesPath(id) !== null) {
+          log.info("Registering web-only extension (no server entry)", { id });
+          extensions.registerWebOnly(id, id);
+          startedExtensions.add(id);
+          return;
+        }
         log.warn("Extension entrypoint not found", {
           id,
           expected: `extensions/${id}/src/index.ts`,
@@ -384,6 +394,13 @@ async function stopExtension(id: string): Promise<void> {
 
   const host = runningExtensions.get(id);
   if (!host) {
+    // Web-only extensions have no host — just clear the registration.
+    if (startedExtensions.has(id)) {
+      log.info("Stopping web-only extension dynamically", { id });
+      extensions.unregisterWebOnly(id);
+      startedExtensions.delete(id);
+      return;
+    }
     log.warn("Extension not running", { id });
     return;
   }

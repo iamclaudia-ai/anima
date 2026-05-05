@@ -14,27 +14,41 @@ edited every time an extension was added or removed.
 
 The dynamic bundler removes that coupling. The gateway's `package.json` no
 longer mentions any extensions; it discovers them at runtime from the set of
-**enabled server extensions** in `~/.anima/anima.json`. For each running
-extension that also has a `src/routes.ts(x)` on disk, the SPA dynamic-imports
-its bundle at startup. Adding a new extension with a UI is:
+**enabled extensions** in `~/.anima/anima.json`. Each extension can
+independently contribute three things, and only the ones it has on disk:
 
-1. Create `extensions/<id>/src/index.ts` (the server-side extension —
-   `methods: []` and `events: []` are fine if it's UI-only).
-2. Create `extensions/<id>/src/routes.ts` with a `default` export.
-3. Add `"<id>": { "enabled": true }` to `~/.anima/anima.json`.
-4. Restart the gateway.
+| Capability      | Requires                                 |
+| --------------- | ---------------------------------------- |
+| Server runtime  | `src/index.ts` (methods, events, RPC)    |
+| Web routes / UI | `src/routes.ts(x)` (default export)      |
+| Static files    | `static/` folder (or `webStatic` config) |
+
+Adding a new extension with a UI is:
+
+1. Create `extensions/<id>/src/routes.ts` with a `default` export, and/or
+   `extensions/<id>/src/index.ts` for server-side methods/events.
+2. Add `"<id>": { "enabled": true }` to `~/.anima/anima.json`.
+3. Restart the gateway.
 
 No gateway source edits, no generator runs, no manual route registration.
 
-### Why enabled server extensions, not raw filesystem scanning
+### Server, web-only, and static-only extensions
 
-`anima.json` is the single source of truth for what's running. Web
-contributions follow that — an extension that isn't enabled (or doesn't
-have a server-side entry) never registers, never appears in
-`gateway.list_web_contributions`, and never has its bundle built. This
-keeps one model in your head: if it's not in `anima.json`, it doesn't
-exist. Orphan `routes.ts` files (e.g. UI scaffolds that were never wired
-up) won't silently ship to the browser.
+`anima.json` is the single source of truth for what's enabled. The gateway
+classifies each enabled extension by what files exist on disk:
+
+- **Server extension** — has `src/index.ts`. Spawned in a host process
+  (NDJSON RPC). May also contribute web routes and static files.
+- **Web-only extension** — has `src/routes.ts(x)` but no `src/index.ts`.
+  No host process is spawned; the gateway just builds the browser bundle
+  and registers static paths. Useful for UI-only experiments, docs sites,
+  or panel-only contributions that don't need server logic.
+- **Static-only** — neither `index.ts` nor `routes.ts(x)`, just a
+  `static/` folder. The path is registered but no JS bundle is built.
+
+Orphan files (a `routes.ts` in an extension that isn't listed in
+`anima.json`) are silently ignored. If it's not enabled, it doesn't
+exist.
 
 ## The three bundles
 

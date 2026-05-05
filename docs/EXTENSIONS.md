@@ -729,19 +729,18 @@ Extensions that track connected clients (like DOMINATRIX tracking Chrome extensi
 ## Web Pages (Client-Side Routes)
 
 Extensions can serve web pages via the gateway's SPA. Web contributions are
-**loaded dynamically at runtime** — for each enabled server extension (from
-`~/.anima/anima.json`) that also has a `src/routes.ts(x)` on disk, the
-gateway builds a browser bundle on demand and the SPA dynamic-imports it
-after fetching the contribution list. There is no compile-time link from
-the gateway to any extension.
+**loaded dynamically at runtime** — for each enabled extension (from
+`~/.anima/anima.json`) that has a `src/routes.ts(x)` on disk, the gateway
+builds a browser bundle on demand and the SPA dynamic-imports it after
+fetching the contribution list. There is no compile-time link from the
+gateway to any extension.
 
-> **An extension must have a `src/index.ts` and be enabled in
-> `anima.json` to contribute web routes.** A bare `routes.ts` with no
-> server-side entry won't be discovered. If your extension is UI-only,
-> ship a stub `index.ts` with empty `methods`/`events`. This keeps
-> `anima.json` as the single source of truth for what's running and
-> prevents orphan `routes.ts` files from silently shipping to the
-> browser.
+> **`src/index.ts` is optional for web extensions.** If an enabled
+> extension has `routes.ts(x)` but no `index.ts`, the gateway treats it
+> as **web-only**: no host process is spawned, but the bundle still
+> builds and the routes mount. Use this for UI-only experiments,
+> docs/landing pages, or panel-only contributions. Orphan `routes.ts`
+> files in extensions not listed in `anima.json` are ignored.
 
 For the full architecture (vendor bundles, importmap, shared-deps contract,
 Bun quirks) see [`WEB-BUNDLER.md`](./WEB-BUNDLER.md).
@@ -766,10 +765,10 @@ export default {
 
 That's it. The gateway picks up the new `routes.ts` on next restart — no
 generator to run, no `package.json` edits in the gateway, no manual
-registration. As long as `my-feature` has a `src/index.ts` and is enabled
-in `anima.json`, the SPA fetches `/api/web-contributions`, finds your
-extension, dynamic-imports `/extensions/my-feature/web-bundle.js`, and
-mounts the routes.
+registration. As long as `my-feature` is enabled in `anima.json`, the SPA
+fetches `/api/web-contributions`, finds your extension, dynamic-imports
+`/extensions/my-feature/web-bundle.js`, and mounts the routes — whether
+or not there's a server-side `index.ts`.
 
 ### package.json
 

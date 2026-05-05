@@ -35,6 +35,11 @@ export class ExtensionManager {
   private remoteGenerations = new Map<string, string | null>();
   private mcpToolOwners = new Map<string, string>();
 
+  // Web-only extensions — enabled in anima.json with a routes.ts(x) but no
+  // server-side index.ts. They contribute browser bundles + webStatic but
+  // have no methods, no events, and no host process.
+  private webOnlyRegistrations = new Map<string, { id: string; name: string }>();
+
   /** Static URL paths contributed by extensions. Public so the HTTP layer can resolve. */
   readonly staticPaths = new StaticPathRegistry();
 
@@ -93,6 +98,42 @@ export class ExtensionManager {
     const configStatic = (getExtensionConfig(registration.id)?.webStatic ?? []) as WebStaticPath[];
     const mergedStatic = mergeWebStatic(mergeWebStatic(convention, codeStatic), configStatic);
     this.staticPaths.set(registration.id, mergedStatic);
+  }
+
+  /**
+   * Register a web-only extension — one that is enabled in anima.json and
+   * has a `src/routes.ts(x)` (or convention `static/` folder) but no
+   * server-side `src/index.ts`. It contributes web routes and static paths
+   * only; no methods, events, or host process.
+   */
+  registerWebOnly(id: string, name: string): void {
+    if (this.webOnlyRegistrations.has(id)) {
+      log.info("Re-registering web-only extension", { id });
+      this.unregisterWebOnly(id);
+    }
+    log.info("Registering web-only extension", { id });
+    this.webOnlyRegistrations.set(id, { id, name });
+
+    // Same convention + config merge as registerRemote, minus the code-declared
+    // webStatic (a web-only extension has no server-side AnimaExtension to declare it).
+    const convention = discoverConventionWebStatic(id);
+    const configStatic = (getExtensionConfig(id)?.webStatic ?? []) as WebStaticPath[];
+    const merged = mergeWebStatic(convention, configStatic);
+    if (merged.length > 0) {
+      this.staticPaths.set(id, merged);
+    }
+  }
+
+  unregisterWebOnly(extensionId: string): void {
+    if (!this.webOnlyRegistrations.delete(extensionId)) return;
+    const convention = discoverConventionWebStatic(extensionId);
+    const configStatic = (getExtensionConfig(extensionId)?.webStatic ?? []) as WebStaticPath[];
+    const seed = mergeWebStatic(convention, configStatic);
+    if (seed.length > 0) {
+      this.staticPaths.set(extensionId, seed);
+    } else {
+      this.staticPaths.delete(extensionId);
+    }
   }
 
   /**
@@ -333,7 +374,12 @@ export class ExtensionManager {
       name: reg.name,
       methods: reg.methods.map((m) => m.name),
     }));
-    return remote;
+    const webOnly = Array.from(this.webOnlyRegistrations.values()).map((reg) => ({
+      id: reg.id,
+      name: reg.name,
+      methods: [] as string[],
+    }));
+    return [...remote, ...webOnly];
   }
 
   getMethodDefinitions(): Array<{
