@@ -46,13 +46,25 @@ export const SHARED_EXTERNALS = [
  * `["react"]` also externalizes `react/jsx-runtime`, which would turn the
  * jsx-runtime vendor bundle into an infinite-loop re-export. We need exact
  * specifier matching, which means going through a plugin's onResolve hook.
+ *
+ * The filter MUST be narrow. A `/.*\/` filter intercepts every internal
+ * path lookup during barrel-import optimization (e.g. lucide-react's per-icon
+ * sub-modules), which breaks Bun's tree-shaking and leaves dangling
+ * `default<N>` references in the bundle. Restrict to bare specifiers only —
+ * those that start with a letter or `@` (so we match "react", "react/x",
+ * "@anima/ui" but skip relative/absolute paths and node:* imports).
  */
 export function exactExternalsPlugin(specifiers: readonly string[]): Bun.BunPlugin {
   const set = new Set(specifiers);
+  // Build a regex that matches just the bare specifiers we care about, plus
+  // any subpaths off the same package roots. Anchored to avoid catching
+  // unrelated imports.
+  const escaped = specifiers.map((s) => s.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const filter = new RegExp(`^(${escaped.join("|")})$`);
   return {
     name: "exact-externals",
     setup(build) {
-      build.onResolve({ filter: /.*/ }, (args) => {
+      build.onResolve({ filter }, (args) => {
         if (set.has(args.path)) {
           return { path: args.path, external: true };
         }
