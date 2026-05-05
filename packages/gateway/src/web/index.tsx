@@ -1,3 +1,20 @@
+/**
+ * Anima SPA bootstrap.
+ *
+ * Loads the gateway's set of extension web contributions dynamically at
+ * startup — no static import of any per-extension module. The flow:
+ *
+ *   1. Fetch /api/web-contributions for the list of bundle URLs.
+ *   2. Dynamic import() each bundle. The browser resolves bare imports
+ *      (react, @anima/ui, etc.) via the importmap declared in index.html,
+ *      so every extension shares the same module instances we use here.
+ *   3. Validate each module's default export against the contribution shape.
+ *   4. Aggregate routes / panels / layouts and render.
+ *
+ * Failures for individual extensions are logged and skipped — one bad
+ * contribution shouldn't prevent the SPA from loading.
+ */
+
 import { createRoot } from "react-dom/client";
 import {
   Router,
@@ -6,14 +23,9 @@ import {
   GlobalNotifications,
   LoginGate,
 } from "@anima/ui";
-import type { PanelRegistry, Route } from "@anima/ui";
+import type { ExtensionWebContribution, PanelContribution, PanelRegistry, Route } from "@anima/ui";
 import type { LayoutDefinition } from "@anima/shared";
-import { extensionWebContributions } from "./extension-web-contributions.generated";
 import "@anima/ui/styles";
-
-const webContributions = [...extensionWebContributions]
-  .filter((contribution) => contribution.enabled !== false)
-  .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.id.localeCompare(b.id));
 
 // ── Hash-to-path redirect (PWA / legacy links) ─────────────
 if (window.location.hash.startsWith("#/")) {
@@ -39,40 +51,129 @@ if (import.meta.env?.DEV) {
   document.head.appendChild(script);
 }
 
-// ── Aggregate routes from all extension web contributions ───
-const allRoutes: Route[] = webContributions.flatMap((contribution) => contribution.routes ?? []);
+// ── Dynamic-import contribution loader ──────────────────────
 
-// ── Build panel registry from all extensions ────────────────
-const panelRegistry: PanelRegistry = new Map();
-for (const contribution of webContributions) {
-  for (const panel of contribution.panels ?? []) {
-    panelRegistry.set(panel.id, {
-      id: panel.id,
-      title: panel.title,
-      icon: panel.icon,
-      component: panel.component,
-    });
-  }
+interface WebContributionEntry {
+  extensionId: string;
+  jsUrl: string;
 }
 
-// ── Merge layout definitions from all extensions ────────────
-const allLayouts: Record<string, LayoutDefinition> = Object.assign(
-  {},
-  ...webContributions.map((contribution) => contribution.layouts ?? {}),
-);
+/**
+ * Lightweight runtime check for the contribution shape. Zod would be
+ * overkill (and would balloon the SPA bundle); we just need to confirm
+ * the extension exported a plausible default before mounting it.
+ */
+function isContribution(value: unknown): value is ExtensionWebContribution {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.id !== "string") return false;
+  if (candidate.name !== undefined && typeof candidate.name !== "string") return false;
+  if (candidate.order !== undefined && typeof candidate.order !== "number") return false;
+  if (candidate.enabled !== undefined && typeof candidate.enabled !== "boolean") return false;
+  if (candidate.routes !== undefined && !Array.isArray(candidate.routes)) return false;
+  if (candidate.panels !== undefined && !Array.isArray(candidate.panels)) return false;
+  if (
+    candidate.layouts !== undefined &&
+    (typeof candidate.layouts !== "object" || candidate.layouts === null)
+  ) {
+    return false;
+  }
+  return true;
+}
 
-// ── Render ──────────────────────────────────────────────────
-createRoot(document.getElementById("root")!).render(
-  <ErrorBoundary>
-    <LoginGate>
-      <GatewayClientProvider>
-        <GlobalNotifications>
-          <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
-        </GlobalNotifications>
-      </GatewayClientProvider>
-    </LoginGate>
-  </ErrorBoundary>,
-);
+async function loadWebContributions(): Promise<ExtensionWebContribution[]> {
+  let entries: WebContributionEntry[];
+  try {
+    const response = await fetch("/api/web-contributions");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = (await response.json()) as { contributions?: WebContributionEntry[] };
+    entries = body.contributions ?? [];
+  } catch (error) {
+    console.error("Failed to fetch web contributions list", error);
+    return [];
+  }
+
+  const settled = await Promise.allSettled(
+    entries.map(async (entry) => {
+      const mod = (await import(/* @vite-ignore */ entry.jsUrl)) as { default?: unknown };
+      if (!isContribution(mod.default)) {
+        throw new Error(`invalid default export shape from ${entry.extensionId}`);
+      }
+      return mod.default;
+    }),
+  );
+
+  const contributions: ExtensionWebContribution[] = [];
+  settled.forEach((result, index) => {
+    const entry = entries[index]!;
+    if (result.status === "fulfilled") {
+      contributions.push(result.value);
+    } else {
+      console.error(
+        `Skipping web contribution from ${entry.extensionId}:`,
+        result.reason instanceof Error ? result.reason.message : result.reason,
+      );
+    }
+  });
+  return contributions;
+}
+
+async function bootstrap(): Promise<void> {
+  const allContributions = await loadWebContributions();
+  const webContributions = allContributions
+    .filter((contribution) => contribution.enabled !== false)
+    .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || (a.id ?? "").localeCompare(b.id ?? ""));
+
+  // ── Aggregate routes / panels / layouts ─────────────────────
+  const allRoutes: Route[] = webContributions.flatMap(
+    (contribution) => (contribution.routes as Route[] | undefined) ?? [],
+  );
+  const panelRegistry: PanelRegistry = new Map();
+  for (const contribution of webContributions) {
+    const panels = (contribution.panels as PanelContribution[] | undefined) ?? [];
+    for (const panel of panels) {
+      panelRegistry.set(panel.id, {
+        id: panel.id,
+        title: panel.title,
+        icon: panel.icon,
+        component: panel.component,
+      });
+    }
+  }
+  const allLayouts: Record<string, LayoutDefinition> = Object.assign(
+    {},
+    ...webContributions.map((contribution) => contribution.layouts ?? {}),
+  );
+
+  // ── Render ──────────────────────────────────────────────────
+  createRoot(document.getElementById("root")!).render(
+    <ErrorBoundary>
+      <LoginGate>
+        <GatewayClientProvider>
+          <GlobalNotifications>
+            <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+          </GlobalNotifications>
+        </GatewayClientProvider>
+      </LoginGate>
+    </ErrorBoundary>,
+  );
+}
+
+bootstrap().catch((error) => {
+  console.error("SPA bootstrap failed", error);
+  const root = document.getElementById("root");
+  if (root) {
+    root.innerHTML = `
+      <div style="padding: 40px; font-family: system-ui, sans-serif; color: #b91c1c;">
+        <h1 style="font-size: 20px; margin: 0 0 12px;">Anima failed to load</h1>
+        <pre style="white-space: pre-wrap; font-size: 13px; color: #475569;">${
+          error instanceof Error ? error.message : String(error)
+        }</pre>
+        <p style="margin-top: 16px; color: #475569;">Check the browser console for details.</p>
+      </div>
+    `;
+  }
+});
 
 // ── Service Worker ──────────────────────────────────────────
 // Register service worker for PWA functionality.

@@ -38,6 +38,7 @@ import type { ExtensionRegistration, OnCallCallback } from "./extension-host";
 import { handleGatewayMcpRequest } from "./mcp-proxy";
 import { buildExtensionBundle, getExtensionRoutesPath } from "./web/extension-bundler";
 import { buildVendorBundles, getVendorBundle } from "./web/vendor-bundler";
+import { buildSpaBundle } from "./web/spa-bundler";
 
 // Web UI — served as SPA fallback for all non-WS routes
 import index from "./web/index.html";
@@ -943,6 +944,50 @@ const server = Bun.serve<ClientState>({
         headers: { "Content-Type": "application/json" },
       });
     },
+    // SPA bundle — gateway's own web shell, built with the same shared-dep
+    // externals as extension bundles so React/react-dom/@anima/ui module
+    // instances are shared across the SPA and every extension.
+    "/spa.js": async () => {
+      const bundle = await buildSpaBundle();
+      if (!bundle) {
+        return new globalThis.Response("SPA bundle build failed", { status: 503 });
+      }
+      return new globalThis.Response(bundle.js, {
+        headers: {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+        },
+      });
+    },
+    "/spa.css": async () => {
+      const bundle = await buildSpaBundle();
+      if (!bundle) {
+        return new globalThis.Response("SPA bundle build failed", { status: 503 });
+      }
+      return new globalThis.Response(bundle.css, {
+        headers: {
+          "Content-Type": "text/css; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+        },
+      });
+    },
+
+    // List of extensions that contribute web routes — fetched by the SPA
+    // bootstrap to drive dynamic-import of each extension's bundle.
+    // Mirrors the gateway.list_web_contributions WS method.
+    "/api/web-contributions": () => {
+      const contributions = extensions
+        .getExtensionList()
+        .filter((ext) => getExtensionRoutesPath(ext.id) !== null)
+        .map((ext) => ({
+          extensionId: ext.id,
+          jsUrl: `/extensions/${ext.id}/web-bundle.js`,
+        }));
+      return new globalThis.Response(JSON.stringify({ contributions }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+
     // Vendor JS bundles — shared deps (React, @anima/ui, etc.) served once
     // and resolved by the SPA importmap. Built at startup by buildVendorBundles().
     "/vendor/*": (req: globalThis.Request) => {
@@ -1157,14 +1202,21 @@ log.info(`
 ╚═══════════════════════════════════════════════════════════╝
 `);
 
-// Fire-and-forget vendor bundle build. Failures here don't block startup —
-// /vendor/*.js requests will 503 until builds land. Phase 2 will gate the
-// SPA importmap on these; today nothing consumes them yet.
-buildVendorBundles().catch((error) => {
-  log.error("Vendor bundle build failed at startup", {
-    error: error instanceof Error ? error.message : String(error),
-  });
-});
+// Fire-and-forget bundle warm-up at startup. Failures here don't block
+// startup — /vendor/*.js, /spa.js and /spa.css will 503 until builds land,
+// after which they're served from in-memory cache.
+Promise.all([
+  buildVendorBundles().catch((error) => {
+    log.error("Vendor bundle build failed at startup", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }),
+  buildSpaBundle().catch((error) => {
+    log.error("SPA bundle build failed at startup", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }),
+]);
 
 // ── Ping/Pong — Connection Liveness ─────────────────────────────────
 // Every 30s, send a ping to all WS clients and prune those that haven't

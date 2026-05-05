@@ -13,7 +13,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Anima" />
 
-    <!-- Styles imported via @anima/ui/styles in index.tsx -->
+    <!-- Compiled SPA stylesheet (Tailwind + @anima/ui/styles).
+         Built by spa-bundler.ts and served from /spa.css. -->
+    <link rel="stylesheet" href="/spa.css" />
 
     <!-- Fonts: Newsreader (memory pages) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -22,6 +24,23 @@
       href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap"
       rel="stylesheet"
     />
+
+    <!-- Importmap: shared deps that every bundle (SPA + extensions) externalizes
+         so the same module instances are used everywhere. Must come BEFORE the
+         first module script. Keep entries in sync with VENDOR_SPECS in
+         packages/gateway/src/web/vendor-bundler.ts. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "/vendor/react.js",
+          "react/jsx-runtime": "/vendor/react-jsx-runtime.js",
+          "react/jsx-dev-runtime": "/vendor/react-jsx-dev-runtime.js",
+          "react-dom": "/vendor/react-dom.js",
+          "react-dom/client": "/vendor/react-dom-client.js",
+          "@anima/ui": "/vendor/anima-ui.js"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
@@ -190,6 +209,9 @@
       })();
     </script>
 
-    <script type="module" src="./index.tsx"></script>
+    <!-- Built by spa-bundler.ts and served from /spa.js. The bundle
+         leaves shared deps as bare imports; the importmap above resolves
+         them to /vendor/*.js so SPA + extensions share module instances. -->
+    <script type="module" src="/spa.js"></script>
   </body>
 </html>
