@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
 
 interface NavigationDrawerProps {
@@ -126,26 +125,13 @@ export function NavigationDrawer({
   onNewSession,
   onNewWorkspace,
 }: NavigationDrawerProps) {
-  const SESSION_PANEL_COLLAPSED_KEY = "anima:nav:sessionsCollapsed";
-
-  const [isPanelCollapsed, setIsPanelCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SESSION_PANEL_COLLAPSED_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SESSION_PANEL_COLLAPSED_KEY, String(isPanelCollapsed));
-    } catch {
-      // ignore localStorage errors
-    }
-  }, [isPanelCollapsed]);
+  // Width and visibility are controlled by the dockview panel that hosts this
+  // component — the user resizes via the panel splitter, and a future "tabs"
+  // mode in LayoutManager will handle mobile collapse. No internal collapse
+  // state is needed here.
 
   return (
-    <>
+    <div className="flex h-full w-full overflow-hidden">
       {/* Left sidebar - Workspace icons */}
       <div className="w-20 bg-gray-800 flex flex-col items-center py-4 gap-3 flex-shrink-0">
         {/* Workspace icons */}
@@ -170,77 +156,57 @@ export function NavigationDrawer({
         </button>
       </div>
 
-      {/* Middle panel - Session list */}
-      <div
-        className={`bg-white border-r border-gray-200 flex flex-col transition-all duration-200 flex-shrink-0 ${
-          isPanelCollapsed ? "w-0" : "w-64"
-        }`}
-      >
+      {/* Middle panel - Session list. flex-1 fills whatever the dockview
+          panel gives us, so the user resizes via the splitter, not an
+          internal collapse button. */}
+      <div className="flex-1 flex flex-col bg-white border-r border-gray-200 min-w-0">
         {/* Panel header */}
-        {!isPanelCollapsed && (
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-semibold text-gray-900 truncate">
-                {activeWorkspace?.name || "Select a workspace"}
-              </h2>
-              {activeWorkspace && (
-                <button
-                  onClick={onNewSession}
-                  className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
-                  title="New session"
-                >
-                  <Plus className="w-5 h-5" />
-                </button>
-              )}
-            </div>
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-semibold text-gray-900 truncate">
+              {activeWorkspace?.name || "Select a workspace"}
+            </h2>
             {activeWorkspace && (
-              <p className="text-xs text-gray-500 truncate">{activeWorkspace.cwdDisplay}</p>
+              <button
+                onClick={onNewSession}
+                className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 transition-colors"
+                title="New session"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
             )}
           </div>
-        )}
+          {activeWorkspace && (
+            <p className="text-xs text-gray-500 truncate">{activeWorkspace.cwdDisplay}</p>
+          )}
+        </div>
 
         {/* Session list */}
-        {!isPanelCollapsed && (
-          <div className="flex-1 overflow-y-auto p-2">
-            {activeWorkspace ? (
-              sessions.length > 0 ? (
-                <div className="space-y-1">
-                  {sessions.map((session) => (
-                    <SessionCard
-                      key={session.sessionId}
-                      session={session}
-                      isActive={activeSessionId === session.sessionId}
-                      onClick={() => onSessionSelect(session)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-gray-500">
-                  No sessions yet
-                </div>
-              )
+        <div className="flex-1 overflow-y-auto p-2">
+          {activeWorkspace ? (
+            sessions.length > 0 ? (
+              <div className="space-y-1">
+                {sessions.map((session) => (
+                  <SessionCard
+                    key={session.sessionId}
+                    session={session}
+                    isActive={activeSessionId === session.sessionId}
+                    onClick={() => onSessionSelect(session)}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full text-sm text-gray-500">
-                Select a workspace to view sessions
+                No sessions yet
               </div>
-            )}
-          </div>
-        )}
+            )
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-gray-500">
+              Select a workspace to view sessions
+            </div>
+          )}
+        </div>
       </div>
-
-      {/* Collapse/Expand button */}
-      <button
-        onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-        className="fixed top-4 z-10 w-6 h-6 bg-white border border-gray-300 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-900 hover:border-gray-400 transition-all shadow-sm"
-        style={{ left: isPanelCollapsed ? "80px" : "336px" }}
-        title={isPanelCollapsed ? "Show sessions" : "Hide sessions"}
-      >
-        {isPanelCollapsed ? (
-          <ChevronRight className="w-4 h-4" />
-        ) : (
-          <ChevronLeft className="w-4 h-4" />
-        )}
-      </button>
-    </>
+    </div>
   );
 }

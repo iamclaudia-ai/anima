@@ -105,11 +105,21 @@
   }
 }
 
-/* Dockview — hide tab headers for single-panel layouts.
-   The layout system stays active for future multi-panel splits,
-   but a single chat panel doesn't need visible chrome. */
+/* Dockview — strip the tab/header chrome. Anima's panels each manage their
+   own headers (NavigationDrawer's rail, ClaudiaChat's title bar, etc.), so
+   dockview's tab bar would just be a duplicate strip between groups.
+   Theme-agnostic so it survives a future dark-theme switch. */
+.dockview-theme-light .dv-groupview > .dv-tabs-and-actions-container,
 .dockview-theme-dark .dv-groupview > .dv-tabs-and-actions-container {
   display: none !important;
+}
+
+/* Paint group bodies white so we never see dockview's default container
+   color through any gap or transition. Panels still set their own
+   backgrounds; this is the safety net. */
+.dockview-theme-light .dv-groupview,
+.dockview-theme-light .dv-content-container {
+  background: #ffffff;
 }
 
 /* Prose styling */

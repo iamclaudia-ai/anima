@@ -16,7 +16,7 @@
  */
 
 import { createContext, useCallback, useContext, useMemo } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -107,6 +107,13 @@ export interface LayoutManagerProps {
   storageKey?: string;
   /** CSS class name */
   className?: string;
+  /**
+   * Optional wrapper installed around the dockview tree. When the layout
+   * comes from `LayoutDefinition.provider`, this lets two panels share
+   * state via React context without each panel needing its own gateway
+   * subscriptions.
+   */
+  provider?: ComponentType<{ children: ReactNode }>;
 }
 
 // ── Component ───────────────────────────────────────────────
@@ -124,7 +131,13 @@ function useLayoutKey(layout: LayoutNode, storageKey: string | undefined): strin
   );
 }
 
-export function LayoutManager({ registry, layout, storageKey, className }: LayoutManagerProps) {
+export function LayoutManager({
+  registry,
+  layout,
+  storageKey,
+  className,
+  provider: Provider,
+}: LayoutManagerProps) {
   // Dockview components map — single wrapper that resolves via registry.
   const components = useMemo(() => ({ "panel-wrapper": PanelWrapper }), []);
 
@@ -221,15 +234,22 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
   // correct: `onReady` fires fresh on every remount.
   const dockKey = useLayoutKey(layout, storageKey);
 
+  const dockview = (
+    <DockviewReact
+      key={dockKey}
+      components={components}
+      onReady={handleReady}
+      // Anima is a light-themed app; the dock chrome (tabs, splitters, group
+      // backgrounds) inherits this. Switch to dockview-theme-dark when we go
+      // IDE-style.
+      className="dockview-theme-light"
+    />
+  );
+
   return (
     <PanelRegistryContext.Provider value={registry}>
       <div className={className} style={{ width: "100%", height: "100%" }}>
-        <DockviewReact
-          key={dockKey}
-          components={components}
-          onReady={handleReady}
-          className="dockview-theme-dark"
-        />
+        {Provider ? <Provider>{dockview}</Provider> : dockview}
       </div>
     </PanelRegistryContext.Provider>
   );

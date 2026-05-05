@@ -1,15 +1,48 @@
 /**
- * ChatPanel — Wraps MainPage for use inside the layout system.
+ * ChatPanel — The conversation view.
  *
- * For now this is a thin wrapper around MainPage that reads route params
- * from the router context. Later we can decompose MainPage into separate
- * panels (nav rail, chat, etc.).
+ * Reads active workspace/session from `useChatPage()`. Empty state when no
+ * session is selected (so the user sees a "create one" prompt instead of a
+ * blank panel).
  */
 
-import { useRouter } from "@anima/ui";
-import { MainPage } from "../pages/MainPage";
+import { ClaudiaChat } from "@anima/ui";
+import { useChatPage } from "../context/ChatPageContext";
 
 export function ChatPanel() {
-  const { params } = useRouter();
-  return <MainPage workspaceId={params.workspaceId} sessionId={params.sessionId} />;
+  const { activeWorkspace, activeSessionId, chatBridge, onNewSession } = useChatPage();
+
+  // Dockview's content container has its own (dark) background — paint over
+  // it with white at the panel root so we don't inherit theme colors.
+  if (!activeSessionId || !activeWorkspace) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-white">
+        <p className="text-gray-400">
+          {activeWorkspace
+            ? "No sessions yet for this workspace"
+            : "Select a workspace to get started"}
+        </p>
+        {activeWorkspace && (
+          <button
+            type="button"
+            onClick={onNewSession}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
+          >
+            Create new session
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full w-full bg-white">
+      <ClaudiaChat
+        bridge={chatBridge}
+        gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
+        // Re-mount when workspace/session changes — keeps streaming state clean.
+        key={`${activeWorkspace.id}-${activeSessionId}`}
+      />
+    </div>
+  );
 }

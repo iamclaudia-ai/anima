@@ -165,6 +165,7 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
                 registry={panelRegistry}
                 layout={layoutNode}
                 storageKey={`layout:${route.layout}:${isMobile ? "mobile" : "desktop"}`}
+                provider={layoutDef.provider}
               />
             </RouterContext.Provider>
           );

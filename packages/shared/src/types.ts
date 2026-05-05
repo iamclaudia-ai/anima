@@ -1,3 +1,4 @@
+import type { ComponentType, ReactNode } from "react";
 import type { ZodType } from "zod/v4";
 import type { LoggerFactoryOptions, LoggerLike } from "./logger";
 
@@ -408,6 +409,15 @@ export interface LayoutDefinition {
   default: LayoutNode;
   /** Mobile layout override (matched via media query) */
   mobile?: LayoutNode;
+  /**
+   * Optional React wrapper installed around the whole dockview tree —
+   * useful for hoisting state shared between panels (e.g., a workspace/
+   * session context provider that both a nav panel and a chat panel
+   * consume). The wrapper is provided as a React component, not just
+   * data, because LayoutDefinition flows through the dynamic-import
+   * boundary as JS.
+   */
+  provider?: ComponentType<{ children: ReactNode }>;
 }
 
 // ============================================================================
