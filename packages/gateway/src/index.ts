@@ -958,7 +958,7 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response(bundle.js, {
         headers: {
           "Content-Type": "application/javascript; charset=utf-8",
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": "no-store",
         },
       });
     },
@@ -970,7 +970,7 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response(bundle.css, {
         headers: {
           "Content-Type": "text/css; charset=utf-8",
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": "no-store",
         },
       });
     },
@@ -1013,7 +1013,7 @@ const server = Bun.serve<ClientState>({
           // Vendor bundles are stable for the gateway's lifetime; the SPA
           // re-fetches on reload anyway. Short cache lets restarts pick up
           // dep upgrades without manual cache busting.
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": "no-store",
         },
       });
     },
@@ -1041,7 +1041,7 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response(bundle.js, {
         headers: {
           "Content-Type": "application/javascript; charset=utf-8",
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": "no-store",
         },
       });
     },
