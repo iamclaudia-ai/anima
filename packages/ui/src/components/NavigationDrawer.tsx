@@ -63,7 +63,7 @@ interface NavigationDrawerProps {
   activeSessionId: string | null;
   isConnected: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
-  onSessionSelect: (session: SessionInfo) => void;
+  onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   /** Create a session in the given workspace (defaults to active when omitted). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -204,7 +204,7 @@ function WorkspaceItem({
   activeSessionId: string | null;
   defaultExpanded: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
-  onSessionSelect: (session: SessionInfo) => void;
+  onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onNewSession: (workspace: WorkspaceInfo) => void;
   onLoadMore?: (workspaceId: string) => Promise<void> | void;
   onMenuAction?: (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => void;
@@ -360,7 +360,7 @@ function WorkspaceItem({
                 key={session.sessionId}
                 session={session}
                 isActive={isActive && activeSessionId === session.sessionId}
-                onClick={() => onSessionSelect(session)}
+                onClick={() => onSessionSelect(session, workspace)}
               />
             ))
           )}
@@ -629,8 +629,9 @@ export function NavigationDrawer({
           onClose={() => setSearchOpen(false)}
           onSelect={(workspace, session) => {
             setSearchOpen(false);
-            onWorkspaceSelect(workspace);
-            onSessionSelect(session);
+            // Single navigate — onSessionSelect carries the workspace, so
+            // we don't race a `latest` redirect from onWorkspaceSelect.
+            onSessionSelect(session, workspace);
           }}
         />
       )}

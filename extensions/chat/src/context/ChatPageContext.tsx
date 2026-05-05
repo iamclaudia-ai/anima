@@ -101,7 +101,12 @@ export interface ChatPageContextValue {
 
   // Handlers — all the actions a panel can take
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
-  onSessionSelect: (session: SessionInfo) => void;
+  /**
+   * Select a session. The workspace is carried explicitly because session
+   * rows live under their workspace in the drawer — using the URL's current
+   * workspace would mis-route clicks across workspaces.
+   */
+  onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   /** Create a new session in `workspace` (defaults to the active one). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -288,13 +293,13 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [callGateway, setSessionsForWorkspace],
   );
 
-  const onSessionSelect = useCallback(
-    (session: SessionInfo) => {
-      if (!activeWorkspace) return;
-      navigate(`/workspace/${activeWorkspace.id}/session/${session.sessionId}`);
-    },
-    [activeWorkspace],
-  );
+  const onSessionSelect = useCallback((session: SessionInfo, workspace: WorkspaceInfo) => {
+    // Use the click's workspace, not the URL's. Otherwise clicking a
+    // session in a different workspace's drawer section would build a URL
+    // that mismatches the session's actual workspace, leaving the Header
+    // and the active-row highlight stuck on the previous workspace.
+    navigate(`/workspace/${workspace.id}/session/${session.sessionId}`);
+  }, []);
 
   const onNewSession = useCallback(
     (workspace?: WorkspaceInfo) => {
