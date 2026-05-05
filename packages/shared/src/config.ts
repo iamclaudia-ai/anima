@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import JSON5 from "json5";
 import { generateToken } from "./auth";
+import type { WebStaticPath } from "./types";
 
 // ============================================================================
 // Types
@@ -65,6 +66,13 @@ export interface ExtensionConfig {
   /** Enable Bun --hot for live reloading (default: false). Set true explicitly
    *  for rapid iteration when developing an extension. */
   hot?: boolean;
+  /**
+   * Optional static URL path overrides. Merged with the extension's code-level
+   * `webStatic` declarations by `path`: a config entry replaces a code entry
+   * with the same `path`; new entries get appended. Useful for relocating
+   * homedir-based paths (e.g., point /audiobooks/static at a different folder).
+   */
+  webStatic?: WebStaticPath[];
   config: Record<string, unknown>;
 }
 

@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { BOGART_SPRITE_URLS } from "@anima/ui";
 
 // ── Sprite sheet config ────────────────────────────────────
 const COLS = 4;
@@ -22,22 +23,25 @@ const TOTAL_FRAMES = COLS * ROWS;
 const FRAME_W = 416;
 const FRAME_H = 416;
 
+// Sprite URLs come from @anima/ui — the production Bogart component imports
+// the PNGs as JS modules, so we get the same hashed asset URLs here without
+// duplicating the bytes into this extension's bundle.
 const SPRITE_SHEETS = [
   {
     name: "Sheet 1",
-    src: "/bogart/sprites/sprite1.png",
+    src: BOGART_SPRITE_URLS[0],
     // Shadow bottom Y within each frame (pixels from top of frame)
     // Scanned with 416×416 grid at x=208, bottom-up
     baselines: [301, 301, 305, 307, 310, 315],
   },
   {
     name: "Sheet 2",
-    src: "/bogart/sprites/sprite2.png",
+    src: BOGART_SPRITE_URLS[1],
     baselines: [302, 305, 316, 313, 312, 313],
   },
   {
     name: "Sheet 3",
-    src: "/bogart/sprites/sprite3.png",
+    src: BOGART_SPRITE_URLS[2],
     baselines: [307, 308, 308, 309, 314, 316],
   },
 ];

@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "@anima/shared";
-import type { GatewayEvent } from "@anima/shared";
+import type { GatewayEvent, WebStaticPath } from "@anima/shared";
 
 const log = createLogger("ExtensionHost", join(homedir(), ".anima", "logs", "gateway.log"));
 
@@ -39,6 +39,8 @@ export interface ExtensionRegistration {
   mcpTools?: RemoteMcpToolInfo[];
   events: string[];
   sourceRoutes: string[];
+  /** Static URL paths the extension wants the gateway to serve. */
+  webStatic?: WebStaticPath[];
 }
 
 /**

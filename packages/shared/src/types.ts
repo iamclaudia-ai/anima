@@ -191,6 +191,12 @@ export interface AnimaExtension {
   events: string[];
   /** Source prefixes this extension handles for routing (e.g., ["imessage", "slack"]) */
   sourceRoutes?: string[];
+  /**
+   * Static URL paths the gateway should serve files for. The extension provides
+   * default declarations here; anima.json's `extensions.<id>.webStatic` can
+   * override entries by `path` or add new ones.
+   */
+  webStatic?: WebStaticPath[];
 
   /** Called when the extension is loaded */
   start(ctx: ExtensionContext): Promise<void>;
@@ -204,6 +210,18 @@ export interface AnimaExtension {
   handleSourceResponse?(source: string, event: GatewayEvent): Promise<void>;
   /** Health check */
   health(): { ok: boolean; details?: Record<string, unknown> };
+}
+
+export interface WebStaticPath {
+  /** URL prefix to serve, e.g. "/audiobooks/static". No trailing slash. */
+  path: string;
+  /**
+   * Filesystem root the URL prefix maps to. Three forms:
+   *   - "~/..."  → home-directory-relative
+   *   - "./..."  → extension-directory-relative (resolved against extensions/<id>/)
+   *   - "/..."   → absolute path (use sparingly)
+   */
+  root: string;
 }
 
 export interface ExtensionMethodDefinition {

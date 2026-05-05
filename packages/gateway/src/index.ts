@@ -39,6 +39,10 @@ import { handleGatewayMcpRequest } from "./mcp-proxy";
 import { buildExtensionBundle, getExtensionRoutesPath } from "./web/extension-bundler";
 import { buildVendorBundles, getVendorBundle } from "./web/vendor-bundler";
 import { buildSpaBundle } from "./web/spa-bundler";
+import { contentTypeFor, discoverAllConventionWebStatic, mergeWebStatic } from "./web/static-paths";
+import { getAsset } from "./web/asset-cache";
+import type { WebStaticPath } from "@anima/shared";
+import { getExtensionConfig } from "@anima/shared";
 
 // Web UI — served as SPA fallback for all non-WS routes
 // Served as a plain file, not Bun's HTML magic mode — auto-bundling no
@@ -173,6 +177,30 @@ function getClientHealth(): {
 
 // Extension manager
 const extensions = new ExtensionManager();
+
+// Seed static-path registry from filesystem conventions + anima.json overrides
+// BEFORE extensions register. UI-only extensions (those without a server-side
+// AnimaExtension, like bogart) get static serving from this seed alone — they
+// never call registerRemote so their convention paths would otherwise be lost.
+// Server-backed extensions later re-merge with their code-declared webStatic
+// at registration time.
+{
+  const seenIds = new Set<string>();
+  for (const { extensionId, paths } of discoverAllConventionWebStatic()) {
+    seenIds.add(extensionId);
+    const configStatic = (getExtensionConfig(extensionId)?.webStatic ?? []) as WebStaticPath[];
+    extensions.staticPaths.set(extensionId, mergeWebStatic(paths, configStatic));
+  }
+  // Also pick up anima.json-only entries (extension with no static/ dir but
+  // with config-declared webStatic).
+  for (const [extensionId, ext] of Object.entries(config.extensions ?? {})) {
+    if (seenIds.has(extensionId)) continue;
+    const configStatic = (ext.webStatic ?? []) as WebStaticPath[];
+    if (configStatic.length > 0) {
+      extensions.staticPaths.set(extensionId, configStatic);
+    }
+  }
+}
 
 // Initialize database (runs migrations)
 getDb();
@@ -1017,6 +1045,26 @@ const server = Bun.serve<ClientState>({
       });
     },
 
+    // Build-time-bundled assets (PNGs, fonts, etc.) — populated by every
+    // Bun.build call (vendor / SPA / extension). Filenames are content-hashed
+    // so an aggressive cache header is safe.
+    "/assets/*": (req: globalThis.Request) => {
+      const filename = new URL(req.url).pathname.slice("/assets/".length);
+      if (!filename || filename.includes("/") || filename.includes("..")) {
+        return new globalThis.Response("Not found", { status: 404 });
+      }
+      const asset = getAsset(filename);
+      if (!asset) {
+        return new globalThis.Response("Asset not found", { status: 404 });
+      }
+      return new globalThis.Response(asset.bytes as unknown as BodyInit, {
+        headers: {
+          "Content-Type": asset.contentType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    },
+
     // Vendor JS bundles — shared deps (React, @anima/ui, etc.) served once
     // and resolved by the SPA importmap. Built at startup by buildVendorBundles().
     "/vendor/*": (req: globalThis.Request) => {
@@ -1085,78 +1133,30 @@ const server = Bun.serve<ClientState>({
       return new globalThis.Response("Not found", { status: 404 });
     },
 
-    // Static file serving for extensions (audiobooks, etc.)
-    "/audiobooks/static/*": (req: globalThis.Request) => {
+    // SPA fallback — serves either an extension-contributed static file (when
+    // the URL matches a registered webStatic prefix) or the SPA HTML shell.
+    // Static prefixes come from the extensions' webStatic declarations merged
+    // with anima.json overrides; see `web/static-paths.ts`.
+    "/*": (req: globalThis.Request) => {
       const url = new URL(req.url);
-      const relativePath = url.pathname.slice("/audiobooks/static/".length);
-
-      // Security: prevent directory traversal
-      if (!relativePath || relativePath.includes("..")) {
-        return new globalThis.Response("Not found", { status: 404 });
-      }
-
-      // Resolve base path (~/romance-novels)
-      const basePath = join(homedir(), "romance-novels");
-      const filePath = join(basePath, relativePath);
-
-      // Ensure the resolved path is still within basePath
-      if (!filePath.startsWith(basePath)) {
-        return new globalThis.Response("Not found", { status: 404 });
-      }
-
-      // Determine content type from extension
-      const ext = filePath.split(".").pop()?.toLowerCase();
-      const contentType =
-        {
-          mp3: "audio/mpeg",
-          png: "image/png",
-          jpg: "image/jpeg",
-          jpeg: "image/jpeg",
-          md: "text/markdown; charset=utf-8",
-          json: "application/json",
-        }[ext || ""] || "application/octet-stream";
-
-      const file = Bun.file(filePath);
-
-      // Check if file exists by checking size (Bun's exists check)
-      return file.size > 0
-        ? new globalThis.Response(file, {
+      const fsPath = extensions.staticPaths.resolveFsPath(url.pathname);
+      if (fsPath !== null) {
+        const file = Bun.file(fsPath);
+        if (file.size > 0) {
+          return new globalThis.Response(file, {
             headers: {
-              "Content-Type": contentType,
-              "Accept-Ranges": "bytes", // Support range requests for audio seeking
-              "Cache-Control": "public, max-age=31536000", // Cache for 1 year
+              "Content-Type": contentTypeFor(fsPath),
+              "Accept-Ranges": "bytes",
+              "Cache-Control": "public, max-age=31536000",
             },
-          })
-        : new globalThis.Response("Not found", { status: 404 });
-    },
-
-    // Static file serving for bogart sprites
-    "/bogart/sprites/*": (req: globalThis.Request) => {
-      const url = new URL(req.url);
-      const filename = url.pathname.slice("/bogart/sprites/".length);
-
-      if (!filename || filename.includes("..") || !filename.endsWith(".png")) {
+          });
+        }
         return new globalThis.Response("Not found", { status: 404 });
       }
-
-      const filePath = join(process.cwd(), "assets", "bogart", filename);
-      const file = Bun.file(filePath);
-
-      return file.size > 0
-        ? new globalThis.Response(file, {
-            headers: {
-              "Content-Type": "image/png",
-              "Cache-Control": "public, max-age=3600",
-            },
-          })
-        : new globalThis.Response("Not found", { status: 404 });
-    },
-
-    // SPA fallback — serves the web UI for all other paths
-    "/*": () =>
-      new globalThis.Response(Bun.file(indexHtml as unknown as string), {
+      return new globalThis.Response(Bun.file(indexHtml as unknown as string), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
-      }),
+      });
+    },
   },
   websocket: {
     open(ws) {

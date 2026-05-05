@@ -129,6 +129,101 @@ What's deliberately NOT in this list:
   duplication is wasteful but not broken. Future optimization can promote
   them if bundle size becomes an issue.
 
+## Static assets
+
+Two distinct mechanisms cover two distinct concerns:
+
+### Bundled assets (`/assets/*`)
+
+For files imported as JS modules — `import sprite from "./sprite.png"` —
+Bun's bundler treats the import as an **asset** and emits the file with a
+content-hashed name (e.g. `sprite-dqk2q25q.png`). All three bundlers
+(`spa-bundler`, `vendor-bundler`, `extension-bundler`) set
+`publicPath: "/assets/"` and pipe each `kind: "asset"` output into a
+shared in-memory cache (`web/asset-cache.ts`). The gateway's `/assets/*`
+route serves from that cache with `Cache-Control: immutable` (safe
+because the URL changes when the content changes).
+
+This is the right tool when:
+
+- The asset ships with the extension or `@anima/ui` itself
+- The consumer is a TS/TSX module that wants a typed import
+- Cache-busting matters
+
+Example — Bogart sprites colocated with the component:
+
+```tsx
+// packages/ui/src/components/Bogart.tsx
+import sprite1Url from "../../static/bogart/sprite1.png";
+// → bundle references "/assets/sprite1-<hash>.png"
+// → gateway serves bytes from in-memory cache
+```
+
+A `*.d.ts` ambient declaration in `packages/ui/src/static.d.ts` tells
+TypeScript the import resolves to a string URL.
+
+> Note: don't pass `root` to `Bun.build` — when set, Bun computes asset
+> URLs as relative paths from the entry to the asset and produces strings
+> like `/assets/../../sprite.png`. Without `root` (which is what we do),
+> URLs are clean `/assets/<filename>`. Workspace dep resolution still
+> works because vendor entry stubs live inside the project tree.
+
+### Mounted directories (`webStatic`)
+
+For runtime-mounted directories whose paths aren't known at build time —
+typically homedir-relative paths to user data — extensions declare
+`webStatic` in their `AnimaExtension`:
+
+```ts
+// extensions/audiobooks/src/index.ts
+return {
+  id: "audiobooks",
+  // ...
+  webStatic: [{ path: "/audiobooks/static", root: "~/romance-novels" }],
+};
+```
+
+Three sources contribute, merged in precedence order (lowest → highest):
+
+1. **Convention** — any `extensions/<id>/static/` directory on disk
+   auto-registers as `/<id>/static/*` → that dir. Useful for an extension
+   that ships unbundled data files.
+2. **Code** (`AnimaExtension.webStatic`) — declared in the server-side
+   extension module, applied at registration time.
+3. **Config** (`anima.json` `extensions.<id>.webStatic`) — overrides
+   matching `path` entries. Useful for relocating homedir-based paths
+   without touching code:
+
+   ```json
+   {
+     "extensions": {
+       "audiobooks": {
+         "webStatic": [{ "path": "/audiobooks/static", "root": "~/my-books" }]
+       }
+     }
+   }
+   ```
+
+`root` accepts three forms:
+
+| Form    | Resolves to                                         |
+| ------- | --------------------------------------------------- |
+| `~/...` | `homedir() + tail`                                  |
+| `./...` | `extensions/<id>/ + tail` (extension-directory rel) |
+| `/...`  | absolute path (used as-is)                          |
+
+Security: every served path is verified to remain inside its resolved
+root. Any `..` traversal that escapes is rejected with 404.
+
+### When to use which
+
+| Scenario                                                                   | Use                                              |
+| -------------------------------------------------------------------------- | ------------------------------------------------ |
+| PNG/SVG used by a React component, ships with the extension or `@anima/ui` | Bundled asset (`import` it)                      |
+| User data in `~/some-folder` outside the workspace                         | webStatic with `~/...` root                      |
+| Read-only extension data files that don't need to be `import`ed            | webStatic convention (`extensions/<id>/static/`) |
+| Asset path that needs to differ between dev and production                 | webStatic via `anima.json` override              |
+
 ## How named exports work (the auto-discovery trick)
 
 React, react-dom, and most of the npm registry are still **CommonJS**. Bun's
@@ -374,12 +469,15 @@ disk, just where to look for `routes.ts`.
 
 ## Key files
 
-| File                                            | Purpose                                                |
-| ----------------------------------------------- | ------------------------------------------------------ |
-| `packages/gateway/src/web/extension-bundler.ts` | Per-extension `Bun.build` + the exact-externals plugin |
-| `packages/gateway/src/web/vendor-bundler.ts`    | Shared vendor bundles, runtime named-export discovery  |
-| `packages/gateway/src/web/spa-bundler.ts`       | SPA shell build (Tailwind + same externals)            |
-| `packages/gateway/src/web/index.tsx`            | SPA bootstrap — fetch + dynamic-import + render        |
-| `packages/gateway/src/web/index.html`           | HTML shell + importmap                                 |
-| `packages/ui/src/styles/index.css`              | Tailwind entry with `@source` globs                    |
-| `packages/gateway/.web-vendor-entries/`         | Generated vendor entry stubs (gitignored)              |
+| File                                            | Purpose                                                                            |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `packages/gateway/src/web/extension-bundler.ts` | Per-extension `Bun.build` + the exact-externals plugin                             |
+| `packages/gateway/src/web/vendor-bundler.ts`    | Shared vendor bundles, runtime named-export discovery                              |
+| `packages/gateway/src/web/spa-bundler.ts`       | SPA shell build (Tailwind + same externals)                                        |
+| `packages/gateway/src/web/asset-cache.ts`       | In-memory cache of `kind: "asset"` Bun outputs (PNGs, fonts) served at `/assets/*` |
+| `packages/gateway/src/web/static-paths.ts`      | `webStatic` registry (convention + code + config merge) for mounted directories    |
+| `packages/gateway/src/web/index.tsx`            | SPA bootstrap — fetch + dynamic-import + render                                    |
+| `packages/gateway/src/web/index.html`           | HTML shell + importmap                                                             |
+| `packages/ui/src/styles/index.css`              | Tailwind entry with `@source` globs                                                |
+| `packages/ui/src/static.d.ts`                   | Ambient TS declarations for asset imports                                          |
+| `packages/gateway/.web-vendor-entries/`         | Generated vendor entry stubs (gitignored)                                          |

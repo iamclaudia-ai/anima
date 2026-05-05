@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "@anima/shared";
+import { ASSET_PUBLIC_PATH, ingestBuildAssets } from "./asset-cache";
 
 const log = createLogger("ExtensionBundler", join(homedir(), ".anima", "logs", "gateway.log"));
 
@@ -121,7 +122,12 @@ export async function buildExtensionBundle(extensionId: string): Promise<Extensi
         plugins: [exactExternalsPlugin(SHARED_EXTERNALS)],
         minify: false,
         sourcemap: "none",
-        root: PROJECT_ROOT,
+        // NOTE: do NOT set `root` — it causes Bun to compute asset URLs as
+        // relative paths from the entry to the asset, producing nonsense
+        // like "/assets/../../foo.png". Without root, asset URLs are clean
+        // "/assets/<filename>" off publicPath. Workspace resolution still
+        // works because the entry files live inside the project tree.
+        publicPath: ASSET_PUBLIC_PATH,
       });
 
       if (!result.success || result.outputs.length === 0) {
@@ -140,6 +146,7 @@ export async function buildExtensionBundle(extensionId: string): Promise<Extensi
       }
 
       const js = await jsOutput.text();
+      await ingestBuildAssets(result.outputs);
       const bundle: ExtensionBundle = { js, builtAt: Date.now() };
       cache.set(extensionId, bundle);
       log.info("Built extension web bundle", { extensionId, bytes: js.length });

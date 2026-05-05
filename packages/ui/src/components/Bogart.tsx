@@ -15,6 +15,14 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// Sprite sheets are colocated with this component under packages/ui/static/.
+// Bun's bundler emits each .png as a hashed asset and resolves these imports
+// to URLs (e.g. "/assets/sprite1-<hash>.png") served by the gateway's asset
+// route. Content-addressed → automatic cache busting.
+import sprite1Url from "../../static/bogart/sprite1.png";
+import sprite2Url from "../../static/bogart/sprite2.png";
+import sprite3Url from "../../static/bogart/sprite3.png";
+
 // ── Sprite config ──────────────────────────────────────────
 const COLS = 4;
 const FRAME_W = 416;
@@ -25,10 +33,16 @@ const DISPLAY_SCALE = 0.15; // ~62px tall
 const DISPLAY_W = FRAME_W * DISPLAY_SCALE;
 const DISPLAY_H = FRAME_H * DISPLAY_SCALE;
 
+/**
+ * Bogart sprite sheet URLs, exported so consumers (e.g. the bogart
+ * scratchpad page) can reference them without re-importing the binary.
+ */
+export const BOGART_SPRITE_URLS = [sprite1Url, sprite2Url, sprite3Url] as const;
+
 const SHEETS = [
-  { src: "/bogart/sprites/sprite1.png", baselines: [301, 301, 305, 307, 310, 315] },
-  { src: "/bogart/sprites/sprite2.png", baselines: [302, 305, 316, 313, 312, 313] },
-  { src: "/bogart/sprites/sprite3.png", baselines: [307, 308, 308, 309, 314, 316] },
+  { src: sprite1Url, baselines: [301, 301, 305, 307, 310, 315] },
+  { src: sprite2Url, baselines: [302, 305, 316, 313, 312, 313] },
+  { src: sprite3Url, baselines: [307, 308, 308, 309, 314, 316] },
 ];
 
 const MAX_BASELINE = Math.max(...SHEETS.flatMap((s) => s.baselines));

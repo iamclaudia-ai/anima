@@ -179,6 +179,7 @@ export default function createAudiobooksExtension(): AnimaExtension {
       },
     ],
     events: [],
+    webStatic: [{ path: "/audiobooks/static", root: "~/romance-novels" }],
 
     async start(extensionCtx) {
       ctx = extensionCtx;

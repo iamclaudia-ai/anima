@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createLogger } from "@anima/shared";
 import { exactExternalsPlugin } from "./extension-bundler";
+import { ASSET_PUBLIC_PATH, ingestBuildAssets } from "./asset-cache";
 
 const log = createLogger("VendorBundler", join(homedir(), ".anima", "logs", "gateway.log"));
 
@@ -143,7 +144,8 @@ export async function buildVendorBundles(): Promise<Map<string, VendorBundle>> {
         plugins: [exactExternalsPlugin(spec.externals)],
         minify: false,
         sourcemap: "none",
-        root: PROJECT_ROOT,
+        // See note in extension-bundler.ts re: not setting `root`.
+        publicPath: ASSET_PUBLIC_PATH,
       });
 
       if (!result.success || result.outputs.length === 0) {
@@ -163,6 +165,9 @@ export async function buildVendorBundles(): Promise<Map<string, VendorBundle>> {
       }
 
       const js = await jsOutput.text();
+      // Capture any non-JS assets the bundle emitted (PNGs, fonts, etc.) into
+      // the shared asset cache so the gateway's /assets/* route can serve them.
+      await ingestBuildAssets(result.outputs);
       cache.set(spec.slug, { slug: spec.slug, specifier: spec.specifier, js });
       log.info("Built vendor bundle", {
         specifier: spec.specifier,

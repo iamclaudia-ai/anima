@@ -9,11 +9,17 @@ import type {
   ExtensionMcpToolResult,
   ExtensionMethodDefinition,
   GatewayEvent,
+  WebStaticPath,
 } from "@anima/shared";
-import { createLogger } from "@anima/shared";
+import { createLogger, getExtensionConfig } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionHost, ExtensionRegistration, RemoteMcpToolInfo } from "./extension-host";
+import {
+  discoverConventionWebStatic,
+  mergeWebStatic,
+  StaticPathRegistry,
+} from "./web/static-paths";
 
 const log = createLogger("ExtensionManager", join(homedir(), ".anima", "logs", "gateway.log"));
 const HEALTH_CHECK_TIMEOUT_MS = 15_000;
@@ -28,6 +34,9 @@ export class ExtensionManager {
   private remoteSourceRoutes = new Map<string, ExtensionHost>();
   private remoteGenerations = new Map<string, string | null>();
   private mcpToolOwners = new Map<string, string>();
+
+  /** Static URL paths contributed by extensions. Public so the HTTP layer can resolve. */
+  readonly staticPaths = new StaticPathRegistry();
 
   /**
    * Register a remote (out-of-process) extension.
@@ -74,6 +83,16 @@ export class ExtensionManager {
       this.sourceRoutes.set(prefix, registration.id);
       log.info("Registered remote source route", { prefix, extensionId: registration.id });
     }
+
+    // Register static URL paths — merge convention (filesystem) → code
+    // (extension's webStatic) → config (anima.json override). The convention
+    // entries were already seeded at startup, but we re-merge here so an
+    // extension's code declarations show up the first time it registers.
+    const convention = discoverConventionWebStatic(registration.id);
+    const codeStatic = (registration.webStatic ?? []) as WebStaticPath[];
+    const configStatic = (getExtensionConfig(registration.id)?.webStatic ?? []) as WebStaticPath[];
+    const mergedStatic = mergeWebStatic(mergeWebStatic(convention, codeStatic), configStatic);
+    this.staticPaths.set(registration.id, mergedStatic);
   }
 
   /**
@@ -82,6 +101,16 @@ export class ExtensionManager {
   unregisterRemote(extensionId: string): void {
     this.remoteHosts.delete(extensionId);
     this.remoteGenerations.delete(extensionId);
+    // Drop the extension's code-declared paths but re-seed convention+config
+    // so any UI-only paths or anima.json entries remain active without it.
+    const convention = discoverConventionWebStatic(extensionId);
+    const configStatic = (getExtensionConfig(extensionId)?.webStatic ?? []) as WebStaticPath[];
+    const seed = mergeWebStatic(convention, configStatic);
+    if (seed.length > 0) {
+      this.staticPaths.set(extensionId, seed);
+    } else {
+      this.staticPaths.delete(extensionId);
+    }
     const reg = this.remoteRegistrations.get(extensionId);
     if (reg) {
       this.remoteRegistrations.delete(extensionId);

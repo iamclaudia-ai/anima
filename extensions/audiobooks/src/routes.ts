@@ -11,8 +11,8 @@ export const audiobooksRoutes: Route[] = [
   { path: "/audiobooks", component: Library, label: "Audiobooks", icon: "🎧" },
   { path: "/audiobooks/:bookId", component: BookDetail, label: "Book" },
   { path: "/audiobooks/:bookId/chapter/:chapterNum", component: ChapterPlayer, label: "Chapter" },
-  // Static file serving (handled by gateway, not React router)
-  { path: "/audiobooks/static/:path*", static: "~/romance-novels" },
+  // Note: /audiobooks/static/* is served by the gateway via this extension's
+  // webStatic declaration in src/index.ts — not a React route.
 ];
 
 export default {

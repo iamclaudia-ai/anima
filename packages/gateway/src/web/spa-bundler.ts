@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { createLogger } from "@anima/shared";
 import tailwindPlugin from "bun-plugin-tailwind";
 import { exactExternalsPlugin, SHARED_EXTERNALS } from "./extension-bundler";
+import { ASSET_PUBLIC_PATH, ingestBuildAssets } from "./asset-cache";
 
 const log = createLogger("SpaBundler", join(homedir(), ".anima", "logs", "gateway.log"));
 const PROJECT_ROOT = join(import.meta.dir, "..", "..", "..", "..");
@@ -44,7 +45,8 @@ export async function buildSpaBundle(): Promise<SpaBundle | null> {
         plugins: [tailwindPlugin, exactExternalsPlugin(SHARED_EXTERNALS)],
         minify: false,
         sourcemap: "none",
-        root: PROJECT_ROOT,
+        // See note in extension-bundler.ts re: not setting `root`.
+        publicPath: ASSET_PUBLIC_PATH,
       });
 
       if (!result.success || result.outputs.length === 0) {
@@ -72,6 +74,7 @@ export async function buildSpaBundle(): Promise<SpaBundle | null> {
         return null;
       }
 
+      await ingestBuildAssets(result.outputs);
       cache = { js, css, builtAt: Date.now() };
       log.info("Built SPA bundle", { jsBytes: js.length, cssBytes: css.length });
       return cache;

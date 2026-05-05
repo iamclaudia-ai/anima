@@ -1,6 +1,10 @@
 // Main component
 export { ClaudiaChat } from "./components/ClaudiaChat";
 
+// Bogart sprite URLs — exposed so the scratchpad page can reuse the same
+// hashed-asset URLs Bun emits when bundling @anima/ui (no duplicate sprites).
+export { BOGART_SPRITE_URLS } from "./components/Bogart";
+
 // Bridge
 export { BridgeContext, useBridge } from "./bridge";
 export type { PlatformBridge } from "./bridge";

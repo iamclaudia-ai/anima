@@ -18,8 +18,6 @@ export interface Route {
   path: string;
   // biome-ignore lint: Page components have varying prop signatures from route params
   component?: ComponentType<any>;
-  /** Base directory for static file serving (e.g., "~/romance-novels") */
-  static?: string;
   /** Named layout to use instead of a single component (e.g., "ide") */
   layout?: string;
   label?: string;

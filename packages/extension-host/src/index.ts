@@ -302,6 +302,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
         mcpTools,
         events: ext.events,
         sourceRoutes: ext.sourceRoutes || [],
+        webStatic: ext.webStatic ?? [],
       },
     });
 
