@@ -19,14 +19,33 @@ export interface SessionIndexEntry {
   gitBranch?: string;
 }
 
+/**
+ * Encode a cwd to Claude Code's `~/.claude/projects/<encoded>/` directory
+ * naming. Claude Code replaces both `/` and `.` with `-`, so
+ * `/Users/me/.hammerspoon` becomes `-Users-me--hammerspoon` (note the
+ * double-dash where the dot was).
+ */
+function encodeCwd(cwd: string): string {
+  return cwd.replace(/[/.]/g, "-");
+}
+
 export function resolveProjectDir(cwd: string): string | null {
   const projectsDir = join(homedir(), ".claude", "projects");
   if (!existsSync(projectsDir)) return null;
 
-  const encodedCwd = cwd.replace(/\//g, "-");
-  const primaryDir = join(projectsDir, encodedCwd);
-  if (existsSync(primaryDir)) return primaryDir;
+  // Try the canonical encoding first (cheap path lookup, no directory scan).
+  const primary = join(projectsDir, encodeCwd(cwd));
+  if (existsSync(primary)) return primary;
 
+  // Legacy encoding (only `/` → `-`) — older session dirs created before
+  // Claude Code added the dot-replacement may still use this form.
+  const legacy = join(projectsDir, cwd.replace(/\//g, "-"));
+  if (legacy !== primary && existsSync(legacy)) return legacy;
+
+  // Last-ditch fallback: scan every project dir's sessions-index.json and
+  // match the recorded `originalPath`. Catches encoding schemes we haven't
+  // seen yet (and doubles as the canonical recovery path when DBs hold
+  // stale entries).
   const dirs = readdirSync(projectsDir);
   for (const dir of dirs) {
     const indexPath = join(projectsDir, dir, "sessions-index.json");
