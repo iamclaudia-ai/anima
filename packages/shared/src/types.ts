@@ -356,6 +356,13 @@ export interface PanelDefinition {
   title: string;
   /** Icon name (Lucide icon name or emoji) */
   icon?: string;
+  /**
+   * Render strategy for this panel. `"always"` keeps the panel mounted even
+   * when not visible — required for iframes (code-server) and stateful
+   * components like terminals (xterm/wterm) that lose state on unmount.
+   * Default: `"onlyWhenVisible"` (dockview's default).
+   */
+  renderer?: "always" | "onlyWhenVisible";
 }
 
 /**
@@ -366,6 +373,19 @@ export type LayoutNode = LayoutLeaf | LayoutSplit;
 export interface LayoutLeaf {
   /** Panel ID to render (resolved from panel registry at runtime) */
   panel: string;
+  /**
+   * Optional unique dockview instance ID. Required when the same panel
+   * appears more than once in a layout (e.g., two terminals split
+   * side-by-side). Defaults to `panel` when omitted.
+   */
+  instanceId?: string;
+  /**
+   * Per-instance parameters passed to the panel component as props.
+   * The panel component receives `params` via React props from the layout
+   * — useful for opening a specific session in a chat panel, a specific
+   * file in an editor, etc.
+   */
+  params?: Record<string, unknown>;
   /** Size as percentage of parent */
   size?: number;
 }

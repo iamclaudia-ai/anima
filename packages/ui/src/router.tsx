@@ -11,6 +11,7 @@ import type { LayoutDefinition, LayoutNode } from "@anima/shared";
 import type { PanelDefinition } from "@anima/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
 import { LayoutManager } from "./components/LayoutManager";
+import { useIsMobile } from "./hooks/useIsMobile";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -123,22 +124,6 @@ export function useDocumentTitle(title: string | undefined | null): void {
 }
 
 // ── Router Component ─────────────────────────────────────────
-
-/** Determine if current viewport is mobile */
-function useIsMobile(breakpoint = 768): boolean {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== "undefined" ? window.innerWidth < breakpoint : false,
-  );
-
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, [breakpoint]);
-
-  return isMobile;
-}
 
 export interface RouterProps {
   routes: Route[];

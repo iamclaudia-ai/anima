@@ -36,6 +36,7 @@ export type { ExtensionWebContribution, PanelContribution, Route } from "./route
 // Hooks
 export { useChatGateway } from "./hooks/useChatGateway";
 export { useGatewayClient } from "./hooks/useGatewayClient";
+export { useIsMobile } from "./hooks/useIsMobile";
 export type {
   UseChatGatewayOptions,
   UseChatGatewayReturn,

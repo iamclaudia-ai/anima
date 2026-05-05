@@ -136,6 +136,7 @@ async function bootstrap(): Promise<void> {
         id: panel.id,
         title: panel.title,
         icon: panel.icon,
+        renderer: panel.renderer,
         component: panel.component,
       });
     }

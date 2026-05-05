@@ -6,10 +6,16 @@
  * Unresolved panels render a graceful error placeholder.
  *
  * Persistence: dockview's toJSON()/fromJSON() handles layout save/restore.
- * The LayoutManager auto-persists to localStorage keyed by layout name.
+ * The LayoutManager auto-persists to localStorage keyed by layout name. A
+ * structural fingerprint of the layout invalidates stale state when an
+ * extension's layout definition changes shape.
+ *
+ * Per-instance state: `LayoutLeaf.params` flows through to the panel
+ * component as React props, so the same panel type can be rendered multiple
+ * times in one layout (e.g., two terminals, two chats on different sessions).
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import type { ComponentType } from "react";
 import {
   DockviewReact,
@@ -19,6 +25,7 @@ import {
 } from "dockview-react";
 import "dockview/dist/styles/dockview.css";
 import type { LayoutNode } from "@anima/shared";
+import { flattenLayout, layoutFingerprint } from "./layout-flatten";
 
 // ── Panel Registry ──────────────────────────────────────────
 
@@ -29,6 +36,12 @@ export interface PanelRegistration {
   title: string;
   /** Icon name or emoji */
   icon?: string;
+  /**
+   * Render strategy — `"always"` keeps the component mounted even when not
+   * visible. Required for iframes and stateful components (terminals, video).
+   * Default is dockview's `"onlyWhenVisible"`.
+   */
+  renderer?: "always" | "onlyWhenVisible";
   /** React component to render in this panel */
   // biome-ignore lint: Panel components have varying prop signatures
   component: ComponentType<any>;
@@ -59,12 +72,19 @@ function PanelNotFound({ panelId }: { panelId: string }) {
 
 // ── Dockview Panel Wrapper ──────────────────────────────────
 
+interface PanelWrapperParams {
+  panelId: string;
+  /** Per-instance params forwarded to the panel component as React props. */
+  params?: Record<string, unknown>;
+}
+
 /**
  * Wraps a registered panel component for dockview.
- * Resolves the panel component from the registry context at render time.
+ * Resolves the panel component from the registry context at render time and
+ * forwards layout-leaf `params` to the component as props.
  */
-function PanelWrapper(props: IDockviewPanelProps<{ panelId: string }>) {
-  const { panelId } = props.params;
+function PanelWrapper(props: IDockviewPanelProps<PanelWrapperParams>) {
+  const { panelId, params } = props.params;
   const registry = useContext(PanelRegistryContext);
   const registration = registry.get(panelId);
 
@@ -73,83 +93,7 @@ function PanelWrapper(props: IDockviewPanelProps<{ panelId: string }>) {
   }
 
   const Component = registration.component;
-  return <Component />;
-}
-
-// ── Layout Builder ──────────────────────────────────────────
-
-interface PanelAddRequest {
-  id: string;
-  panelId: string;
-  title: string;
-  direction?: "right" | "below";
-  referencePanel?: string;
-  size?: number;
-  renderer?: "always" | "onlyWhenVisible";
-}
-
-/**
- * Walks a LayoutNode tree and produces a flat list of panel add requests
- * with positioning info that dockview can consume sequentially.
- */
-function flattenLayout(node: LayoutNode, parentRef?: string): PanelAddRequest[] {
-  const requests: PanelAddRequest[] = [];
-
-  if ("panel" in node) {
-    // Leaf node
-    requests.push({
-      id: node.panel,
-      panelId: node.panel,
-      title: node.panel,
-      referencePanel: parentRef,
-      direction: parentRef ? "right" : undefined,
-      size: node.size,
-    });
-  } else {
-    // Split node
-    const directionMap = {
-      horizontal: "right" as const,
-      vertical: "below" as const,
-    };
-
-    for (let i = 0; i < node.children.length; i++) {
-      const child = node.children[i];
-      const childRequests = flattenLayout(
-        child,
-        i > 0 ? getFirstPanelId(node.children[i - 1]) : parentRef,
-      );
-
-      // For the first child in a split, use parent's reference
-      // For subsequent children, position relative to the previous sibling
-      if (i > 0 && childRequests.length > 0) {
-        childRequests[0].direction = directionMap[node.direction];
-      }
-
-      requests.push(...childRequests);
-    }
-  }
-
-  return requests;
-}
-
-/** Get the first panel ID from a layout node (for reference positioning) */
-function getFirstPanelId(node: LayoutNode): string {
-  if ("panel" in node) return node.panel;
-  if (node.children.length > 0) return getFirstPanelId(node.children[0]);
-  return "";
-}
-
-// ── Layout Fingerprint ──────────────────────────────────────
-
-/**
- * Compute a stable fingerprint for a layout definition.
- * When the layout shape changes (panels added/removed, direction changed),
- * the fingerprint changes — invalidating any stale persisted layout.
- */
-function layoutFingerprint(node: LayoutNode): string {
-  if ("panel" in node) return node.panel;
-  const childKeys = node.children.map(layoutFingerprint).join(",");
-  return `${node.direction}[${childKeys}]`;
+  return <Component {...(params ?? {})} />;
 }
 
 // ── Props ───────────────────────────────────────────────────
@@ -167,16 +111,22 @@ export interface LayoutManagerProps {
 
 // ── Component ───────────────────────────────────────────────
 
-export function LayoutManager({ registry, layout, storageKey, className }: LayoutManagerProps) {
-  const apiRef = useRef<DockviewApi | null>(null);
-
-  // Dockview components map — single wrapper that resolves via registry
-  const components = useMemo(
-    () => ({
-      "panel-wrapper": PanelWrapper,
-    }),
-    [],
+/**
+ * Compute a stable React key from the layout structure + storage key. When
+ * either changes, React tears down the entire DockviewReact subtree and
+ * rebuilds — which is the only reliable way to rebuild the layout, since
+ * `onReady` only fires once per dockview instance.
+ */
+function useLayoutKey(layout: LayoutNode, storageKey: string | undefined): string {
+  return useMemo(
+    () => `${storageKey ?? "anon"}::${layoutFingerprint(layout)}`,
+    [layout, storageKey],
   );
+}
+
+export function LayoutManager({ registry, layout, storageKey, className }: LayoutManagerProps) {
+  // Dockview components map — single wrapper that resolves via registry.
+  const components = useMemo(() => ({ "panel-wrapper": PanelWrapper }), []);
 
   const buildLayout = useCallback(
     (api: DockviewApi) => {
@@ -185,16 +135,17 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
       for (const req of requests) {
         const registration = registry.get(req.panelId);
         const title = registration?.title ?? req.panelId;
-
-        // Use 'always' renderer for panels that might contain iframes
-        const renderer = req.panelId.startsWith("editor.") ? ("always" as const) : undefined;
+        const renderer = registration?.renderer;
 
         const addOptions: Parameters<typeof api.addPanel>[0] = {
           id: req.id,
           component: "panel-wrapper",
           title,
-          params: { panelId: req.panelId },
+          params: { panelId: req.panelId, params: req.params },
+          // Dockview accepts the renderer hint per-panel; undefined = its default.
           renderer,
+          initialWidth: req.size,
+          initialHeight: req.size,
         };
 
         if (req.referencePanel && req.direction) {
@@ -215,11 +166,12 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
 
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
-      apiRef.current = event.api;
+      const api = event.api;
 
-      // Try to restore persisted layout — but only if the layout definition
-      // hasn't changed. A fingerprint mismatch means panels were added/removed,
-      // so the saved state would reference stale panels.
+      // 1. Try to restore persisted layout, but only if the fingerprint matches —
+      //    a mismatch means panels were added/removed, so the saved state would
+      //    reference stale dockview instance IDs.
+      let restored = false;
       if (storageKey) {
         const fingerprint = layoutFingerprint(layout);
         const fingerprintKey = `${storageKey}:fingerprint`;
@@ -228,50 +180,52 @@ export function LayoutManager({ registry, layout, storageKey, className }: Layou
 
         if (saved && savedFingerprint === fingerprint) {
           try {
-            const parsed = JSON.parse(saved);
-            event.api.fromJSON(parsed);
-            return;
+            api.fromJSON(JSON.parse(saved));
+            restored = true;
           } catch {
             // Fall through to default layout
           }
         }
 
-        // Fingerprint mismatch or no saved state — clear stale data
-        localStorage.removeItem(storageKey);
-        localStorage.setItem(fingerprintKey, fingerprint);
+        if (!restored) {
+          localStorage.removeItem(storageKey);
+          localStorage.setItem(fingerprintKey, fingerprint);
+        }
       }
 
-      // Build from default layout definition
-      buildLayout(event.api);
+      // 2. Build the default layout if nothing was restored.
+      if (!restored) buildLayout(api);
+
+      // 3. Subscribe to layout changes for persistence. Attaching the listener
+      //    HERE (not in a useEffect) is critical — `apiRef.current` is null on
+      //    the first effect run and the deps don't include it, so the listener
+      //    never gets attached if subscribed via useEffect. (Old bug.)
+      if (storageKey) {
+        const fingerprint = layoutFingerprint(layout);
+        const fingerprintKey = `${storageKey}:fingerprint`;
+        api.onDidLayoutChange(() => {
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(api.toJSON()));
+            localStorage.setItem(fingerprintKey, fingerprint);
+          } catch {
+            // Persistence is best-effort.
+          }
+        });
+      }
     },
     [buildLayout, layout, storageKey],
   );
 
-  // Auto-persist on layout changes (with fingerprint for cache invalidation)
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api || !storageKey) return;
-
-    const fingerprint = layoutFingerprint(layout);
-    const fingerprintKey = `${storageKey}:fingerprint`;
-
-    const disposable = api.onDidLayoutChange(() => {
-      try {
-        const state = api.toJSON();
-        localStorage.setItem(storageKey, JSON.stringify(state));
-        localStorage.setItem(fingerprintKey, fingerprint);
-      } catch {
-        // Silently fail — persistence is best-effort
-      }
-    });
-
-    return () => disposable.dispose();
-  }, [layout, storageKey]);
+  // Re-key on layout/storageKey change so the entire dockview instance
+  // remounts. Cheaper than reconciling panel diffs imperatively, and
+  // correct: `onReady` fires fresh on every remount.
+  const dockKey = useLayoutKey(layout, storageKey);
 
   return (
     <PanelRegistryContext.Provider value={registry}>
       <div className={className} style={{ width: "100%", height: "100%" }}>
         <DockviewReact
+          key={dockKey}
           components={components}
           onReady={handleReady}
           className="dockview-theme-dark"
