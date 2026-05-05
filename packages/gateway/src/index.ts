@@ -41,7 +41,10 @@ import { buildVendorBundles, getVendorBundle } from "./web/vendor-bundler";
 import { buildSpaBundle } from "./web/spa-bundler";
 
 // Web UI — served as SPA fallback for all non-WS routes
-import index from "./web/index.html";
+// Served as a plain file, not Bun's HTML magic mode — auto-bundling no
+// longer applies now that the script src is /spa.js (built by spa-bundler).
+// @ts-ignore - Bun's file import syntax
+import indexHtml from "./web/index.html" with { type: "file" };
 // @ts-ignore - Bun's file import syntax
 import serviceWorker from "./web/service-worker.js" with { type: "file" };
 import manifestData from "./web/manifest.json";
@@ -1124,7 +1127,10 @@ const server = Bun.serve<ClientState>({
     },
 
     // SPA fallback — serves the web UI for all other paths
-    "/*": index,
+    "/*": () =>
+      new globalThis.Response(Bun.file(indexHtml as unknown as string), {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      }),
   },
   websocket: {
     open(ws) {
