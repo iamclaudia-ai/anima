@@ -154,16 +154,26 @@ function TopAction({
 function SessionRow({
   session,
   isActive,
-  onClick,
+  href,
+  onSelect,
 }: {
   session: SessionInfo;
   isActive: boolean;
-  onClick: () => void;
+  href: string;
+  onSelect: () => void;
 }) {
+  // Real <a> so right-click / cmd-click / middle-click open in a new tab.
+  // Plain left-click is intercepted and routed through the SPA navigator.
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    onSelect();
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <a
+      href={href}
+      onClick={handleClick}
       // Full-width highlight (no rounded corners, no left margin) — the
       // text gets the indent via pl-9 instead, so the active session reads
       // as a flat row across the entire sidebar.
@@ -177,7 +187,7 @@ function SessionRow({
       <span className="flex-shrink-0 text-xs text-gray-400">
         {formatTimeAgo(session.modified || session.created || "")}
       </span>
-    </button>
+    </a>
   );
 }
 
@@ -360,7 +370,8 @@ function WorkspaceItem({
                 key={session.sessionId}
                 session={session}
                 isActive={isActive && activeSessionId === session.sessionId}
-                onClick={() => onSessionSelect(session, workspace)}
+                href={`/workspace/${workspace.id}/session/${session.sessionId}`}
+                onSelect={() => onSessionSelect(session, workspace)}
               />
             ))
           )}
@@ -536,17 +547,25 @@ function SearchModal({
           {flatSessions.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
           ) : (
-            flatSessions.map(({ workspace, session }) => (
-              <button
-                key={`${workspace.id}-${session.sessionId}`}
-                type="button"
-                onClick={() => onSelect(workspace, session)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
-              >
-                <span className="truncate text-gray-700">{formatSessionName(session)}</span>
-                <span className="flex-shrink-0 text-xs text-gray-400">{workspace.name}</span>
-              </button>
-            ))
+            flatSessions.map(({ workspace, session }) => {
+              const href = `/workspace/${workspace.id}/session/${session.sessionId}`;
+              const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onSelect(workspace, session);
+              };
+              return (
+                <a
+                  key={`${workspace.id}-${session.sessionId}`}
+                  href={href}
+                  onClick={handleClick}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                >
+                  <span className="truncate text-gray-700">{formatSessionName(session)}</span>
+                  <span className="flex-shrink-0 text-xs text-gray-400">{workspace.name}</span>
+                </a>
+              );
+            })
           )}
         </div>
       </div>
