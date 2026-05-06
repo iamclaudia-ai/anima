@@ -849,12 +849,45 @@ export class SDKSession extends EventEmitter {
 
   /**
    * result — query completion with usage/cost data.
+   *
+   * Note: the SDK uses two shapes for result messages:
+   *   - SDKResultSuccess (subtype: "success") — but `is_error: true` + `api_error_status`
+   *     can still indicate a transient API error (e.g., 529 Overloaded).
+   *   - SDKResultError (subtype: "error_during_execution" | "error_max_turns" | ...) —
+   *     agent-level failures.
+   * Both surface an `api_error` event so the UI can render a visible error block
+   * instead of silently completing the turn.
    */
   private handleResultMessage(msg: SDKResultMessage): void {
     const stopReason = msg.stop_reason || msg.subtype || "end_turn";
 
     // Store latest usage for inclusion in compaction events
     this.lastUsage = msg.usage || null;
+
+    if (msg.is_error === true) {
+      let status = 0;
+      let message: string;
+      if (msg.subtype === "success") {
+        status = msg.api_error_status ?? 0;
+        message = msg.result || `API error ${status || ""}`.trim();
+      } else {
+        const human = msg.subtype.replace(/^error_/, "").replace(/_/g, " ");
+        message = `Agent error: ${human}`;
+      }
+
+      this.logger.error("API error in result message", {
+        status,
+        subtype: msg.subtype,
+        message,
+      });
+
+      this.emit("sse", {
+        type: "api_error",
+        timestamp: new Date().toISOString(),
+        status,
+        message,
+      });
+    }
 
     this.emit("sse", {
       type: "turn_stop",

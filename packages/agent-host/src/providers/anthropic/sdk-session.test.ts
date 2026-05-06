@@ -146,6 +146,115 @@ describe("SDKSession", () => {
     expect(procEvents).toContain("ended");
   });
 
+  it("emits api_error when result has is_error and api_error_status (e.g., 529 Overloaded)", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-api-error`;
+    createdSessionIds.push(sessionId);
+    const session = new SDKSession(
+      sessionId,
+      { cwd: "/repo/test", model: "claude-test", effort: "low" },
+      false,
+      { queryFactory: asQueryFactory(fakeQuery) },
+    );
+    const sseEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    session.on("sse", (e) => sseEvents.push(e as { type: string; [key: string]: unknown }));
+
+    await session.start();
+    session.prompt("hello");
+
+    fakeQuery.push({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 529,
+      result: "API Error: 529 Overloaded. This is a server-side issue, usually temporary.",
+      stop_reason: "stop_sequence",
+      duration_ms: 246608,
+      num_turns: 1,
+      total_cost_usd: 5.37,
+    });
+    fakeQuery.finish();
+    await Bun.sleep(20);
+
+    const apiError = sseEvents.find((e) => e.type === "api_error");
+    expect(apiError).toBeDefined();
+    expect(apiError?.status).toBe(529);
+    expect(apiError?.message).toContain("529 Overloaded");
+
+    // turn_stop still fires so the UI clears its querying state.
+    expect(sseEvents.some((e) => e.type === "turn_stop")).toBe(true);
+    // api_error must arrive before turn_stop so the error block attaches first.
+    const apiErrorIdx = sseEvents.findIndex((e) => e.type === "api_error");
+    const turnStopIdx = sseEvents.findIndex((e) => e.type === "turn_stop");
+    expect(apiErrorIdx).toBeLessThan(turnStopIdx);
+  });
+
+  it("emits api_error for SDKResultError shape (e.g., error_max_turns)", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-agent-error`;
+    createdSessionIds.push(sessionId);
+    const session = new SDKSession(
+      sessionId,
+      { cwd: "/repo/test", model: "claude-test", effort: "low" },
+      false,
+      { queryFactory: asQueryFactory(fakeQuery) },
+    );
+    const sseEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    session.on("sse", (e) => sseEvents.push(e as { type: string; [key: string]: unknown }));
+
+    await session.start();
+    session.prompt("hello");
+
+    fakeQuery.push({
+      type: "result",
+      subtype: "error_max_turns",
+      is_error: true,
+      duration_ms: 100,
+      num_turns: 50,
+      stop_reason: null,
+      total_cost_usd: 0.5,
+    });
+    fakeQuery.finish();
+    await Bun.sleep(20);
+
+    const apiError = sseEvents.find((e) => e.type === "api_error");
+    expect(apiError).toBeDefined();
+    expect(apiError?.message).toContain("max turns");
+  });
+
+  it("does not emit api_error on a normal successful result", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-no-error`;
+    createdSessionIds.push(sessionId);
+    const session = new SDKSession(
+      sessionId,
+      { cwd: "/repo/test", model: "claude-test", effort: "low" },
+      false,
+      { queryFactory: asQueryFactory(fakeQuery) },
+    );
+    const sseEvents: Array<{ type: string; [key: string]: unknown }> = [];
+    session.on("sse", (e) => sseEvents.push(e as { type: string; [key: string]: unknown }));
+
+    await session.start();
+    session.prompt("hello");
+
+    fakeQuery.push({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      stop_reason: "end_turn",
+      duration_ms: 10,
+      num_turns: 1,
+      result: "ok",
+      total_cost_usd: 0.001,
+    });
+    fakeQuery.finish();
+    await Bun.sleep(20);
+
+    expect(sseEvents.some((e) => e.type === "api_error")).toBe(false);
+    expect(sseEvents.some((e) => e.type === "turn_stop")).toBe(true);
+  });
+
   it("builds string systemPrompt from CLAUDE.md files and configures SDK setting sources", async () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-claude-md`;
