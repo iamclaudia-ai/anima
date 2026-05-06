@@ -6,7 +6,7 @@ import { discoverSessions } from "../claude-projects";
 import type { MemoryContextResult } from "../memory-context";
 import { formatMemoryContext } from "../memory-context";
 import { resolveSessionPath, parseSessionFilePaginated, parseSessionUsage } from "../parse-session";
-import { listWorkspaceSessions } from "../session-store";
+import { listWorkspaceSessions, getStoredSession } from "../session-store";
 import { getRuntime } from "../runtime";
 
 const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "session.log"));
@@ -70,7 +70,13 @@ export function getHistory(params: {
   cwd?: string;
   limit?: number;
   offset?: number;
-}): { messages: unknown[]; total: number; hasMore: boolean; usage?: unknown } {
+}): {
+  messages: unknown[];
+  total: number;
+  hasMore: boolean;
+  usage?: unknown;
+  gitStatus?: unknown;
+} {
   const filepath = resolveSessionPath(params.sessionId, params.cwd);
   if (!filepath) {
     log.warn("Session file not found", {
@@ -85,6 +91,8 @@ export function getHistory(params: {
     offset: params.offset || 0,
   });
   const usage = parseSessionUsage(filepath);
+  const stored = getStoredSession(params.sessionId);
+  const gitStatus = stored?.metadata?.gitStatus ?? undefined;
 
   log.info("Loaded history", {
     sessionId: shortId(params.sessionId),
@@ -94,7 +102,7 @@ export function getHistory(params: {
     hasUsage: !!usage,
   });
 
-  return { ...result, usage };
+  return { ...result, usage, gitStatus };
 }
 
 export async function getMemoryContext(cwd?: string): Promise<{

@@ -14,6 +14,7 @@ import {
 } from "./lifecycle/subagent-workflow";
 import { sendSessionNotification } from "./lifecycle/subagent-events";
 import { listSessions, getHistory, getMemoryContext } from "./lifecycle/session-query";
+import { emitGitStatus } from "./lifecycle/session-events";
 import { switchSession, resetSession } from "./lifecycle/session-activation";
 import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
 import type { AgentHostSessionInfo } from "./session-types";
@@ -121,13 +122,21 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
         limit: params.limit as number | undefined,
         offset: params.offset as number | undefined,
       }),
-    "session.get_history": async (params) =>
-      getHistory({
+    "session.get_history": async (params) => {
+      const result = getHistory({
         sessionId: params.sessionId as string,
         cwd: params.cwd as string | undefined,
         limit: params.limit as number | undefined,
         offset: params.offset as number | undefined,
-      }),
+      });
+      // Fire a fresh git-status pass async so the UI updates from cached → live
+      // even on older sessions that haven't had a turn since the cache landed.
+      // Only on initial load (offset 0) — pagination shouldn't re-fetch.
+      if (!params.offset || params.offset === 0) {
+        void emitGitStatus(params.sessionId as string);
+      }
+      return result;
+    },
     "session.get_info": async (params) => {
       const rt = getRuntime();
       const sessionId = params.sessionId as string | undefined;
