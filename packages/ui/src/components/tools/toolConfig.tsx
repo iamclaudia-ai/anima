@@ -161,8 +161,7 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
     case "Edit": {
       const filePath = parsedInput.file_path as string | undefined;
       if (filePath) {
-        const fileName = filePath.split("/").pop() || filePath;
-        return fileName.length > 20 ? `${fileName.substring(0, 17)}...` : fileName;
+        return filePath.split("/").pop() || filePath;
       }
       return name;
     }
@@ -170,43 +169,27 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
       const desc = parsedInput.description as string | undefined;
       const cmd = parsedInput.command as string | undefined;
       if (desc) return desc;
-      if (cmd) {
-        const first = cmd.split(" ")[0];
-        return first.length > 15 ? `${first.substring(0, 12)}...` : first;
-      }
+      if (cmd) return cmd.split(" ")[0];
       return "Run command";
     }
     case "BashOutput":
       return "Bash Output";
     case "Grep": {
       const pattern = parsedInput.pattern as string | undefined;
-      if (pattern) {
-        const p = pattern.length > 15 ? `${pattern.substring(0, 12)}...` : pattern;
-        return `Search "${p}"`;
-      }
-      return "Search";
+      return pattern ? `Search "${pattern}"` : "Search";
     }
     case "Glob": {
       const pattern = parsedInput.pattern as string | undefined;
-      if (pattern) {
-        const p = pattern.length > 15 ? `${pattern.substring(0, 12)}...` : pattern;
-        return `Find ${p}`;
-      }
-      return "Find";
+      return pattern ? `Find ${pattern}` : "Find";
     }
     case "Task": {
       const desc = parsedInput.description as string | undefined;
-      if (desc) {
-        return desc.length > 25 ? `${desc.substring(0, 22)}...` : desc;
-      }
-      return "Task";
+      return desc || "Task";
     }
     case "Agent": {
       const desc = parsedInput.description as string | undefined;
       const subagentType = parsedInput.subagent_type as string | undefined;
-      if (desc) {
-        return desc.length > 25 ? `${desc.substring(0, 22)}...` : desc;
-      }
+      if (desc) return desc;
       if (subagentType) return subagentType;
       return "Agent";
     }
@@ -222,20 +205,16 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
       const url = parsedInput.url as string | undefined;
       if (url) {
         try {
-          const hostname = new URL(url).hostname;
-          return hostname.length > 20 ? `${hostname.substring(0, 17)}...` : hostname;
+          return new URL(url).hostname;
         } catch {
-          return url.length > 20 ? `${url.substring(0, 17)}...` : url;
+          return url;
         }
       }
       return "Fetch";
     }
     case "WebSearch": {
       const query = parsedInput.query as string | undefined;
-      if (query) {
-        return query.length > 20 ? `${query.substring(0, 17)}...` : query;
-      }
-      return "Search";
+      return query || "Search";
     }
     case "TodoWrite": {
       const todos = parsedInput.todos as Array<{ status?: string }> | undefined;
