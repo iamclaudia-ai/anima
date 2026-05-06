@@ -120,8 +120,11 @@ function parseAssistantContent(content: unknown[]): ContentBlock[] {
   for (const item of content as Record<string, unknown>[]) {
     if (item.type === "text" && item.text) {
       blocks.push({ type: "text", content: item.text as string });
-    } else if (item.type === "thinking" && item.thinking) {
-      blocks.push({ type: "thinking", content: item.thinking as string });
+    } else if (item.type === "thinking") {
+      // Claude Code redacts the thinking text on persistence (only signature
+      // is preserved). Preserve the block anyway so the UI still shows a
+      // "Thought" timeline entry — content is "" when redacted.
+      blocks.push({ type: "thinking", content: (item.thinking as string) || "" });
     } else if (item.type === "tool_use") {
       blocks.push({
         type: "tool_use",
