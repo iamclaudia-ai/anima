@@ -338,6 +338,24 @@ export function useChatGateway(
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, [messages]);
 
+  // Re-scroll to bottom when the messages container itself resizes (e.g.,
+  // the GitStatusBar or ContextBar appears below, or the textarea grows
+  // as the user types). Without this, the bottom of the conversation
+  // slides out of view because the container shrinks but scrollTop stays
+  // put. ResizeObserver only fires on the container's own box, not on
+  // content-size changes, so this doesn't double-fire with the messages
+  // effect above.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (!isAtBottomRef.current) return;
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   const sendRequest = useCallback(
     (method: string, params?: Record<string, unknown>, tags?: string[]) => {
       sendRequestImplRef.current(method, params, tags);
