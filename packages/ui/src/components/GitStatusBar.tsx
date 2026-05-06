@@ -5,7 +5,16 @@
  * end of each agent turn.
  */
 
-import { FilePenLine, FilePlus, FileX, FileQuestionMark, FilePen } from "lucide-react";
+import {
+  FilePenLine,
+  FilePlus,
+  FileX,
+  FileQuestionMark,
+  FilePen,
+  CloudUpload,
+  CloudDownload,
+  Check,
+} from "lucide-react";
 import type { ComponentType } from "react";
 import type { GitStatusInfo } from "../hooks/useChatGateway";
 
@@ -119,9 +128,25 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
         </span>
 
         {(ahead > 0 || behind > 0) && (
-          <span className="inline-flex items-center gap-1 font-mono text-gray-500 shrink-0">
-            {ahead > 0 && <span>↑{ahead}</span>}
-            {behind > 0 && <span>↓{behind}</span>}
+          <span className="inline-flex items-center gap-3 font-mono font-bold shrink-0">
+            {ahead > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 text-indigo-600"
+                title={`${ahead} ahead of upstream`}
+              >
+                <CloudUpload className="w-4 h-4" />
+                {ahead}
+              </span>
+            )}
+            {behind > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 text-gray-500"
+                title={`${behind} behind upstream`}
+              >
+                <CloudDownload className="w-4 h-4" />
+                {behind}
+              </span>
+            )}
           </span>
         )}
 
@@ -139,7 +164,7 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
             ))}
           </span>
         ) : (
-          <span className="text-emerald-600 font-medium leading-none shrink-0">clean</span>
+          <Check className="w-4 h-4 text-emerald-600 shrink-0" aria-label="clean working tree" />
         )}
       </div>
 
