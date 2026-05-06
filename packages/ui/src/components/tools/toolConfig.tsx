@@ -350,6 +350,15 @@ const purpleColors = {
   iconColor: "text-purple-500",
 };
 
+const salmonColors = {
+  border: "border-[#FDB9A8]/60", // 200
+  bg: "bg-[#FEF2EC]/80", // 50
+  text: "text-[#DF665C]", // 600
+  hoverBg: "hover:bg-[#FEDCD0]/80", // 100
+  chevron: "text-[#F87C62]", // 400
+  iconColor: "text-[#DF665C]", // 600
+};
+
 const orangeColors = {
   border: "border-orange-200/60",
   bg: "bg-orange-50/80",
@@ -374,17 +383,16 @@ const skyColors = {
 export function getThinkingBadgeConfig(): ToolBadgeConfig {
   return {
     icon: <Brain className="size-3" />,
-    colors: purpleColors,
+    colors: salmonColors,
   };
 }
 
 /** Thinking label for collapsed badge */
-export function getThinkingLabel(isComplete: boolean, durationMs?: number): string {
-  const durationSeconds =
-    typeof durationMs === "number" ? Math.max(1, Math.round(durationMs / 1000)) : null;
+export function getThinkingLabel(isComplete: boolean, durationMs: number): string {
+  const durationSeconds = Math.round(durationMs / 1000);
 
   if (isComplete && durationSeconds) {
-    return `${durationSeconds}s`;
+    return `Thought for ${durationSeconds}s`;
   }
   if (isComplete) {
     return "Thought";

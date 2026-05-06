@@ -84,12 +84,13 @@ export const MessageContent = memo(function MessageContent({
   type,
   isLoading,
 }: MessageContentProps) {
+  const [start] = useState(Date.now());
   const [fallbackExpanded, setFallbackExpanded] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inlineExpansion = useInlineExpansion();
   const variant = useToolVariant();
   const expansionId = useId();
-
+  const elapsed = Date.now() - start;
   const markdown = remend(content);
 
   if (type === "user") {
@@ -120,7 +121,7 @@ export const MessageContent = memo(function MessageContent({
   if (type === "thinking") {
     const thinkingConfig = getThinkingBadgeConfig();
     const hasContent = content?.trim().length > 0;
-    const label = getThinkingLabel(!isLoading);
+    const label = getThinkingLabel(!isLoading, elapsed);
     const useInline = variant === "badge" && !!inlineExpansion;
     const isExpanded = useInline ? inlineExpansion!.isOpen(expansionId) : fallbackExpanded;
     const expandedThinkingContent = (
