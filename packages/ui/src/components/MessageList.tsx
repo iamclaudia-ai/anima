@@ -12,7 +12,6 @@ import { ToolCallBlock } from "./ToolCallBlock";
 import { CopyButton } from "./CopyButton";
 import CompactionBoundary from "./CompactionBoundary";
 import { FileText, FileImage, File, OctagonX } from "lucide-react";
-import { InlineExpansionProvider } from "./InlineExpansionProvider";
 import { ToolTimeline } from "./tools/ToolTimeline";
 
 function getFileIcon(mediaType: string) {
@@ -178,201 +177,197 @@ export function MessageList({
   const lastMsgIdx = messages.length - 1;
 
   return (
-    <InlineExpansionProvider containerRef={messagesContainerRef}>
-      <main
-        ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
-      >
-        {hasMore && (
-          <button
-            onClick={onLoadEarlier}
-            className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            Load {Math.min(50, remainingCount)} earlier messages
-            {totalMessages > 0 && (
-              <span className="ml-1 text-gray-400">
-                ({messages.length} of {totalMessages})
-              </span>
-            )}
-          </button>
-        )}
-        {segments.map((seg, idx) => {
-          // ── Compaction boundary ──
-          if (seg.kind === "boundary") {
-            return (
-              <CompactionBoundary
-                key={`boundary-${idx}`}
-                trigger={seg.msg.compaction?.trigger || "auto"}
-                preTokens={seg.msg.compaction?.pre_tokens || 0}
-                timestamp={seg.msg.timestamp}
-              />
-            );
-          }
+    <main
+      ref={messagesContainerRef}
+      className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
+    >
+      {hasMore && (
+        <button
+          onClick={onLoadEarlier}
+          className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          Load {Math.min(50, remainingCount)} earlier messages
+          {totalMessages > 0 && (
+            <span className="ml-1 text-gray-400">
+              ({messages.length} of {totalMessages})
+            </span>
+          )}
+        </button>
+      )}
+      {segments.map((seg, idx) => {
+        // ── Compaction boundary ──
+        if (seg.kind === "boundary") {
+          return (
+            <CompactionBoundary
+              key={`boundary-${idx}`}
+              trigger={seg.msg.compaction?.trigger || "auto"}
+              preTokens={seg.msg.compaction?.pre_tokens || 0}
+              timestamp={seg.msg.timestamp}
+            />
+          );
+        }
 
-          // ── User message ──
-          if (seg.kind === "user") {
-            return (
-              <div key={`user-${seg.msgIdx}`} className="ml-12">
-                <UserHeader msg={seg.msg} />
-                <UserMessage msg={seg.msg} />
-              </div>
-            );
-          }
+        // ── User message ──
+        if (seg.kind === "user") {
+          return (
+            <div key={`user-${seg.msgIdx}`} className="ml-12">
+              <UserHeader msg={seg.msg} />
+              <UserMessage msg={seg.msg} />
+            </div>
+          );
+        }
 
-          // ── Tool timeline (may span multiple messages) ──
-          if (seg.kind === "tool-row") {
-            const isLatestRow = seg.entries.some((e) => e.msgIdx === lastMsgIdx);
-            return (
-              <div key={`toolrow-${idx}`} className="mr-12">
-                <ToolTimeline>
-                  {seg.entries.map((entry) => {
-                    const { block, isLastInAllMessages, msgIdx, blockIdx } = entry;
-                    if (block.type === "thinking") {
-                      return (
-                        <MessageContent
-                          key={`${msgIdx}-${blockIdx}`}
-                          content={(block as TextBlock).content}
-                          type="thinking"
-                          isLoading={isLastInAllMessages && isQuerying}
-                        />
-                      );
-                    }
-                    if (block.type === "tool_use") {
-                      const tool = block as ToolUseBlock;
-                      const isInteractiveTool =
-                        tool.name === "ExitPlanMode" || tool.name === "EnterPlanMode";
-                      return (
-                        <ToolCallBlock
-                          key={tool.id}
-                          name={tool.name}
-                          input={tool.input}
-                          result={tool.result}
-                          isLoading={!tool.result && isQuerying}
-                          toolUseId={tool.id}
-                          onSendMessage={
-                            isLatestRow || isInteractiveTool ? onSendMessage : undefined
-                          }
-                          onSendToolResult={
-                            isLatestRow || isInteractiveTool ? onSendToolResult : undefined
-                          }
-                        />
-                      );
-                    }
-                    // Empty text block — no-op
-                    return null;
-                  })}
-                </ToolTimeline>
-              </div>
-            );
-          }
+        // ── Tool timeline (may span multiple messages) ──
+        if (seg.kind === "tool-row") {
+          const isLatestRow = seg.entries.some((e) => e.msgIdx === lastMsgIdx);
+          return (
+            <div key={`toolrow-${idx}`} className="mr-12">
+              <ToolTimeline>
+                {seg.entries.map((entry) => {
+                  const { block, isLastInAllMessages, msgIdx, blockIdx } = entry;
+                  if (block.type === "thinking") {
+                    return (
+                      <MessageContent
+                        key={`${msgIdx}-${blockIdx}`}
+                        content={(block as TextBlock).content}
+                        type="thinking"
+                        isLoading={isLastInAllMessages && isQuerying}
+                      />
+                    );
+                  }
+                  if (block.type === "tool_use") {
+                    const tool = block as ToolUseBlock;
+                    const isInteractiveTool =
+                      tool.name === "ExitPlanMode" || tool.name === "EnterPlanMode";
+                    return (
+                      <ToolCallBlock
+                        key={tool.id}
+                        name={tool.name}
+                        input={tool.input}
+                        result={tool.result}
+                        isLoading={!tool.result && isQuerying}
+                        toolUseId={tool.id}
+                        onSendMessage={isLatestRow || isInteractiveTool ? onSendMessage : undefined}
+                        onSendToolResult={
+                          isLatestRow || isInteractiveTool ? onSendToolResult : undefined
+                        }
+                      />
+                    );
+                  }
+                  // Empty text block — no-op
+                  return null;
+                })}
+              </ToolTimeline>
+            </div>
+          );
+        }
 
-          // ── Assistant text paragraph ──
-          if (seg.kind === "assistant-text") {
-            return (
-              <div key={`atext-${seg.msgIdx}-${seg.block.originalIndex}`} className="mr-12">
-                {seg.isFirstTextInMsg && <AssistantHeader msg={seg.msg} />}
-                <MessageContent content={seg.block.content} type="assistant" />
-              </div>
-            );
-          }
+        // ── Assistant text paragraph ──
+        if (seg.kind === "assistant-text") {
+          return (
+            <div key={`atext-${seg.msgIdx}-${seg.block.originalIndex}`} className="mr-12">
+              {seg.isFirstTextInMsg && <AssistantHeader msg={seg.msg} />}
+              <MessageContent content={seg.block.content} type="assistant" />
+            </div>
+          );
+        }
 
-          // ── Assistant error block ──
-          if (seg.kind === "assistant-error") {
-            const err = seg.block;
-            if (err.isRetrying) {
-              return (
-                <div
-                  key={`aerr-${seg.msgIdx}-${err.originalIndex}`}
-                  className="mr-12 mt-2 px-3 py-2 text-sm bg-amber-50 border border-amber-200 rounded-md flex items-center gap-2"
-                >
-                  <svg
-                    className="w-4 h-4 text-amber-500 animate-spin shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  <span className="text-amber-700">{err.message}</span>
-                  {err.retryInMs && (
-                    <span className="text-amber-500 text-xs ml-auto">
-                      retrying in {(err.retryInMs / 1000).toFixed(0)}s
-                    </span>
-                  )}
-                </div>
-              );
-            }
+        // ── Assistant error block ──
+        if (seg.kind === "assistant-error") {
+          const err = seg.block;
+          if (err.isRetrying) {
             return (
               <div
                 key={`aerr-${seg.msgIdx}-${err.originalIndex}`}
-                className="mr-12 mt-2 px-3 py-2 text-sm bg-red-50 border border-red-200 rounded-md"
+                className="mr-12 mt-2 px-3 py-2 text-sm bg-amber-50 border border-amber-200 rounded-md flex items-center gap-2"
               >
-                <div className="flex items-center gap-2">
-                  <svg
-                    className="w-4 h-4 text-red-500 shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
+                <svg
+                  className="w-4 h-4 text-amber-500 animate-spin shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
                     stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                    />
-                  </svg>
-                  <span className="text-red-700 font-medium">{err.message}</span>
-                  {err.status && (
-                    <span className="text-red-400 text-xs ml-auto">HTTP {err.status}</span>
-                  )}
-                </div>
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                <span className="text-amber-700">{err.message}</span>
+                {err.retryInMs && (
+                  <span className="text-amber-500 text-xs ml-auto">
+                    retrying in {(err.retryInMs / 1000).toFixed(0)}s
+                  </span>
+                )}
               </div>
             );
           }
-
-          // ── Aborted indicator ──
-          if (seg.kind === "aborted") {
-            return (
-              <div
-                key={`aborted-${seg.msgIdx}`}
-                className="mr-12 mt-3 flex items-center gap-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md w-fit"
-              >
-                <OctagonX className="w-4 h-4 flex-shrink-0" />
-                <span>Interrupted · What should Claudia do instead?</span>
-              </div>
-            );
-          }
-
-          // ── Unknown block fallback ──
           return (
             <div
-              key={`unknown-${idx}`}
-              className="mr-12 mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
+              key={`aerr-${seg.msgIdx}-${err.originalIndex}`}
+              className="mr-12 mt-2 px-3 py-2 text-sm bg-red-50 border border-red-200 rounded-md"
             >
-              <div className="text-sm font-mono text-yellow-800">
-                <strong>Unknown message type:</strong>{" "}
-                {(seg.block as { type?: string }).type || "undefined"}
+              <div className="flex items-center gap-2">
+                <svg
+                  className="w-4 h-4 text-red-500 shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                  />
+                </svg>
+                <span className="text-red-700 font-medium">{err.message}</span>
+                {err.status && (
+                  <span className="text-red-400 text-xs ml-auto">HTTP {err.status}</span>
+                )}
               </div>
-              <pre className="text-xs text-yellow-700 mt-1 whitespace-pre-wrap">
-                {JSON.stringify(seg.block, null, 2)}
-              </pre>
             </div>
           );
-        })}
-        <div ref={messagesEndRef} />
-      </main>
-    </InlineExpansionProvider>
+        }
+
+        // ── Aborted indicator ──
+        if (seg.kind === "aborted") {
+          return (
+            <div
+              key={`aborted-${seg.msgIdx}`}
+              className="mr-12 mt-3 flex items-center gap-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md w-fit"
+            >
+              <OctagonX className="w-4 h-4 flex-shrink-0" />
+              <span>Interrupted · What should Claudia do instead?</span>
+            </div>
+          );
+        }
+
+        // ── Unknown block fallback ──
+        return (
+          <div
+            key={`unknown-${idx}`}
+            className="mr-12 mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
+          >
+            <div className="text-sm font-mono text-yellow-800">
+              <strong>Unknown message type:</strong>{" "}
+              {(seg.block as { type?: string }).type || "undefined"}
+            </div>
+            <pre className="text-xs text-yellow-700 mt-1 whitespace-pre-wrap">
+              {JSON.stringify(seg.block, null, 2)}
+            </pre>
+          </div>
+        );
+      })}
+      <div ref={messagesEndRef} />
+    </main>
   );
 }
 

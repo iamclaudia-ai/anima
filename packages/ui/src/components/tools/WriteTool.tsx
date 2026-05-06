@@ -8,7 +8,7 @@ export default function WriteTool({ name, parsedInput, result: _result, isLoadin
   const filePath = parsedInput?.file_path as string | undefined;
   const content = parsedInput?.content as string | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = (
     <div className="space-y-1.5">

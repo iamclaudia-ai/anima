@@ -8,7 +8,7 @@ export default function BashTool({ name, parsedInput, result, isLoading, isError
 
   const collapsedContent = (
     <div className="flex flex-wrap items-center gap-1.5">
-      <ToolHeader toolName={name} label={label} />
+      <ToolHeader toolName={name} label={label} isLoading={isLoading} />
     </div>
   );
 

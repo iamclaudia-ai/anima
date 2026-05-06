@@ -8,7 +8,7 @@ export default function WebFetchTool({ name, parsedInput, result, isLoading }: T
   const url = parsedInput?.url as string | undefined;
   const prompt = parsedInput?.prompt as string | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = (
     <div className="space-y-1.5">

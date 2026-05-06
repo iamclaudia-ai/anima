@@ -18,7 +18,7 @@ export default function TodoWriteTool({
   const label = getToolLabel(name, parsedInput);
   const todos = (parsedInput?.todos as TodoItem[] | undefined) || [];
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent =
     todos.length > 0 ? (

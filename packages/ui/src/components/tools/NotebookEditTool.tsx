@@ -15,7 +15,7 @@ export default function NotebookEditTool({
   const editMode = parsedInput?.edit_mode as string | undefined;
   const newSource = parsedInput?.new_source as string | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = (
     <div className="space-y-1.5">

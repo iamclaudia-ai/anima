@@ -9,7 +9,7 @@ export default function ReadTool({ name, parsedInput, result, isLoading }: ToolP
   const offset = parsedInput?.offset as number | undefined;
   const limit = parsedInput?.limit as number | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = (
     <div className="space-y-1.5">

@@ -7,7 +7,7 @@ export default function WebSearchTool({ name, parsedInput, result, isLoading }: 
   const label = getToolLabel(name, parsedInput);
   const query = parsedInput?.query as string | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = (
     <div className="space-y-1.5">

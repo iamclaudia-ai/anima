@@ -17,7 +17,7 @@ export default function EditTool({ name, parsedInput, result: _result, isLoading
 
   const collapsedContent = (
     <div className="flex items-center gap-1.5">
-      <ToolHeader toolName={name} label={label} />
+      <ToolHeader toolName={name} label={label} isLoading={isLoading} />
       {(added > 0 || removed > 0) && (
         <span className="flex items-center gap-1 font-mono text-xs">
           {added > 0 && <span className="text-emerald-600">+{added}</span>}

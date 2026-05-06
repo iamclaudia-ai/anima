@@ -6,7 +6,7 @@ import { getToolLabel } from "./toolConfig";
 export default function SkillTool({ name, parsedInput, result, isLoading }: ToolProps) {
   const label = getToolLabel(name, parsedInput);
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const collapsedContent = <ToolHeader toolName={name} label={label} isLoading={isLoading} />;
 
   const expandedContent = result?.content ? (
     <ResultBlock content={result.content} isError={result.is_error} />

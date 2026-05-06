@@ -1,5 +1,6 @@
 import { cloneElement, isValidElement } from "react";
 import type { ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { getToolBadgeConfig } from "./toolConfig";
 import { useWorkspace } from "../../contexts/WorkspaceContext";
 
@@ -22,10 +23,13 @@ function stripCwdPrefix(path: string, cwd?: string): string {
 interface ToolHeaderProps {
   toolName: string;
   label: string;
+  /** When true, the tool icon is replaced in place with a spinner — so the
+   *  user sees activity at the start of the row rather than at the far right. */
+  isLoading?: boolean;
 }
 
 /** Icon + label header for a tool, using the unified color config */
-export function ToolHeader({ toolName, label }: ToolHeaderProps) {
+export function ToolHeader({ toolName, label, isLoading = false }: ToolHeaderProps) {
   const config = getToolBadgeConfig(toolName);
 
   // Resize icon from size-2.5 (badge) to size-3 (header) for readability
@@ -38,13 +42,15 @@ export function ToolHeader({ toolName, label }: ToolHeaderProps) {
   }
 
   return (
-    <div className={`flex items-center gap-1.5 text-sm font-medium ${config.colors.text}`}>
-      {displayIcon && (
-        <span className={`flex h-4 w-4 items-center justify-center ${config.colors.iconColor}`}>
-          {displayIcon}
+    <div className={`flex min-w-0 items-center gap-1.5 text-sm font-medium ${config.colors.text}`}>
+      {(isLoading || displayIcon) && (
+        <span
+          className={`flex h-4 w-4 shrink-0 items-center justify-center ${config.colors.iconColor}`}
+        >
+          {isLoading ? <Loader2 className="size-3 animate-spin" /> : displayIcon}
         </span>
       )}
-      <span className="tracking-tight">{label}</span>
+      <span className="min-w-0 truncate tracking-tight">{label}</span>
     </div>
   );
 }
