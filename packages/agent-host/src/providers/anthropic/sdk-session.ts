@@ -102,6 +102,35 @@ const THINKING_TOKENS: Record<ThinkingEffort, number> = {
   max: 32000,
 };
 
+/**
+ * Whether a model requires/prefers adaptive thinking mode.
+ *
+ * - Opus 4.7+ outright rejects manual `{ type: "enabled", budget_tokens: N }`
+ *   with a 400 error and requires `{ type: "adaptive" }`.
+ * - Opus 4.6 and Sonnet 4.6 *accept* manual mode but it's deprecated — and
+ *   without the `interleaved-thinking-2025-05-14` beta header the API stops
+ *   emitting `thinking_delta` events (only `signature_delta`), which means
+ *   no visible reasoning text streams to the UI. Adaptive mode enables
+ *   interleaved thinking automatically and produces visible thinking deltas.
+ * - Older models (≤4.5) still use manual mode with an explicit budget.
+ */
+function requiresAdaptiveThinking(model: string): boolean {
+  // Match e.g. "claude-opus-4-7", "claude-opus-4-7[1m]", "claude-opus-5-0"
+  const m = model.match(/claude-(opus|sonnet|haiku)-(\d+)-(\d+)/);
+  if (!m) return false;
+  const family = m[1];
+  const major = Number.parseInt(m[2], 10);
+  const minor = Number.parseInt(m[3], 10);
+  // 4.6+ on any family — manual mode is deprecated; use adaptive for visible thinking.
+  if (
+    (family === "opus" || family === "sonnet" || family === "haiku") &&
+    (major > 4 || (major === 4 && minor >= 6))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 const CLAUDE_MD_NAME = "CLAUDE.md";
 
 function normalizePathForTraversal(path: string): string {
@@ -545,12 +574,25 @@ export class SDKSession extends EventEmitter {
       // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum
       disallowedTools: DISALLOWED_TOOLS,
 
-      // Thinking configuration
+      // Thinking configuration — Opus 4.7+ requires adaptive mode; older
+      // models use manual mode with an explicit token budget.
+      // `display: "summarized"` is required for the API to emit visible
+      // `thinking_delta` events; without it the default is "omitted" and
+      // only the signature streams through (no reasoning text).
       ...(this.effort
-        ? {
-            thinking: { type: "enabled", budgetTokens: THINKING_TOKENS[this.effort] },
-            effort: this.effort,
-          }
+        ? requiresAdaptiveThinking(this.model)
+          ? {
+              thinking: { type: "adaptive" as const, display: "summarized" as const },
+              effort: this.effort,
+            }
+          : {
+              thinking: {
+                type: "enabled" as const,
+                budgetTokens: THINKING_TOKENS[this.effort] ?? THINKING_TOKENS.high,
+                display: "summarized" as const,
+              },
+              effort: this.effort,
+            }
         : {}),
 
       // Permissions — bypass everything (headless mode)
