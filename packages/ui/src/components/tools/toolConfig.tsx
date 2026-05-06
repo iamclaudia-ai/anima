@@ -110,6 +110,11 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
         icon: <Sparkles className="size-2.5" />,
         colors: roseColors,
       };
+    case "ToolSearch":
+      return {
+        icon: <Search className="size-2.5" />,
+        colors: roseColors,
+      };
 
     // Notebook — Teal
     case "NotebookEdit":
