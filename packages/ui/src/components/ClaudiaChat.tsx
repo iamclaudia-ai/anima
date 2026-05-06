@@ -343,6 +343,7 @@ function ChatInner({
           usage={gateway.usage}
           onSend={handleSend}
           onInterrupt={gateway.sendInterrupt}
+          gitStatus={gateway.gitStatus}
         />
       </div>
     </WorkspaceProvider>

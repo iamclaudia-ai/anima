@@ -3,6 +3,8 @@ import { FileText, FileImage, File, X, ArrowUp } from "lucide-react";
 import type { Attachment, Usage } from "../types";
 import { useBridge } from "../bridge";
 import { Bogart } from "./Bogart";
+import { GitStatusBar } from "./GitStatusBar";
+import type { GitStatusInfo } from "../hooks/useChatGateway";
 
 function getFileIcon(mediaType: string) {
   if (mediaType.startsWith("image/")) return FileImage;
@@ -20,6 +22,7 @@ interface InputAreaProps {
   usage: Usage | null;
   onSend(): void;
   onInterrupt(): void;
+  gitStatus?: GitStatusInfo | null;
 }
 
 export function InputArea({
@@ -32,6 +35,7 @@ export function InputArea({
   usage,
   onSend,
   onInterrupt,
+  gitStatus,
 }: InputAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -521,6 +525,8 @@ export function InputArea({
           </div>
         )}
       </div>
+
+      <GitStatusBar status={gitStatus ?? null} />
     </footer>
   );
 }

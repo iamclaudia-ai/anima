@@ -43,6 +43,27 @@ export interface SessionInfo {
   gitBranch?: string;
 }
 
+export interface GitStatusInfo {
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  dirty: {
+    modified: number;
+    added: number;
+    deleted: number;
+    untracked: number;
+    renamed: number;
+    total: number;
+  };
+  pr: {
+    number: number;
+    url: string;
+    title: string;
+    state: string;
+    isDraft?: boolean;
+  } | null;
+}
+
 export interface SubagentInfo {
   subagentId: string;
   parentSessionId: string;
@@ -129,6 +150,8 @@ export interface UseChatGatewayReturn {
   connectionId: string | null;
   /** Latest hook state per hookId (e.g., { "git-status": { modified: 2, ... } }) */
   hookState: Record<string, unknown>;
+  /** Latest git status emitted at end-of-turn for the active session. */
+  gitStatus: GitStatusInfo | null;
   messagesContainerRef: React.RefObject<HTMLDivElement | null>;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -157,6 +180,7 @@ export function useChatGateway(
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   const [hookState, setHookState] = useState<Record<string, unknown>>({});
+  const [gitStatus, setGitStatus] = useState<GitStatusInfo | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -463,6 +487,7 @@ export function useChatGateway(
           "process_ended",
           "session_stale",
           "process_died",
+          "git_status",
         ].includes(eventType)
       ) {
         setIsQuerying(true);
@@ -518,6 +543,25 @@ export function useChatGateway(
           stopToolTickSimulation();
           setIsQuerying(false);
           break;
+
+        case "git_status": {
+          const p = payload as Partial<GitStatusInfo> & { sessionId?: string };
+          setGitStatus({
+            branch: p.branch ?? null,
+            ahead: p.ahead ?? 0,
+            behind: p.behind ?? 0,
+            dirty: p.dirty ?? {
+              modified: 0,
+              added: 0,
+              deleted: 0,
+              untracked: 0,
+              renamed: 0,
+              total: 0,
+            },
+            pr: p.pr ?? null,
+          });
+          break;
+        }
 
         case "message_start": {
           // Filter out Haiku model responses (they contain <is_displaying_contents> artifacts)
@@ -739,6 +783,9 @@ export function useChatGateway(
       if (method === "session.get_history") {
         const historyMessages = payload.messages as Message[] | undefined;
         const historyUsage = payload.usage as Usage | undefined;
+        const historyGitStatus = payload.gitStatus as
+          | (GitStatusInfo & { capturedAt?: string })
+          | undefined;
         const total = (payload.total as number) || 0;
         const more = (payload.hasMore as boolean) || false;
         const offset = (payload.offset as number) || 0;
@@ -777,6 +824,22 @@ export function useChatGateway(
         }
         setTotalMessages(total);
         setHasMore(more);
+        if (offset === 0 && historyGitStatus) {
+          setGitStatus({
+            branch: historyGitStatus.branch ?? null,
+            ahead: historyGitStatus.ahead ?? 0,
+            behind: historyGitStatus.behind ?? 0,
+            dirty: historyGitStatus.dirty ?? {
+              modified: 0,
+              added: 0,
+              deleted: 0,
+              untracked: 0,
+              renamed: 0,
+              total: 0,
+            },
+            pr: historyGitStatus.pr ?? null,
+          });
+        }
         // Always set usage - use provided data or initialize to zero if not available
         if (historyUsage) {
           setUsage(normalizeUsage(historyUsage));
@@ -850,6 +913,7 @@ export function useChatGateway(
           setMessages(() => []);
           setSubagents(() => []);
           setUsage(null);
+          setGitStatus(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
@@ -871,6 +935,7 @@ export function useChatGateway(
           setMessages(() => []);
           setSubagents(() => []);
           setUsage(null);
+          setGitStatus(null);
           setTotalMessages(0);
           setHasMore(false);
           historyLoadedRef.current = false;
@@ -1269,6 +1334,7 @@ export function useChatGateway(
     onEvent,
     connectionId: connectionIdRef.current,
     hookState,
+    gitStatus,
     messagesContainerRef,
     messagesEndRef,
   };

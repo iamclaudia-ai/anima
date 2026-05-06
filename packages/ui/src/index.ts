@@ -43,6 +43,7 @@ export type {
   WorkspaceInfo,
   SessionInfo,
   SubagentInfo,
+  GitStatusInfo,
 } from "./hooks/useChatGateway";
 export type { UseGatewayClientOptions, UseGatewayClientReturn } from "./hooks/useGatewayClient";
 
@@ -56,6 +57,7 @@ export { InputArea } from "./components/InputArea";
 export { CopyButton } from "./components/CopyButton";
 export { ClaudiaThinking } from "./components/ClaudiaThinking";
 export { SubagentActivityStrip } from "./components/SubagentActivityStrip";
+export { GitStatusBar } from "./components/GitStatusBar";
 export { LayoutManager } from "./components/LayoutManager";
 export type { PanelRegistration, PanelRegistry } from "./components/LayoutManager";
 export { ErrorBoundary } from "./components/ErrorBoundary";
