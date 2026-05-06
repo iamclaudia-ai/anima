@@ -13,6 +13,7 @@ import { CopyButton } from "./CopyButton";
 import CompactionBoundary from "./CompactionBoundary";
 import { FileText, FileImage, File, OctagonX } from "lucide-react";
 import { InlineExpansionProvider } from "./InlineExpansionProvider";
+import { ToolTimeline } from "./tools/ToolTimeline";
 
 function getFileIcon(mediaType: string) {
   if (mediaType.startsWith("image/")) return FileImage;
@@ -32,43 +33,118 @@ function formatTimestamp(ts?: number): string | null {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-/** Check if a message contains only tool-like blocks (thinking / tool_use / empty text) */
-function isToolOnlyMessage(msg: Message): boolean {
-  if (msg.role !== "assistant") return false;
-  return msg.blocks.every(
-    (b) =>
-      b.type === "thinking" || b.type === "tool_use" || (b.type === "text" && !b.content?.trim()),
-  );
+/** Strip invisible characters (zero-width spaces, BOM, etc.) and trim. */
+function isBlankText(content: string | undefined): boolean {
+  if (!content) return true;
+  // Remove zero-width chars (U+200B..U+200D), word-joiner (U+2060), BOM (U+FEFF) —
+  // String.prototype.trim doesn't classify these as whitespace.
+  return content.replace(/[​-‍⁠﻿]/g, "").trim().length === 0;
 }
 
-/** A "display row" is either a single message, a group of consecutive tool-only messages, or a compaction boundary */
-type DisplayRow =
-  | { kind: "message"; msg: Message; msgIdx: number }
-  | { kind: "tool-row"; messages: Array<{ msg: Message; msgIdx: number }> }
-  | { kind: "boundary"; msg: Message; msgIdx: number };
+/**
+ * A "segment" is a slice of the message stream we render as one display row.
+ * Assistant messages are sliced at non-tool block boundaries so consecutive
+ * tool-like blocks across messages merge into a single timeline.
+ */
+type ToolEntry = {
+  msgIdx: number;
+  blockIdx: number;
+  block: ContentBlock;
+  /** Whether this entry is the very last block across all messages. */
+  isLastInAllMessages: boolean;
+};
 
-/** Group consecutive tool-only assistant messages into combined rows */
-function buildDisplayRows(messages: Message[]): DisplayRow[] {
-  const rows: DisplayRow[] = [];
+type Segment =
+  | { kind: "boundary"; msg: Message; msgIdx: number }
+  | { kind: "user"; msg: Message; msgIdx: number }
+  | { kind: "tool-row"; entries: ToolEntry[] }
+  | {
+      kind: "assistant-text";
+      msg: Message;
+      msgIdx: number;
+      block: TextBlock & { originalIndex: number };
+      isFirstTextInMsg: boolean;
+    }
+  | {
+      kind: "assistant-error";
+      msg: Message;
+      msgIdx: number;
+      block: ErrorBlock & { originalIndex: number };
+    }
+  | {
+      kind: "assistant-unknown";
+      msg: Message;
+      msgIdx: number;
+      block: ContentBlock & { originalIndex: number };
+    }
+  | { kind: "aborted"; msg: Message; msgIdx: number };
+
+function buildSegments(messages: Message[]): Segment[] {
+  const segments: Segment[] = [];
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
 
     if (msg.role === "compaction_boundary") {
-      rows.push({ kind: "boundary", msg, msgIdx: i });
-    } else if (isToolOnlyMessage(msg)) {
-      const lastRow = rows[rows.length - 1];
-      if (lastRow?.kind === "tool-row") {
-        lastRow.messages.push({ msg, msgIdx: i });
+      segments.push({ kind: "boundary", msg, msgIdx: i });
+      continue;
+    }
+
+    if (msg.role === "user") {
+      segments.push({ kind: "user", msg, msgIdx: i });
+      continue;
+    }
+
+    // Assistant — slice blocks into tool / non-tool segments. Tool segments
+    // merge with adjacent tool segments (including those from the previous
+    // message) so back-to-back tool calls form a single timeline.
+    let firstTextSeen = false;
+    for (let j = 0; j < msg.blocks.length; j++) {
+      const block = msg.blocks[j];
+      const isLastInAllMessages = i === messages.length - 1 && j === msg.blocks.length - 1;
+      const isToolLike =
+        block.type === "thinking" ||
+        block.type === "tool_use" ||
+        (block.type === "text" && isBlankText(block.content));
+
+      if (isToolLike) {
+        const last = segments[segments.length - 1];
+        const entry: ToolEntry = { msgIdx: i, blockIdx: j, block, isLastInAllMessages };
+        if (last?.kind === "tool-row") last.entries.push(entry);
+        else segments.push({ kind: "tool-row", entries: [entry] });
+      } else if (block.type === "text") {
+        const isFirst = !firstTextSeen;
+        firstTextSeen = true;
+        segments.push({
+          kind: "assistant-text",
+          msg,
+          msgIdx: i,
+          block: { ...block, originalIndex: j },
+          isFirstTextInMsg: isFirst,
+        });
+      } else if (block.type === "error") {
+        segments.push({
+          kind: "assistant-error",
+          msg,
+          msgIdx: i,
+          block: { ...block, originalIndex: j },
+        });
       } else {
-        rows.push({ kind: "tool-row", messages: [{ msg, msgIdx: i }] });
+        segments.push({
+          kind: "assistant-unknown",
+          msg,
+          msgIdx: i,
+          block: { ...block, originalIndex: j } as ContentBlock & { originalIndex: number },
+        });
       }
-    } else {
-      rows.push({ kind: "message", msg, msgIdx: i });
+    }
+
+    if (msg.aborted) {
+      segments.push({ kind: "aborted", msg, msgIdx: i });
     }
   }
 
-  return rows;
+  return segments;
 }
 
 interface MessageListProps {
@@ -98,7 +174,8 @@ export function MessageList({
   onSendToolResult,
 }: MessageListProps) {
   const remainingCount = totalMessages - messages.length;
-  const displayRows = buildDisplayRows(messages);
+  const segments = buildSegments(messages);
+  const lastMsgIdx = messages.length - 1;
 
   return (
     <InlineExpansionProvider containerRef={messagesContainerRef}>
@@ -119,108 +196,177 @@ export function MessageList({
             )}
           </button>
         )}
-        {displayRows.map((row, rowIdx) => {
+        {segments.map((seg, idx) => {
           // ── Compaction boundary ──
-          if (row.kind === "boundary") {
+          if (seg.kind === "boundary") {
             return (
               <CompactionBoundary
-                key={`boundary-${rowIdx}`}
-                trigger={row.msg.compaction?.trigger || "auto"}
-                preTokens={row.msg.compaction?.pre_tokens || 0}
-                timestamp={row.msg.timestamp}
+                key={`boundary-${idx}`}
+                trigger={seg.msg.compaction?.trigger || "auto"}
+                preTokens={seg.msg.compaction?.pre_tokens || 0}
+                timestamp={seg.msg.timestamp}
               />
             );
           }
 
-          // ── Tool row: grouped badges in a single flex-wrap container ──
-          if (row.kind === "tool-row") {
-            // Only allow interaction on the very latest message
-            const isLatestRow = row.messages.some(({ msgIdx: mi }) => mi === messages.length - 1);
+          // ── User message ──
+          if (seg.kind === "user") {
             return (
-              <div key={`toolrow-${rowIdx}`} className="mr-12">
-                <div className="flex flex-wrap gap-2 my-1">
-                  {row.messages.flatMap(({ msg, msgIdx }) =>
-                    msg.blocks.map((block, blockIdx) => {
-                      if (block.type === "thinking") {
-                        const isLast =
-                          msgIdx === messages.length - 1 && blockIdx === msg.blocks.length - 1;
-                        return (
-                          <MessageContent
-                            key={`${msgIdx}-${blockIdx}`}
-                            content={block.content}
-                            type="thinking"
-                            isLoading={isLast && isQuerying}
-                          />
-                        );
-                      }
-                      if (block.type === "tool_use") {
-                        const isInteractiveTool =
-                          block.name === "ExitPlanMode" || block.name === "EnterPlanMode";
-                        return (
-                          <ToolCallBlock
-                            key={block.id}
-                            name={block.name}
-                            input={block.input}
-                            result={block.result}
-                            isLoading={!block.result && isQuerying}
-                            toolUseId={block.id}
-                            onSendMessage={
-                              isLatestRow || isInteractiveTool ? onSendMessage : undefined
-                            }
-                            onSendToolResult={
-                              isLatestRow || isInteractiveTool ? onSendToolResult : undefined
-                            }
-                          />
-                        );
-                      }
-                      // Skip empty text blocks in tool rows
-                      return null;
-                    }),
+              <div key={`user-${seg.msgIdx}`} className="ml-12">
+                <UserHeader msg={seg.msg} />
+                <UserMessage msg={seg.msg} />
+              </div>
+            );
+          }
+
+          // ── Tool timeline (may span multiple messages) ──
+          if (seg.kind === "tool-row") {
+            const isLatestRow = seg.entries.some((e) => e.msgIdx === lastMsgIdx);
+            return (
+              <div key={`toolrow-${idx}`} className="mr-12">
+                <ToolTimeline>
+                  {seg.entries.map((entry) => {
+                    const { block, isLastInAllMessages, msgIdx, blockIdx } = entry;
+                    if (block.type === "thinking") {
+                      return (
+                        <MessageContent
+                          key={`${msgIdx}-${blockIdx}`}
+                          content={(block as TextBlock).content}
+                          type="thinking"
+                          isLoading={isLastInAllMessages && isQuerying}
+                        />
+                      );
+                    }
+                    if (block.type === "tool_use") {
+                      const tool = block as ToolUseBlock;
+                      const isInteractiveTool =
+                        tool.name === "ExitPlanMode" || tool.name === "EnterPlanMode";
+                      return (
+                        <ToolCallBlock
+                          key={tool.id}
+                          name={tool.name}
+                          input={tool.input}
+                          result={tool.result}
+                          isLoading={!tool.result && isQuerying}
+                          toolUseId={tool.id}
+                          onSendMessage={
+                            isLatestRow || isInteractiveTool ? onSendMessage : undefined
+                          }
+                          onSendToolResult={
+                            isLatestRow || isInteractiveTool ? onSendToolResult : undefined
+                          }
+                        />
+                      );
+                    }
+                    // Empty text block — no-op
+                    return null;
+                  })}
+                </ToolTimeline>
+              </div>
+            );
+          }
+
+          // ── Assistant text paragraph ──
+          if (seg.kind === "assistant-text") {
+            return (
+              <div key={`atext-${seg.msgIdx}-${seg.block.originalIndex}`} className="mr-12">
+                {seg.isFirstTextInMsg && <AssistantHeader msg={seg.msg} />}
+                <MessageContent content={seg.block.content} type="assistant" />
+              </div>
+            );
+          }
+
+          // ── Assistant error block ──
+          if (seg.kind === "assistant-error") {
+            const err = seg.block;
+            if (err.isRetrying) {
+              return (
+                <div
+                  key={`aerr-${seg.msgIdx}-${err.originalIndex}`}
+                  className="mr-12 mt-2 px-3 py-2 text-sm bg-amber-50 border border-amber-200 rounded-md flex items-center gap-2"
+                >
+                  <svg
+                    className="w-4 h-4 text-amber-500 animate-spin shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <span className="text-amber-700">{err.message}</span>
+                  {err.retryInMs && (
+                    <span className="text-amber-500 text-xs ml-auto">
+                      retrying in {(err.retryInMs / 1000).toFixed(0)}s
+                    </span>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div
+                key={`aerr-${seg.msgIdx}-${err.originalIndex}`}
+                className="mr-12 mt-2 px-3 py-2 text-sm bg-red-50 border border-red-200 rounded-md"
+              >
+                <div className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-red-500 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                    />
+                  </svg>
+                  <span className="text-red-700 font-medium">{err.message}</span>
+                  {err.status && (
+                    <span className="text-red-400 text-xs ml-auto">HTTP {err.status}</span>
                   )}
                 </div>
               </div>
             );
           }
 
-          // ── Regular message ──
-          const { msg, msgIdx } = row;
+          // ── Aborted indicator ──
+          if (seg.kind === "aborted") {
+            return (
+              <div
+                key={`aborted-${seg.msgIdx}`}
+                className="mr-12 mt-3 flex items-center gap-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md w-fit"
+              >
+                <OctagonX className="w-4 h-4 flex-shrink-0" />
+                <span>Interrupted · What should Claudia do instead?</span>
+              </div>
+            );
+          }
+
+          // ── Unknown block fallback ──
           return (
-            <div key={msgIdx} className={msg.role === "user" ? "ml-12" : "mr-12"}>
-              {/* Copy button + timestamp — only for messages with text content */}
-              {(() => {
-                const hasText = msg.blocks.some((b) => b.type === "text" && b.content?.trim());
-                if (!hasText) return null;
-                const rawContent = getMessageRawContent(msg.blocks);
-                const time = formatTimestamp(msg.timestamp);
-                const isUser = msg.role === "user";
-                return (
-                  <div className={`flex items-center gap-2 mb-1 ${isUser ? "justify-end" : ""}`}>
-                    {isUser ? (
-                      <>
-                        {time && <span className="text-xs text-gray-400">{time}</span>}
-                        <CopyButton text={rawContent} />
-                      </>
-                    ) : (
-                      <>
-                        <CopyButton text={rawContent} />
-                        {time && <span className="text-xs text-gray-400">{time}</span>}
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-              {msg.role === "user" ? (
-                <UserMessage msg={msg} />
-              ) : (
-                <AssistantMessage
-                  msg={msg}
-                  msgIdx={msgIdx}
-                  totalMessages={messages.length}
-                  isQuerying={isQuerying}
-                  onSendMessage={msgIdx === messages.length - 1 ? onSendMessage : undefined}
-                  onSendToolResult={msgIdx === messages.length - 1 ? onSendToolResult : undefined}
-                />
-              )}
+            <div
+              key={`unknown-${idx}`}
+              className="mr-12 mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
+            >
+              <div className="text-sm font-mono text-yellow-800">
+                <strong>Unknown message type:</strong>{" "}
+                {(seg.block as { type?: string }).type || "undefined"}
+              </div>
+              <pre className="text-xs text-yellow-700 mt-1 whitespace-pre-wrap">
+                {JSON.stringify(seg.block, null, 2)}
+              </pre>
             </div>
           );
         })}
@@ -231,6 +377,31 @@ export function MessageList({
 }
 
 // ── Sub-components ──────────────────────────────────────────
+
+function UserHeader({ msg }: { msg: Message }) {
+  const hasText = msg.blocks.some((b) => b.type === "text" && b.content?.trim());
+  if (!hasText) return null;
+  const rawContent = getMessageRawContent(msg.blocks);
+  const time = formatTimestamp(msg.timestamp);
+  return (
+    <div className="flex items-center gap-2 mb-1 justify-end">
+      {time && <span className="text-xs text-gray-400">{time}</span>}
+      <CopyButton text={rawContent} />
+    </div>
+  );
+}
+
+function AssistantHeader({ msg }: { msg: Message }) {
+  const rawContent = getMessageRawContent(msg.blocks);
+  const time = formatTimestamp(msg.timestamp);
+  if (!rawContent.trim()) return null;
+  return (
+    <div className="flex items-center gap-2 mb-1">
+      <CopyButton text={rawContent} />
+      {time && <span className="text-xs text-gray-400">{time}</span>}
+    </div>
+  );
+}
 
 function UserMessage({ msg }: { msg: Message }) {
   return (
@@ -273,182 +444,5 @@ function UserMessage({ msg }: { msg: Message }) {
           <MessageContent key={idx} content={block.content} type="user" />
         ))}
     </div>
-  );
-}
-
-function AssistantMessage({
-  msg,
-  isQuerying,
-  onSendMessage,
-  onSendToolResult,
-}: {
-  msg: Message;
-  msgIdx: number;
-  totalMessages: number;
-  isQuerying: boolean;
-  onSendMessage?: (text: string) => void;
-  onSendToolResult?: (toolUseId: string, content: string, isError?: boolean) => void;
-}) {
-  // Group blocks within this message: consecutive tool-like → flex row, text/error → standalone
-  const groups: Array<{
-    type: "text" | "tool-group" | "error" | "unknown";
-    blocks: Array<ContentBlock & { originalIndex: number }>;
-  }> = [];
-
-  for (let i = 0; i < msg.blocks.length; i++) {
-    const block = { ...msg.blocks[i], originalIndex: i };
-    const isToolLike = block.type === "thinking" || block.type === "tool_use";
-
-    if (isToolLike) {
-      const lastGroup = groups[groups.length - 1];
-      if (lastGroup?.type === "tool-group") {
-        lastGroup.blocks.push(block);
-      } else {
-        groups.push({ type: "tool-group", blocks: [block] });
-      }
-    } else if (block.type === "error") {
-      groups.push({ type: "error", blocks: [block] });
-    } else if (block.type === "text") {
-      groups.push({ type: "text", blocks: [block] });
-    } else {
-      groups.push({ type: "unknown", blocks: [block] });
-    }
-  }
-
-  return (
-    <>
-      {groups.map((group, groupIdx) => {
-        if (group.type === "tool-group") {
-          return (
-            <div key={`group-${groupIdx}`} className="flex flex-wrap gap-2 my-1">
-              {group.blocks.map((block) => {
-                const blockIdx = block.originalIndex;
-                if (block.type === "thinking") {
-                  const isLast = blockIdx === msg.blocks.length - 1;
-                  return (
-                    <MessageContent
-                      key={blockIdx}
-                      content={(block as TextBlock).content}
-                      type="thinking"
-                      isLoading={isLast && isQuerying}
-                    />
-                  );
-                }
-                if (block.type === "tool_use") {
-                  const tool = block as ToolUseBlock;
-                  return (
-                    <ToolCallBlock
-                      key={tool.id}
-                      name={tool.name}
-                      input={tool.input}
-                      result={tool.result}
-                      isLoading={!tool.result && isQuerying}
-                      toolUseId={tool.id}
-                      onSendMessage={onSendMessage}
-                      onSendToolResult={onSendToolResult}
-                    />
-                  );
-                }
-                return null;
-              })}
-            </div>
-          );
-        }
-
-        if (group.type === "error") {
-          const err = group.blocks[0] as ErrorBlock & { originalIndex: number };
-          if (err.isRetrying) {
-            return (
-              <div
-                key={err.originalIndex}
-                className="mt-2 px-3 py-2 text-sm bg-amber-50 border border-amber-200 rounded-md flex items-center gap-2"
-              >
-                <svg
-                  className="w-4 h-4 text-amber-500 animate-spin shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                <span className="text-amber-700">{err.message}</span>
-                {err.retryInMs && (
-                  <span className="text-amber-500 text-xs ml-auto">
-                    retrying in {(err.retryInMs / 1000).toFixed(0)}s
-                  </span>
-                )}
-              </div>
-            );
-          }
-          return (
-            <div
-              key={err.originalIndex}
-              className="mt-2 px-3 py-2 text-sm bg-red-50 border border-red-200 rounded-md"
-            >
-              <div className="flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-red-500 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                  />
-                </svg>
-                <span className="text-red-700 font-medium">{err.message}</span>
-                {err.status && (
-                  <span className="text-red-400 text-xs ml-auto">HTTP {err.status}</span>
-                )}
-              </div>
-            </div>
-          );
-        }
-
-        if (group.type === "text") {
-          const text = group.blocks[0] as TextBlock & { originalIndex: number };
-          if (!text.content || text.content.trim().length === 0) return null;
-          return (
-            <MessageContent key={text.originalIndex} content={text.content} type="assistant" />
-          );
-        }
-
-        // Unknown block type fallback
-        const block = group.blocks[0];
-        return (
-          <div
-            key={`unknown-${groupIdx}`}
-            className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
-          >
-            <div className="text-sm font-mono text-yellow-800">
-              <strong>Unknown message type:</strong> {(block as any).type || "undefined"}
-            </div>
-            <pre className="text-xs text-yellow-700 mt-1 whitespace-pre-wrap">
-              {JSON.stringify(block, null, 2)}
-            </pre>
-          </div>
-        );
-      })}
-      {msg.aborted && (
-        <div className="mt-3 flex items-center gap-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md w-fit">
-          <OctagonX className="w-4 h-4 flex-shrink-0" />
-          <span>Interrupted · What should Claudia do instead?</span>
-        </div>
-      )}
-    </>
   );
 }

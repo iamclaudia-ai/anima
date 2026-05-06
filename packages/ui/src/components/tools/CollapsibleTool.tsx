@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { useId, useState, useRef, useEffect, type ReactNode } from "react";
 import { getToolBadgeConfig } from "./toolConfig";
 import { useInlineExpansion } from "../InlineExpansionProvider";
+import { useToolVariant } from "./ToolVariantContext";
 
 interface CollapsibleToolProps {
   collapsedContent: ReactNode;
@@ -22,13 +23,20 @@ export function CollapsibleTool({
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inlineExpansion = useInlineExpansion();
+  const variant = useToolVariant();
   const expansionId = useId();
   const hasExpandedContent = expandedContent !== null && expandedContent !== undefined;
-  const isExpanded = inlineExpansion ? inlineExpansion.isOpen(expansionId) : fallbackExpanded;
 
-  // Close on click outside
+  // Inline-expansion (popover portal) is only used in badge mode. In timeline
+  // mode the expanded panel renders inline beneath the row, so we always use
+  // local state regardless of any ambient InlineExpansionProvider.
+  const usingInline = variant === "badge" && !!inlineExpansion;
+  const isExpanded = usingInline ? inlineExpansion!.isOpen(expansionId) : fallbackExpanded;
+
+  // Close on click outside (badge fallback only — timeline expansions stay open until toggled)
   useEffect(() => {
-    if (inlineExpansion) return;
+    if (usingInline) return;
+    if (variant === "timeline") return;
     if (!isExpanded) return;
     function handleClick(e: MouseEvent) {
       if (
@@ -42,11 +50,47 @@ export function CollapsibleTool({
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [inlineExpansion, isExpanded]);
+  }, [usingInline, isExpanded, variant]);
 
-  // Get tool-specific colors for the container
   const config = toolName ? getToolBadgeConfig(toolName) : null;
   const chevronColor = config?.colors.chevron || "text-neutral-400";
+
+  // ── Timeline rendering: bare row (icon + label + chevron), no pill. ──
+  if (variant === "timeline") {
+    return (
+      <>
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={() => {
+            if (!hasExpandedContent) return;
+            setFallbackExpanded((v) => !v);
+          }}
+          disabled={!hasExpandedContent && !isLoading}
+          aria-expanded={isExpanded}
+          className={`flex w-full items-center gap-1.5 text-left ${
+            hasExpandedContent ? "cursor-pointer" : "cursor-default"
+          }`}
+        >
+          <div className="min-w-0">{collapsedContent}</div>
+          {isLoading && (
+            <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center">
+              <Loader2 className={`size-3 animate-spin ${chevronColor}`} />
+            </span>
+          )}
+        </button>
+        {isExpanded && hasExpandedContent && (
+          <div className="mt-1 ml-6">
+            <div className="rounded-md border border-neutral-200 bg-white p-3 space-y-1.5">
+              {expandedContent}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ── Badge rendering (default) ───────────────────────────────
   const containerBorder = config?.colors.border || "border-neutral-200/60";
   const containerBg = config?.colors.bg || "bg-neutral-50/80";
   const containerHover = config?.colors.hoverBg || "hover:bg-neutral-100/80";

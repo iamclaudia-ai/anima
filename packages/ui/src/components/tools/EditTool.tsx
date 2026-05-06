@@ -10,7 +10,22 @@ export default function EditTool({ name, parsedInput, result: _result, isLoading
   const newString = parsedInput?.new_string as string | undefined;
   const replaceAll = parsedInput?.replace_all as boolean | undefined;
 
-  const collapsedContent = <ToolHeader toolName={name} label={label} />;
+  const countLines = (s: string | undefined) =>
+    s === undefined || s === "" ? 0 : s.split("\n").length;
+  const removed = countLines(oldString);
+  const added = countLines(newString);
+
+  const collapsedContent = (
+    <div className="flex items-center gap-1.5">
+      <ToolHeader toolName={name} label={label} />
+      {(added > 0 || removed > 0) && (
+        <span className="flex items-center gap-1 font-mono text-xs">
+          {added > 0 && <span className="text-emerald-600">+{added}</span>}
+          {removed > 0 && <span className="text-red-600">-{removed}</span>}
+        </span>
+      )}
+    </div>
+  );
 
   const expandedContent = (
     <div className="space-y-1.5">

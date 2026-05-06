@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Copy, Check, Loader2 } from "lucide-react";
 import { useBridge } from "../bridge";
 import { getThinkingBadgeConfig, getThinkingLabel } from "./tools/toolConfig";
 import { useInlineExpansion } from "./InlineExpansionProvider";
+import { useToolVariant } from "./tools/ToolVariantContext";
 
 interface MessageContentProps {
   content: string;
@@ -86,6 +87,7 @@ export const MessageContent = memo(function MessageContent({
   const [fallbackExpanded, setFallbackExpanded] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inlineExpansion = useInlineExpansion();
+  const variant = useToolVariant();
   const expansionId = useId();
 
   const markdown = remend(content);
@@ -119,7 +121,8 @@ export const MessageContent = memo(function MessageContent({
     const thinkingConfig = getThinkingBadgeConfig();
     const hasContent = content?.trim().length > 0;
     const label = getThinkingLabel(!isLoading);
-    const isExpanded = inlineExpansion ? inlineExpansion.isOpen(expansionId) : fallbackExpanded;
+    const useInline = variant === "badge" && !!inlineExpansion;
+    const isExpanded = useInline ? inlineExpansion!.isOpen(expansionId) : fallbackExpanded;
     const expandedThinkingContent = (
       <div
         className="prose prose-sm max-w-none font-serif text-neutral-500 italic overflow-hidden break-words
@@ -142,6 +145,49 @@ export const MessageContent = memo(function MessageContent({
         </ReactMarkdown>
       </div>
     );
+
+    // ── Timeline rendering: bare row (icon + label + chevron), no pill. ──
+    if (variant === "timeline") {
+      return (
+        <>
+          <button
+            ref={buttonRef}
+            type="button"
+            onClick={() => {
+              if (!hasContent) return;
+              setFallbackExpanded((v) => !v);
+            }}
+            disabled={!hasContent}
+            aria-expanded={isExpanded}
+            className={`flex w-full items-center gap-1.5 text-left ${
+              hasContent ? "cursor-pointer" : "cursor-default"
+            }`}
+          >
+            <div
+              className={`flex items-center gap-1.5 text-sm font-medium ${thinkingConfig.colors.text}`}
+            >
+              {isLoading ? (
+                <Loader2 className={`size-3 animate-spin ${thinkingConfig.colors.iconColor}`} />
+              ) : (
+                thinkingConfig.icon && (
+                  <span className={`shrink-0 ${thinkingConfig.colors.iconColor}`}>
+                    {thinkingConfig.icon}
+                  </span>
+                )
+              )}
+              <span>{label}</span>
+            </div>
+          </button>
+          {isExpanded && hasContent && (
+            <div className="mt-1 ml-6">
+              <div className="rounded-md border border-neutral-200 bg-white p-3">
+                {expandedThinkingContent}
+              </div>
+            </div>
+          )}
+        </>
+      );
+    }
 
     return (
       <div className="relative">
