@@ -20,6 +20,7 @@ import type { ComponentType, ReactNode } from "react";
 import {
   DockviewReact,
   type DockviewReadyEvent,
+  type IDockviewPanel,
   type IDockviewPanelProps,
   type DockviewApi,
 } from "dockview-react";
@@ -134,11 +135,63 @@ export interface LayoutManagerProps {
  * rebuilds — which is the only reliable way to rebuild the layout, since
  * `onReady` only fires once per dockview instance.
  */
+// Bump when the persisted layout shape becomes incompatible with new code —
+// e.g., when introducing per-panel size constraints. Old saved JSON predating
+// the change has no constraint fields, so naively restoring it yields panels
+// that ignore the new bounds. The fingerprint is keyed on this version so a
+// bump invalidates everyone's stale state in one shot.
+const LAYOUT_VERSION = "v2";
+
 function useLayoutKey(layout: LayoutNode, storageKey: string | undefined): string {
   return useMemo(
-    () => `${storageKey ?? "anon"}::${layoutFingerprint(layout)}`,
+    () => `${storageKey ?? "anon"}::${LAYOUT_VERSION}::${layoutFingerprint(layout)}`,
     [layout, storageKey],
   );
+}
+
+/**
+ * Apply registry-declared constraints to a panel's group. In dockview,
+ * constraints are stored privately on the panel at construction and are
+ * read by the group's `minimumWidth/maximumWidth` getters from `activePanel`.
+ * Calling `panel.api.setConstraints` fires an event the panel itself doesn't
+ * listen to — only the *group* listens (it extends GridviewPanel). So the
+ * working imperative path is `panel.api.group.api.setConstraints(...)`.
+ *
+ * This is idempotent — safe to call on every panel add (build, fromJSON
+ * restore, runtime toggle).
+ */
+function applyConstraintsFromRegistry(panel: IDockviewPanel, registry: PanelRegistry): void {
+  const params = panel.params as PanelWrapperParams | undefined;
+  const panelId = params?.panelId;
+  if (!panelId) return;
+  const reg = registry.get(panelId);
+  if (!reg) return;
+  if (
+    reg.minimumWidth === undefined &&
+    reg.maximumWidth === undefined &&
+    reg.minimumHeight === undefined &&
+    reg.maximumHeight === undefined
+  ) {
+    return;
+  }
+  const groupApi = panel.group?.api;
+  if (!groupApi) return;
+  groupApi.setConstraints({
+    minimumWidth: reg.minimumWidth,
+    maximumWidth: reg.maximumWidth,
+    minimumHeight: reg.minimumHeight,
+    maximumHeight: reg.maximumHeight,
+  });
+  // setConstraints updates bounds but doesn't re-clamp the current size.
+  // If the panel is currently outside the new bounds (common when restoring
+  // a pre-constraints layout, or when a toggle re-add lands in dockview's
+  // 50/50 fallback), force it back inside.
+  const w = panel.api.width;
+  if (reg.maximumWidth !== undefined && w > reg.maximumWidth) {
+    groupApi.setSize({ width: reg.maximumWidth });
+  } else if (reg.minimumWidth !== undefined && w < reg.minimumWidth) {
+    groupApi.setSize({ width: reg.minimumWidth });
+  }
 }
 
 export function LayoutManager(props: LayoutManagerProps) {
@@ -226,12 +279,21 @@ function LayoutManagerInner({
       // panel visibility, resize, subscribe to layout events.
       setLayoutApi(api);
 
+      // Wire the constraint listener BEFORE building/restoring so every
+      // panel — initial layout, fromJSON restore, runtime toggle — gets
+      // its registered min/max applied to its group. This is the single
+      // place that owns "apply constraints from registry"; addPanel call
+      // sites don't have to remember to thread them through.
+      api.onDidAddPanel((panel) => applyConstraintsFromRegistry(panel, registry));
+
       // 1. Try to restore persisted layout, but only if the fingerprint matches —
       //    a mismatch means panels were added/removed, so the saved state would
-      //    reference stale dockview instance IDs.
+      //    reference stale dockview instance IDs. The fingerprint also embeds
+      //    `LAYOUT_VERSION` so a bump (e.g., introducing constraint fields)
+      //    invalidates older saved state without each user having to clear it.
       let restored = false;
+      const fingerprint = `${LAYOUT_VERSION}::${layoutFingerprint(layout)}`;
       if (storageKey) {
-        const fingerprint = layoutFingerprint(layout);
         const fingerprintKey = `${storageKey}:fingerprint`;
         const savedFingerprint = localStorage.getItem(fingerprintKey);
         const saved = localStorage.getItem(storageKey);
@@ -259,7 +321,6 @@ function LayoutManagerInner({
       //    the first effect run and the deps don't include it, so the listener
       //    never gets attached if subscribed via useEffect. (Old bug.)
       if (storageKey) {
-        const fingerprint = layoutFingerprint(layout);
         const fingerprintKey = `${storageKey}:fingerprint`;
         api.onDidLayoutChange(() => {
           try {
