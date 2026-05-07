@@ -19,11 +19,18 @@ import { createRoot } from "react-dom/client";
 import {
   Router,
   ErrorBoundary,
+  ExtensionConfigProvider,
   GatewayClientProvider,
   GlobalNotifications,
   LoginGate,
 } from "@anima/ui";
-import type { ExtensionWebContribution, PanelContribution, PanelRegistry, Route } from "@anima/ui";
+import type {
+  ExtensionConfigMap,
+  ExtensionWebContribution,
+  PanelContribution,
+  PanelRegistry,
+  Route,
+} from "@anima/ui";
 import type { LayoutDefinition } from "@anima/shared";
 import { HomePage } from "./HomePage";
 import "@anima/ui/styles";
@@ -57,6 +64,13 @@ if (import.meta.env?.DEV) {
 interface WebContributionEntry {
   extensionId: string;
   jsUrl: string;
+  /** Public, client-safe config slice for this extension (anima.json `webConfig`). */
+  webConfig?: Record<string, unknown>;
+}
+
+interface LoadedContribution {
+  contribution: ExtensionWebContribution;
+  webConfig: Record<string, unknown>;
 }
 
 /**
@@ -99,7 +113,7 @@ function isContribution(value: unknown): value is ExtensionWebContribution {
   return true;
 }
 
-async function loadWebContributions(): Promise<ExtensionWebContribution[]> {
+async function loadWebContributions(): Promise<LoadedContribution[]> {
   let entries: WebContributionEntry[];
   try {
     const response = await fetch("/api/web-contributions");
@@ -121,11 +135,14 @@ async function loadWebContributions(): Promise<ExtensionWebContribution[]> {
     }),
   );
 
-  const contributions: ExtensionWebContribution[] = [];
+  const contributions: LoadedContribution[] = [];
   settled.forEach((result, index) => {
     const entry = entries[index]!;
     if (result.status === "fulfilled") {
-      contributions.push(result.value);
+      contributions.push({
+        contribution: result.value,
+        webConfig: entry.webConfig ?? {},
+      });
     } else {
       console.error(
         `Skipping web contribution from ${entry.extensionId}:`,
@@ -137,10 +154,17 @@ async function loadWebContributions(): Promise<ExtensionWebContribution[]> {
 }
 
 async function bootstrap(): Promise<void> {
-  const allContributions = await loadWebContributions();
-  const webContributions = allContributions
-    .filter((contribution) => contribution.enabled !== false)
+  const allLoaded = await loadWebContributions();
+  const enabledLoaded = allLoaded.filter((entry) => entry.contribution.enabled !== false);
+  const webContributions = enabledLoaded
+    .map((entry) => entry.contribution)
     .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || (a.id ?? "").localeCompare(b.id ?? ""));
+
+  // Build the id → webConfig map the SPA exposes via ExtensionConfigProvider.
+  const extensionConfigs: ExtensionConfigMap = {};
+  for (const { contribution, webConfig } of enabledLoaded) {
+    if (contribution.id) extensionConfigs[contribution.id] = webConfig;
+  }
 
   // ── Aggregate routes / panels / layouts ─────────────────────
   // The gateway owns `/` as the home page launcher. Prepending the
@@ -185,9 +209,11 @@ async function bootstrap(): Promise<void> {
     <ErrorBoundary>
       <LoginGate>
         <GatewayClientProvider>
-          <GlobalNotifications>
-            <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
-          </GlobalNotifications>
+          <ExtensionConfigProvider configs={extensionConfigs}>
+            <GlobalNotifications>
+              <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+            </GlobalNotifications>
+          </ExtensionConfigProvider>
         </GatewayClientProvider>
       </LoginGate>
     </ErrorBoundary>,

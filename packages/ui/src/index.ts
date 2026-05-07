@@ -13,6 +13,12 @@ export type { PlatformBridge } from "./bridge";
 export { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
 export { GatewayClientProvider, useGatewayClientContext } from "./contexts/GatewayClientContext";
 export type { GatewayClientProviderProps } from "./contexts/GatewayClientContext";
+export { ExtensionConfigProvider, useExtensionConfig } from "./contexts/ExtensionConfigContext";
+export type {
+  ExtensionConfigMap,
+  ExtensionConfigProviderProps,
+  ExtensionWebConfig,
+} from "./contexts/ExtensionConfigContext";
 
 // Types
 export type {

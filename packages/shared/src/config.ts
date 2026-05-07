@@ -74,6 +74,16 @@ export interface ExtensionConfig {
    */
   webStatic?: WebStaticPath[];
   config: Record<string, unknown>;
+  /**
+   * Public, client-safe configuration exposed to the SPA. Returned alongside
+   * the extension's web bundle URL via `gateway.list_web_contributions` /
+   * `/api/web-contributions`, and read on the client through
+   * `useExtensionConfig(id)` from `@anima/ui`.
+   *
+   * Keep this strictly to non-secret values (URLs, feature flags, defaults).
+   * Server-only secrets — API keys, tokens, paths — belong in `config`.
+   */
+  webConfig?: Record<string, unknown>;
 }
 
 export type ExtensionsConfig = Record<string, ExtensionConfig>;
@@ -281,6 +291,15 @@ export function getExtensionConfig(id: string): ExtensionConfig | undefined {
 export function isExtensionEnabled(id: string): boolean {
   const ext = getExtensionConfig(id);
   return ext?.enabled ?? false;
+}
+
+/**
+ * Get the public, client-safe `webConfig` slice for an extension. Returns
+ * an empty object when the extension declares no `webConfig` so callers can
+ * destructure without null checks.
+ */
+export function getExtensionWebConfig(id: string): Record<string, unknown> {
+  return getExtensionConfig(id)?.webConfig ?? {};
 }
 
 /**

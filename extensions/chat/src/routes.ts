@@ -29,12 +29,20 @@ export const chatPanels: (PanelDefinition & { component: React.ComponentType })[
 
 export const chatLayouts: Record<string, LayoutDefinition> = {
   ide: {
-    // Desktop: nav on the left, chat fills the rest. Mobile: chat only —
-    // the nav is reachable via NavigationDrawer's own hamburger affordance
-    // when we wire that up; for now mobile users land directly on chat.
+    // Desktop: nav on the left, chat in the middle, code-server (editor.viewer)
+    // on the right. The editor panel is contributed by the `editor` extension
+    // and resolved by string ID against the global panel registry — only
+    // present when the editor extension is enabled in anima.json.
+    //
+    // Mobile: chat only. The nav is reachable via NavigationDrawer's own
+    // hamburger affordance; the editor isn't useful at phone widths.
     default: {
       direction: "horizontal",
-      children: [{ panel: "chat.nav", size: 300 }, { panel: "chat.main" }],
+      children: [
+        { panel: "chat.nav", size: 280 },
+        { panel: "chat.main" },
+        { panel: "editor.viewer" },
+      ],
     },
     mobile: { panel: "chat.main" },
     provider: ChatPageProvider,

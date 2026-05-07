@@ -42,7 +42,7 @@ import { buildSpaBundle } from "./web/spa-bundler";
 import { contentTypeFor, discoverAllConventionWebStatic, mergeWebStatic } from "./web/static-paths";
 import { getAsset } from "./web/asset-cache";
 import type { WebStaticPath } from "@anima/shared";
-import { getExtensionConfig } from "@anima/shared";
+import { getExtensionConfig, getExtensionWebConfig } from "@anima/shared";
 
 // Web UI — served as SPA fallback for all non-WS routes
 // Served as a plain file, not Bun's HTML magic mode — auto-bundling no
@@ -412,6 +412,7 @@ export async function executeGatewayMethod(
           .map((ext) => ({
             extensionId: ext.id,
             jsUrl: `/extensions/${ext.id}/web-bundle.js`,
+            webConfig: getExtensionWebConfig(ext.id),
           })),
       };
     case "gateway.acquire_liveness_lock": {
@@ -1039,6 +1040,7 @@ const server = Bun.serve<ClientState>({
         .map((ext) => ({
           extensionId: ext.id,
           jsUrl: `/extensions/${ext.id}/web-bundle.js`,
+          webConfig: getExtensionWebConfig(ext.id),
         }));
       return new globalThis.Response(JSON.stringify({ contributions }), {
         headers: { "Content-Type": "application/json" },

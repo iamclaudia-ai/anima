@@ -1,17 +1,26 @@
 /**
  * EditorPanel — Embeds code-server in an iframe.
  *
- * code-server runs as a separate process, serving VS Code on port 8080.
- * The iframe gets `renderer: 'always'` via the layout manager so it
- * stays in the DOM even when hidden (prevents iframe reload).
+ * code-server runs as a separate process. The iframe URL is config-driven
+ * via the editor extension's `webConfig.url` in `~/.anima/anima.json`,
+ * read here through `useExtensionConfig("editor")`. When unset, the panel
+ * falls back to the same host as the SPA on port 8080 — useful for local
+ * dev where code-server runs alongside the gateway.
  *
- * Remote access works via Tailscale — same as the gateway.
+ * The iframe gets `renderer: 'always'` via the layout manager so it stays
+ * in the DOM even when hidden (prevents code-server session reload).
  */
 
 import { useState, useEffect, useRef } from "react";
+import { useExtensionConfig } from "@anima/ui";
 
-/** code-server URL — same host as current page, port 8080 */
-function getCodeServerUrl(): string {
+interface EditorWebConfig {
+  /** Absolute code-server URL (e.g. https://code.kiliman.dev) */
+  url?: string;
+}
+
+/** Local-dev fallback when no `webConfig.url` is configured. */
+function defaultCodeServerUrl(): string {
   const hostname = window.location.hostname;
   return `http://${hostname}:8080`;
 }
@@ -19,7 +28,8 @@ function getCodeServerUrl(): string {
 export function EditorPanel() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const codeServerUrl = getCodeServerUrl();
+  const { url } = useExtensionConfig<EditorWebConfig>("editor");
+  const codeServerUrl = url ?? defaultCodeServerUrl();
 
   useEffect(() => {
     // Probe code-server health
