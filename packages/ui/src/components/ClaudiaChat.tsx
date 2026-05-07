@@ -181,7 +181,7 @@ function ChatInner({
 
   return (
     <WorkspaceProvider cwd={gateway.workspace?.cwd}>
-      <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="relative flex h-full min-h-0 w-full flex-col">
         {showHeader && (
           <Header
             isConnected={gateway.isConnected}
@@ -217,7 +217,7 @@ function ChatInner({
         {audio.isPlaying && (
           <button
             onClick={audio.stop}
-            className="fixed bottom-40 left-8 z-50 flex items-center gap-2 px-4 py-2 bg-purple-500/90 backdrop-blur-sm text-white rounded-full shadow-lg hover:bg-purple-600 transition-colors text-sm"
+            className="absolute bottom-40 left-8 z-50 flex items-center gap-2 px-4 py-2 bg-purple-500/90 backdrop-blur-sm text-white rounded-full shadow-lg hover:bg-purple-600 transition-colors text-sm"
           >
             <span className="flex gap-0.5">
               <span className="w-1 h-3 bg-white rounded-full animate-pulse" />
@@ -232,7 +232,7 @@ function ChatInner({
         {ENABLE_THINKING_TUNER ? (
           shouldShowThinkingPanel ? (
             gateway.isCompacting ? (
-              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
+              <div className="absolute bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
                 <div className="flex items-center justify-end p-2">
                   <button
                     type="button"
@@ -245,7 +245,7 @@ function ChatInner({
                 <CompactionIndicator />
               </div>
             ) : (
-              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
+              <div className="absolute bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
                 <div className="mb-2 flex items-center justify-end">
                   <button
                     type="button"
@@ -302,7 +302,7 @@ function ChatInner({
             <button
               type="button"
               onClick={() => setThinkingVisible(true)}
-              className="fixed bottom-40 right-8 z-50 rounded-full border border-purple-200 bg-white/80 px-3 py-2 text-xs font-medium text-purple-800 shadow-lg backdrop-blur-sm hover:bg-purple-50"
+              className="absolute bottom-40 right-8 z-50 rounded-full border border-purple-200 bg-white/80 px-3 py-2 text-xs font-medium text-purple-800 shadow-lg backdrop-blur-sm hover:bg-purple-50"
             >
               Show Claudia
             </button>
@@ -318,11 +318,11 @@ function ChatInner({
             leaveTo="opacity-0 translate-y-1 scale-95"
           >
             {gateway.isCompacting ? (
-              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
+              <div className="absolute bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl border border-purple-200/50">
                 <CompactionIndicator />
               </div>
             ) : (
-              <div className="fixed bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
+              <div className="absolute bottom-40 right-8 z-50 bg-white/50 backdrop-blur-sm rounded-2xl shadow-2xl drop-shadow-xl p-4 border border-purple-100/50">
                 <ClaudiaThinking
                   count={gateway.eventCount}
                   streamCount={gateway.streamEventCount}
