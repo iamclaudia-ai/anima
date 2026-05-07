@@ -26,6 +26,8 @@ export type {
   HeaderSlotsProviderProps,
   UseHeaderSlotOptions,
 } from "./contexts/HeaderSlotsContext";
+export { LayoutApiProvider, useLayoutApi } from "./contexts/LayoutApiContext";
+export type { LayoutApiProviderProps } from "./contexts/LayoutApiContext";
 
 // Types
 export type {

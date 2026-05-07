@@ -15,7 +15,7 @@
  * times in one layout (e.g., two terminals, two chats on different sessions).
  */
 
-import { createContext, useCallback, useContext, useMemo } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   DockviewReact,
@@ -26,6 +26,7 @@ import {
 import "dockview/dist/styles/dockview.css";
 import type { LayoutNode } from "@anima/shared";
 import { flattenLayout, layoutFingerprint } from "./layout-flatten";
+import { LayoutApiProvider, useSetLayoutApi } from "../contexts/LayoutApiContext";
 
 // ── Panel Registry ──────────────────────────────────────────
 
@@ -131,7 +132,17 @@ function useLayoutKey(layout: LayoutNode, storageKey: string | undefined): strin
   );
 }
 
-export function LayoutManager({
+export function LayoutManager(props: LayoutManagerProps) {
+  // The api setter lives in LayoutApiContext, so the inner component has
+  // to be a child of the provider — wrap and delegate.
+  return (
+    <LayoutApiProvider>
+      <LayoutManagerInner {...props} />
+    </LayoutApiProvider>
+  );
+}
+
+function LayoutManagerInner({
   registry,
   layout,
   storageKey,
@@ -140,6 +151,7 @@ export function LayoutManager({
 }: LayoutManagerProps) {
   // Dockview components map — single wrapper that resolves via registry.
   const components = useMemo(() => ({ "panel-wrapper": PanelWrapper }), []);
+  const setLayoutApi = useSetLayoutApi();
 
   const buildLayout = useCallback(
     (api: DockviewApi) => {
@@ -196,6 +208,11 @@ export function LayoutManager({
     (event: DockviewReadyEvent) => {
       const api = event.api;
 
+      // Publish the api so panels (and any descendants of LayoutManager)
+      // can drive the layout imperatively via `useLayoutApi()` — toggle
+      // panel visibility, resize, subscribe to layout events.
+      setLayoutApi(api);
+
       // 1. Try to restore persisted layout, but only if the fingerprint matches —
       //    a mismatch means panels were added/removed, so the saved state would
       //    reference stale dockview instance IDs.
@@ -241,8 +258,16 @@ export function LayoutManager({
         });
       }
     },
-    [buildLayout, layout, storageKey],
+    [buildLayout, layout, storageKey, setLayoutApi],
   );
+
+  // Clear the published api on unmount so consumers don't hold a stale
+  // reference. Re-keying on layout change re-runs `onReady` and re-sets
+  // the api, but a full unmount (route change with no layout) needs an
+  // explicit clear.
+  useEffect(() => {
+    return () => setLayoutApi(null);
+  }, [setLayoutApi]);
 
   // Re-key on layout/storageKey change so the entire dockview instance
   // remounts. Cheaper than reconciling panel diffs imperatively, and

@@ -34,7 +34,7 @@ export function AppHeader() {
   const right = useMemo(() => pickAndSort(slots, "right"), [slots]);
 
   return (
-    <header className="flex h-12 shrink-0 items-center border-b border-gray-200 bg-white px-3">
+    <header className="flex h-12 shrink-0 items-center border-b border-gray-200 bg-gradient-to-r from-purple-100 via-indigo-100 to-blue-100 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {left.map((s) => (
           <span key={slotKey(s)} className="flex items-center">

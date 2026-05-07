@@ -10,22 +10,107 @@
  * an overlay drawer. Auto-closes when the active session changes.
  */
 
-import { useEffect, useState } from "react";
-import { ClaudiaChat, Link, useHeaderSlot, useIsMobile } from "@anima/ui";
-import { Menu, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ClaudiaChat, Link, useHeaderSlot, useIsMobile, useLayoutApi } from "@anima/ui";
+import { Menu, PanelLeft, PanelLeftDashed, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
+
+const NAV_PANEL_ID = "chat.nav";
+const NAV_PANEL_WIDTH = 280;
+const EDITOR_PANEL_ID = "editor.viewer";
 
 export function ChatPanel() {
   const { activeWorkspace, activeSessionId, chatBridge, isConnected, onNewSession } = useChatPage();
   const isMobile = useIsMobile();
   const [navOpen, setNavOpen] = useState(false);
 
+  // ── Layout panel toggles (nav + editor) ────────────────────
+  // Desktop: each toggle adds/removes its panel from the dockview layout
+  // via the LayoutManager's published api. Mobile: the layout doesn't
+  // include `chat.nav` (the drawer is an overlay) and skips the editor
+  // entirely, so the editor toggle is a no-op there.
+  const layoutApi = useLayoutApi();
+  const [isNavInLayout, setIsNavInLayout] = useState(false);
+  const [isEditorInLayout, setIsEditorInLayout] = useState(false);
+
+  // Mirror dockview's reality into local state so the icons stay in sync
+  // with closes-by-drag, persisted-layout restores, etc. Both toggles
+  // share one subscription since dockview emits a single change event.
+  useEffect(() => {
+    if (!layoutApi) return;
+    const sync = () => {
+      setIsNavInLayout(Boolean(layoutApi.getPanel(NAV_PANEL_ID)));
+      setIsEditorInLayout(Boolean(layoutApi.getPanel(EDITOR_PANEL_ID)));
+    };
+    sync();
+    const subscription = layoutApi.onDidLayoutChange(sync);
+    return () => subscription.dispose();
+  }, [layoutApi]);
+
+  const isNavOpen = isMobile ? navOpen : isNavInLayout;
+
+  const toggleNav = useCallback(() => {
+    if (isMobile) {
+      setNavOpen((prev) => !prev);
+      return;
+    }
+    if (!layoutApi) return;
+    const existing = layoutApi.getPanel(NAV_PANEL_ID);
+    if (existing) {
+      existing.api.close();
+      return;
+    }
+    const ref = layoutApi.getPanel("chat.main");
+    if (!ref) return;
+    layoutApi.addPanel({
+      id: NAV_PANEL_ID,
+      component: "panel-wrapper",
+      params: { panelId: NAV_PANEL_ID },
+      title: "Workspaces",
+      position: { referencePanel: ref, direction: "left" },
+      initialWidth: NAV_PANEL_WIDTH,
+    });
+  }, [isMobile, layoutApi]);
+
+  const toggleEditor = useCallback(() => {
+    if (!layoutApi) return;
+    const existing = layoutApi.getPanel(EDITOR_PANEL_ID);
+    if (existing) {
+      existing.api.close();
+      return;
+    }
+    const ref = layoutApi.getPanel("chat.main");
+    if (!ref) return;
+    layoutApi.addPanel({
+      id: EDITOR_PANEL_ID,
+      component: "panel-wrapper",
+      params: { panelId: EDITOR_PANEL_ID },
+      title: "Editor",
+      position: { referencePanel: ref, direction: "right" },
+    });
+  }, [layoutApi]);
+
   // ── Global header slots ────────────────────────────────────
   // ChatPanel is the canonical owner of "what chat-context is active right
   // now" — workspace name, connection status, link back home. Other
   // panels (editor, voice, …) contribute their own slots; the AppHeader
   // composes them into segments. See `useHeaderSlot` in @anima/ui.
+  useHeaderSlot(
+    "left",
+    "chat.nav-toggle",
+    <button
+      type="button"
+      onClick={toggleNav}
+      className="rounded-md p-1.5 text-gray-600 transition-colors hover:bg-white/40 hover:text-gray-800"
+      title={isNavOpen ? "Hide workspaces" : "Show workspaces"}
+      aria-label={isNavOpen ? "Hide workspaces" : "Show workspaces"}
+      aria-pressed={isNavOpen}
+    >
+      {isNavOpen ? <PanelLeftDashed className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
+    </button>,
+    { order: 10 },
+  );
   useHeaderSlot(
     "left",
     "chat.home",
@@ -40,6 +125,25 @@ export function ChatPanel() {
     <span className="truncate text-sm font-medium text-gray-800">
       {activeWorkspace?.name ?? ""}
     </span>,
+  );
+  useHeaderSlot(
+    "right",
+    "editor.toggle",
+    <button
+      type="button"
+      onClick={toggleEditor}
+      className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-white/40"
+      title={isEditorInLayout ? "Hide editor" : "Show editor"}
+      aria-label={isEditorInLayout ? "Hide editor" : "Show editor"}
+      aria-pressed={isEditorInLayout}
+    >
+      <img
+        src={isEditorInLayout ? "/editor/static/vscode.svg" : "/editor/static/vscode-alt.svg"}
+        alt=""
+        className="h-4 w-4"
+      />
+    </button>,
+    { order: 60 },
   );
   useHeaderSlot(
     "right",
