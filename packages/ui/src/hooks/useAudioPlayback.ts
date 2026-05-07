@@ -21,10 +21,16 @@ import {
   shouldAcceptVoiceChunk,
   startVoiceStream,
 } from "./audioPlaybackState";
-import { getAudioConfig, setAudioStatus, subscribeAudioConfig } from "./audioConfig";
 import { AUDIO_PLAYER_WORKLET_SOURCE } from "./audioPlayerWorklet";
 
 const CARTESIA_SAMPLE_RATE = 24000;
+
+// Tuned values from the audio debug session — these absorb Cartesia's
+// faster-than-realtime sentence bursts cleanly with no overflows even
+// across multi-minute responses.
+const PRIMER_BUFFER_MS = 120;
+const HIGH_WATERMARK_MS = 2000;
+const RING_BUFFER_MS = 8000;
 
 export interface UseAudioPlaybackReturn {
   /** Whether audio is currently playing (ring buffer non-empty + past primer). */
@@ -141,9 +147,8 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         await ctx.audioWorklet.addModule(moduleUrlRef.current);
       }
 
-      const cfg = getAudioConfig();
-      const primerSamples = Math.floor((cfg.primerBufferMs / 1000) * ctx.sampleRate);
-      const bufferSize = Math.floor((cfg.ringBufferMs / 1000) * ctx.sampleRate);
+      const primerSamples = Math.floor((PRIMER_BUFFER_MS / 1000) * ctx.sampleRate);
+      const bufferSize = Math.floor((RING_BUFFER_MS / 1000) * ctx.sampleRate);
 
       const node = new AudioWorkletNode(ctx, "anima-pcm-player", {
         outputChannelCount: [1],
@@ -151,20 +156,13 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       });
 
       node.port.onmessage = (e: MessageEvent) => {
-        const msg = e.data as
-          | { type: "fill"; fillMs: number; underruns: number; overflows: number }
-          | { type: "drained" };
+        const msg = e.data as { type: "fill"; fillMs: number } | { type: "drained" };
         if (msg.type === "fill") {
           // Update tracking refs so estimateWorkletFillMs stays accurate.
           lastReportedFillMsRef.current = msg.fillMs;
           lastReportedAtRef.current = ctx.currentTime;
           pushedSinceReportMsRef.current = 0;
 
-          setAudioStatus({
-            fillMs: msg.fillMs,
-            underruns: msg.underruns,
-            overflows: msg.overflows,
-          });
           const playing = msg.fillMs > 0 || chunkQueueRef.current.length > 0;
           if (playing !== isPlayingRef.current) {
             isPlayingRef.current = playing;
@@ -199,8 +197,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     const node = workletNodeRef.current;
     const ctx = audioContextRef.current;
     if (!node || !ctx) return;
-    const watermark = getAudioConfig().highWatermarkMs;
-    while (chunkQueueRef.current.length > 0 && estimateWorkletFillMs() < watermark) {
+    while (chunkQueueRef.current.length > 0 && estimateWorkletFillMs() < HIGH_WATERMARK_MS) {
       const samples = chunkQueueRef.current.shift();
       if (!samples) break;
       const chunkMs = (samples.length / ctx.sampleRate) * 1000;
@@ -209,7 +206,6 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       // Transfer the underlying buffer to avoid a copy.
       node.port.postMessage({ type: "pcm", samples }, [samples.buffer]);
     }
-    setAudioStatus({ queueMs: Math.round(queueMsRef.current) });
   }, [estimateWorkletFillMs]);
 
   // Keep the ref in sync so ensureWorklet's message handler always calls the latest.
@@ -243,7 +239,6 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     queueMsRef.current = 0;
     pushedSinceReportMsRef.current = 0;
     lastReportedFillMsRef.current = 0;
-    setAudioStatus({ fillMs: 0, queueMs: 0 });
   }, []);
 
   const stopBatchSources = useCallback(() => {
@@ -266,41 +261,8 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     isStreamingRef.current = false;
     setIsPlaying(false);
     setIsStreaming(false);
-    setAudioStatus({ fillMs: 0 });
     gateway.sendRequest("voice.stop");
   }, [clearWorkletBuffer, stopBatchSources, gateway]);
-
-  // Push live config changes to the worklet. Primer is a hot tune; ring
-  // capacity requires rebuilding the node (its buffer is fixed-size).
-  useEffect(() => {
-    let lastRingMs = getAudioConfig().ringBufferMs;
-    return subscribeAudioConfig(() => {
-      const cfg = getAudioConfig();
-      const ctx = audioContextRef.current;
-      const node = workletNodeRef.current;
-      if (!ctx || !node) return;
-
-      // Primer is live.
-      const primerSamples = Math.floor((cfg.primerBufferMs / 1000) * ctx.sampleRate);
-      node.port.postMessage({ type: "config", primerSamples });
-
-      // Ring capacity changed → tear down + rebuild the worklet node.
-      if (cfg.ringBufferMs !== lastRingMs) {
-        lastRingMs = cfg.ringBufferMs;
-        try {
-          node.disconnect();
-        } catch {
-          /* noop */
-        }
-        workletNodeRef.current = null;
-        workletReadyRef.current = null;
-        // Next chunk in will lazily ensureWorklet() with the new size.
-        // Reset status so the meter doesn't show stale values.
-        setAudioStatus({ fillMs: 0 });
-        void ensureWorklet();
-      }
-    });
-  }, [ensureWorklet]);
 
   // Subscribe to voice events
   useEffect(() => {
