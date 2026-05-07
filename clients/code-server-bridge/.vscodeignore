@@ -2,9 +2,12 @@
 .vscode-test/**
 src/**
 node_modules/**
+**/node_modules/**
 **/*.ts
+**/*.tsx
 **/*.map
 .gitignore
+.vscodeignore
 tsconfig.json
 bundle.ts
 *.vsix
