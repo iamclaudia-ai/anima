@@ -112,7 +112,11 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       source.connect(ctx.destination);
 
       const now = ctx.currentTime;
-      const startAt = Math.max(playbackCursorRef.current, now + 0.01);
+      // 100ms scheduling lookahead — standard "Tale of Two Clocks" pattern.
+      // Gives the main thread headroom for React renders, WS bursts, decode
+      // latency, and other tabs/iframes (e.g. code-server) without dropping
+      // chunks into the past and creating audible gaps.
+      const startAt = Math.max(playbackCursorRef.current, now + 0.1);
       playbackCursorRef.current = startAt + buffer.duration;
 
       activeSourcesRef.current.add(source);
@@ -155,7 +159,9 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
         isStreamingRef.current = true;
         setIsStreaming(true);
-        playbackCursorRef.current = Math.max(playbackCursorRef.current, ctx.currentTime + 0.02);
+        // Stream-start buffer: align with the 100ms scheduling lookahead so
+        // the first chunk doesn't get scheduled tighter than subsequent ones.
+        playbackCursorRef.current = Math.max(playbackCursorRef.current, ctx.currentTime + 0.12);
         return;
       }
 
