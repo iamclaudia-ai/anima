@@ -14,16 +14,27 @@ export interface AudioConfig {
    * tolerance for early-stream stalls; lower = less startup latency.
    */
   primerBufferMs: number;
-  /** Total ring buffer capacity (ms). Acts as an overflow safety net. */
+  /**
+   * Target steady-state worklet fill (ms). The feeder pushes from the JS
+   * chunk queue whenever the worklet's estimated fill drops below this.
+   * Acts as the real "how much audio do I want buffered ahead" knob.
+   */
+  highWatermarkMs: number;
+  /**
+   * Worklet ring buffer capacity (ms). Just needs to be bigger than the
+   * watermark — overflow is now structurally impossible because the JS
+   * queue absorbs production bursts.
+   */
   ringBufferMs: number;
 }
 
 const DEFAULTS: AudioConfig = {
   primerBufferMs: 120,
-  // 30s default — comfortably absorbs Cartesia's faster-than-realtime
-  // sentence bursts even on long responses. ~5.7MB at 48kHz Float32 mono,
-  // trivial against the rest of a browser tab's footprint.
-  ringBufferMs: 30000,
+  // 2s steady-state target — enough cushion to absorb main-thread jank
+  // without committing to long latency.
+  highWatermarkMs: 2000,
+  // 8s ring; the JS queue holds anything beyond this, so 8s is plenty.
+  ringBufferMs: 8000,
 };
 
 const state: AudioConfig = { ...DEFAULTS };
@@ -59,15 +70,17 @@ export function getAudioConfigDefaults(): AudioConfig {
 // ---------------------------------------------------------------------------
 
 export interface AudioStatus {
-  /** Current ring buffer fill in ms. */
+  /** Current worklet ring buffer fill in ms (from worklet reports). */
   fillMs: number;
+  /** Pending audio queued on the main thread waiting to be fed (ms). */
+  queueMs: number;
   /** Total underrun events since context start. */
   underruns: number;
-  /** Total overflow events since context start (chunks dropped on full ring). */
+  /** Total overflow events since context start (should now stay at 0). */
   overflows: number;
 }
 
-const status: AudioStatus = { fillMs: 0, underruns: 0, overflows: 0 };
+const status: AudioStatus = { fillMs: 0, queueMs: 0, underruns: 0, overflows: 0 };
 const statusListeners = new Set<() => void>();
 
 export function getAudioStatus(): AudioStatus {

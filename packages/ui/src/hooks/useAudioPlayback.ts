@@ -106,6 +106,17 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
   const streamGenerationRef = useRef(0);
   const batchSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
+  // Back-pressure queue: chunks wait here until the worklet has room.
+  // (Cartesia generates audio faster than realtime; this absorbs the burst.)
+  const chunkQueueRef = useRef<Float32Array[]>([]);
+  const queueMsRef = useRef(0);
+  const lastReportedFillMsRef = useRef(0);
+  const lastReportedAtRef = useRef(0); // audioContext.currentTime
+  const pushedSinceReportMsRef = useRef(0);
+  // drainQueue is referenced inside ensureWorklet's message handler, but
+  // declared after it — bridge the temporal gap with a ref.
+  const drainQueueRef = useRef<() => void>(() => {});
+
   const ensureAudioContext = useCallback((): AudioContext => {
     if (!audioContextRef.current) {
       audioContextRef.current = new AudioContext();
@@ -144,16 +155,23 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
           | { type: "fill"; fillMs: number; underruns: number; overflows: number }
           | { type: "drained" };
         if (msg.type === "fill") {
+          // Update tracking refs so estimateWorkletFillMs stays accurate.
+          lastReportedFillMsRef.current = msg.fillMs;
+          lastReportedAtRef.current = ctx.currentTime;
+          pushedSinceReportMsRef.current = 0;
+
           setAudioStatus({
             fillMs: msg.fillMs,
             underruns: msg.underruns,
             overflows: msg.overflows,
           });
-          const playing = msg.fillMs > 0;
+          const playing = msg.fillMs > 0 || chunkQueueRef.current.length > 0;
           if (playing !== isPlayingRef.current) {
             isPlayingRef.current = playing;
             setIsPlaying(playing);
           }
+          // Buffer drained below watermark? Push more from queue.
+          drainQueueRef.current();
         } else if (msg.type === "drained") {
           // Buffer hit empty mid-stream; ring will re-prime on next push.
         }
@@ -168,15 +186,36 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     return promise;
   }, [ensureAudioContext]);
 
-  /** Push a Float32 PCM block (already at AudioContext sample rate) to the worklet. */
-  const pushPcm = useCallback((samples: Float32Array) => {
-    const node = workletNodeRef.current;
-    if (!node) return;
-    // Transfer the underlying buffer to avoid a copy.
-    node.port.postMessage({ type: "pcm", samples }, [samples.buffer]);
+  /** Estimated current worklet fill (ms), interpolating between reports. */
+  const estimateWorkletFillMs = useCallback((): number => {
+    const ctx = audioContextRef.current;
+    if (!ctx) return 0;
+    const elapsedMs = (ctx.currentTime - lastReportedAtRef.current) * 1000;
+    return Math.max(0, lastReportedFillMsRef.current + pushedSinceReportMsRef.current - elapsedMs);
   }, []);
 
-  /** Decode WAV chunk → Float32 → resample → push. */
+  /** Drain the JS chunk queue into the worklet up to the high watermark. */
+  const drainQueue = useCallback(() => {
+    const node = workletNodeRef.current;
+    const ctx = audioContextRef.current;
+    if (!node || !ctx) return;
+    const watermark = getAudioConfig().highWatermarkMs;
+    while (chunkQueueRef.current.length > 0 && estimateWorkletFillMs() < watermark) {
+      const samples = chunkQueueRef.current.shift();
+      if (!samples) break;
+      const chunkMs = (samples.length / ctx.sampleRate) * 1000;
+      queueMsRef.current = Math.max(0, queueMsRef.current - chunkMs);
+      pushedSinceReportMsRef.current += chunkMs;
+      // Transfer the underlying buffer to avoid a copy.
+      node.port.postMessage({ type: "pcm", samples }, [samples.buffer]);
+    }
+    setAudioStatus({ queueMs: Math.round(queueMsRef.current) });
+  }, [estimateWorkletFillMs]);
+
+  // Keep the ref in sync so ensureWorklet's message handler always calls the latest.
+  drainQueueRef.current = drainQueue;
+
+  /** Decode WAV chunk → Float32 → resample → enqueue + drain. */
   const handleStreamingChunk = useCallback(
     async (arrayBuffer: ArrayBuffer, format: string | undefined) => {
       const ctx = ensureAudioContext();
@@ -190,13 +229,21 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         pcmFloat = pcm16ToFloat32(new Int16Array(arrayBuffer));
       }
       const resampled = resampleLinear(pcmFloat, CARTESIA_SAMPLE_RATE, ctx.sampleRate);
-      pushPcm(resampled);
+      const chunkMs = (resampled.length / ctx.sampleRate) * 1000;
+      chunkQueueRef.current.push(resampled);
+      queueMsRef.current += chunkMs;
+      drainQueue();
     },
-    [ensureAudioContext, ensureWorklet, pushPcm],
+    [ensureAudioContext, ensureWorklet, drainQueue],
   );
 
   const clearWorkletBuffer = useCallback(() => {
     workletNodeRef.current?.port.postMessage({ type: "reset" });
+    chunkQueueRef.current = [];
+    queueMsRef.current = 0;
+    pushedSinceReportMsRef.current = 0;
+    lastReportedFillMsRef.current = 0;
+    setAudioStatus({ fillMs: 0, queueMs: 0 });
   }, []);
 
   const stopBatchSources = useCallback(() => {

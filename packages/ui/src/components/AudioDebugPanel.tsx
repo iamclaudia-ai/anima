@@ -48,30 +48,53 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
 
   const defaults = getAudioConfigDefaults();
 
-  // Buffer level bar — fill ms relative to ring capacity.
-  const fillPct = Math.min(100, Math.round((status.fillMs / Math.max(1, cfg.ringBufferMs)) * 100));
+  // Worklet buffer level (capped at watermark in steady state).
+  const fillPct = Math.min(
+    100,
+    Math.round((status.fillMs / Math.max(1, cfg.highWatermarkMs)) * 100),
+  );
+  // JS queue depth — log scale visual (ranges from 0 to many seconds).
+  const queueScale = Math.max(2000, status.queueMs);
+  const queuePct = Math.min(100, Math.round((status.queueMs / queueScale) * 100));
+
   const fillBar = (
-    <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
-      <div className="mb-1 flex items-center justify-between text-xs">
-        <span className="text-slate-700 dark:text-slate-300">Buffer level</span>
-        <span className="font-mono text-slate-500 dark:text-slate-400">
-          {status.fillMs}ms / {cfg.ringBufferMs}ms
+    <div className="mt-3 space-y-2 rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+      <div>
+        <div className="mb-1 flex items-center justify-between text-xs">
+          <span className="text-slate-700 dark:text-slate-300">Worklet fill</span>
+          <span className="font-mono text-slate-500 dark:text-slate-400">
+            {status.fillMs}ms / {cfg.highWatermarkMs}ms
+          </span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+          <div
+            className={`h-full transition-all duration-75 ${
+              status.fillMs === 0
+                ? "bg-red-500"
+                : status.fillMs < cfg.primerBufferMs
+                  ? "bg-amber-400"
+                  : "bg-emerald-500"
+            }`}
+            style={{ width: `${fillPct}%` }}
+          />
+        </div>
+      </div>
+      <div>
+        <div className="mb-1 flex items-center justify-between text-xs">
+          <span className="text-slate-700 dark:text-slate-300">JS queue (pending)</span>
+          <span className="font-mono text-slate-500 dark:text-slate-400">{status.queueMs}ms</span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+          <div
+            className="h-full bg-purple-500 transition-all duration-75"
+            style={{ width: `${queuePct}%` }}
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+        <span>
+          primer {cfg.primerBufferMs}ms · ring {cfg.ringBufferMs}ms
         </span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-        <div
-          className={`h-full transition-all duration-75 ${
-            status.fillMs === 0
-              ? "bg-red-500"
-              : status.fillMs < cfg.primerBufferMs
-                ? "bg-amber-400"
-                : "bg-emerald-500"
-          }`}
-          style={{ width: `${fillPct}%` }}
-        />
-      </div>
-      <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-        <span>primer at {cfg.primerBufferMs}ms</span>
         <span className="flex gap-2">
           <span className={status.underruns > 0 ? "font-semibold text-red-500" : ""}>
             under: {status.underruns}
@@ -110,10 +133,20 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
         onChange={(v) => update({ primerBufferMs: v })}
       />
       <Slider
+        label="High watermark (target)"
+        unit="ms"
+        min={200}
+        max={6000}
+        step={50}
+        value={cfg.highWatermarkMs}
+        defaultValue={defaults.highWatermarkMs}
+        onChange={(v) => update({ highWatermarkMs: v })}
+      />
+      <Slider
         label="Ring buffer (capacity)"
         unit="ms"
         min={1000}
-        max={60000}
+        max={30000}
         step={500}
         value={cfg.ringBufferMs}
         defaultValue={defaults.ringBufferMs}
