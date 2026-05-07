@@ -20,10 +20,10 @@ export interface AudioConfig {
 
 const DEFAULTS: AudioConfig = {
   primerBufferMs: 120,
-  // 16s default — comfortably absorbs Cartesia's faster-than-realtime
-  // sentence bursts for any normal-length response. ~3MB at 48kHz Float32
-  // mono, which is trivial against the rest of a browser tab's footprint.
-  ringBufferMs: 16000,
+  // 30s default — comfortably absorbs Cartesia's faster-than-realtime
+  // sentence bursts even on long responses. ~5.7MB at 48kHz Float32 mono,
+  // trivial against the rest of a browser tab's footprint.
+  ringBufferMs: 30000,
 };
 
 const state: AudioConfig = { ...DEFAULTS };
