@@ -28,7 +28,6 @@ export default {
   id: "editor",
   name: "Editor",
   order: 80,
-  enabled: false,
   routes: editorRoutes,
   panels: editorPanels,
 } satisfies ExtensionWebContribution;
