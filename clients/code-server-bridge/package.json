@@ -1,0 +1,60 @@
+{
+  "name": "anima-bridge",
+  "displayName": "Anima Bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bridges code-server / VS Code commands through the Anima gateway. Lets chat, CLI, MCP, and voice clients drive the editor (open files, read selection, watch active file).",
+  "categories": [
+    "Other"
+  ],
+  "publisher": "iamclaudia-ai",
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "bun run bundle.ts",
+    "clean": "rm -rf dist *.vsix",
+    "package": "bun run build && bunx @vscode/vsce package --skip-license --out anima-bridge.vsix",
+    "typecheck": "tsc --noEmit -p ./"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/vscode": "^1.80.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "catalog:"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Anima",
+      "properties": {
+        "anima.gatewayUrl": {
+          "type": "string",
+          "default": "ws://localhost:30086/ws",
+          "description": "WebSocket URL of the Anima gateway. Use wss:// for remote (Tailscale, public domain)."
+        },
+        "anima.gatewayToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for the Anima gateway (matches `gateway.token` in ~/.anima/anima.json). Leave empty when running unauthenticated locally."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "anima.bridge.reconnect",
+        "title": "Anima: Reconnect Bridge"
+      },
+      {
+        "command": "anima.bridge.showStatus",
+        "title": "Anima: Show Bridge Status"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "engines": {
+    "vscode": "^1.80.0"
+  }
+}
