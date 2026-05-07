@@ -19,6 +19,13 @@ export type {
   ExtensionConfigProviderProps,
   ExtensionWebConfig,
 } from "./contexts/ExtensionConfigContext";
+export { HeaderSlotsProvider, useHeaderSlot, useHeaderSlots } from "./contexts/HeaderSlotsContext";
+export type {
+  HeaderSegment,
+  HeaderSlot,
+  HeaderSlotsProviderProps,
+  UseHeaderSlotOptions,
+} from "./contexts/HeaderSlotsContext";
 
 // Types
 export type {
@@ -55,6 +62,7 @@ export type { UseGatewayClientOptions, UseGatewayClientReturn } from "./hooks/us
 
 // Components (for direct use if needed)
 export { Header } from "./components/Header";
+export { AppHeader } from "./components/AppHeader";
 export { ContextBar } from "./components/ContextBar";
 export { MessageList } from "./components/MessageList";
 export { MessageContent } from "./components/MessageContent";

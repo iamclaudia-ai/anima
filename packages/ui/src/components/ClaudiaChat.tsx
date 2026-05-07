@@ -26,12 +26,30 @@ interface ClaudiaChatProps {
   onBack?: () => void;
   /** Optional hamburger callback — when provided, Header renders a menu button (mobile nav). */
   onOpenMenu?: () => void;
+  /**
+   * Render the per-chat `Header` (workspace name, voice toggle, connection
+   * dot). Defaults to `true` for embedded clients (VS Code, menubar, iOS).
+   * The web SPA's `ChatPanel` passes `false` so the global `AppHeader`
+   * chrome owns those affordances instead.
+   */
+  showHeader?: boolean;
 }
 
-export function ClaudiaChat({ bridge, gatewayOptions, onBack, onOpenMenu }: ClaudiaChatProps) {
+export function ClaudiaChat({
+  bridge,
+  gatewayOptions,
+  onBack,
+  onOpenMenu,
+  showHeader = true,
+}: ClaudiaChatProps) {
   return (
     <BridgeContext.Provider value={bridge}>
-      <ChatInner gatewayOptions={gatewayOptions} onBack={onBack} onOpenMenu={onOpenMenu} />
+      <ChatInner
+        gatewayOptions={gatewayOptions}
+        onBack={onBack}
+        onOpenMenu={onOpenMenu}
+        showHeader={showHeader}
+      />
     </BridgeContext.Provider>
   );
 }
@@ -40,10 +58,12 @@ function ChatInner({
   gatewayOptions,
   onBack,
   onOpenMenu,
+  showHeader,
 }: {
   gatewayOptions?: UseChatGatewayOptions;
   onBack?: () => void;
   onOpenMenu?: () => void;
+  showHeader: boolean;
 }) {
   const bridge = useBridge();
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
@@ -175,20 +195,22 @@ function ChatInner({
 
   return (
     <WorkspaceProvider cwd={gateway.workspace?.cwd}>
-      <div className="flex flex-col h-dvh w-full">
-        <Header
-          isConnected={gateway.isConnected}
-          sessionId={gateway.sessionId}
-          workspace={gateway.workspace}
-          sessions={gateway.sessions}
-          onCreateSession={gateway.createNewSession}
-          onSwitchSession={gateway.switchSession}
-          sendRequest={gateway.sendRequest}
-          onBack={onBack}
-          voiceEnabled={voiceEnabled}
-          onToggleVoice={toggleVoice}
-          onOpenMenu={onOpenMenu}
-        />
+      <div className="flex h-full min-h-0 w-full flex-col">
+        {showHeader && (
+          <Header
+            isConnected={gateway.isConnected}
+            sessionId={gateway.sessionId}
+            workspace={gateway.workspace}
+            sessions={gateway.sessions}
+            onCreateSession={gateway.createNewSession}
+            onSwitchSession={gateway.switchSession}
+            sendRequest={gateway.sendRequest}
+            onBack={onBack}
+            voiceEnabled={voiceEnabled}
+            onToggleVoice={toggleVoice}
+            onOpenMenu={onOpenMenu}
+          />
+        )}
 
         {bridge.showContextBar && <ContextBar context={editorContext} />}
 

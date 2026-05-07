@@ -18,6 +18,16 @@
 }
 
 @layer base {
+  /* Force light color-scheme everywhere. Without this, browsers in system
+     dark-mode paint the canvas, scrollbars, and any transparent UA-default
+     surface in dark colors — which leaks through anywhere our own styles
+     don't set an explicit background (dockview gaps, panel overflow,
+     scroll regions). Individual components can opt into dark by setting
+     `color-scheme: dark` on their own root. */
+  html {
+    color-scheme: light;
+  }
+
   /* Full-height chain for dockview layout system.
      Without this, height: 100% on child elements collapses to zero. */
   html,

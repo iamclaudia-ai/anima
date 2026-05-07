@@ -22,6 +22,7 @@ import {
   ExtensionConfigProvider,
   GatewayClientProvider,
   GlobalNotifications,
+  HeaderSlotsProvider,
   LoginGate,
 } from "@anima/ui";
 import type {
@@ -172,12 +173,16 @@ async function bootstrap(): Promise<void> {
   // <Router>, regardless of what extensions claim — extensions get
   // namespaced paths (`/chat`, `/memory`, etc.) and contribute their
   // first route as a launcher tile via the `icon` + `label` convention.
+  //
+  // The home page hides the global AppHeader — it has its own iPhone-grid
+  // visual identity and there's nowhere to navigate "home" from.
   const builtinRoutes: Route[] = [
     {
       path: "/",
       component: () => <HomePage contributions={webContributions} />,
       title: "Home",
       label: "Home",
+      hideAppHeader: true,
     },
   ];
   const allRoutes: Route[] = [
@@ -205,13 +210,18 @@ async function bootstrap(): Promise<void> {
   );
 
   // ── Render ──────────────────────────────────────────────────
+  // HeaderSlotsProvider wraps the Router so any panel rendered by any
+  // route can contribute to the global AppHeader chrome. The chrome
+  // itself is rendered inside Router (per-route, gated by `hideAppHeader`).
   createRoot(document.getElementById("root")!).render(
     <ErrorBoundary>
       <LoginGate>
         <GatewayClientProvider>
           <ExtensionConfigProvider configs={extensionConfigs}>
             <GlobalNotifications>
-              <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+              <HeaderSlotsProvider>
+                <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
+              </HeaderSlotsProvider>
             </GlobalNotifications>
           </ExtensionConfigProvider>
         </GatewayClientProvider>

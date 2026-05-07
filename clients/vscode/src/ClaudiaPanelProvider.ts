@@ -226,6 +226,7 @@ export class ClaudiaPanelProvider {
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <link rel="stylesheet" href="${styleUri}">
   <title>Anima</title>
+  <style>html, body, #root { height: 100%; margin: 0; }</style>
 </head>
 <body>
   <div id="root"></div>

@@ -12,6 +12,7 @@ import type { LayoutDefinition, LayoutNode } from "@anima/shared";
 import type { PanelDefinition } from "@anima/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
 import { LayoutManager } from "./components/LayoutManager";
+import { AppHeader } from "./components/AppHeader";
 import { useIsMobile } from "./hooks/useIsMobile";
 
 // ── Types ────────────────────────────────────────────────────
@@ -25,6 +26,13 @@ export interface Route {
   label?: string;
   /** Browser tab title — shown as "title — Anima". Falls back to label. */
   title?: string;
+  /**
+   * When true, suppress the global `AppHeader` chrome on this route. Use
+   * for pages that own their own visual identity (e.g., the home-page
+   * launcher) or that need full-bleed content. Defaults to false — every
+   * other route gets the global header.
+   */
+  hideAppHeader?: boolean;
 }
 
 export interface PanelContribution extends PanelDefinition {
@@ -214,12 +222,15 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
             isMobile && layoutDef.mobile ? layoutDef.mobile : layoutDef.default;
           return (
             <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
-              <LayoutManager
-                registry={panelRegistry}
-                layout={layoutNode}
-                storageKey={`layout:${route.layout}:${isMobile ? "mobile" : "desktop"}`}
-                provider={layoutDef.provider}
-              />
+              {wrapWithChrome(
+                route,
+                <LayoutManager
+                  registry={panelRegistry}
+                  layout={layoutNode}
+                  storageKey={`layout:${route.layout}:${isMobile ? "mobile" : "desktop"}`}
+                  provider={layoutDef.provider}
+                />,
+              )}
             </RouterContext.Provider>
           );
         }
@@ -231,7 +242,7 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
         const Component = route.component;
         return (
           <RouterContext.Provider value={{ pathname, params, navigate: nav }}>
-            <Component {...params} />
+            {wrapWithChrome(route, <Component {...params} />)}
           </RouterContext.Provider>
         );
       }
@@ -242,6 +253,22 @@ export function Router({ routes, fallback, layouts, panelRegistry }: RouterProps
     <RouterContext.Provider value={{ pathname, params: {}, navigate: nav }}>
       {fallback ?? null}
     </RouterContext.Provider>
+  );
+}
+
+/**
+ * Wrap a route's content with the global `AppHeader` chrome unless the
+ * route opted out via `hideAppHeader: true`. The chrome installs a
+ * full-viewport flex column so the header gets its natural height and the
+ * content fills the rest.
+ */
+function wrapWithChrome(route: Route, content: ReactNode): ReactNode {
+  if (route.hideAppHeader) return content;
+  return (
+    <div className="flex h-screen flex-col bg-white">
+      <AppHeader />
+      <main className="min-h-0 flex-1 bg-white">{content}</main>
+    </div>
   );
 }
 

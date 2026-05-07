@@ -11,15 +11,45 @@
  */
 
 import { useEffect, useState } from "react";
-import { ClaudiaChat, useIsMobile } from "@anima/ui";
+import { ClaudiaChat, Link, useHeaderSlot, useIsMobile } from "@anima/ui";
 import { Menu, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
 
 export function ChatPanel() {
-  const { activeWorkspace, activeSessionId, chatBridge, onNewSession } = useChatPage();
+  const { activeWorkspace, activeSessionId, chatBridge, isConnected, onNewSession } = useChatPage();
   const isMobile = useIsMobile();
   const [navOpen, setNavOpen] = useState(false);
+
+  // ── Global header slots ────────────────────────────────────
+  // ChatPanel is the canonical owner of "what chat-context is active right
+  // now" — workspace name, connection status, link back home. Other
+  // panels (editor, voice, …) contribute their own slots; the AppHeader
+  // composes them into segments. See `useHeaderSlot` in @anima/ui.
+  useHeaderSlot(
+    "left",
+    "chat.home",
+    <Link to="/" className="text-sm font-semibold text-purple-700 hover:text-purple-800">
+      Anima
+    </Link>,
+    { order: 20 },
+  );
+  useHeaderSlot(
+    "center",
+    "chat.workspace",
+    <span className="truncate text-sm font-medium text-gray-800">
+      {activeWorkspace?.name ?? ""}
+    </span>,
+  );
+  useHeaderSlot(
+    "right",
+    "chat.connection",
+    <span
+      className={`block h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+      title={isConnected ? "Connected" : "Disconnected"}
+    />,
+    { order: 90 },
+  );
 
   // Auto-close the mobile drawer when the user picks a session, or when
   // we leave mobile (e.g., user rotates / resizes back to desktop).
@@ -68,6 +98,10 @@ export function ChatPanel() {
           bridge={chatBridge}
           gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
           onOpenMenu={onOpenMenu}
+          // The global AppHeader already shows workspace name, connection
+          // status, and (eventually) the voice toggle — let it own that
+          // chrome and skip ClaudiaChat's per-instance Header on the web.
+          showHeader={false}
           // Re-mount when workspace/session changes — keeps streaming state clean.
           key={`${activeWorkspace.id}-${activeSessionId}`}
         />
