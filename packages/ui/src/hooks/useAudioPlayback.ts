@@ -47,14 +47,6 @@ function pcm16ToAudioBuffer(
     channelData[i] = pcmData[i] / 32768;
   }
 
-  // Small edge fade to reduce clicks between chunk boundaries.
-  const fadeSamples = Math.min(64, Math.floor(pcmData.length / 4));
-  for (let i = 0; i < fadeSamples; i++) {
-    const gain = i / Math.max(1, fadeSamples);
-    channelData[i] *= gain;
-    channelData[channelData.length - 1 - i] *= gain;
-  }
-
   return audioBuffer;
 }
 
