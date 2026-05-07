@@ -25,7 +25,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { navigate, useGatewayClient, useRouter } from "@anima/ui";
+import { navigate, useGatewayClient, useRouter, WorkspaceProvider } from "@anima/ui";
 import type { WorkspaceInfo, SessionInfo } from "@anima/ui";
 import { createBridge } from "../app";
 import {
@@ -586,5 +586,16 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <ChatPageContext.Provider value={value}>{children}</ChatPageContext.Provider>;
+  // Hoist WorkspaceProvider here so every panel in the chat layout — not just
+  // chat.main — gets the active workspace's cwd. The editor panel uses it to
+  // template `?folder=<cwd>` for code-server; future panels (terminal, file
+  // tree, log viewer) will lean on the same hook.
+  //
+  // ClaudiaChat keeps its own nested WorkspaceProvider so embedded clients
+  // (VS Code extension, menubar, iOS) that mount it directly still work.
+  return (
+    <ChatPageContext.Provider value={value}>
+      <WorkspaceProvider cwd={activeWorkspace?.cwd}>{children}</WorkspaceProvider>
+    </ChatPageContext.Provider>
+  );
 }
