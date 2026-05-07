@@ -364,6 +364,16 @@ export interface PanelDefinition {
    * Default: `"onlyWhenVisible"` (dockview's default).
    */
   renderer?: "always" | "onlyWhenVisible";
+  /**
+   * Size constraints (px) applied to the panel in the dockview layout.
+   * Without these, dockview redistributes space proportionally on
+   * show/hide — a 280px nav drawer can balloon to half the viewport
+   * after another panel closes. Setting min/max keeps it pinned.
+   */
+  minimumWidth?: number;
+  maximumWidth?: number;
+  minimumHeight?: number;
+  maximumHeight?: number;
 }
 
 /**

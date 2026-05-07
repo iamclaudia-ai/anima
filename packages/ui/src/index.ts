@@ -77,6 +77,7 @@ export { SubagentActivityStrip } from "./components/SubagentActivityStrip";
 export { GitStatusBar } from "./components/GitStatusBar";
 export { LayoutManager } from "./components/LayoutManager";
 export type { PanelRegistration, PanelRegistry } from "./components/LayoutManager";
+export { rememberPanelWidth, getRememberedPanelWidth } from "./components/panel-widths";
 export { ErrorBoundary } from "./components/ErrorBoundary";
 export { GlobalNotifications } from "./components/GlobalNotifications";
 export { LoginGate, logout } from "./components/LoginGate";

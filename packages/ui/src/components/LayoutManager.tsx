@@ -43,6 +43,15 @@ export interface PanelRegistration {
    * Default is dockview's `"onlyWhenVisible"`.
    */
   renderer?: "always" | "onlyWhenVisible";
+  /**
+   * Size constraints (px). Without these, dockview redistributes space
+   * proportionally on show/hide — a 280px nav can balloon to half the
+   * viewport after another panel closes. Min/max keeps it pinned.
+   */
+  minimumWidth?: number;
+  maximumWidth?: number;
+  minimumHeight?: number;
+  maximumHeight?: number;
   /** React component to render in this panel */
   // biome-ignore lint: Panel components have varying prop signatures
   component: ComponentType<any>;
@@ -171,6 +180,10 @@ function LayoutManagerInner({
           renderer,
           initialWidth: req.size,
           initialHeight: req.size,
+          minimumWidth: registration?.minimumWidth,
+          maximumWidth: registration?.maximumWidth,
+          minimumHeight: registration?.minimumHeight,
+          maximumHeight: registration?.maximumHeight,
         };
 
         if (req.referencePanel && req.direction) {

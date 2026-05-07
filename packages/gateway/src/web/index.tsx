@@ -200,6 +200,10 @@ async function bootstrap(): Promise<void> {
         title: panel.title,
         icon: panel.icon,
         renderer: panel.renderer,
+        minimumWidth: panel.minimumWidth,
+        maximumWidth: panel.maximumWidth,
+        minimumHeight: panel.minimumHeight,
+        maximumHeight: panel.maximumHeight,
         component: panel.component,
       });
     }

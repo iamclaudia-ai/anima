@@ -21,7 +21,17 @@ import { ChatPageProvider } from "./context/ChatPageContext";
 // ── Panels ──────────────────────────────────────────────────
 
 export const chatPanels: (PanelDefinition & { component: React.ComponentType })[] = [
-  { id: "chat.nav", title: "Workspaces", icon: "Folder", component: NavPanel },
+  {
+    id: "chat.nav",
+    title: "Workspaces",
+    icon: "Folder",
+    // Pin the nav drawer so dockview can't proportionally balloon it
+    // when the editor closes. 220 is enough for the workspace list to
+    // breathe; 320 keeps it from eating the chat width.
+    minimumWidth: 220,
+    maximumWidth: 320,
+    component: NavPanel,
+  },
   { id: "chat.main", title: "Chat", icon: "MessageSquare", component: ChatPanel },
 ];
 

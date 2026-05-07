@@ -13,7 +13,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ClaudiaChat,
+  getRememberedPanelWidth,
   Link,
+  rememberPanelWidth,
   useHeaderSlot,
   useIsMobile,
   useLayoutApi,
@@ -24,8 +26,9 @@ import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
 
 const NAV_PANEL_ID = "chat.nav";
-const NAV_PANEL_WIDTH = 280;
+const NAV_PANEL_DEFAULT_WIDTH = 280;
 const EDITOR_PANEL_ID = "editor.viewer";
+const EDITOR_PANEL_DEFAULT_WIDTH = 800;
 
 export function ChatPanel() {
   const { activeWorkspace, activeSessionId, chatBridge, isConnected, onNewSession } = useChatPage();
@@ -68,37 +71,50 @@ export function ChatPanel() {
     if (!layoutApi) return;
     const existing = layoutApi.getPanel(NAV_PANEL_ID);
     if (existing) {
+      // Snapshot width before close — clamped by registered min/max
+      // constraints, so a future open won't restore a stale extreme.
+      rememberPanelWidth(NAV_PANEL_ID, existing.api.width);
       existing.api.close();
       return;
     }
     const ref = layoutApi.getPanel("chat.main");
     if (!ref) return;
+    const width = getRememberedPanelWidth(NAV_PANEL_ID) ?? NAV_PANEL_DEFAULT_WIDTH;
     layoutApi.addPanel({
       id: NAV_PANEL_ID,
       component: "panel-wrapper",
       params: { panelId: NAV_PANEL_ID },
       title: "Workspaces",
       position: { referencePanel: ref, direction: "left" },
-      initialWidth: NAV_PANEL_WIDTH,
+      initialWidth: width,
     });
+    // `initialWidth` is unreliable when adding next to existing siblings —
+    // dockview falls back to a 50/50 split. Pin the size in a microtask
+    // so dockview has finished placing the panel first. (Same trick the
+    // LayoutManager uses for initial layout build.)
+    queueMicrotask(() => layoutApi.getPanel(NAV_PANEL_ID)?.api.setSize({ width }));
   }, [isMobile, layoutApi]);
 
   const toggleEditor = useCallback(() => {
     if (!layoutApi) return;
     const existing = layoutApi.getPanel(EDITOR_PANEL_ID);
     if (existing) {
+      rememberPanelWidth(EDITOR_PANEL_ID, existing.api.width);
       existing.api.close();
       return;
     }
     const ref = layoutApi.getPanel("chat.main");
     if (!ref) return;
+    const width = getRememberedPanelWidth(EDITOR_PANEL_ID) ?? EDITOR_PANEL_DEFAULT_WIDTH;
     layoutApi.addPanel({
       id: EDITOR_PANEL_ID,
       component: "panel-wrapper",
       params: { panelId: EDITOR_PANEL_ID },
       title: "Editor",
       position: { referencePanel: ref, direction: "right" },
+      initialWidth: width,
     });
+    queueMicrotask(() => layoutApi.getPanel(EDITOR_PANEL_ID)?.api.setSize({ width }));
   }, [layoutApi]);
 
   // ── Global header slots ────────────────────────────────────
