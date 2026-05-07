@@ -13,7 +13,7 @@ export default function ReadTool({ name, parsedInput, result, isLoading }: ToolP
 
   const expandedContent = (
     <div className="space-y-1.5">
-      {filePath && <FilePath path={filePath} />}
+      {filePath && <FilePath path={filePath} line={offset} />}
       {(offset !== undefined || limit !== undefined) && (
         <div className="flex gap-1.5">
           {offset !== undefined && (
