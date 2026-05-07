@@ -2,32 +2,25 @@
  * Live-tunable audio playback parameters.
  *
  * TEMPORARY debug singleton — exposed via <AudioDebugPanel /> so we can
- * iterate on click/pop tuning without restarting the dev server.
+ * iterate on buffering parameters without restarting the dev server.
  *
- * Read by useAudioPlayback at scheduling time (every chunk), so mutations
- * take effect on the next chunk after a change. Subscribers (the panel)
- * use the small pub/sub below to re-render their controls.
+ * Read by useAudioPlayback at decision time. Mutations propagate to the
+ * AudioWorklet via a `config` postMessage.
  */
 
 export interface AudioConfig {
-  /** Scheduling lookahead floor: chunks scheduled at max(cursor, now + this). */
-  lookaheadMs: number;
-  /** Extra cushion at stream_start before first chunk lands. */
-  streamStartBufferMs: number;
-  /** Edge-fade length in samples (per chunk, both ends). 0 disables. */
-  fadeSamples: number;
-  /** If true, apply edge fade in pcm16ToAudioBuffer. */
-  fadeEnabled: boolean;
-  /** Synthetic silence to insert between every chunk (ms). 0 = none. */
-  interChunkSilenceMs: number;
+  /**
+   * Initial primer fill before playback begins (ms). Higher = more
+   * tolerance for early-stream stalls; lower = less startup latency.
+   */
+  primerBufferMs: number;
+  /** Total ring buffer capacity (ms). Acts as an overflow safety net. */
+  ringBufferMs: number;
 }
 
 const DEFAULTS: AudioConfig = {
-  lookaheadMs: 100,
-  streamStartBufferMs: 120,
-  fadeSamples: 64,
-  fadeEnabled: true,
-  interChunkSilenceMs: 0,
+  primerBufferMs: 120,
+  ringBufferMs: 4000,
 };
 
 const state: AudioConfig = { ...DEFAULTS };
@@ -56,4 +49,34 @@ export function subscribeAudioConfig(fn: () => void): () => void {
 
 export function getAudioConfigDefaults(): AudioConfig {
   return { ...DEFAULTS };
+}
+
+// ---------------------------------------------------------------------------
+// Live status (worklet → main thread → debug panel)
+// ---------------------------------------------------------------------------
+
+export interface AudioStatus {
+  /** Current ring buffer fill in ms. */
+  fillMs: number;
+  /** Total underruns since context start. */
+  underruns: number;
+}
+
+const status: AudioStatus = { fillMs: 0, underruns: 0 };
+const statusListeners = new Set<() => void>();
+
+export function getAudioStatus(): AudioStatus {
+  return status;
+}
+
+export function setAudioStatus(patch: Partial<AudioStatus>): void {
+  Object.assign(status, patch);
+  for (const fn of statusListeners) fn();
+}
+
+export function subscribeAudioStatus(fn: () => void): () => void {
+  statusListeners.add(fn);
+  return () => {
+    statusListeners.delete(fn);
+  };
 }

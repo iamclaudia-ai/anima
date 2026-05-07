@@ -1,19 +1,22 @@
 /**
  * Live audio playback tuning panel.
  *
- * TEMPORARY — used to dial in lookahead / fade / silence parameters
- * without rebuilds. Includes a "Speak" button that triggers voice.speak
- * with custom test text so we don't have to prompt Claudia each round.
+ * TEMPORARY — used to dial in worklet ring-buffer parameters without
+ * rebuilds. Includes a live buffer level meter, an underrun counter,
+ * and a "Speak" button that triggers voice.speak with custom test text.
  */
 
 import { useEffect, useRef, useState } from "react";
 import {
   type AudioConfig,
+  type AudioStatus,
   getAudioConfig,
   getAudioConfigDefaults,
+  getAudioStatus,
   resetAudioConfig,
   setAudioConfig,
   subscribeAudioConfig,
+  subscribeAudioStatus,
 } from "../hooks/audioConfig";
 import type { UseChatGatewayReturn } from "../hooks/useChatGateway";
 
@@ -27,39 +30,61 @@ const DEFAULT_TEST_TEXT =
 
 export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
   const [cfg, setCfgState] = useState<AudioConfig>(() => ({ ...getAudioConfig() }));
+  const [status, setStatusState] = useState<AudioStatus>(() => ({ ...getAudioStatus() }));
   const [text, setText] = useState(DEFAULT_TEST_TEXT);
   const textRef = useRef(text);
   textRef.current = text;
 
-  useEffect(() => {
-    return subscribeAudioConfig(() => {
-      setCfgState({ ...getAudioConfig() });
-    });
-  }, []);
+  useEffect(() => subscribeAudioConfig(() => setCfgState({ ...getAudioConfig() })), []);
+  useEffect(() => subscribeAudioStatus(() => setStatusState({ ...getAudioStatus() })), []);
 
-  const update = (patch: Partial<AudioConfig>) => {
-    setAudioConfig(patch);
-  };
-
-  const reset = () => {
-    resetAudioConfig();
-  };
-
+  const update = (patch: Partial<AudioConfig>) => setAudioConfig(patch);
+  const reset = () => resetAudioConfig();
   const speak = () => {
     if (!textRef.current.trim()) return;
     gateway.sendRequest("voice.speak", { text: textRef.current });
   };
-
-  const stop = () => {
-    gateway.sendRequest("voice.stop");
-  };
+  const stop = () => gateway.sendRequest("voice.stop");
 
   const defaults = getAudioConfigDefaults();
+
+  // Buffer level bar — fill ms relative to ring capacity.
+  const fillPct = Math.min(100, Math.round((status.fillMs / Math.max(1, cfg.ringBufferMs)) * 100));
+  const fillBar = (
+    <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-slate-700 dark:text-slate-300">Buffer level</span>
+        <span className="font-mono text-slate-500 dark:text-slate-400">
+          {status.fillMs}ms / {cfg.ringBufferMs}ms
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+        <div
+          className={`h-full transition-all duration-75 ${
+            status.fillMs === 0
+              ? "bg-red-500"
+              : status.fillMs < cfg.primerBufferMs
+                ? "bg-amber-400"
+                : "bg-emerald-500"
+          }`}
+          style={{ width: `${fillPct}%` }}
+        />
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+        <span>primer at {cfg.primerBufferMs}ms</span>
+        <span className={status.underruns > 0 ? "font-semibold text-red-500" : ""}>
+          underruns: {status.underruns}
+        </span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="absolute right-4 bottom-24 z-50 w-80 rounded-xl border border-purple-300/40 bg-white/95 p-4 shadow-xl backdrop-blur dark:border-purple-400/30 dark:bg-slate-900/95">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-purple-700 dark:text-purple-300">Audio Debug</h3>
+        <h3 className="text-sm font-semibold text-purple-700 dark:text-purple-300">
+          Audio Debug — Worklet
+        </h3>
         <button
           type="button"
           onClick={onClose}
@@ -70,44 +95,27 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
       </div>
 
       <Slider
-        label="Lookahead"
-        unit="ms"
-        min={0}
-        max={400}
-        step={5}
-        value={cfg.lookaheadMs}
-        defaultValue={defaults.lookaheadMs}
-        onChange={(v) => update({ lookaheadMs: v })}
-      />
-      <Slider
-        label="Stream-start buffer"
+        label="Primer buffer"
         unit="ms"
         min={0}
         max={500}
         step={5}
-        value={cfg.streamStartBufferMs}
-        defaultValue={defaults.streamStartBufferMs}
-        onChange={(v) => update({ streamStartBufferMs: v })}
+        value={cfg.primerBufferMs}
+        defaultValue={defaults.primerBufferMs}
+        onChange={(v) => update({ primerBufferMs: v })}
       />
       <Slider
-        label="Fade samples"
-        unit="smp"
-        min={0}
-        max={1024}
-        step={8}
-        value={cfg.fadeSamples}
-        defaultValue={defaults.fadeSamples}
-        onChange={(v) => update({ fadeSamples: v })}
+        label="Ring buffer (capacity)"
+        unit="ms"
+        min={500}
+        max={8000}
+        step={100}
+        value={cfg.ringBufferMs}
+        defaultValue={defaults.ringBufferMs}
+        onChange={(v) => update({ ringBufferMs: v })}
       />
-      <div className="mt-2 mb-3 flex items-center justify-between text-xs">
-        <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
-            checked={cfg.fadeEnabled}
-            onChange={(e) => update({ fadeEnabled: e.target.checked })}
-          />
-          Fade enabled
-        </label>
+
+      <div className="mt-2 flex items-center justify-end text-xs">
         <button
           type="button"
           onClick={reset}
@@ -116,16 +124,12 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
           reset all
         </button>
       </div>
-      <Slider
-        label="Inter-chunk silence"
-        unit="ms"
-        min={0}
-        max={100}
-        step={1}
-        value={cfg.interChunkSilenceMs}
-        defaultValue={defaults.interChunkSilenceMs}
-        onChange={(v) => update({ interChunkSilenceMs: v })}
-      />
+
+      {fillBar}
+
+      <p className="mt-2 text-[10px] leading-tight text-slate-500 dark:text-slate-400">
+        Ring capacity changes apply on next reload (worklet node is rebuilt). Primer applies live.
+      </p>
 
       <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">
         <textarea
