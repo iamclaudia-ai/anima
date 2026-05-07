@@ -16,6 +16,7 @@
     "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
+    "lucide-react": "catalog:",
     "zod": "catalog:"
   }
 }

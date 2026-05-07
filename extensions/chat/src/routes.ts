@@ -13,6 +13,7 @@
 
 import type { ExtensionWebContribution, Route } from "@anima/ui";
 import type { PanelDefinition, LayoutDefinition } from "@anima/shared";
+import { MessageSquare } from "lucide-react";
 import { NavPanel } from "./panels/NavPanel";
 import { ChatPanel } from "./panels/ChatPanel";
 import { ChatPageProvider } from "./context/ChatPageContext";
@@ -42,11 +43,12 @@ export const chatLayouts: Record<string, LayoutDefinition> = {
 
 // ── Routes ──────────────────────────────────────────────────
 
+// The first route is what the home-page launcher tile links to.
 export const chatRoutes: Route[] = [
-  { path: "/", layout: "ide", title: "Chat", label: "Claudia" },
-  { path: "/workspace/:workspaceId", layout: "ide", title: "Workspace", label: "Workspace" },
+  { path: "/chat", layout: "ide", title: "Chat", label: "Claudia" },
+  { path: "/chat/:workspaceId", layout: "ide", title: "Workspace", label: "Workspace" },
   {
-    path: "/workspace/:workspaceId/session/:sessionId",
+    path: "/chat/:workspaceId/:sessionId",
     layout: "ide",
     title: "Chat",
     label: "Chat",
@@ -55,8 +57,15 @@ export const chatRoutes: Route[] = [
 
 export default {
   id: "chat",
-  name: "Chat",
+  name: "Claudia",
   order: 40,
+  icon: MessageSquare,
+  color: {
+    iconBg: "bg-rose-100",
+    iconColor: "text-rose-600",
+    ring: "ring-rose-200/70",
+    hoverText: "group-hover:text-rose-700",
+  },
   routes: chatRoutes,
   panels: chatPanels,
   layouts: chatLayouts,

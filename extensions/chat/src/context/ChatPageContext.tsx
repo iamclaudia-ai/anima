@@ -280,7 +280,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   // derivation above does the rest. No imperative setActive* calls.
   const onWorkspaceSelect = useCallback(
     (workspace: WorkspaceInfo) => {
-      navigate(`/workspace/${workspace.id}/session/latest`);
+      navigate(`/chat/${workspace.id}/latest`);
       // Best-effort refresh of the first page in case anything changed
       // externally — purely a data fetch, doesn't touch selection.
       void loadSessionsForWorkspace(callGateway, workspace.cwd, {
@@ -298,7 +298,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     // session in a different workspace's drawer section would build a URL
     // that mismatches the session's actual workspace, leaving the Header
     // and the active-row highlight stuck on the previous workspace.
-    navigate(`/workspace/${workspace.id}/session/${session.sessionId}`);
+    navigate(`/chat/${workspace.id}/${session.sessionId}`);
   }, []);
 
   const onNewSession = useCallback(
@@ -324,7 +324,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
             ),
           }));
           // Navigate — URL change drives selection.
-          navigate(`/workspace/${target.id}/session/${nextSessionId}`);
+          navigate(`/chat/${target.id}/${nextSessionId}`);
           // Reconcile with the server in the background — refresh just the
           // first page; older sessions stay paged out until "Show more".
           return loadSessionsForWorkspace(callGateway, target.cwd, {
@@ -448,7 +448,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
         }
 
         // Navigate — URL change drives selection.
-        navigate(`/workspace/${newWorkspace.id}/session/${sessionIdToUse}`);
+        navigate(`/chat/${newWorkspace.id}/${sessionIdToUse}`);
 
         const reconciled =
           existingSessions.length > 0
@@ -485,7 +485,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   );
 
   // Persist active session as the workspace's "latest" so re-entering the
-  // workspace via `/workspace/<id>/session/latest` lands on the same one.
+  // workspace via `/chat/<id>/latest` lands on the same one.
   useEffect(() => {
     if (activeSessionId && activeWorkspace) {
       setLatestSessionId(activeWorkspace.id, activeSessionId);
@@ -493,22 +493,22 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   }, [activeSessionId, activeWorkspace]);
 
   // ── URL redirects (single writer) ────────────────────────────
-  // Resolve `/`, `/workspace/<id>`, and `/workspace/<id>/session/latest`
-  // to a concrete URL. Uses `replace: true` so the placeholder doesn't
-  // pollute the back-button history.
+  // Resolve `/chat`, `/chat/<id>`, and `/chat/<id>/latest` to a concrete
+  // URL. Uses `replace: true` so the placeholder doesn't pollute the
+  // back-button history.
   useEffect(() => {
     if (workspaces.length === 0) return;
 
     // No workspace in the URL → land on the first one's latest session.
     if (!workspaceId) {
       const first = workspaces[0];
-      if (first) navigate(`/workspace/${first.id}/session/latest`, { replace: true });
+      if (first) navigate(`/chat/${first.id}/latest`, { replace: true });
       return;
     }
 
     // Workspace in URL but no session → resolve to latest.
     if (workspaceId && !sessionId) {
-      navigate(`/workspace/${workspaceId}/session/latest`, { replace: true });
+      navigate(`/chat/${workspaceId}/latest`, { replace: true });
       return;
     }
 
@@ -518,7 +518,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       const fallback = activeWorkspaceSessions[0]?.sessionId;
       const resolved = remembered ?? fallback;
       if (resolved) {
-        navigate(`/workspace/${workspaceId}/session/${resolved}`, { replace: true });
+        navigate(`/chat/${workspaceId}/${resolved}`, { replace: true });
       }
       // If nothing's loaded yet we just leave `latest` in the URL — the
       // bootstrap fetch will populate `activeWorkspaceSessions` and this

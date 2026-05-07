@@ -310,7 +310,7 @@ RPC metadata: `traceId`, `depth` (max 8), `deadlineMs`. Per-extension rate limit
 | Extension       | ID         | What It Does                                                                           |
 | --------------- | ---------- | -------------------------------------------------------------------------------------- |
 | Session         | `session`  | Thin RPC client to agent-host, workspace CRUD, history parsing, provider-aware routing |
-| Chat            | `chat`     | Web pages: /, /workspace/:workspaceId/session/:sessionId                               |
+| Chat            | `chat`     | Web pages: /chat, /chat/:workspaceId/:sessionId                                        |
 | Voice           | `voice`    | Cartesia Sonic 3.0 TTS, streaming audio                                                |
 | iMessage        | `imessage` | iMessage bridge, auto-reply                                                            |
 | Mission Control | `control`  | System dashboard, health checks                                                        |
@@ -568,7 +568,7 @@ packages/
 
 extensions/
   session/src/          # Session lifecycle, SDK engine, workspace CRUD
-  chat/src/             # Web pages: /, /workspace/:workspaceId/session/:sessionId
+  chat/src/             # Web pages: /chat, /chat/:workspaceId/:sessionId
   voice/src/            # Cartesia Sonic 3.0 TTS, streaming audio
   imessage/src/         # iMessage bridge, auto-reply
   control/src/          # System dashboard, health checks

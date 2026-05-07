@@ -15,6 +15,7 @@
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "lucide-react": "catalog:",
     "react-markdown": "catalog:",
     "remark-gfm": "4.0.1",
     "zod": "catalog:",

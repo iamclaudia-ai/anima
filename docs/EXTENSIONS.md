@@ -750,15 +750,32 @@ Bun quirks) see [`WEB-BUNDLER.md`](./WEB-BUNDLER.md).
 ```typescript
 // extensions/my-feature/src/routes.ts
 import type { ExtensionWebContribution, Route } from "@anima/ui";
-import { MyPage } from "./pages/MyPage";
+import { Sparkles } from "lucide-react";
+import { MyPage, DetailPage } from "./pages";
 
 export const myFeatureRoutes: Route[] = [
   { path: "/my-feature", component: MyPage, label: "My Feature" },
+  { path: "/my-feature/:id", component: DetailPage, label: "Detail" },
 ];
 
 export default {
   id: "my-feature",
   name: "My Feature",
+  // Launcher tile config — `icon` makes the extension appear on the
+  // gateway home page (`/`); the tile links to the first route above.
+  // Drop `icon` to opt out (e.g., dev-only or panel-only contributions).
+  icon: Sparkles,
+  // `color` is a literal Tailwind class set — pick anything (violet,
+  // teal, custom hex via arbitrary values, …). Tailwind's content
+  // scanner picks the classes up via the `@source extensions/...` glob
+  // in `packages/ui/src/styles/index.css`. Defaults to a neutral stone
+  // tone if omitted.
+  color: {
+    iconBg: "bg-indigo-100",
+    iconColor: "text-indigo-600",
+    ring: "ring-indigo-200/70",
+    hoverText: "group-hover:text-indigo-700",
+  },
   routes: myFeatureRoutes,
 } satisfies ExtensionWebContribution;
 ```
@@ -768,7 +785,8 @@ generator to run, no `package.json` edits in the gateway, no manual
 registration. As long as `my-feature` is enabled in `anima.json`, the SPA
 fetches `/api/web-contributions`, finds your extension, dynamic-imports
 `/extensions/my-feature/web-bundle.js`, and mounts the routes — whether
-or not there's a server-side `index.ts`.
+or not there's a server-side `index.ts`. The home page rebuilds its grid
+from the same contribution list.
 
 ### package.json
 
@@ -811,9 +829,10 @@ exist in the shared bundle.
 
 ### Convention
 
-- Chat owns `/` (workspaces, sessions)
-- Other extensions use `/{extension-name}` paths
-- Pages are React components using `@anima/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`)
+- The gateway owns `/` — a launcher home page rendered by the SPA shell. Extensions don't claim it.
+- Each extension uses a namespaced prefix (`/chat`, `/memory`, `/scheduler`, etc.).
+- Set `icon` (Lucide component) and optionally `color` (a `LauncherColor` object of Tailwind classes — `iconBg`/`iconColor`/`ring`/`hoverText`) on the contribution's default export to appear on the home page. The tile links to the first route in `routes`.
+- Pages are React components using `@anima/ui` hooks (`useChatGateway`, `useGatewayClient`, `useRouter`).
 
 ### Gateway URL Defaults (Web Extensions)
 
@@ -844,14 +863,14 @@ Chat still manages session scope explicitly (`session.<id>.*`) and unsubscribes 
 
 ## Existing Extensions
 
-| Extension       | ID           | Package                 | Web Pages                                         | Source Routes |
-| --------------- | ------------ | ----------------------- | ------------------------------------------------- | ------------- |
-| Chat            | `chat`       | `@anima/ext-chat`       | `/`, `/workspace/:workspaceId/session/:sessionId` | --            |
-| Voice           | `voice`      | `@anima/voice`          | --                                                | --            |
-| iMessage        | `imessage`   | `@anima/ext-imessage`   | --                                                | `imessage`    |
-| Mission Control | `control`    | `@anima/ext-control`    | `/control`, `/logs`                               | --            |
-| Hooks           | `hooks`      | `@anima/ext-hooks`      | --                                                | --            |
-| DOMINATRIX      | `dominatrix` | `@anima/ext-dominatrix` | --                                                | --            |
+| Extension       | ID           | Package                 | Web Pages                                | Source Routes |
+| --------------- | ------------ | ----------------------- | ---------------------------------------- | ------------- |
+| Chat            | `chat`       | `@anima/ext-chat`       | `/chat`, `/chat/:workspaceId/:sessionId` | --            |
+| Voice           | `voice`      | `@anima/voice`          | --                                       | --            |
+| iMessage        | `imessage`   | `@anima/ext-imessage`   | --                                       | `imessage`    |
+| Mission Control | `control`    | `@anima/ext-control`    | `/control`, `/logs`                      | --            |
+| Hooks           | `hooks`      | `@anima/ext-hooks`      | --                                       | --            |
+| DOMINATRIX      | `dominatrix` | `@anima/ext-dominatrix` | --                                       | --            |
 
 All extensions run out-of-process. There is no in-process mode.
 

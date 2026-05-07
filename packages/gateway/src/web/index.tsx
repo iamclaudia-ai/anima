@@ -25,6 +25,7 @@ import {
 } from "@anima/ui";
 import type { ExtensionWebContribution, PanelContribution, PanelRegistry, Route } from "@anima/ui";
 import type { LayoutDefinition } from "@anima/shared";
+import { HomePage } from "./HomePage";
 import "@anima/ui/styles";
 
 // ── Hash-to-path redirect (PWA / legacy links) ─────────────
@@ -70,6 +71,23 @@ function isContribution(value: unknown): value is ExtensionWebContribution {
   if (candidate.name !== undefined && typeof candidate.name !== "string") return false;
   if (candidate.order !== undefined && typeof candidate.order !== "number") return false;
   if (candidate.enabled !== undefined && typeof candidate.enabled !== "boolean") return false;
+  // `icon` is a React component reference — could be a plain function
+  // OR a forwardRef object (lucide-react wraps every icon in
+  // `forwardRef`, which returns `{ $$typeof, render }`, NOT a function).
+  // Accept either; React will complain at render time if it's bogus.
+  if (
+    candidate.icon !== undefined &&
+    typeof candidate.icon !== "function" &&
+    typeof candidate.icon !== "object"
+  ) {
+    return false;
+  }
+  if (
+    candidate.color !== undefined &&
+    (typeof candidate.color !== "object" || candidate.color === null)
+  ) {
+    return false;
+  }
   if (candidate.routes !== undefined && !Array.isArray(candidate.routes)) return false;
   if (candidate.panels !== undefined && !Array.isArray(candidate.panels)) return false;
   if (
@@ -125,9 +143,25 @@ async function bootstrap(): Promise<void> {
     .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || (a.id ?? "").localeCompare(b.id ?? ""));
 
   // ── Aggregate routes / panels / layouts ─────────────────────
-  const allRoutes: Route[] = webContributions.flatMap(
-    (contribution) => (contribution.routes as Route[] | undefined) ?? [],
-  );
+  // The gateway owns `/` as the home page launcher. Prepending the
+  // built-in route guarantees it wins the "first match wins" lookup in
+  // <Router>, regardless of what extensions claim — extensions get
+  // namespaced paths (`/chat`, `/memory`, etc.) and contribute their
+  // first route as a launcher tile via the `icon` + `label` convention.
+  const builtinRoutes: Route[] = [
+    {
+      path: "/",
+      component: () => <HomePage contributions={webContributions} />,
+      title: "Home",
+      label: "Home",
+    },
+  ];
+  const allRoutes: Route[] = [
+    ...builtinRoutes,
+    ...webContributions.flatMap(
+      (contribution) => (contribution.routes as Route[] | undefined) ?? [],
+    ),
+  ];
   const panelRegistry: PanelRegistry = new Map();
   for (const contribution of webContributions) {
     const panels = (contribution.panels as PanelContribution[] | undefined) ?? [];

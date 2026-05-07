@@ -5,6 +5,8 @@
 import type { ExtensionWebContribution, Route } from "@anima/ui";
 import { BogartPage } from "./pages/BogartPage";
 
+// Dev scaffolding — no `icon` on the contribution, so it doesn't appear
+// on the home page launcher. Reachable via the direct `/bogart` URL.
 export const bogartRoutes: Route[] = [{ path: "/bogart", component: BogartPage, label: "Bogart" }];
 
 export default {

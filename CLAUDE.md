@@ -42,19 +42,19 @@ All API methods declare Zod schemas for input validation. The gateway validates 
 
 ### Everything is an Extension
 
-Every feature — including the web chat UI — is an extension with routes and pages.
+Every feature — including the web chat UI — is an extension with routes and pages. The gateway itself owns the home page at `/`: an iPhone-app-grid launcher that renders one tile per extension whose `ExtensionWebContribution` declares a Lucide `icon` (and optionally a `color` from `LauncherColor`). The tile links to that contribution's first route and uses `name` as the label.
 
 Server extension loading is config-driven from `~/.anima/anima.json` and always out-of-process (one child process per enabled extension). Each extension calls `runExtensionHost(factory)` from `@anima/extension-host` — making it directly executable with `bun --hot` for native HMR.
 
-| Extension  | Location               | Server methods                                                              | Web pages                                         |
-| ---------- | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------- |
-| `session`  | `extensions/session/`  | `session.create_session`, `session.send_prompt`, `session.start_task`, etc. | —                                                 |
-| `chat`     | `extensions/chat/`     | —                                                                           | `/`, `/workspace/:workspaceId/session/:sessionId` |
-| `voice`    | `extensions/voice/`    | `voice.speak`, `voice.stop`                                                 | —                                                 |
-| `imessage` | `extensions/imessage/` | `imessage.send`, `imessage.chats`                                           | —                                                 |
-| `hooks`    | `extensions/hooks/`    | `hooks.health_check`                                                        | —                                                 |
-| `memory`   | `extensions/memory/`   | `memory.health_check`                                                       | —                                                 |
-| `control`  | `extensions/control/`  | `control.health_check`                                                      | `/control`                                        |
+| Extension  | Location               | Server methods                                                              | Web pages                                |
+| ---------- | ---------------------- | --------------------------------------------------------------------------- | ---------------------------------------- |
+| `session`  | `extensions/session/`  | `session.create_session`, `session.send_prompt`, `session.start_task`, etc. | —                                        |
+| `chat`     | `extensions/chat/`     | —                                                                           | `/chat`, `/chat/:workspaceId/:sessionId` |
+| `voice`    | `extensions/voice/`    | `voice.speak`, `voice.stop`                                                 | —                                        |
+| `imessage` | `extensions/imessage/` | `imessage.send`, `imessage.chats`                                           | —                                        |
+| `hooks`    | `extensions/hooks/`    | `hooks.health_check`                                                        | —                                        |
+| `memory`   | `extensions/memory/`   | `memory.health_check`                                                       | —                                        |
+| `control`  | `extensions/control/`  | `control.health_check`                                                      | `/control`                               |
 
 **Note**: Task delegation (code review, tests, etc.) routes through `session.start_task({ agent: "codex", ... })` — agent-host owns all SDK runtimes (Claude sessions, Codex tasks, future Gemini)
 

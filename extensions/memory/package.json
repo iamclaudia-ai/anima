@@ -18,6 +18,7 @@
     "@anima/shared": "workspace:*",
     "@anima/ui": "workspace:*",
     "gray-matter": "^4.0.3",
+    "lucide-react": "catalog:",
     "react-markdown": "catalog:",
     "remark-gfm": "4.0.1",
     "xstate": "5.30.0"

@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionWebContribution, Route } from "@anima/ui";
+import { Presentation } from "lucide-react";
 import { PresenterPage } from "./pages/PresenterPage";
 import { PresenterNotesPage } from "./pages/PresenterNotesPage";
 import { DisplayPage } from "./pages/DisplayPage";
@@ -24,5 +25,12 @@ export default {
   id: "presenter",
   name: "Presenter",
   order: 30,
+  icon: Presentation,
+  color: {
+    iconBg: "bg-fuchsia-100",
+    iconColor: "text-fuchsia-600",
+    ring: "ring-fuchsia-200/70",
+    hoverText: "group-hover:text-fuchsia-700",
+  },
   routes: presenterRoutes,
 } satisfies ExtensionWebContribution;

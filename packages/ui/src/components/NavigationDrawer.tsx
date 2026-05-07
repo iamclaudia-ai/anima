@@ -370,7 +370,7 @@ function WorkspaceItem({
                 key={session.sessionId}
                 session={session}
                 isActive={isActive && activeSessionId === session.sessionId}
-                href={`/workspace/${workspace.id}/session/${session.sessionId}`}
+                href={`/chat/${workspace.id}/${session.sessionId}`}
                 onSelect={() => onSessionSelect(session, workspace)}
               />
             ))
@@ -548,7 +548,7 @@ function SearchModal({
             <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
           ) : (
             flatSessions.map(({ workspace, session }) => {
-              const href = `/workspace/${workspace.id}/session/${session.sessionId}`;
+              const href = `/chat/${workspace.id}/${session.sessionId}`;
               const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();

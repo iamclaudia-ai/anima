@@ -7,6 +7,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import type { LayoutDefinition, LayoutNode } from "@anima/shared";
 import type { PanelDefinition } from "@anima/shared";
 import type { PanelRegistry } from "./components/LayoutManager";
@@ -22,7 +23,6 @@ export interface Route {
   /** Named layout to use instead of a single component (e.g., "ide") */
   layout?: string;
   label?: string;
-  icon?: string;
   /** Browser tab title — shown as "title — Anima". Falls back to label. */
   title?: string;
 }
@@ -33,15 +33,59 @@ export interface PanelContribution extends PanelDefinition {
   component: ComponentType<any>;
 }
 
+/**
+ * Color theme for an extension's launcher tile on the gateway home page.
+ *
+ * Each field is a literal Tailwind class string — no central palette,
+ * no enum, no mapping table. Pick whatever colors fit your extension.
+ * The home page slots the classes in directly; Tailwind picks them up
+ * via the `@source "extensions/.../*.tsx"` content scan in
+ * `packages/ui/src/styles/index.css`, so any class you write in your
+ * `routes.ts` ships in the SPA bundle.
+ *
+ * Conventional template (replace `<color>` with violet, rose, teal, …):
+ *   {
+ *     iconBg: "bg-<color>-100",
+ *     iconColor: "text-<color>-600",
+ *     ring: "ring-<color>-200/70",
+ *     hoverText: "group-hover:text-<color>-700",
+ *   }
+ */
+export interface LauncherColor {
+  /** Tailwind class for the icon-square background. */
+  iconBg: string;
+  /** Tailwind class for the icon stroke. */
+  iconColor: string;
+  /** Tailwind class for the icon-square ring. */
+  ring: string;
+  /** Tailwind class for the label color on hover. */
+  hoverText: string;
+}
+
 export interface ExtensionWebContribution {
   /** Extension ID that owns this browser contribution. */
   id: string;
-  /** Optional display name for gateway UI surfaces. */
+  /**
+   * Display name. Used as the label on the gateway home page launcher
+   * tile, so make it pretty (e.g., "Claudia" rather than "Chat").
+   */
   name?: string;
   /** Stable ordering hint for route/panel aggregation. Lower values sort first. */
   order?: number;
   /** Allows a contribution module to exist without being mounted yet. */
   enabled?: boolean;
+  /**
+   * Lucide icon shown on the gateway home page (`/`) launcher tile.
+   * The tile links to the **first route** in the `routes` array.
+   * Without an icon, the extension gets no launcher tile — useful for
+   * dev-only or panel-only contributions.
+   */
+  icon?: LucideIcon;
+  /**
+   * Launcher tile color theme. Defaults to a neutral stone tone if
+   * omitted. Pick whatever Tailwind classes fit the extension's vibe.
+   */
+  color?: LauncherColor;
   /** Client-side routes contributed by this extension. */
   routes?: Route[];
   /** Layout panels contributed by this extension. */
@@ -58,7 +102,7 @@ interface RouterState {
 
 // ── Path Matching ────────────────────────────────────────────
 
-/** Match "/workspace/:workspaceId" against "/workspace/ws_abc" → { workspaceId: "ws_abc" } */
+/** Match "/chat/:workspaceId" against "/chat/ws_abc" → { workspaceId: "ws_abc" } */
 export function matchPath(pattern: string, pathname: string): Record<string, string> | null {
   const paramNames: string[] = [];
   // Support :param* for wildcard (matches rest of path including /)

@@ -83,7 +83,7 @@ export interface SubagentInfo {
 export interface UseChatGatewayOptions {
   /**
    * Explicit session ID (CC UUID) to load.
-   * Used by web client when navigating to /workspace/:wsId/session/:id.
+   * Used by web client when navigating to /chat/:wsId/:sessionId.
    * When set, loads history for this specific session.
    */
   sessionId?: string;
