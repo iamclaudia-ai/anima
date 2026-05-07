@@ -82,20 +82,20 @@ export function EditorPanel() {
 
   if (status === "error") {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-zinc-950 text-zinc-400">
+      <div className="flex h-full w-full items-center justify-center bg-white text-gray-500">
         <div className="text-center">
-          <p className="text-lg font-medium text-zinc-300">Code Server Unavailable</p>
+          <p className="text-lg font-medium text-gray-700">Code Server Unavailable</p>
           <p className="mt-2 text-sm">
             Expected at{" "}
-            <code className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">{baseUrl}</code>
+            <code className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{baseUrl}</code>
           </p>
-          <p className="mt-4 text-xs text-zinc-500">
-            Start it with: <code className="text-zinc-400">code-server</code>
+          <p className="mt-4 text-xs text-gray-400">
+            Start it with: <code className="text-gray-500">code-server</code>
           </p>
           <button
             type="button"
             onClick={() => setStatus("loading")}
-            className="mt-4 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-700"
+            className="mt-4 rounded bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200"
           >
             Retry
           </button>
@@ -105,10 +105,10 @@ export function EditorPanel() {
   }
 
   return (
-    <div className="relative h-full w-full bg-zinc-950">
+    <div className="relative h-full w-full bg-white">
       {status === "loading" && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950">
-          <p className="text-sm text-zinc-500">Connecting to code-server...</p>
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white">
+          <p className="text-sm text-gray-400">Connecting to code-server...</p>
         </div>
       )}
       <iframe

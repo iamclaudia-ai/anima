@@ -73,6 +73,14 @@ export function HeaderSlotsProvider({ children }: HeaderSlotsProviderProps) {
 export interface UseHeaderSlotOptions {
   /** Lower numbers render first within a segment. Defaults to 100. */
   order?: number;
+  /**
+   * When `false`, the slot is unregistered (or never registers). Lets a
+   * caller toggle a slot on/off — e.g., hiding the editor toggle on
+   * mobile where the editor panel isn't part of the layout. Defaults to
+   * `true`. Hooks must run unconditionally, so don't put `useHeaderSlot`
+   * inside an `if`; use this option instead.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -81,10 +89,11 @@ export interface UseHeaderSlotOptions {
  * Usage:
  *   useHeaderSlot("center", "chat.workspace", <span>{name}</span>);
  *   useHeaderSlot("right",  "chat.connection", <ConnectionDot />, { order: 90 });
+ *   useHeaderSlot("right",  "editor.toggle", <Toggle />, { enabled: !isMobile });
  *
- * No-op (with a console warning in dev) if there's no `HeaderSlotsProvider`
- * above — callers can drop the hook into shared components without
- * worrying about which routes do/don't have a header.
+ * No-op if there's no `HeaderSlotsProvider` above — callers can drop the
+ * hook into shared components without worrying about which routes do/
+ * don't have a header.
  */
 export function useHeaderSlot(
   segment: HeaderSegment,
@@ -94,14 +103,15 @@ export function useHeaderSlot(
 ): void {
   const ctx = useContext(HeaderSlotsContext);
   const order = options.order ?? 100;
+  const enabled = options.enabled ?? true;
 
   useEffect(() => {
-    if (!ctx) return;
+    if (!ctx || !enabled) return;
     ctx.register({ segment, id, order, content });
     return () => {
       ctx.unregister(segment, id);
     };
-  }, [ctx, segment, id, order, content]);
+  }, [ctx, segment, id, order, content, enabled]);
 }
 
 /** Read all currently-registered header slots. Used by `AppHeader`. */

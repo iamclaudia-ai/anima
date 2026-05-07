@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ClaudiaChat, Link, useHeaderSlot, useIsMobile, useLayoutApi } from "@anima/ui";
-import { Menu, PanelLeft, PanelLeftDashed, X } from "lucide-react";
+import { PanelLeft, PanelLeftDashed, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
 
@@ -143,7 +143,9 @@ export function ChatPanel() {
         className="h-4 w-4"
       />
     </button>,
-    { order: 60 },
+    // The editor panel isn't in the mobile layout, so the toggle is
+    // meaningless there — skip the slot entirely.
+    { order: 60, enabled: !isMobile },
   );
   useHeaderSlot(
     "right",
@@ -156,12 +158,13 @@ export function ChatPanel() {
   );
 
   // Auto-close the mobile drawer when the user picks a session, or when
-  // we leave mobile (e.g., user rotates / resizes back to desktop).
+  // we leave mobile (e.g., user rotates / resizes back to desktop). The
+  // AppHeader's nav-toggle is the canonical way to open it now — we used
+  // to render an inline hamburger here too, but the header toggle covers
+  // both desktop and mobile, so the inline button became redundant.
   useEffect(() => {
     setNavOpen(false);
   }, [activeSessionId, activeWorkspace?.id, isMobile]);
-
-  const onOpenMenu = isMobile ? () => setNavOpen(true) : undefined;
 
   // Dockview's content container has its own (dark) background — paint over
   // it with white at the panel root so we don't inherit theme colors.
@@ -169,16 +172,6 @@ export function ChatPanel() {
   if (!activeSessionId || !activeWorkspace) {
     body = (
       <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-white">
-        {isMobile && (
-          <button
-            type="button"
-            onClick={() => setNavOpen(true)}
-            className="absolute top-3 left-3 rounded-md p-2 text-gray-600 hover:bg-gray-100"
-            aria-label="Open navigation"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-        )}
         <p className="text-gray-400">
           {activeWorkspace
             ? "No sessions yet for this workspace"
@@ -201,7 +194,6 @@ export function ChatPanel() {
         <ClaudiaChat
           bridge={chatBridge}
           gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
-          onOpenMenu={onOpenMenu}
           // The global AppHeader already shows workspace name, connection
           // status, and (eventually) the voice toggle — let it own that
           // chrome and skip ClaudiaChat's per-instance Header on the web.
@@ -218,12 +210,13 @@ export function ChatPanel() {
       {body}
       {isMobile && navOpen && (
         <>
-          {/* Backdrop */}
+          {/* Backdrop — soft glass tint instead of a flat dim overlay
+              gives depth while keeping the underlying chat readable. */}
           <button
             type="button"
             aria-label="Close navigation"
             onClick={() => setNavOpen(false)}
-            className="fixed inset-0 z-40 bg-black/40"
+            className="fixed inset-0 z-40 bg-gradient-to-b from-black/10 to-black/20 backdrop-blur-xs"
           />
           {/* Sliding drawer */}
           <div className="fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] bg-white shadow-xl">

@@ -523,7 +523,7 @@ function SearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-24"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-gradient-to-b from-black/10 to-black/20 pt-24 backdrop-blur-xs"
       onClick={onClose}
     >
       <div
