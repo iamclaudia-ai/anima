@@ -2,7 +2,7 @@
  * HeaderSlotsContext — Lets panels (and any descendant component) contribute
  * pieces of UI to the global `AppHeader` chrome.
  *
- * Why a context+hook instead of a static `headerSlots` field on the panel
+ * Why a hook instead of a static `headerSlots` field on the panel
  * contribution: slot content typically depends on live state (active
  * workspace, connection status, voice on/off). It's cleanest to register
  * from the component that already owns that state.
@@ -13,17 +13,22 @@
  *
  * Ordering within a segment: `(order asc, id asc)` so the result is
  * deterministic across mount order. Default `order: 100`.
+ *
+ * Implementation note — external store
+ * ────────────────────────────────────
+ * Slot state lives in a module-scoped store (not React state) and is
+ * exposed via `useSyncExternalStore`. This is deliberate: if slots were
+ * regular `useState`, every `register` call would update the provider's
+ * context value, which would re-render every consumer of `useHeaderSlot`
+ * (including the panel that just registered). Each re-render produces a
+ * new `content` JSX element, the effect's deps change, and we'd churn
+ * register/unregister in a tight loop until React threw "Maximum update
+ * depth exceeded". With an external store, only the `useHeaderSlots`
+ * subscriber (the `AppHeader` itself) re-renders on changes — registrant
+ * panels are not pulled along for the ride.
  */
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 export type HeaderSegment = "left" | "center" | "right";
 
@@ -34,40 +39,50 @@ export interface HeaderSlot {
   content: ReactNode;
 }
 
-interface HeaderSlotsContextValue {
-  slots: HeaderSlot[];
-  register(slot: HeaderSlot): void;
-  unregister(segment: HeaderSegment, id: string): void;
+type Listener = () => void;
+
+const listeners = new Set<Listener>();
+let snapshot: HeaderSlot[] = [];
+
+function emit(): void {
+  for (const fn of listeners) fn();
 }
 
-const HeaderSlotsContext = createContext<HeaderSlotsContextValue | null>(null);
+function setSlot(slot: HeaderSlot): void {
+  const filtered = snapshot.filter((s) => !(s.segment === slot.segment && s.id === slot.id));
+  snapshot = [...filtered, slot];
+  emit();
+}
+
+function removeSlot(segment: HeaderSegment, id: string): void {
+  const next = snapshot.filter((s) => !(s.segment === segment && s.id === id));
+  if (next.length === snapshot.length) return;
+  snapshot = next;
+  emit();
+}
+
+function subscribe(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+function getSnapshot(): HeaderSlot[] {
+  return snapshot;
+}
 
 export interface HeaderSlotsProviderProps {
   children: ReactNode;
 }
 
+/**
+ * Kept for API compatibility — slots now live in a module-scoped store, so
+ * the provider is a no-op pass-through. Mounting it is harmless and makes
+ * SPAs that already wrap their tree continue to type-check.
+ */
 export function HeaderSlotsProvider({ children }: HeaderSlotsProviderProps) {
-  const [slots, setSlots] = useState<HeaderSlot[]>([]);
-
-  const register = useCallback((slot: HeaderSlot) => {
-    setSlots((prev) => {
-      // Drop any existing entry with the same (segment, id) so a re-render
-      // with new content replaces cleanly instead of stacking.
-      const filtered = prev.filter((s) => !(s.segment === slot.segment && s.id === slot.id));
-      return [...filtered, slot];
-    });
-  }, []);
-
-  const unregister = useCallback((segment: HeaderSegment, id: string) => {
-    setSlots((prev) => prev.filter((s) => !(s.segment === segment && s.id === id)));
-  }, []);
-
-  const value = useMemo<HeaderSlotsContextValue>(
-    () => ({ slots, register, unregister }),
-    [slots, register, unregister],
-  );
-
-  return <HeaderSlotsContext.Provider value={value}>{children}</HeaderSlotsContext.Provider>;
+  return <>{children}</>;
 }
 
 export interface UseHeaderSlotOptions {
@@ -90,10 +105,6 @@ export interface UseHeaderSlotOptions {
  *   useHeaderSlot("center", "chat.workspace", <span>{name}</span>);
  *   useHeaderSlot("right",  "chat.connection", <ConnectionDot />, { order: 90 });
  *   useHeaderSlot("right",  "editor.toggle", <Toggle />, { enabled: !isMobile });
- *
- * No-op if there's no `HeaderSlotsProvider` above — callers can drop the
- * hook into shared components without worrying about which routes do/
- * don't have a header.
  */
 export function useHeaderSlot(
   segment: HeaderSegment,
@@ -101,21 +112,22 @@ export function useHeaderSlot(
   content: ReactNode,
   options: UseHeaderSlotOptions = {},
 ): void {
-  const ctx = useContext(HeaderSlotsContext);
   const order = options.order ?? 100;
   const enabled = options.enabled ?? true;
 
   useEffect(() => {
-    if (!ctx || !enabled) return;
-    ctx.register({ segment, id, order, content });
+    if (!enabled) {
+      removeSlot(segment, id);
+      return;
+    }
+    setSlot({ segment, id, order, content });
     return () => {
-      ctx.unregister(segment, id);
+      removeSlot(segment, id);
     };
-  }, [ctx, segment, id, order, content, enabled]);
+  }, [segment, id, order, content, enabled]);
 }
 
 /** Read all currently-registered header slots. Used by `AppHeader`. */
 export function useHeaderSlots(): HeaderSlot[] {
-  const ctx = useContext(HeaderSlotsContext);
-  return ctx?.slots ?? [];
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
