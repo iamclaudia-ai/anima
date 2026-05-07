@@ -6,6 +6,7 @@ import type { Attachment } from "../types";
 import { useChatGateway } from "../hooks/useChatGateway";
 import type { UseChatGatewayOptions } from "../hooks/useChatGateway";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
+import { AudioDebugPanel } from "./AudioDebugPanel";
 import { useVoiceEnabled } from "../hooks/useVoiceEnabled";
 import { WorkspaceProvider } from "../contexts/WorkspaceContext";
 import { Header } from "./Header";
@@ -114,6 +115,7 @@ function ChatInner({
 
   const [input, setInput] = useState(() => bridge.loadDraft());
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [audioDebugOpen, setAudioDebugOpen] = useState(false);
   const shouldShowThinkingPanel = ENABLE_THINKING_TUNER
     ? thinkingVisible
     : gateway.isQuerying || gateway.isCompacting;
@@ -335,6 +337,20 @@ function ChatInner({
               </div>
             )}
           </Transition>
+        )}
+
+        {/* Audio debug toggle + panel */}
+        {audioDebugOpen ? (
+          <AudioDebugPanel gateway={gateway} onClose={() => setAudioDebugOpen(false)} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAudioDebugOpen(true)}
+            className="absolute right-3 bottom-24 z-40 rounded-full border border-purple-200/60 bg-white/70 px-2.5 py-1 text-[10px] font-medium text-purple-700 shadow backdrop-blur hover:bg-purple-50 dark:border-purple-400/30 dark:bg-slate-900/70 dark:text-purple-300 dark:hover:bg-slate-800"
+            title="Audio debug panel"
+          >
+            🎚 audio
+          </button>
         )}
 
         <StatusBar hookState={gateway.hookState} />

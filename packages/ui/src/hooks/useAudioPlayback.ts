@@ -14,6 +14,7 @@ import {
   shouldAcceptVoiceChunk,
   startVoiceStream,
 } from "./audioPlaybackState";
+import { getAudioConfig } from "./audioConfig";
 
 export interface UseAudioPlaybackReturn {
   /** Whether audio is currently playing */
@@ -47,12 +48,15 @@ function pcm16ToAudioBuffer(
     channelData[i] = pcmData[i] / 32768;
   }
 
-  // Small edge fade to reduce clicks between chunk boundaries.
-  const fadeSamples = Math.min(64, Math.floor(pcmData.length / 4));
-  for (let i = 0; i < fadeSamples; i++) {
-    const gain = i / Math.max(1, fadeSamples);
-    channelData[i] *= gain;
-    channelData[channelData.length - 1 - i] *= gain;
+  // Edge fade — pulled from live config so the debug panel can tune it.
+  const cfg = getAudioConfig();
+  if (cfg.fadeEnabled && cfg.fadeSamples > 0) {
+    const fadeSamples = Math.min(cfg.fadeSamples, Math.floor(pcmData.length / 4));
+    for (let i = 0; i < fadeSamples; i++) {
+      const gain = i / Math.max(1, fadeSamples);
+      channelData[i] *= gain;
+      channelData[channelData.length - 1 - i] *= gain;
+    }
   }
 
   return audioBuffer;
@@ -112,12 +116,11 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
       source.connect(ctx.destination);
 
       const now = ctx.currentTime;
-      // 100ms scheduling lookahead — standard "Tale of Two Clocks" pattern.
-      // Gives the main thread headroom for React renders, WS bursts, decode
-      // latency, and other tabs/iframes (e.g. code-server) without dropping
-      // chunks into the past and creating audible gaps.
-      const startAt = Math.max(playbackCursorRef.current, now + 0.1);
-      playbackCursorRef.current = startAt + buffer.duration;
+      const cfg = getAudioConfig();
+      const lookaheadSec = cfg.lookaheadMs / 1000;
+      const interChunkSilenceSec = cfg.interChunkSilenceMs / 1000;
+      const startAt = Math.max(playbackCursorRef.current, now + lookaheadSec);
+      playbackCursorRef.current = startAt + buffer.duration + interChunkSilenceSec;
 
       activeSourcesRef.current.add(source);
       isPlayingRef.current = true;
@@ -159,9 +162,12 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
         isStreamingRef.current = true;
         setIsStreaming(true);
-        // Stream-start buffer: align with the 100ms scheduling lookahead so
-        // the first chunk doesn't get scheduled tighter than subsequent ones.
-        playbackCursorRef.current = Math.max(playbackCursorRef.current, ctx.currentTime + 0.12);
+        // Stream-start buffer pulled from live config.
+        const startBufferSec = getAudioConfig().streamStartBufferMs / 1000;
+        playbackCursorRef.current = Math.max(
+          playbackCursorRef.current,
+          ctx.currentTime + startBufferSec,
+        );
         return;
       }
 
