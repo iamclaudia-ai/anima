@@ -11,8 +11,15 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ClaudiaChat, Link, useHeaderSlot, useIsMobile, useLayoutApi } from "@anima/ui";
-import { PanelLeft, PanelLeftDashed, X } from "lucide-react";
+import {
+  ClaudiaChat,
+  Link,
+  useHeaderSlot,
+  useIsMobile,
+  useLayoutApi,
+  useVoiceEnabled,
+} from "@anima/ui";
+import { PanelLeft, PanelLeftDashed, Volume2, VolumeX, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
 import { NavPanel } from "./NavPanel";
 
@@ -24,6 +31,9 @@ export function ChatPanel() {
   const { activeWorkspace, activeSessionId, chatBridge, isConnected, onNewSession } = useChatPage();
   const isMobile = useIsMobile();
   const [navOpen, setNavOpen] = useState(false);
+  // Voice on/off — shared with `ChatInner` via a pub/sub store so the toggle
+  // here and the `voice.speak` tag inside the chat see the same value.
+  const [voiceEnabled, toggleVoice] = useVoiceEnabled();
 
   // ── Layout panel toggles (nav + editor) ────────────────────
   // Desktop: each toggle adds/removes its panel from the dockview layout
@@ -146,6 +156,23 @@ export function ChatPanel() {
     // The editor panel isn't in the mobile layout, so the toggle is
     // meaningless there — skip the slot entirely.
     { order: 60, enabled: !isMobile },
+  );
+  useHeaderSlot(
+    "right",
+    "chat.voice",
+    <button
+      type="button"
+      onClick={toggleVoice}
+      className={`rounded-md p-1.5 transition-colors hover:bg-white/40 ${
+        voiceEnabled ? "text-purple-700" : "text-gray-500"
+      }`}
+      title={voiceEnabled ? "Voice enabled — click to mute" : "Voice muted — click to enable"}
+      aria-label={voiceEnabled ? "Mute voice" : "Enable voice"}
+      aria-pressed={voiceEnabled}
+    >
+      {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+    </button>,
+    { order: 75 },
   );
   useHeaderSlot(
     "right",

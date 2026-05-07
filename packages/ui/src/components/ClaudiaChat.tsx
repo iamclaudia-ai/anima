@@ -6,6 +6,7 @@ import type { Attachment } from "../types";
 import { useChatGateway } from "../hooks/useChatGateway";
 import type { UseChatGatewayOptions } from "../hooks/useChatGateway";
 import { useAudioPlayback } from "../hooks/useAudioPlayback";
+import { useVoiceEnabled } from "../hooks/useVoiceEnabled";
 import { WorkspaceProvider } from "../contexts/WorkspaceContext";
 import { Header } from "./Header";
 import { ContextBar } from "./ContextBar";
@@ -66,13 +67,10 @@ function ChatInner({
   showHeader: boolean;
 }) {
   const bridge = useBridge();
-  const [voiceEnabled, setVoiceEnabled] = useState(() => {
-    try {
-      return localStorage.getItem("anima:voice") === "true";
-    } catch {
-      return false;
-    }
-  });
+  // Voice toggle lives in the global AppHeader for the web SPA, but its
+  // value is also consumed here to drive the `voice.speak` request tag.
+  // `useVoiceEnabled` is a shared pub/sub store so both stay in sync.
+  const [voiceEnabled, toggleVoice] = useVoiceEnabled();
   const [thinkingVisible, setThinkingVisible] = useState(() => {
     try {
       return localStorage.getItem("anima:thinking:visible") !== "false";
@@ -98,18 +96,6 @@ function ChatInner({
     }
     return 100;
   });
-
-  const toggleVoice = useCallback(() => {
-    setVoiceEnabled((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("anima:voice", String(next));
-      } catch {
-        /* noop */
-      }
-      return next;
-    });
-  }, []);
 
   const voiceEnabledRef = useRef(voiceEnabled);
   useEffect(() => {

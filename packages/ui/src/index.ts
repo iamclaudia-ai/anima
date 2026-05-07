@@ -52,6 +52,7 @@ export type { ExtensionWebContribution, LauncherColor, PanelContribution, Route 
 export { useChatGateway } from "./hooks/useChatGateway";
 export { useGatewayClient } from "./hooks/useGatewayClient";
 export { useIsMobile } from "./hooks/useIsMobile";
+export { useVoiceEnabled } from "./hooks/useVoiceEnabled";
 export type {
   UseChatGatewayOptions,
   UseChatGatewayReturn,
