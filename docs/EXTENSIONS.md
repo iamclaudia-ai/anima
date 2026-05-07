@@ -10,6 +10,8 @@ Extensions are **directly executable** — each extension is its own entry point
 
 Server entrypoint convention is strict: every extension must expose `extensions/<id>/src/index.ts`. Do not use alternate server entrypoint filenames.
 
+> **Bridging a foreign runtime?** If your "extension" actually drives something outside the gateway process — a browser, a code-server / VS Code instance, a remote daemon — read [BRIDGE-PATTERN.md](./BRIDGE-PATTERN.md) before writing code. There's a proven shape for that case (in-process server extension + remote WebSocket client) used by `dominatrix` and `editor`.
+
 ## Quick Start
 
 ### 1. Create the extension package
