@@ -1144,6 +1144,219 @@ async function watchdogCommand(args: string[]): Promise<void> {
   process.exit(1);
 }
 
+// ── code-server launch agent ────────────────────────────
+
+const CODE_SERVER_LABEL = "com.anima.code-server";
+
+/**
+ * Locate the code-server executable. Tries common Homebrew locations first,
+ * then falls back to a PATH lookup so installs from a custom prefix still
+ * work. Throws if nothing is found — `anima code-server install` is the
+ * one place this matters and a clear error is better than writing a plist
+ * with a broken path.
+ */
+function getCodeServerExecutable(): string {
+  const candidates = ["/opt/homebrew/bin/code-server", "/usr/local/bin/code-server"];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  const result = Bun.spawnSync(["which", "code-server"]);
+  const out = new TextDecoder().decode(result.stdout).trim();
+  if (out && existsSync(out)) return out;
+  throw new Error(
+    "code-server not found in /opt/homebrew/bin, /usr/local/bin, or PATH. Install it with `brew install code-server`.",
+  );
+}
+
+/**
+ * Render the launchd plist for code-server. Mirrors the watchdog plist —
+ * KeepAlive so crashes auto-recover, RunAtLoad so it comes up at login,
+ * logs into ~/.anima/logs. Honors the user's `~/.config/code-server/config.yaml`
+ * (bind-addr, user-data-dir, proxy-domain) — we don't override anything
+ * there. The lone CLI flag we pass is `--disable-update-check` so launchd
+ * won't suddenly auto-reload the browser when a new code-server is published.
+ */
+function renderCodeServerPlist(params: { homeDir: string; executable: string }): string {
+  const programArguments = [params.executable, "--disable-update-check"]
+    .map((arg) => `    <string>${escapePlistValue(arg)}</string>`)
+    .join("\n");
+
+  // code-server's bash wrapper resolves node@22 relative to its own
+  // location, so the standard Homebrew PATH is sufficient.
+  const path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+  const logPath = resolve(params.homeDir, ".anima", "logs", "code-server-launchd.log");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${CODE_SERVER_LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+${programArguments}
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>${escapePlistValue(params.homeDir)}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${escapePlistValue(path)}</string>
+    <key>HOME</key>
+    <string>${escapePlistValue(params.homeDir)}</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>${escapePlistValue(logPath)}</string>
+
+  <key>StandardErrorPath</key>
+  <string>${escapePlistValue(logPath)}</string>
+</dict>
+</plist>
+`;
+}
+
+function codeServerPlistPath(): string {
+  return resolve(process.env.HOME || "", "Library", "LaunchAgents", `${CODE_SERVER_LABEL}.plist`);
+}
+
+async function runLaunchctl(action: "load" | "unload", plistPath: string): Promise<number> {
+  const proc = Bun.spawn(["launchctl", action, plistPath], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  return proc.exited;
+}
+
+async function codeServerCommand(args: string[]): Promise<void> {
+  const sub = args[0];
+
+  if (!sub || sub === "--help") {
+    console.log("\ncode-server commands:\n");
+    console.log(
+      "  anima code-server install     Write plist + load via launchd (auto-start at login)",
+    );
+    console.log("  anima code-server uninstall   Unload + remove plist");
+    console.log("  anima code-server start       Load the agent (idempotent if already loaded)");
+    console.log(
+      "  anima code-server stop        Unload the agent (no auto-respawn until reload/login)",
+    );
+    console.log("  anima code-server restart     Unload + load");
+    console.log("  anima code-server status      Show whether the agent is loaded");
+    console.log();
+    return;
+  }
+
+  const homeDir = process.env.HOME;
+  if (!homeDir) {
+    console.error("Error: HOME is not set");
+    process.exit(1);
+  }
+  const plistPath = codeServerPlistPath();
+
+  if (sub === "install") {
+    try {
+      const executable = getCodeServerExecutable();
+      mkdirSync(dirname(plistPath), { recursive: true });
+      mkdirSync(resolve(homeDir, ".anima", "logs"), { recursive: true });
+      const plist = renderCodeServerPlist({ homeDir, executable });
+      await Bun.write(plistPath, plist);
+      console.log(`Wrote plist to ${plistPath}`);
+      console.log(`Will run: ${executable} --disable-update-check`);
+
+      await runLaunchctl("load", plistPath);
+      console.log(`✓ ${CODE_SERVER_LABEL} installed and loaded. It will start on login.`);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === "uninstall") {
+    try {
+      if (existsSync(plistPath)) {
+        await runLaunchctl("unload", plistPath);
+        const { unlinkSync } = await import("node:fs");
+        unlinkSync(plistPath);
+        console.log(`✓ ${CODE_SERVER_LABEL} uninstalled.`);
+      } else {
+        console.log(`Plist not found at ${plistPath} — nothing to uninstall.`);
+      }
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === "start") {
+    if (!existsSync(plistPath)) {
+      console.error(`Plist not found at ${plistPath}. Run \`anima code-server install\` first.`);
+      process.exit(1);
+    }
+    await runLaunchctl("load", plistPath);
+    console.log(`✓ ${CODE_SERVER_LABEL} loaded.`);
+    return;
+  }
+
+  if (sub === "stop") {
+    if (!existsSync(plistPath)) {
+      console.error(`Plist not found at ${plistPath} — nothing to stop.`);
+      process.exit(1);
+    }
+    await runLaunchctl("unload", plistPath);
+    console.log(`✓ ${CODE_SERVER_LABEL} unloaded.`);
+    return;
+  }
+
+  if (sub === "restart") {
+    if (!existsSync(plistPath)) {
+      console.error(`Plist not found at ${plistPath}. Run \`anima code-server install\` first.`);
+      process.exit(1);
+    }
+    console.log(`Unloading ${CODE_SERVER_LABEL}...`);
+    await runLaunchctl("unload", plistPath);
+    console.log(`Loading ${CODE_SERVER_LABEL}...`);
+    await runLaunchctl("load", plistPath);
+    console.log(`✓ ${CODE_SERVER_LABEL} restarted.`);
+    return;
+  }
+
+  if (sub === "status") {
+    const proc = Bun.spawn(["launchctl", "list", CODE_SERVER_LABEL], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await proc.exited;
+    if (proc.exitCode === 0) {
+      const out = await new Response(proc.stdout).text();
+      console.log(out.trim() || `${CODE_SERVER_LABEL} is loaded.`);
+    } else {
+      console.log(`${CODE_SERVER_LABEL} is not loaded.`);
+      if (existsSync(plistPath)) {
+        console.log(`(Plist exists at ${plistPath} — try \`anima code-server start\`.)`);
+      } else {
+        console.log("(No plist installed. Run `anima code-server install`.)");
+      }
+    }
+    return;
+  }
+
+  console.error(`Unknown code-server command: ${sub}`);
+  console.error("Run 'anima code-server --help' for usage.");
+  process.exit(1);
+}
+
 // ── Main ─────────────────────────────────────────────────
 
 /**
@@ -1215,6 +1428,11 @@ async function main(): Promise<void> {
 
   if (args[0] === "watchdog") {
     await watchdogCommand(args.slice(1));
+    return;
+  }
+
+  if (args[0] === "code-server") {
+    await codeServerCommand(args.slice(1));
     return;
   }
 

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reference template for the code-server launch agent. Don't install this
+  file directly — `anima code-server install` generates the live copy at
+  ~/Library/LaunchAgents/com.anima.code-server.plist with the local
+  user's HOME, the resolved code-server binary path, and a real log path.
+  This copy is here for reference + diffing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.anima.code-server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/code-server</string>
+    <string>--disable-update-check</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/michael</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/michael</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/michael/.anima/logs/code-server-launchd.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/michael/.anima/logs/code-server-launchd.log</string>
+</dict>
+</plist>
