@@ -134,8 +134,10 @@
       "name": "@anima/ext-editor",
       "version": "0.1.0",
       "dependencies": {
+        "@anima/extension-host": "workspace:*",
         "@anima/shared": "workspace:*",
         "@anima/ui": "workspace:*",
+        "zod": "catalog:",
       },
     },
     "extensions/hooks": {

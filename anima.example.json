@@ -134,6 +134,19 @@
     "presenter": {
       "enabled": false,
       "config": {}
+    },
+
+    // Editor Extension — embeds code-server in the chat layout and bridges
+    // commands like editor.open_file / editor.get_selection through a small
+    // VS Code shim (clients/code-server-bridge) installed inside code-server.
+    //
+    // - webConfig.url: absolute URL of your code-server instance.
+    "editor": {
+      "enabled": false,
+      "config": {},
+      "webConfig": {
+        "url": "http://localhost:8080"
+      }
     }
   },
 

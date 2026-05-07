@@ -4,10 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
     "./routes": "./src/routes.ts"
   },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.json"
+  },
   "dependencies": {
+    "@anima/extension-host": "workspace:*",
     "@anima/shared": "workspace:*",
-    "@anima/ui": "workspace:*"
+    "@anima/ui": "workspace:*",
+    "zod": "catalog:"
   }
 }
