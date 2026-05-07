@@ -91,8 +91,6 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     }
   }, []);
 
-  const chunkCounterRef = useRef(0);
-
   const clearScheduledSources = useCallback(() => {
     for (const source of activeSourcesRef.current) {
       try {
@@ -115,13 +113,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
       const now = ctx.currentTime;
       const startAt = Math.max(playbackCursorRef.current, now + 0.01);
-      const gap = startAt - now;
       playbackCursorRef.current = startAt + buffer.duration;
-      const chunkNum = ++chunkCounterRef.current;
-
-      console.log(
-        `[Audio] #${chunkNum} dur=${buffer.duration.toFixed(3)}s startAt=${startAt.toFixed(3)} now=${now.toFixed(3)} gap=${gap.toFixed(3)}s cursor→${playbackCursorRef.current.toFixed(3)} queued=${activeSourcesRef.current.size}`,
-      );
 
       activeSourcesRef.current.add(source);
       isPlayingRef.current = true;
@@ -163,11 +155,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
         isStreamingRef.current = true;
         setIsStreaming(true);
-        const oldCursor = playbackCursorRef.current;
         playbackCursorRef.current = Math.max(playbackCursorRef.current, ctx.currentTime + 0.02);
-        console.log(
-          `[Audio] STREAM_START id=${streamId} now=${ctx.currentTime.toFixed(3)} cursor=${oldCursor.toFixed(3)}→${playbackCursorRef.current.toFixed(3)}`,
-        );
         return;
       }
 
@@ -207,9 +195,6 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         const streamId = (data.streamId as string) || "?";
         if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
 
-        console.log(
-          `[Audio] STREAM_END id=${streamId} aborted=${data.aborted ?? false} activeSources=${activeSourcesRef.current.size}`,
-        );
         const hasActiveStreams = endVoiceStream(playbackStateRef.current, streamId);
         isStreamingRef.current = hasActiveStreams;
         setIsStreaming(hasActiveStreams);
@@ -251,9 +236,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
         document.visibilityState === "visible" &&
         audioContextRef.current?.state === "suspended"
       ) {
-        void audioContextRef.current.resume().then(() => {
-          console.log("[Audio] AudioContext resumed after tab became visible");
-        });
+        void audioContextRef.current.resume();
       }
     };
 
