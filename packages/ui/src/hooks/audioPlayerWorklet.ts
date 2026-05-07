@@ -33,11 +33,14 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
     this.primerSamples = opts.primerSamples || Math.floor(sampleRate * 0.1); // 100ms
     this.priming = true;
     this.underruns = 0;
+    this.overflows = 0;
     this.lastReportedFillMs = -1;
     this.lastReportedUnderruns = 0;
+    this.lastReportedOverflows = 0;
     this.framesSinceReport = 0;
     this.framesPerReport = Math.floor(sampleRate / 128 / 20); // ~50ms
     this.wasDrained = false;
+    this.wasOverflowing = false;
 
     this.port.onmessage = (e) => {
       const msg = e.data;
@@ -60,6 +63,7 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
 
   write(samples) {
     const len = samples.length;
+    let overflowedThisCall = false;
     for (let i = 0; i < len; i++) {
       this.buffer[this.writeIdx] = samples[i];
       this.writeIdx = (this.writeIdx + 1) % this.bufferSize;
@@ -68,7 +72,14 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
       } else {
         // Overflow — advance read pointer, drop oldest sample
         this.readIdx = (this.readIdx + 1) % this.bufferSize;
+        overflowedThisCall = true;
       }
+    }
+    if (overflowedThisCall && !this.wasOverflowing) {
+      this.overflows++;
+      this.wasOverflowing = true;
+    } else if (!overflowedThisCall) {
+      this.wasOverflowing = false;
     }
   }
 
@@ -87,6 +98,7 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
       }
     }
 
+    let dryThisQuantum = false;
     for (let i = 0; i < need; i++) {
       if (this.fillSamples > 0) {
         out[i] = this.buffer[this.readIdx];
@@ -94,13 +106,15 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
         this.fillSamples--;
       } else {
         out[i] = 0;
-        this.underruns++;
-        this.priming = true; // re-prime on dry
-        if (!this.wasDrained) {
-          this.wasDrained = true;
-          this.port.postMessage({ type: "drained" });
-        }
+        dryThisQuantum = true;
       }
+    }
+    if (dryThisQuantum && !this.wasDrained) {
+      // Count one underrun per dry-event (entering empty state), not per sample.
+      this.underruns++;
+      this.wasDrained = true;
+      this.priming = true; // re-prime on dry
+      this.port.postMessage({ type: "drained" });
     }
 
     this.report();
@@ -112,10 +126,20 @@ class AnimaPCMPlayer extends AudioWorkletProcessor {
     if (this.framesSinceReport < this.framesPerReport) return;
     this.framesSinceReport = 0;
     const fillMs = Math.round((this.fillSamples / sampleRate) * 1000);
-    if (fillMs !== this.lastReportedFillMs || this.underruns !== this.lastReportedUnderruns) {
-      this.port.postMessage({ type: "fill", fillMs, underruns: this.underruns });
+    if (
+      fillMs !== this.lastReportedFillMs ||
+      this.underruns !== this.lastReportedUnderruns ||
+      this.overflows !== this.lastReportedOverflows
+    ) {
+      this.port.postMessage({
+        type: "fill",
+        fillMs,
+        underruns: this.underruns,
+        overflows: this.overflows,
+      });
       this.lastReportedFillMs = fillMs;
       this.lastReportedUnderruns = this.underruns;
+      this.lastReportedOverflows = this.overflows;
     }
   }
 }

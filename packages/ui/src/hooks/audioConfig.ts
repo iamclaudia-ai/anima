@@ -20,7 +20,10 @@ export interface AudioConfig {
 
 const DEFAULTS: AudioConfig = {
   primerBufferMs: 120,
-  ringBufferMs: 4000,
+  // Generous default so Cartesia's faster-than-realtime sentence bursts
+  // never overflow on a normal-length response. Memory cost is trivial
+  // (~5.7MB at 48kHz Float32).
+  ringBufferMs: 30000,
 };
 
 const state: AudioConfig = { ...DEFAULTS };
@@ -58,11 +61,13 @@ export function getAudioConfigDefaults(): AudioConfig {
 export interface AudioStatus {
   /** Current ring buffer fill in ms. */
   fillMs: number;
-  /** Total underruns since context start. */
+  /** Total underrun events since context start. */
   underruns: number;
+  /** Total overflow events since context start (chunks dropped on full ring). */
+  overflows: number;
 }
 
-const status: AudioStatus = { fillMs: 0, underruns: 0 };
+const status: AudioStatus = { fillMs: 0, underruns: 0, overflows: 0 };
 const statusListeners = new Set<() => void>();
 
 export function getAudioStatus(): AudioStatus {

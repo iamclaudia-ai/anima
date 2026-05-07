@@ -72,8 +72,13 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
       </div>
       <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
         <span>primer at {cfg.primerBufferMs}ms</span>
-        <span className={status.underruns > 0 ? "font-semibold text-red-500" : ""}>
-          underruns: {status.underruns}
+        <span className="flex gap-2">
+          <span className={status.underruns > 0 ? "font-semibold text-red-500" : ""}>
+            under: {status.underruns}
+          </span>
+          <span className={status.overflows > 0 ? "font-semibold text-amber-500" : ""}>
+            over: {status.overflows}
+          </span>
         </span>
       </div>
     </div>
@@ -107,9 +112,9 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
       <Slider
         label="Ring buffer (capacity)"
         unit="ms"
-        min={500}
-        max={8000}
-        step={100}
+        min={1000}
+        max={60000}
+        step={500}
         value={cfg.ringBufferMs}
         defaultValue={defaults.ringBufferMs}
         onChange={(v) => update({ ringBufferMs: v })}

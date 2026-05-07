@@ -141,10 +141,14 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
 
       node.port.onmessage = (e: MessageEvent) => {
         const msg = e.data as
-          | { type: "fill"; fillMs: number; underruns: number }
+          | { type: "fill"; fillMs: number; underruns: number; overflows: number }
           | { type: "drained" };
         if (msg.type === "fill") {
-          setAudioStatus({ fillMs: msg.fillMs, underruns: msg.underruns });
+          setAudioStatus({
+            fillMs: msg.fillMs,
+            underruns: msg.underruns,
+            overflows: msg.overflows,
+          });
           const playing = msg.fillMs > 0;
           if (playing !== isPlayingRef.current) {
             isPlayingRef.current = playing;
@@ -152,7 +156,6 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
           }
         } else if (msg.type === "drained") {
           // Buffer hit empty mid-stream; ring will re-prime on next push.
-          // We rely on the periodic fill report to flip isPlaying.
         }
       };
 
