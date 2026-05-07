@@ -223,19 +223,37 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     gateway.sendRequest("voice.stop");
   }, [clearWorkletBuffer, stopBatchSources, gateway]);
 
-  // Push live config changes to the worklet (primer can be tuned live).
+  // Push live config changes to the worklet. Primer is a hot tune; ring
+  // capacity requires rebuilding the node (its buffer is fixed-size).
   useEffect(() => {
+    let lastRingMs = getAudioConfig().ringBufferMs;
     return subscribeAudioConfig(() => {
-      const node = workletNodeRef.current;
-      if (!node) return;
-      const ctx = audioContextRef.current;
-      if (!ctx) return;
       const cfg = getAudioConfig();
+      const ctx = audioContextRef.current;
+      const node = workletNodeRef.current;
+      if (!ctx || !node) return;
+
+      // Primer is live.
       const primerSamples = Math.floor((cfg.primerBufferMs / 1000) * ctx.sampleRate);
       node.port.postMessage({ type: "config", primerSamples });
-      // ringBufferMs requires recreating the node — skip live mutation for that.
+
+      // Ring capacity changed → tear down + rebuild the worklet node.
+      if (cfg.ringBufferMs !== lastRingMs) {
+        lastRingMs = cfg.ringBufferMs;
+        try {
+          node.disconnect();
+        } catch {
+          /* noop */
+        }
+        workletNodeRef.current = null;
+        workletReadyRef.current = null;
+        // Next chunk in will lazily ensureWorklet() with the new size.
+        // Reset status so the meter doesn't show stale values.
+        setAudioStatus({ fillMs: 0 });
+        void ensureWorklet();
+      }
     });
-  }, []);
+  }, [ensureWorklet]);
 
   // Subscribe to voice events
   useEffect(() => {

@@ -133,7 +133,7 @@ export function AudioDebugPanel({ gateway, onClose }: AudioDebugPanelProps) {
       {fillBar}
 
       <p className="mt-2 text-[10px] leading-tight text-slate-500 dark:text-slate-400">
-        Ring capacity changes apply on next reload (worklet node is rebuilt). Primer applies live.
+        Ring capacity rebuilds the worklet (brief silence). Primer applies live.
       </p>
 
       <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">

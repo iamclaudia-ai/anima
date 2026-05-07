@@ -20,10 +20,9 @@ export interface AudioConfig {
 
 const DEFAULTS: AudioConfig = {
   primerBufferMs: 120,
-  // Generous default so Cartesia's faster-than-realtime sentence bursts
-  // never overflow on a normal-length response. Memory cost is trivial
-  // (~5.7MB at 48kHz Float32).
-  ringBufferMs: 30000,
+  // 8s default: enough to absorb Cartesia's faster-than-realtime sentence
+  // bursts for typical response lengths without overflowing.
+  ringBufferMs: 8000,
 };
 
 const state: AudioConfig = { ...DEFAULTS };
