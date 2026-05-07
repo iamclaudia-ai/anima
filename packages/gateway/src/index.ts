@@ -715,7 +715,12 @@ function handleRegisterExtension(ws: ServerWebSocket<ClientState>, req: Request)
           );
       return { ok: true as const, payload: result };
     } catch (error) {
-      return { ok: false as const, error: String(error) };
+      // Use .message — String(err) produces "Error: <msg>" which clients
+      // re-prefix and end up with "Error: Error: <msg>".
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   };
 
