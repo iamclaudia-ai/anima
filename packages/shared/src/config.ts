@@ -259,7 +259,6 @@ export function loadConfig(configPath?: string): AnimaConfig {
       `[Config] No config file found. Searched: ${searched}. Copy anima.example.json to ~/.anima/anima.json`,
     );
   }
-  console.log(`[Config] Loaded from: ${loadedFrom}`);
 
   // Interpolate environment variables
   const interpolated = interpolateEnvVars(rawConfig) as Partial<AnimaConfig>;
