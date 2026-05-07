@@ -251,47 +251,26 @@ bootstrap().catch((error) => {
 });
 
 // ── Service Worker ──────────────────────────────────────────
-// Register service worker for PWA functionality.
-// Skip SW in dev to avoid reload loops during active local rebuilds.
+// Register service worker for PWA functionality (push notifications,
+// offline shell). Intentionally does NOT auto-reload on update:
+//   - The SW itself omits skipWaiting()/clients.claim(), so a new version
+//     waits in "waiting" state until all tabs close or a real refresh.
+//   - We don't listen for controllerchange to trigger reload, because
+//     yanking the page mid-session destroys the code-server iframe and
+//     anything else with persistent state.
+// Skip SW entirely in dev to avoid stale-cache headaches during rebuilds.
 if ("serviceWorker" in navigator && !import.meta.env?.DEV) {
-  let reloadedForUpdate = false;
-
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/service-worker.js")
       .then((registration) => {
         console.log("Service Worker registered:", registration.scope);
-
-        // Check for updates periodically (every hour)
-        setInterval(
-          () => {
-            registration.update();
-          },
-          60 * 60 * 1000,
-        );
-
-        // Listen for updates
-        registration.addEventListener("updatefound", () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener("statechange", () => {
-              if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-                // New version available: let controllerchange own the single reload.
-                console.log("New version available! Waiting for activation...");
-              }
-            });
-          }
-        });
+        // No periodic update poll — the browser already checks for an
+        // updated service-worker.js on every page load. Polling hourly
+        // just downloads bytes we won't act on until next reload anyway.
       })
       .catch((error) => {
         console.error("Service Worker registration failed:", error);
       });
-  });
-
-  // Listen for controller change (new service worker activated)
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloadedForUpdate) return;
-    reloadedForUpdate = true;
-    window.location.reload();
   });
 }

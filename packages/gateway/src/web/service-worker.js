@@ -14,8 +14,12 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(["/", "/index.html", "/manifest.json"])),
   );
-  // Force activation of new service worker
-  self.skipWaiting();
+  // Intentionally NOT calling self.skipWaiting() — we want a new SW version
+  // to sit in "waiting" state until the user opens a fresh tab or hard
+  // refreshes. The previous behavior force-activated the new SW mid-session,
+  // which (combined with clients.claim + a controllerchange reload listener)
+  // caused full-page refreshes that nuked active state like the code-server
+  // iframe. New versions will be picked up on the next genuine page load.
 });
 
 // Clean old caches on activate
@@ -27,7 +31,9 @@ self.addEventListener("activate", (event) => {
         Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))),
       ),
   );
-  return self.clients.claim();
+  // Intentionally NOT calling self.clients.claim() — only control pages that
+  // load AFTER this SW activates. Already-open pages stay with the previous
+  // SW (or no SW) until they reload on their own terms.
 });
 
 // Network-first fetch strategy (no offline support)
