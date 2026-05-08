@@ -74,30 +74,20 @@ async function watchTask(opts: TaskCommandOptions): Promise<number> {
   const client = createGatewayClient({ url: opts.gatewayUrl });
   let lastProgress: string | undefined;
   let lastStatus: string | undefined;
-  let everSeenRunning = false;
 
   console.log(`Watching task ${opts.taskId} — Ctrl-C to stop\n`);
 
   try {
-    // Poll every 2s until the task completes or is gone
+    // Poll every 2s until the task reaches a terminal status
     while (true) {
       let status;
       try {
         status = await fetchTaskStatus(client, opts.taskId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        // Once-tasks are deleted from the scheduler after completion. If we've
-        // seen the task running before, treat disappearance as successful completion.
-        if (everSeenRunning && /not found/i.test(msg)) {
-          console.log("\n  Task completed (cleaned up by scheduler)");
-          console.log(`  Log: ~/.anima/logs/scheduler-task-${opts.taskId}.log`);
-          return 0;
-        }
         console.error(`\n[lookup failed] ${msg}`);
         return 1;
       }
-
-      if (status.status === "running") everSeenRunning = true;
 
       // Print progress changes
       if (status.progress && status.progress !== lastProgress) {

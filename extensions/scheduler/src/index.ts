@@ -323,7 +323,12 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     const newFiredCount = task.firedCount + 1;
 
     if (task.type === "once") {
-      deleteTask(task.id);
+      // Disable instead of delete so the task and its execution history remain
+      // inspectable via scheduler.get_history and `anima skill task <id>`.
+      // UI surfaces should filter out type:once + enabled:false unless explicitly
+      // requested, and a future cleanup pass can prune by age.
+      updateTaskAfterFire(task.id, task.fireAt, newFiredCount, firedAt);
+      setTaskEnabled(task.id, false);
     } else if (task.type === "interval" && task.intervalSeconds) {
       const nextFire = new Date(now.getTime() + task.intervalSeconds * 1000).toISOString();
       updateTaskAfterFire(task.id, nextFire, newFiredCount, firedAt);
