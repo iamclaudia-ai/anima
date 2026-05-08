@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@anima/shared";
 import { rotatePersistentSessions } from "./persistent-sessions";
+import { listCommands } from "./commands-discovery";
 import {
   getSubagent,
   listSubagents,
@@ -169,6 +170,8 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
       const path = (params.path as string | undefined) || "~";
       return { path, directories: getDirectories(path) };
     },
+    "session.list_commands": async (params) =>
+      listCommands({ cwd: params.cwd as string | undefined }),
     "session.health_check": async () => healthCheckDetailed(),
     "session.rotate_persistent_sessions": async () => {
       const rt = getRuntime();

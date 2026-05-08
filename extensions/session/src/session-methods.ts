@@ -242,6 +242,18 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
+    name: "session.list_commands",
+    description:
+      "List discoverable skills + slash commands (global ~/.claude + project <cwd>/.claude). Used by the web UI's `/` picker.",
+    inputSchema: z.object({
+      cwd: z
+        .string()
+        .optional()
+        .describe("Workspace cwd; if provided, project-local commands are merged in"),
+    }),
+    execution: { lane: "read", concurrency: "parallel" },
+  },
+  {
     name: "session.health_check",
     description: "Health status of session extension",
     inputSchema: z.object({}),

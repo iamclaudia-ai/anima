@@ -1,8 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { FileText, FileImage, File, X, ArrowUp } from "lucide-react";
 import type { Attachment, Usage } from "../types";
 import { useBridge } from "../bridge";
+import { useWorkspace } from "../contexts/WorkspaceContext";
+import { useCommands, type CommandItem } from "../hooks/useCommands";
 import { Bogart } from "./Bogart";
+import { CommandPicker, filterCommands, type FilteredItem } from "./CommandPicker";
 import { GitStatusBar } from "./GitStatusBar";
 import type { GitStatusInfo } from "../hooks/useChatGateway";
 
@@ -40,13 +43,47 @@ export function InputArea({
   const [isDragging, setIsDragging] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [containerWidth, setContainerWidth] = useState(600);
+  const [pickerDismissed, setPickerDismissed] = useState(false);
+  const [pickerSelectedIndex, setPickerSelectedIndex] = useState(0);
+  const filteredRef = useRef<FilteredItem[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaContainerRef = useRef<HTMLDivElement>(null);
   const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
   const hadFocusBeforeDisconnectRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bridge = useBridge();
+  const workspace = useWorkspace();
+  const { items: commandItems } = useCommands(workspace.cwd);
   const isTauriRuntime = typeof window !== "undefined" && "__TAURI__" in window;
+
+  // Picker is open whenever the input starts with `/` and the user hasn't dismissed it.
+  // Resets on full-clear so re-typing `/` re-opens.
+  const pickerActive = input.startsWith("/") && !pickerDismissed;
+  const pickerQuery = pickerActive ? input.slice(1) : "";
+
+  // Recompute filtered list whenever query or catalog changes — used by both the
+  // picker UI and the parent's keyboard handlers (selection bounds, accept).
+  const filtered = useMemo(
+    () => (pickerActive ? filterCommands(commandItems, pickerQuery) : []),
+    [pickerActive, commandItems, pickerQuery],
+  );
+  filteredRef.current = filtered;
+
+  // Reset selection to top whenever the filtered list changes shape.
+  useEffect(() => {
+    setPickerSelectedIndex(0);
+  }, [filtered.length, pickerQuery]);
+
+  const acceptPickerSelection = useCallback(
+    (item: CommandItem) => {
+      onInputChange(`/${item.name} `);
+      bridge.saveDraft(`/${item.name} `);
+      setPickerDismissed(true);
+      // Refocus the textarea after mouse selection.
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    [bridge, onInputChange],
+  );
 
   // Track container width for Bogart's walking bounds
   useEffect(() => {
@@ -271,6 +308,10 @@ export function InputArea({
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       typingTimerRef.current = setTimeout(() => setIsTyping(false), 2000);
 
+      // Reset the picker dismissal whenever the input is empty so that re-typing `/`
+      // re-opens the picker. Without this, dismissing once would block it forever.
+      if (value === "") setPickerDismissed(false);
+
       // Save cursor position on every change
       cursorPositionRef.current = {
         start: e.target.selectionStart,
@@ -293,6 +334,44 @@ export function InputArea({
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // ── Command picker key handling ──────────────────────────────────
+      // When the picker is open and has results, intercept nav + accept keys
+      // before the rest of the textarea handlers see them.
+      if (pickerActive && filteredRef.current.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setPickerSelectedIndex((i) => (i + 1) % filteredRef.current.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setPickerSelectedIndex(
+            (i) => (i - 1 + filteredRef.current.length) % filteredRef.current.length,
+          );
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab" || e.key === " ") {
+          // Tab/Enter/Space all accept. Space only accepts when there's a query —
+          // a bare `/ ` should pass through as literal text (otherwise typing
+          // `/ a thought` would immediately get hijacked).
+          if (e.key === " " && pickerQuery.length === 0) {
+            // Bare `/ ` should pass through as literal text — let the space
+            // fall through; it'll dismiss naturally as input no longer
+            // starts with `/`.
+            return;
+          }
+          e.preventDefault();
+          const picked = filteredRef.current[pickerSelectedIndex];
+          if (picked) acceptPickerSelection(picked.item);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setPickerDismissed(true);
+          return;
+        }
+      }
+
       // Tauri/macOS fallback: ensure common Cmd shortcuts work in the prompt textarea.
       if (isTauriRuntime && e.metaKey && !e.ctrlKey && !e.altKey) {
         const key = e.key.toLowerCase();
@@ -370,7 +449,18 @@ export function InputArea({
         return;
       }
     },
-    [bridge, input, isTauriRuntime, onInputChange, onInterrupt, onSend],
+    [
+      acceptPickerSelection,
+      bridge,
+      input,
+      isTauriRuntime,
+      onInputChange,
+      onInterrupt,
+      onSend,
+      pickerActive,
+      pickerQuery,
+      pickerSelectedIndex,
+    ],
   );
 
   // Calculate context usage for the ring indicator
@@ -435,6 +525,16 @@ export function InputArea({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* Skill / slash-command picker — anchored above the textarea */}
+        <CommandPicker
+          isOpen={pickerActive}
+          items={commandItems}
+          query={pickerQuery}
+          selectedIndex={pickerSelectedIndex}
+          onSelectedIndexChange={setPickerSelectedIndex}
+          onPick={acceptPickerSelection}
+        />
+
         {/* Bogart the cat 🐱 */}
         <Bogart isQuerying={isQuerying} isTyping={isTyping} containerWidth={containerWidth} />
         <textarea
