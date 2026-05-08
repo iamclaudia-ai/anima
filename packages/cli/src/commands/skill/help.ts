@@ -24,8 +24,12 @@ export function runSkillHelp(args: string[]): void {
   }
   console.log("");
 
-  console.log(`  Script:    ${resolved.scriptPath}`);
-  console.log(`  Runtime:   ${resolved.runtime}`);
+  if (resolved.mode === "command") {
+    console.log(`  Binary:    ${resolved.commandBinary} (PATH-resolved)`);
+  } else {
+    console.log(`  Script:    ${resolved.scriptPath}`);
+    console.log(`  Runtime:   ${resolved.runtime}`);
+  }
   console.log(`  Long-run:  ${resolved.longRunning ? "yes (auto --task)" : "no"}`);
   console.log(`  Timeout:   ${(resolved.timeoutMs / 1000).toFixed(0)}s`);
 

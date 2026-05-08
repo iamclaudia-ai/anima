@@ -65,7 +65,7 @@ async function runInline(resolved: ResolvedCommand, opts: RunSkillOptions): Prom
   const proc = Bun.spawn([cmd, ...args], {
     cwd: resolved.skillDir,
     env: {
-      ...process.env,
+      ...(process.env as Record<string, string>),
       SKILL_DIR: resolved.skillDir,
       SKILL_ID: resolved.skillId,
       SKILL_COMMAND: resolved.command,
@@ -153,15 +153,20 @@ interface SpawnArgs {
 }
 
 /**
- * Build the (binary, args) tuple for spawning the script with its runtime.
+ * Build the (binary, args) tuple for spawning a resolved command.
  *
- *   runtime=node     → ["node",    [scriptPath, ...userArgs]]
- *   runtime=bun      → ["bun",     [scriptPath, ...userArgs]]
- *   runtime=python3  → ["python3", [scriptPath, ...userArgs]]
- *   runtime=bash     → ["bash",    [scriptPath, ...userArgs]]
+ * mode: "command" → [binary, userArgs]            (binary on PATH)
+ * mode: "script":
+ *   runtime=node     → ["node",     [scriptPath, ...userArgs]]
+ *   runtime=bun      → ["bun",      [scriptPath, ...userArgs]]
+ *   runtime=python3  → ["python3",  [scriptPath, ...userArgs]]
+ *   runtime=bash     → ["bash",     [scriptPath, ...userArgs]]
  *   runtime=exec     → [scriptPath, [...userArgs]]
  */
 function buildSpawnArgs(resolved: ResolvedCommand, userArgs: string[]): SpawnArgs {
+  if (resolved.mode === "command") {
+    return { cmd: resolved.commandBinary, args: userArgs };
+  }
   if (resolved.runtime === "exec") {
     return { cmd: resolved.scriptPath, args: userArgs };
   }

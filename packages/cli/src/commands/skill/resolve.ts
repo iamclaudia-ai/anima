@@ -71,38 +71,70 @@ export function detectRuntime(scriptPath: string): SkillRuntime {
 
 /**
  * Resolve a (skill-id, command) pair to a ResolvedCommand.
- * Checks skill.json first, then falls back to convention.
+ *
+ * Resolution priority:
+ *   1. skill.json declaration with `command` field → mode: "command" (PATH binary)
+ *   2. skill.json declaration with `script` field → mode: "script" (skill-internal file)
+ *   3. Convention fallback: scripts/<command>.<ext> → mode: "script"
  */
 export function resolveCommand(skillId: string, command: string): ResolvedCommand {
   const skillDir = resolveSkillDir(skillId);
   const skillJson = loadSkillJson(skillDir);
-
-  // 1. skill.json declaration takes priority
   const declared = skillJson?.commands?.[command];
+
   if (declared) {
-    const scriptPath = join(skillDir, declared.script);
-    if (!existsSync(scriptPath)) {
+    if (declared.command && declared.script) {
       throw new Error(
-        `Script not found: ${scriptPath}\n  (declared in ${join(skillDir, "skill.json")} as commands.${command}.script)`,
+        `skill.json error: ${skillId}/${command} sets both 'command' and 'script' — they are mutually exclusive.`,
       );
     }
-    return {
-      skillId,
-      skillDir,
-      command,
-      scriptPath,
-      runtime: declared.runtime ?? detectRuntime(scriptPath),
-      config: declared,
-      longRunning: declared.longRunning ?? false,
-      timeoutMs: declared.timeoutMs ?? 600_000,
-    };
+
+    // 1. PATH binary
+    if (declared.command) {
+      return {
+        mode: "command",
+        skillId,
+        skillDir,
+        command,
+        commandBinary: declared.command,
+        config: declared,
+        longRunning: declared.longRunning ?? false,
+        timeoutMs: declared.timeoutMs ?? 600_000,
+      };
+    }
+
+    // 2. Skill-internal script
+    if (declared.script) {
+      const scriptPath = join(skillDir, declared.script);
+      if (!existsSync(scriptPath)) {
+        throw new Error(
+          `Script not found: ${scriptPath}\n  (declared in ${join(skillDir, "skill.json")} as commands.${command}.script)`,
+        );
+      }
+      return {
+        mode: "script",
+        skillId,
+        skillDir,
+        command,
+        scriptPath,
+        runtime: declared.runtime ?? detectRuntime(scriptPath),
+        config: declared,
+        longRunning: declared.longRunning ?? false,
+        timeoutMs: declared.timeoutMs ?? 600_000,
+      };
+    }
+
+    throw new Error(
+      `skill.json error: ${skillId}/${command} must set either 'script' or 'command'.`,
+    );
   }
 
-  // 2. Convention fallback: scripts/<command>.<ext>
+  // 3. Convention fallback: scripts/<command>.<ext>
   for (const ext of CONVENTION_EXTENSIONS) {
     const scriptPath = join(skillDir, "scripts", `${command}${ext}`);
     if (existsSync(scriptPath) && statSync(scriptPath).isFile()) {
       return {
+        mode: "script",
         skillId,
         skillDir,
         command,
