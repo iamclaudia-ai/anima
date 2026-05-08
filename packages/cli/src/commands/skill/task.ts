@@ -172,10 +172,14 @@ async function fetchTaskStatus(
   client: ReturnType<typeof createGatewayClient>,
   taskId: string,
 ): Promise<TaskStatusReport> {
-  // Pull a small window of recent executions; we'll pick the most relevant.
+  // Pull a generous window of recent executions; we'll pick the most relevant.
+  // Tasks with `concurrency: skip_if_running` can have their "success" row
+  // buried under many "skipped" rows from cron-overlap or fire_now bursts —
+  // a small window risks the watch losing track of the actual run.
+  // 50 matches the default `keepHistory` so we always see the full retained set.
   const history = (await client.call("scheduler.get_history", {
     taskId,
-    limit: 10,
+    limit: 50,
   })) as HistoryResponse;
 
   // Also pull task-level info to surface fireAt for not-yet-run tasks
