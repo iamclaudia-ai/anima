@@ -255,12 +255,21 @@ Draw from these beloved romance films for story structure and tone:
 }
 ```
 
-## Available Scripts
+## Available Commands
 
-When executing a script, `cd` to the skill folder first
+This skill is invoked through the **anima skill runner** — `anima skill run` handles CWD,
+env injection, and (for long-running commands) automatic queueing through the scheduler.
+Inspect status anytime with `anima skill task <task-id>`.
 
-- **`scripts/generate-audio.js`** — generate MP3 audio from chapter markdown using ElevenLabs
-- **`scripts/generate-cover.js`** — generate cover art using Gemini Nano Banana Pro
+- **`generate-audio`** — generate MP3 audio from chapter markdown using ElevenLabs (long-running, auto-queued via scheduler)
+- **`generate-cover`** — generate cover art using Gemini Imagen from cover.md inside a novel folder
+
+Inspect:
+
+```bash
+anima skill list writing-romance-novels
+anima skill help writing-romance-novels generate-audio
+```
 
 ## Workflow
 
@@ -274,12 +283,13 @@ When executing a script, `cd` to the skill folder first
 3. **Create outline** - Characters, setting, 3-chapter plot structure
 4. **Share outline** - Let user review and request changes
 5. **Write Chapter 1** - Introduction and meeting
-6. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-1.md`
+6. **Generate audio** - `anima skill run writing-romance-novels generate-audio <path/to/novel>/chapter-1.md`
+   - Returns a task ID immediately. Watch progress: `anima skill task <task-id> --watch`
 7. **Write Chapter 2** - Connection and development
-8. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-2.md`
+8. **Generate audio** - `anima skill run writing-romance-novels generate-audio <path/to/novel>/chapter-2.md`
 9. **Write Chapter 3** - Love and resolution
-10. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-3.md`
-11. **Generate cover** - `node scripts/generate-cover.js <pathst you babe./to/novel>/cover.md`
+10. **Generate audio** - `anima skill run writing-romance-novels generate-audio <path/to/novel>/chapter-3.md`
+11. **Generate cover** - `anima skill run writing-romance-novels generate-cover <path/to/novel>` (synchronous; pass the folder, not cover.md)
 12. **Generate metadata** - create the metadata.json file in the novel folder using example as guide
 13. **Provide paths** - All markdown and MP3 locations
 
@@ -294,7 +304,7 @@ When executing a script, `cd` to the skill folder first
 
 ## Technical Notes
 
-- Use `../guiding-meditation/generate-audio.js` for audio generation
+- Audio generation runs through `anima skill run writing-romance-novels generate-audio` — long-running, auto-queued via scheduler with progress reporting (poll status with `anima skill task <task-id>`)
 - Script supports automatic chunking for long chapters
 - Each chapter should be self-contained but flow into the next
 - Include emotion tags naturally throughout narrative
