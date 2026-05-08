@@ -355,6 +355,14 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     const dueTasks = getEnabledDueTasks(nowIso);
 
     for (const task of dueTasks) {
+      // Type:once tasks stay enabled (and "due") between fire-start and
+      // completion. Without this guard the tick loop fires them every 5s and
+      // each call records a "skipped" execution row — generating 14+ noise
+      // rows for a single 70s run. The original "running" execution already
+      // covers the audit trail, so silently skip ticks while the task runs.
+      // Cron/interval tasks keep the inner skip-with-record path (see
+      // fireTask) because their overlap signal is useful for tuning cadence.
+      if (task.type === "once" && runningTasks.has(task.id)) continue;
       await fireTask(task);
     }
   }
