@@ -24,9 +24,23 @@ describe("findActiveMention", () => {
     expect(findActiveMention("path/to@file", 12)).toBeNull();
   });
 
-  it("returns null when the cursor is past whitespace following the @", () => {
-    // `@foo bar` with cursor after `bar` — the space ended the candidate
-    expect(findActiveMention("@foo bar", 8)).toBeNull();
+  it("treats space as part of the query (multi-token search)", () => {
+    // `@foo bar` with cursor at end — space is a filter chunker, not a terminator.
+    expect(findActiveMention("@foo bar", 8)).toEqual({
+      triggerPos: 0,
+      query: "foo bar",
+      cursorPos: 8,
+    });
+  });
+
+  it("stops scanning at a newline (mentions can't span lines)", () => {
+    expect(findActiveMention("@foo\nbar", 8)).toBeNull();
+  });
+
+  it("skips past an invalid @ to find an earlier valid one", () => {
+    // The `@` in `me@host` is invalid; scanning continues back to find `@valid`.
+    const result = findActiveMention("text @valid me@host", 19);
+    expect(result).toEqual({ triggerPos: 5, query: "valid me@host", cursorPos: 19 });
   });
 
   it("returns the query truncated at the cursor (mid-typing)", () => {

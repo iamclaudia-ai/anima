@@ -23,22 +23,70 @@ export interface FilteredFile {
 const MAX_RESULTS = 50;
 
 /**
- * Filter and rank file paths. Empty query returns the first MAX_RESULTS entries
- * unranked (just gives the user *something* to pick from when they first type `@`).
+ * Filter and rank file paths.
+ *
+ * Empty query: return the first MAX_RESULTS entries unranked.
+ *
+ * Single-token query: standard fuzzysort. Its built-in scoring weights
+ * basename + word-boundary matches more heavily, giving VS-Code-like ranking
+ * out of the box (`pkg.json` ranks `package.json` ahead of
+ * `packages/foo/json-utils.ts`).
+ *
+ * Multi-token query (split on whitespace): each token must fuzzy-match the
+ * path. Final score is the sum of per-token scores; highlight indices are the
+ * union of per-token matches. This is fzf's default AND-mode — `input area`
+ * matches `packages/ui/src/InputArea.tsx` while letting the user chunk the
+ * query for tighter narrowing.
  */
 export function filterFiles(files: string[], query: string): FilteredFile[] {
-  if (query.length === 0) {
+  const tokens = query
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) {
     return files.slice(0, MAX_RESULTS).map((path) => ({ path, matchIndices: [] }));
   }
-  // fuzzysort weights basename and word-boundary matches more heavily, which
-  // gives VS-Code-like ranking out of the box (e.g. `pkg.json` ranks
-  // `package.json` ahead of `packages/foo/json-utils.ts`).
+
   const targets = files.map((p) => fuzzysort.prepare(p));
-  const results = fuzzysort.go(query, targets, { all: false, limit: MAX_RESULTS });
-  return results.map((result) => ({
-    path: result.target,
-    matchIndices: result.indexes,
-  }));
+
+  if (tokens.length === 1) {
+    const results = fuzzysort.go(tokens[0], targets, { all: false, limit: MAX_RESULTS });
+    return results.map((result) => ({
+      path: result.target,
+      matchIndices: result.indexes,
+    }));
+  }
+
+  // Multi-token AND. For each token, build a path → match map (no limit so
+  // the intersection isn't truncated by per-token cuts). Then keep paths that
+  // matched every token, sum scores, union match indices, sort, slice.
+  const tokenMaps = tokens.map((tok) => {
+    const results = fuzzysort.go(tok, targets, { all: false });
+    const map = new Map<string, { score: number; indexes: ReadonlyArray<number> }>();
+    for (const r of results) {
+      map.set(r.target, { score: r.score, indexes: r.indexes });
+    }
+    return map;
+  });
+
+  const ranked: Array<{ path: string; score: number; matchIndices: number[] }> = [];
+  for (const path of files) {
+    if (!tokenMaps.every((m) => m.has(path))) continue;
+    let score = 0;
+    const indices = new Set<number>();
+    for (const m of tokenMaps) {
+      const r = m.get(path)!;
+      score += r.score;
+      for (const idx of r.indexes) indices.add(idx);
+    }
+    ranked.push({
+      path,
+      score,
+      matchIndices: Array.from(indices).sort((a, b) => a - b),
+    });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.slice(0, MAX_RESULTS).map(({ path, matchIndices }) => ({ path, matchIndices }));
 }
 
 function highlightPath(path: string, indices: ReadonlyArray<number>): React.ReactElement[] {

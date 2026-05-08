@@ -417,12 +417,15 @@ export function InputArea({
           setIdx((i) => (i - 1 + len) % len);
           return;
         }
-        if (e.key === "Enter" || e.key === "Tab" || e.key === " ") {
-          // Bare-trigger space pass-through: typing `/ a thought` or `@ ...`
-          // should drop the picker and let the literal space land.
-          if (e.key === " " && (cmdOpen ? cmdQuery : fileQuery).length === 0) {
-            return;
-          }
+        // Accept keys differ between pickers:
+        //   - Command picker: Tab / Enter / Space all accept (matches TUI feel)
+        //   - File picker: only Tab / Enter — space is part of the query so the
+        //     user can chunk with multi-token search ("input area")
+        const isAcceptKey = e.key === "Enter" || e.key === "Tab" || (cmdOpen && e.key === " ");
+        if (isAcceptKey) {
+          // Bare-trigger space pass-through for the command picker: `/ thought`
+          // should let the space land literally.
+          if (cmdOpen && e.key === " " && cmdQuery.length === 0) return;
           e.preventDefault();
           if (cmdOpen) {
             const picked = cmdFilteredRef.current[cmdSelectedIndex];

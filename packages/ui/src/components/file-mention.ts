@@ -21,16 +21,20 @@ const TRIGGER_BOUNDARY_RE = /\s|`/;
  * Walk backwards from the cursor looking for an `@` that starts a valid
  * mention. Returns null if there's no active mention at the cursor — this is
  * the "is the picker open?" predicate.
+ *
+ * Spaces are part of the query (the filter logic uses them for multi-token
+ * AND search), so we only stop scanning at newlines. Invalid `@`s (those not
+ * preceded by a boundary char — e.g. inside `me@host`) are skipped, so an
+ * email later in the input doesn't kill an earlier valid mention.
  */
 export function findActiveMention(input: string, cursorPos: number): ActiveMention | null {
   if (cursorPos < 0 || cursorPos > input.length) return null;
 
-  // Scan backwards. Stop on whitespace (mention can't span whitespace), or
-  // on `@` (potential trigger).
   for (let i = cursorPos - 1; i >= 0; i--) {
     const ch = input[i];
+    // Newlines end any candidate mention — mentions can't span lines.
+    if (ch === "\n" || ch === "\r") return null;
     if (ch === "@") {
-      // Validate the boundary char before the `@`.
       if (i === 0) {
         return { triggerPos: i, query: input.slice(i + 1, cursorPos), cursorPos };
       }
@@ -38,12 +42,8 @@ export function findActiveMention(input: string, cursorPos: number): ActiveMenti
       if (TRIGGER_BOUNDARY_RE.test(prev)) {
         return { triggerPos: i, query: input.slice(i + 1, cursorPos), cursorPos };
       }
-      // `@` exists but the char before it isn't a valid boundary
-      // (e.g. `me@host` — the `e` disqualifies it).
-      return null;
+      // Invalid boundary — keep scanning; there might be a valid `@` earlier.
     }
-    // Whitespace ends the candidate query before we ever found an `@`.
-    if (/\s/.test(ch)) return null;
   }
   return null;
 }
