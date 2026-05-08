@@ -36,12 +36,14 @@ import {
   getAllTasks,
   getEnabledDueTasks,
   getExecutionsForTask,
+  getLatestRunningExecution,
   getTaskById,
   insertExecution,
   insertTask,
   migrateLegacyTasks,
   pruneExecutions,
   setTaskEnabled,
+  updateExecutionProgress,
   updateTask,
   updateTaskAfterFire,
 } from "./db.js";
@@ -223,6 +225,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           const useShell = (payload.shell as boolean) ?? false;
           const rawCwd = (payload.cwd as string) ?? undefined;
           const timeoutMs = (payload.timeoutMs as number) ?? 60_000;
+          const customEnv = (payload.env as Record<string, string>) ?? {};
 
           // Interpolate template variables in command, args, and cwd
           const target = interpolate(task.action.target, task);
@@ -231,15 +234,25 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
           const cmd = useShell ? ["sh", "-c", [target, ...args].join(" ")] : [target, ...args];
 
+          // Merge env: parent process env + custom payload env + auto-injected anima vars
+          const env: Record<string, string> = {
+            ...(process.env as Record<string, string>),
+            ...customEnv,
+            ANIMA_TASK_ID: task.id,
+            ANIMA_EXECUTION_ID: execId,
+          };
+
           ctx.log.info(`Exec task started: ${task.name}`, { id: task.id, cwd, timeoutMs });
           taskLog.info("Exec command", {
             command: cmd.join(" "),
             cwd,
             timeoutMs,
+            execId,
           });
 
           const proc = Bun.spawn(cmd, {
             cwd,
+            env,
             stdout: "pipe",
             stderr: "pipe",
           });
@@ -441,6 +454,20 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
       inputSchema: z.object({
         taskId: z.string(),
         limit: z.number().default(50),
+      }),
+    },
+    {
+      name: "scheduler.update_progress",
+      description:
+        "Update the progress message on a running task execution. Pass either taskId (looks up latest running execution) or executionId. Read $ANIMA_TASK_ID / $ANIMA_EXECUTION_ID inside an exec task to find these values.",
+      inputSchema: z.object({
+        taskId: z.string().optional().describe("Task id — looks up the latest running execution"),
+        executionId: z
+          .string()
+          .optional()
+          .describe("Specific execution id (alternative to taskId)"),
+        message: z.string().describe("Progress message (e.g. 'Generated part 5 of 9')"),
+        meta: z.record(z.string(), z.unknown()).optional().describe("Optional structured data"),
       }),
     },
     {
@@ -666,9 +693,48 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
             durationMs: e.duration_ms,
             error: e.error,
             output: e.output,
+            progressMessage: e.progress_message,
           })),
           count: executions.length,
         };
+      }
+
+      case "scheduler.update_progress": {
+        const { taskId, executionId, message, meta } = params as {
+          taskId?: string;
+          executionId?: string;
+          message: string;
+          meta?: Record<string, unknown>;
+        };
+
+        if (!taskId && !executionId) {
+          throw new Error("Either taskId or executionId is required");
+        }
+
+        let resolvedExecId = executionId;
+        if (!resolvedExecId && taskId) {
+          const exec = getLatestRunningExecution(taskId);
+          if (!exec) {
+            throw new Error(`No running execution found for task: ${taskId}`);
+          }
+          resolvedExecId = exec.id;
+        }
+
+        const updated = updateExecutionProgress(resolvedExecId!, message);
+        if (!updated) {
+          throw new Error(`Execution not found: ${resolvedExecId}`);
+        }
+
+        // Broadcast a live progress event for any UI surface that wants it
+        ctx?.emit("scheduler.task_progress", {
+          taskId,
+          executionId: resolvedExecId,
+          message,
+          meta,
+          at: new Date().toISOString(),
+        });
+
+        return { ok: true, executionId: resolvedExecId, message };
       }
 
       case "scheduler.health_check": {
@@ -703,7 +769,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     id: "scheduler",
     name: "Task Scheduler",
     methods,
-    events: ["scheduler.task_fired", "scheduler.notification"],
+    events: ["scheduler.task_fired", "scheduler.notification", "scheduler.task_progress"],
 
     async start(context: ExtensionContext): Promise<void> {
       ctx = context;

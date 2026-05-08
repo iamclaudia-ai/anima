@@ -76,15 +76,16 @@ export function setupSchemaForTests(): void {
 
   d.exec(`
     CREATE TABLE IF NOT EXISTS scheduler_task_executions (
-      id           TEXT PRIMARY KEY,
-      task_id      TEXT NOT NULL REFERENCES scheduler_tasks(id) ON DELETE CASCADE,
-      fired_at     TEXT NOT NULL,
-      completed_at TEXT,
-      status       TEXT NOT NULL CHECK(status IN ('running', 'success', 'error', 'skipped', 'cancelled')),
-      duration_ms  INTEGER,
-      error        TEXT,
-      output       TEXT,
-      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      id               TEXT PRIMARY KEY,
+      task_id          TEXT NOT NULL REFERENCES scheduler_tasks(id) ON DELETE CASCADE,
+      fired_at         TEXT NOT NULL,
+      completed_at     TEXT,
+      status           TEXT NOT NULL CHECK(status IN ('running', 'success', 'error', 'skipped', 'cancelled')),
+      duration_ms      INTEGER,
+      error            TEXT,
+      output           TEXT,
+      progress_message TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
@@ -130,6 +131,7 @@ export interface ExecutionRow {
   duration_ms: number | null;
   error: string | null;
   output: string | null;
+  progress_message: string | null;
   created_at: string;
 }
 
@@ -393,6 +395,33 @@ export function getExecutionsForTask(taskId: string, limit = 50): ExecutionRow[]
        LIMIT ?`,
     )
     .all(taskId, limit) as ExecutionRow[];
+}
+
+/**
+ * Find the latest running execution for a task. Used by scheduler.update_progress
+ * to attach progress messages to the in-flight run when only a taskId is given.
+ */
+export function getLatestRunningExecution(taskId: string): ExecutionRow | null {
+  const row = getDb()
+    .query(
+      `SELECT * FROM scheduler_task_executions
+       WHERE task_id = ? AND status = 'running'
+       ORDER BY fired_at DESC
+       LIMIT 1`,
+    )
+    .get(taskId) as ExecutionRow | null;
+  return row ?? null;
+}
+
+/**
+ * Update the progress_message field on an execution row.
+ * Identifies the row either by execution id or by (taskId, latest running).
+ */
+export function updateExecutionProgress(executionId: string, message: string): boolean {
+  const result = getDb()
+    .query(`UPDATE scheduler_task_executions SET progress_message = ? WHERE id = ?`)
+    .run(message, executionId);
+  return result.changes > 0;
 }
 
 export function pruneExecutions(taskId: string, keepCount: number): void {
