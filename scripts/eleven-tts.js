@@ -1,13 +1,32 @@
 #!/usr/bin/env node
 
 /**
- * ElevenLabs Text-to-Dialogue Generator for Meditation Sessions
+ * eleven-tts — ElevenLabs Text-to-Dialogue CLI
  *
- * Uses the ElevenLabs text-to-dialogue API with eleven_v3 model
- * to generate high-quality emotional audio from meditation markdown.
+ * Converts a markdown source file to MP3 audio using the ElevenLabs
+ * text-to-dialogue API with the eleven_v3 model. The output MP3 is
+ * written next to the input markdown (chapter-1.md → chapter-1.mp3).
  *
- * Supports automatic chunking for long meditations (>3000 chars)
- * with ffmpeg merging and silence padding between chunks.
+ * Used as a shared tool by skills that need TTS output (writing-romance-novels,
+ * guiding-meditation, creating-bedtime-stories). The skill runner exposes it
+ * to skills via skill.json's `command` field, but it can also be invoked
+ * directly as `eleven-tts <path>` from any shell.
+ *
+ * Features:
+ *   - Auto-chunks long inputs at the eleven_v3 3000-char limit
+ *   - Merges chunks with ffmpeg (re-encoded for seamless playback) plus
+ *     a short silence between chunks
+ *   - Detects meditation vs prose markdown formats and strips headings
+ *     accordingly while preserving emotion tags
+ *   - Reports progress via $ANIMA_TASK_ID + `anima scheduler update_progress`
+ *     when run under the skill runner's --task mode (no-op otherwise)
+ *
+ * Required env vars:
+ *   ELEVENLABS_API_KEY
+ *   ELEVENLABS_VOICE_ID
+ *
+ * Usage:
+ *   eleven-tts <path-to-markdown-file>
  */
 
 const fs = require("fs");
@@ -195,13 +214,21 @@ function mergeAudioParts(partPaths, outputPath) {
 }
 
 /**
- * Generate audio from meditation markdown file
- * @param {string} markdownPath - Path to the markdown file
+ * Generate audio from a markdown file.
+ * Output MP3 is written alongside the input (foo.md → foo.mp3).
+ *
+ * Detects two markdown shapes:
+ *   - Meditation-style: content sandwiched between `---` blocks (frontmatter
+ *     and trailing metadata get stripped)
+ *   - Prose: # / ## headings stripped, body preserved (section break `---`
+ *     sequences pass through as natural pauses for the TTS)
+ *
+ * @param {string} markdownPath - Absolute path to the input markdown file
  * @returns {Promise<string>} Path to generated MP3 file
  */
 async function generateAudio(markdownPath) {
   try {
-    console.log(`🧘 Generating meditation audio for: ${path.basename(markdownPath)}`);
+    console.log(`🎙️  Generating audio for: ${path.basename(markdownPath)}`);
 
     // Read markdown file
     if (!fs.existsSync(markdownPath)) {
@@ -210,34 +237,39 @@ async function generateAudio(markdownPath) {
 
     const markdownContent = fs.readFileSync(markdownPath, "utf8");
 
-    // Extract meditation content between the --- markers, excluding header/metadata
-    let meditationText = markdownContent;
+    // Strip headings/frontmatter according to detected shape
+    let bodyText = markdownContent;
+    const hasFrontmatter = bodyText.trim().startsWith("---");
 
-    // Remove title and description
-    meditationText = meditationText.replace(/^# .*$/gm, "");
-    meditationText = meditationText.replace(/^\*.*\*$/gm, "");
+    if (hasFrontmatter) {
+      // Meditation-style: extract content between leading and trailing --- markers
+      bodyText = bodyText.replace(/^# .*$/gm, "");
+      bodyText = bodyText.replace(/^\*.*\*$/gm, "");
 
-    // Extract content between --- markers
-    const betweenDashes = meditationText.match(/---\n\n([\s\S]*?)\n\n---/);
-    if (betweenDashes) {
-      meditationText = betweenDashes[1];
+      const betweenDashes = bodyText.match(/---\n\n([\s\S]*?)\n\n---/);
+      if (betweenDashes) {
+        bodyText = betweenDashes[1];
+      } else {
+        bodyText = bodyText.replace(/\n\n---\n\n[\s\S]*$/, "");
+        bodyText = bodyText.replace(/^---\n\n/, "");
+      }
     } else {
-      // Fallback: remove everything after second ---
-      meditationText = meditationText.replace(/\n\n---\n\n[\s\S]*$/, "");
-      meditationText = meditationText.replace(/^---\n\n/, "");
+      // Prose: strip h1/h2 headings, leave body (including section break `---`) intact
+      bodyText = bodyText.replace(/^# .*$/gm, "");
+      bodyText = bodyText.replace(/^## .*$/gm, "");
     }
 
-    meditationText = meditationText.trim();
+    bodyText = bodyText.trim();
 
-    if (!meditationText) {
-      throw new Error("No meditation content found in markdown file");
+    if (!bodyText) {
+      throw new Error("No content found in markdown file after stripping headings");
     }
 
-    console.log(`📝 Meditation length: ${meditationText.length} characters`);
+    console.log(`📝 Source length: ${bodyText.length} characters`);
     console.log(`🎵 Using voice: ${VOICE_ID}`);
 
     // Split into chunks if needed
-    const chunks = splitIntoChunks(meditationText);
+    const chunks = splitIntoChunks(bodyText);
 
     if (chunks.length > 1) {
       console.log(`📦 Split into ${chunks.length} chunks for processing`);
@@ -276,7 +308,7 @@ async function generateAudio(markdownPath) {
     progress("Audio generation complete");
 
     const sizeKB = (totalSize / 1024).toFixed(1);
-    const estimatedCredits = Math.ceil(meditationText.length / 1000);
+    const estimatedCredits = Math.ceil(bodyText.length / 1000);
 
     console.log(`💾 Audio saved: ${path.basename(audioPath)}`);
     console.log(`📏 File size: ${sizeKB} KB`);
@@ -284,7 +316,7 @@ async function generateAudio(markdownPath) {
 
     return audioPath;
   } catch (error) {
-    console.error(`❌ Error generating meditation audio: ${error.message}`);
+    console.error(`❌ Error generating audio: ${error.message}`);
     throw error;
   }
 }
@@ -294,20 +326,20 @@ async function main() {
   const markdownPath = process.argv[2];
 
   if (!markdownPath) {
-    console.error("Usage: node generate-audio.js <path-to-markdown-file>");
+    console.error("Usage: eleven-tts <path-to-markdown-file>");
     process.exit(1);
   }
 
   try {
     await generateAudio(markdownPath);
-    console.log("🎉 Meditation audio generation complete!");
+    console.log("🎉 Audio generation complete!");
   } catch (error) {
     console.error(error.message);
     process.exit(1);
   }
 }
 
-// Export for use in skill
+// Export for programmatic use
 module.exports = { generateAudio };
 
 // Run if called directly

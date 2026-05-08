@@ -53,26 +53,46 @@ When absent, any executable file under `scripts/` is callable by basename
 auto-detected by extension or shebang.
 
 For richer behavior — argv help, longRunning auto-queue, required env
-checks — add a `skill.json`:
+checks — add a `skill.json`. Each command resolves to one of two execution
+modes (mutually exclusive):
+
+### `script` — A file inside the skill directory
+
+For logic that lives with the skill. Relative path. Runtime auto-detected.
 
 ```json
 {
   "id": "writing-romance-novels",
   "description": "Generate full-length romance novels — chapter MP3s and AI cover art.",
   "commands": {
-    "generate-audio": {
-      "script": "scripts/generate-audio.js",
+    "generate-cover": {
+      "script": "scripts/generate-cover.js",
       "runtime": "node",
+      "longRunning": false,
+      "description": "Generate cover art using Gemini Imagen from cover.md inside a novel folder.",
+      "args": [{ "name": "novel-folder", "type": "absolute-folder", "required": true }],
+      "env": ["GEMINI_API_KEY"],
+      "timeoutMs": 180000
+    }
+  }
+}
+```
+
+### `command` — A binary on PATH
+
+For shared tooling. Avoids duplicating logic across multiple skills. The runner
+spawns the binary directly with full env injection (SKILL_DIR, ANIMA_TASK_ID, etc.)
+just like script mode.
+
+```json
+{
+  "id": "writing-romance-novels",
+  "commands": {
+    "generate-audio": {
+      "command": "eleven-tts",
       "longRunning": true,
-      "description": "Generate MP3 audio from chapter markdown using ElevenLabs v3.",
-      "args": [
-        {
-          "name": "chapter-path",
-          "type": "absolute-file",
-          "required": true,
-          "description": "Absolute path to the chapter .md file"
-        }
-      ],
+      "description": "Generate MP3 audio from chapter markdown using the shared eleven-tts binary.",
+      "args": [{ "name": "chapter-path", "type": "absolute-file", "required": true }],
       "env": ["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"],
       "timeoutMs": 1800000
     }
@@ -80,9 +100,15 @@ checks — add a `skill.json`:
 }
 ```
 
+**When to extract a `command`**: If two or more skills would have an
+identical (or near-identical) script, extract it once into
+`anima/scripts/<tool>.js`, symlink to `~/.local/bin/<tool>`, and point each
+skill's `command` field at the binary name. Future skills get the tool for
+free without copy-pasting code.
+
 **Effects of `longRunning: true`**: The runner auto-enables `--task` mode
 (returns task ID immediately, executes via the scheduler). Pass `--sync` to
-override and run inline.
+override and run inline. Works the same in both script and command modes.
 
 ## Frontmatter Format
 
@@ -235,7 +261,11 @@ anima skill run doing-something <command> /absolute/path/to/input
   "description": "Short description shown in `anima skill list`.",
   "commands": {
     "<command-name>": {
+      // Choose ONE: `script` for skill-local logic, `command` for a PATH binary
       "script": "scripts/<command-name>.<ext>",
+      // OR
+      "command": "<binary-name>",
+
       "runtime": "node | bun | python3 | bash",
       "longRunning": false,
       "description": "What the command does.",

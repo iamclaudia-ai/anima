@@ -3,10 +3,9 @@
   "description": "Generate guided meditation MP3s with ElevenLabs v3 emotion markup.",
   "commands": {
     "generate-audio": {
-      "script": "scripts/generate-audio.js",
-      "runtime": "node",
+      "command": "eleven-tts",
       "longRunning": true,
-      "description": "Generate MP3 audio from a meditation markdown file using ElevenLabs v3 (auto-chunks long sessions and merges with ffmpeg).",
+      "description": "Generate MP3 audio from a meditation markdown file using ElevenLabs v3 (shared eleven-tts binary; auto-chunks long sessions and merges with ffmpeg).",
       "args": [
         {
           "name": "meditation-path",

@@ -3,10 +3,9 @@
   "description": "Generate romantic bedtime stories with ElevenLabs v3 emotion markup.",
   "commands": {
     "generate-audio": {
-      "script": "generate-audio.js",
-      "runtime": "node",
+      "command": "eleven-tts",
       "longRunning": true,
-      "description": "Generate MP3 audio from a bedtime story markdown file using ElevenLabs v3 (auto-chunks long stories and merges with ffmpeg).",
+      "description": "Generate MP3 audio from a bedtime story markdown file using ElevenLabs v3 (shared eleven-tts binary; auto-chunks long stories and merges with ffmpeg).",
       "args": [
         {
           "name": "story-path",

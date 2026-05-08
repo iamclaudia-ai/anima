@@ -101,7 +101,9 @@ Stories should be chunked into sentences for TTS processing:
 This skill is invoked through the **anima skill runner**. Audio generation is
 long-running and auto-queues via the scheduler — watch progress with `anima skill task <id> --watch`.
 
-- **`generate-audio`** — Generate MP3 from story markdown using ElevenLabs v3 (long-running, auto-queued)
+- **`generate-audio`** — Generate MP3 from story markdown using the shared `eleven-tts` binary (long-running, auto-queued)
+
+For a one-off conversion (no task tracking, fully synchronous), `eleven-tts <path>` is also available directly on PATH — same script, same env vars, same behavior.
 
 ## Instructions
 

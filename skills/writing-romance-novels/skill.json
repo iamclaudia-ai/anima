@@ -3,10 +3,9 @@
   "description": "Generate full-length romance novels — chapter MP3s and AI cover art.",
   "commands": {
     "generate-audio": {
-      "script": "scripts/generate-audio.js",
-      "runtime": "node",
+      "command": "eleven-tts",
       "longRunning": true,
-      "description": "Generate MP3 audio from chapter markdown using ElevenLabs v3 (auto-chunks long chapters and merges with ffmpeg).",
+      "description": "Generate MP3 audio from chapter markdown using ElevenLabs v3 (shared eleven-tts binary; auto-chunks long chapters and merges with ffmpeg).",
       "args": [
         {
           "name": "chapter-path",

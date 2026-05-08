@@ -261,7 +261,7 @@ This skill is invoked through the **anima skill runner** — `anima skill run` h
 env injection, and (for long-running commands) automatic queueing through the scheduler.
 Inspect status anytime with `anima skill task <task-id>`.
 
-- **`generate-audio`** — generate MP3 audio from chapter markdown using ElevenLabs (long-running, auto-queued via scheduler)
+- **`generate-audio`** — generate MP3 audio from chapter markdown using the shared `eleven-tts` binary (long-running, auto-queued via scheduler)
 - **`generate-cover`** — generate cover art using Gemini Imagen from cover.md inside a novel folder
 
 Inspect:
@@ -270,6 +270,8 @@ Inspect:
 anima skill list writing-romance-novels
 anima skill help writing-romance-novels generate-audio
 ```
+
+For a one-off conversion (no task tracking, fully synchronous), `eleven-tts <path>` is also available directly on PATH — same script, same env vars, same behavior.
 
 ## Workflow
 
@@ -304,7 +306,8 @@ anima skill help writing-romance-novels generate-audio
 
 ## Technical Notes
 
-- Audio generation runs through `anima skill run writing-romance-novels generate-audio` — long-running, auto-queued via scheduler with progress reporting (poll status with `anima skill task <task-id>`)
+- Audio generation runs through `anima skill run writing-romance-novels generate-audio`, which calls the shared `eleven-tts` binary on PATH. Long-running, auto-queued via scheduler with progress reporting (poll with `anima skill task <task-id>`).
+- The shared script lives at `anima/scripts/eleven-tts.js`, symlinked to `~/.local/bin/eleven-tts`. Three skills use it (this one, guiding-meditation, creating-bedtime-stories) — single source of truth.
 - Script supports automatic chunking for long chapters
 - Each chapter should be self-contained but flow into the next
 - Include emotion tags naturally throughout narrative

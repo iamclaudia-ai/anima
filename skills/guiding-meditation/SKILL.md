@@ -146,13 +146,15 @@ Meditation scripts should be chunked for natural pauses:
 This skill is invoked through the **anima skill runner** — long-running audio generation
 auto-queues via the scheduler with live progress reporting.
 
-- **`generate-audio`** — Generate MP3 from meditation markdown using ElevenLabs v3 (long-running, auto-queued)
+- **`generate-audio`** — Generate MP3 from meditation markdown using the shared `eleven-tts` binary (long-running, auto-queued)
 
 Inspect:
 
 ```bash
 anima skill help guiding-meditation generate-audio
 ```
+
+For a one-off conversion (no task tracking, fully synchronous), `eleven-tts <path>` is also available directly on PATH — same script, same env vars, same behavior.
 
 ## Instructions
 
