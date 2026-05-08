@@ -65,4 +65,26 @@ describe("applyMentionSelection", () => {
     expect(result.input).toBe("@foo.ts ");
     expect(result.cursorPos).toBe("@foo.ts ".length);
   });
+
+  it("closes a markdown code span when the @ was preceded by a backtick", () => {
+    // User typed `` look at `@inp `` and selected `packages/ui/src/InputArea.tsx`.
+    // We should auto-close the backtick so the rendered span is balanced.
+    const result = applyMentionSelection(
+      "look at `@inp",
+      { triggerPos: 9, query: "inp", cursorPos: 13 },
+      "packages/ui/src/InputArea.tsx",
+    );
+    expect(result.input).toBe("look at `@packages/ui/src/InputArea.tsx` ");
+    expect(result.cursorPos).toBe("look at `@packages/ui/src/InputArea.tsx` ".length);
+  });
+
+  it("does not add a closing backtick when the @ wasn't in a code span", () => {
+    const result = applyMentionSelection(
+      "see @inp here",
+      { triggerPos: 4, query: "inp", cursorPos: 8 },
+      "InputArea.tsx",
+    );
+    // Plain space, no backtick injected.
+    expect(result.input).toBe("see @InputArea.tsx  here");
+  });
 });

@@ -51,6 +51,11 @@ export function findActiveMention(input: string, cursorPos: number): ActiveMenti
 /**
  * Replace the active mention's `@<query>` segment with `@<path> ` and return
  * the new input + the cursor position where it should land afterward.
+ *
+ * Special case: when the character immediately before the `@` is a backtick,
+ * the user is starting a markdown code span (`` `@path/to/file` ``), so we
+ * append a closing backtick before the trailing space — saves them from
+ * having to manually close the span.
  */
 export function applyMentionSelection(
   input: string,
@@ -59,7 +64,8 @@ export function applyMentionSelection(
 ): { input: string; cursorPos: number } {
   const before = input.slice(0, mention.triggerPos);
   const after = input.slice(mention.triggerPos + 1 + mention.query.length);
-  const insertion = `@${selectedPath} `;
+  const inBacktickSpan = mention.triggerPos > 0 && input[mention.triggerPos - 1] === "`";
+  const insertion = inBacktickSpan ? `@${selectedPath}\` ` : `@${selectedPath} `;
   return {
     input: before + insertion + after,
     cursorPos: before.length + insertion.length,

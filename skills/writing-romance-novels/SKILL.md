@@ -279,7 +279,7 @@ When executing a script, `cd` to the skill folder first
 8. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-2.md`
 9. **Write Chapter 3** - Love and resolution
 10. **Generate audio** - `node scripts/generate-audio.js <path/to/novel>/chapter-3.md`
-11. **Generate cover** - `node scripts/generate-cover.js <path/to/novel>/cover.md`
+11. **Generate cover** - `node scripts/generate-cover.js <pathst you babe./to/novel>/cover.md`
 12. **Generate metadata** - create the metadata.json file in the novel folder using example as guide
 13. **Provide paths** - All markdown and MP3 locations
 
