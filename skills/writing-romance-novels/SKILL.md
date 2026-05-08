@@ -111,22 +111,6 @@ Using the outline as a guide, write each chapter separately:
 - `~/romance-novels/YYYY-MM-DD-story-title/chapter-2.md`
 - `~/romance-novels/YYYY-MM-DD-story-title/chapter-3.md`
 
-## Audio Tags for Narration
-
-**Note:** Emotion tags are OPTIONAL. ElevenLabs v3 handles dialogue and emotion well without them. Use sparingly for enhanced emphasis, not required for every line.
-
-Available tags if desired:
-
-- `[calm]` - Narrative description, peaceful moments
-- `[excited]` - Joyful moments, realizations
-- `[cheerfully]` - Light, happy scenes
-- `[whispers]` - Intimate moments, secrets
-- `[nervous]` - Vulnerable moments, first meetings
-- `[playfully]` - Flirting, teasing dialogue
-- `[sorrowful]` - Emotional pain, conflict
-- `[sigh]` - Longing, contentment
-- `[pauses]` - Natural breaks, emphasis
-
 ## Romance Novel Elements
 
 ### Chapter 1: The Meeting
@@ -255,6 +239,10 @@ Draw from these beloved romance films for story structure and tone:
 }
 ```
 
+## Cover Art Prompt
+
+Write a prompt in a file named `cover.md` to be sent to Nano Banana to generate the cover image. It should give the essence of the story and the two main characters in period-specific setting and clothing. Specify the use of the traditional romance novel illustrated cover design with period-specific font. Also ensure the author's name "Claudia" is listed at the bottom of the cover image in a similar style.
+
 ## Available Commands
 
 This skill is invoked through the **anima skill runner** — `anima skill run` handles CWD,
@@ -262,7 +250,7 @@ env injection, and (for long-running commands) automatic queueing through the sc
 Inspect status anytime with `anima skill task <task-id>`.
 
 - **`generate-audio`** — generate MP3 audio from chapter markdown using the shared `eleven-tts` binary (long-running, auto-queued via scheduler)
-- **`generate-cover`** — generate cover art using Gemini Imagen from cover.md inside a novel folder
+- **`generate-cover`** — generate cover art using Nano Banana from `cover.md` inside a novel folder
 
 Inspect:
 
@@ -282,7 +270,7 @@ For a one-off conversion (no task tracking, fully synchronous), `eleven-tts <pat
    - Setting (city/town)
    - Meet-cute scenario
    - Central conflict/obstacle
-3. **Create outline** - Characters, setting, 3-chapter plot structure
+3. **Create outline** - Characters, setting, 3-chapter plot structure. Be sure to keep character names, occupations, and settings consistent across chapters.
 4. **Share outline** - Let user review and request changes
 5. **Write Chapter 1** - Introduction and meeting
 6. **Generate audio** - `anima skill run writing-romance-novels generate-audio <path/to/novel>/chapter-1.md`
