@@ -1109,7 +1109,7 @@ describe("session extension", () => {
     await ext.stop();
   });
 
-  it("lists child directories with tilde expansion and hides dot-directories", async () => {
+  it("lists child directories with tilde expansion and sorts dot-directories last", async () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
     const rootName = `claudia-dir-list-${Date.now()}`;
@@ -1119,7 +1119,7 @@ describe("session extension", () => {
     try {
       mkdirSync(join(basePath, "alpha"), { recursive: true });
       mkdirSync(join(basePath, "beta"), { recursive: true });
-      mkdirSync(join(basePath, ".hidden"), { recursive: true });
+      mkdirSync(join(basePath, ".hammerspoon"), { recursive: true });
       writeFileSync(join(basePath, "README.md"), "not a directory");
 
       const result = (await ext.handleMethod("session.get_directories", {
@@ -1127,7 +1127,10 @@ describe("session extension", () => {
       })) as { path: string; directories: string[] };
 
       expect(result.path).toBe(tildePath);
-      expect(result.directories).toEqual(["alpha", "beta"]);
+      // Dot-folders are included (many real workspaces live in them — e.g.
+      // ~/.hammerspoon, ~/.config/*) but sorted after regular folders for
+      // readability.
+      expect(result.directories).toEqual(["alpha", "beta", ".hammerspoon"]);
     } finally {
       rmSync(basePath, { recursive: true, force: true });
       await ext.stop();

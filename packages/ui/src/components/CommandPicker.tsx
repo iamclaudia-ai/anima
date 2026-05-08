@@ -126,7 +126,7 @@ export function CommandPicker({
           No matches for <span className="font-mono">/{query}</span>
         </div>
       ) : (
-        <ul ref={listRef} className="max-h-72 overflow-auto py-1">
+        <ul ref={listRef} className="max-h-72 overflow-auto py-1 pl-0 m-0 list-none">
           {filtered.map((entry, idx) => {
             const isSelected = idx === selectedIndex;
             return (
