@@ -13,6 +13,7 @@
 import { createGatewayClient, loadConfig, generateToken, writeConfigToken } from "@anima/shared";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { skillCommand } from "./commands/skill/index.js";
 
 const DEFAULT_GATEWAY_URL = "ws://localhost:30086/ws";
 let gatewayUrl = process.env.ANIMA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
@@ -1433,6 +1434,11 @@ async function main(): Promise<void> {
 
   if (args[0] === "code-server") {
     await codeServerCommand(args.slice(1));
+    return;
+  }
+
+  if (args[0] === "skill") {
+    await skillCommand(args.slice(1), gatewayUrl);
     return;
   }
 
