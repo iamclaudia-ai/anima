@@ -6,6 +6,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@anima/shared";
 import { rotatePersistentSessions } from "./persistent-sessions";
 import { listCommands } from "./commands-discovery";
+import { listFiles } from "./file-discovery";
 import {
   getSubagent,
   listSubagents,
@@ -172,6 +173,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     },
     "session.list_commands": async (params) =>
       listCommands({ cwd: params.cwd as string | undefined }),
+    "session.list_files": async (params) => listFiles({ cwd: params.cwd as string }),
     "session.health_check": async () => healthCheckDetailed(),
     "session.rotate_persistent_sessions": async () => {
       const rt = getRuntime();

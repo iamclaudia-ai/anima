@@ -254,6 +254,15 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
+    name: "session.list_files",
+    description:
+      "List files in a workspace cwd as relative paths. Uses `git ls-files` (respects .gitignore) when in a git repo, else walks while skipping heavy dirs (node_modules, .git, etc). Used by the web UI's `@` file picker.",
+    inputSchema: z.object({
+      cwd: z.string().describe("Workspace cwd to scan"),
+    }),
+    execution: { lane: "read", concurrency: "parallel" },
+  },
+  {
     name: "session.health_check",
     description: "Health status of session extension",
     inputSchema: z.object({}),

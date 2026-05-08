@@ -4,8 +4,11 @@ import type { Attachment, Usage } from "../types";
 import { useBridge } from "../bridge";
 import { useWorkspace } from "../contexts/WorkspaceContext";
 import { useCommands, type CommandItem } from "../hooks/useCommands";
+import { useFiles } from "../hooks/useFiles";
 import { Bogart } from "./Bogart";
 import { CommandPicker, filterCommands, type FilteredItem } from "./CommandPicker";
+import { FilePicker, filterFiles, type FilteredFile } from "./FilePicker";
+import { applyMentionSelection, findActiveMention, type ActiveMention } from "./file-mention";
 import { GitStatusBar } from "./GitStatusBar";
 import type { GitStatusInfo } from "../hooks/useChatGateway";
 
@@ -43,9 +46,17 @@ export function InputArea({
   const [isDragging, setIsDragging] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [containerWidth, setContainerWidth] = useState(600);
-  const [pickerDismissed, setPickerDismissed] = useState(false);
-  const [pickerSelectedIndex, setPickerSelectedIndex] = useState(0);
-  const filteredRef = useRef<FilteredItem[]>([]);
+  // ── slash picker state ──
+  const [cmdDismissed, setCmdDismissed] = useState(false);
+  const [cmdSelectedIndex, setCmdSelectedIndex] = useState(0);
+  const cmdFilteredRef = useRef<FilteredItem[]>([]);
+  // ── file picker state ──
+  const [fileDismissed, setFileDismissed] = useState(false);
+  const [fileSelectedIndex, setFileSelectedIndex] = useState(0);
+  const [cursorTick, setCursorTick] = useState(0); // bumps on any cursor move
+  const fileFilteredRef = useRef<FilteredFile[]>([]);
+  const fileMentionRef = useRef<ActiveMention | null>(null);
+  // ── shared refs ──
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaContainerRef = useRef<HTMLDivElement>(null);
   const cursorPositionRef = useRef<{ start: number; end: number } | null>(null);
@@ -54,36 +65,83 @@ export function InputArea({
   const bridge = useBridge();
   const workspace = useWorkspace();
   const { items: commandItems } = useCommands(workspace.cwd);
+  const { files } = useFiles(workspace.cwd);
   const isTauriRuntime = typeof window !== "undefined" && "__TAURI__" in window;
 
-  // Picker is open whenever the input starts with `/` and the user hasn't dismissed it.
+  // ── Slash-command picker ──────────────────────────────────────────
+  // Opens when input starts with `/` AND there's no whitespace yet (so
+  // `/podcast some args` doesn't keep the picker hovering during arg entry).
   // Resets on full-clear so re-typing `/` re-opens.
-  const pickerActive = input.startsWith("/") && !pickerDismissed;
-  const pickerQuery = pickerActive ? input.slice(1) : "";
-
-  // Recompute filtered list whenever query or catalog changes — used by both the
-  // picker UI and the parent's keyboard handlers (selection bounds, accept).
-  const filtered = useMemo(
-    () => (pickerActive ? filterCommands(commandItems, pickerQuery) : []),
-    [pickerActive, commandItems, pickerQuery],
+  const cmdActive = input.startsWith("/") && !/\s/.test(input) && !cmdDismissed;
+  const cmdQuery = cmdActive ? input.slice(1) : "";
+  const cmdFiltered = useMemo(
+    () => (cmdActive ? filterCommands(commandItems, cmdQuery) : []),
+    [cmdActive, commandItems, cmdQuery],
   );
-  filteredRef.current = filtered;
-
-  // Reset selection to top whenever the filtered list changes shape.
+  cmdFilteredRef.current = cmdFiltered;
   useEffect(() => {
-    setPickerSelectedIndex(0);
-  }, [filtered.length, pickerQuery]);
+    setCmdSelectedIndex(0);
+  }, [cmdFiltered.length, cmdQuery]);
 
-  const acceptPickerSelection = useCallback(
+  // ── File `@` picker ───────────────────────────────────────────────
+  // Active when there's a valid `@<query>` mention at the cursor — see
+  // `findActiveMention` for the trigger rules (whitespace/backtick/BOF before).
+  // Recomputed on every input change AND every cursor move (cursorTick).
+  const fileMention = useMemo<ActiveMention | null>(() => {
+    const cursor = cursorPositionRef.current?.start ?? input.length;
+    return findActiveMention(input, cursor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cursorTick is the cursor signal
+  }, [input, cursorTick]);
+  fileMentionRef.current = fileMention;
+  const fileActive = fileMention !== null && !fileDismissed;
+  const fileQuery = fileMention?.query ?? "";
+  const fileFiltered = useMemo(
+    () => (fileActive ? filterFiles(files, fileQuery) : []),
+    [fileActive, files, fileQuery],
+  );
+  fileFilteredRef.current = fileFiltered;
+  useEffect(() => {
+    setFileSelectedIndex(0);
+  }, [fileFiltered.length, fileQuery]);
+
+  // ── Selection handlers ────────────────────────────────────────────
+  const acceptCommandSelection = useCallback(
     (item: CommandItem) => {
       onInputChange(`/${item.name} `);
       bridge.saveDraft(`/${item.name} `);
-      setPickerDismissed(true);
-      // Refocus the textarea after mouse selection.
+      setCmdDismissed(true);
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
     [bridge, onInputChange],
   );
+
+  const acceptFileSelection = useCallback(
+    (path: string) => {
+      const mention = fileMentionRef.current;
+      if (!mention) return;
+      const next = applyMentionSelection(input, mention, path);
+      onInputChange(next.input);
+      bridge.saveDraft(next.input);
+      setFileDismissed(true);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.cursorPos, next.cursorPos);
+        // Re-arm: clear dismissal once the user moves on so the next `@` works.
+        setFileDismissed(false);
+      });
+    },
+    [bridge, input, onInputChange],
+  );
+
+  // Track cursor position on selection changes (arrow keys, mouse clicks).
+  // Bumps `cursorTick` so the file-mention memo re-runs.
+  const handleSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    cursorPositionRef.current = { start: el.selectionStart, end: el.selectionEnd };
+    setCursorTick((t) => t + 1);
+  }, []);
 
   // Track container width for Bogart's walking bounds
   useEffect(() => {
@@ -308,15 +366,19 @@ export function InputArea({
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       typingTimerRef.current = setTimeout(() => setIsTyping(false), 2000);
 
-      // Reset the picker dismissal whenever the input is empty so that re-typing `/`
-      // re-opens the picker. Without this, dismissing once would block it forever.
-      if (value === "") setPickerDismissed(false);
+      // Reset both pickers' dismissal when input clears — re-typing `/` or `@`
+      // should re-open them.
+      if (value === "") {
+        setCmdDismissed(false);
+        setFileDismissed(false);
+      }
 
-      // Save cursor position on every change
+      // Save cursor position on every change + bump tick so file-mention recomputes
       cursorPositionRef.current = {
         start: e.target.selectionStart,
         end: e.target.selectionEnd,
       };
+      setCursorTick((t) => t + 1);
     },
     [onInputChange, bridge],
   );
@@ -334,40 +396,47 @@ export function InputArea({
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // ── Command picker key handling ──────────────────────────────────
-      // When the picker is open and has results, intercept nav + accept keys
-      // before the rest of the textarea handlers see them.
-      if (pickerActive && filteredRef.current.length > 0) {
+      // ── Picker key handling ──────────────────────────────────────────
+      // When either picker is open and has results, intercept nav + accept
+      // keys before the rest of the textarea handlers see them. The two
+      // pickers are mutually exclusive given the trigger rules, so a single
+      // dispatch is safe.
+      const cmdOpen = cmdActive && cmdFilteredRef.current.length > 0;
+      const fileOpen = fileActive && fileFilteredRef.current.length > 0;
+      if (cmdOpen || fileOpen) {
+        const len = cmdOpen ? cmdFilteredRef.current.length : fileFilteredRef.current.length;
+        const setIdx = cmdOpen ? setCmdSelectedIndex : setFileSelectedIndex;
+
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setPickerSelectedIndex((i) => (i + 1) % filteredRef.current.length);
+          setIdx((i) => (i + 1) % len);
           return;
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          setPickerSelectedIndex(
-            (i) => (i - 1 + filteredRef.current.length) % filteredRef.current.length,
-          );
+          setIdx((i) => (i - 1 + len) % len);
           return;
         }
         if (e.key === "Enter" || e.key === "Tab" || e.key === " ") {
-          // Tab/Enter/Space all accept. Space only accepts when there's a query —
-          // a bare `/ ` should pass through as literal text (otherwise typing
-          // `/ a thought` would immediately get hijacked).
-          if (e.key === " " && pickerQuery.length === 0) {
-            // Bare `/ ` should pass through as literal text — let the space
-            // fall through; it'll dismiss naturally as input no longer
-            // starts with `/`.
+          // Bare-trigger space pass-through: typing `/ a thought` or `@ ...`
+          // should drop the picker and let the literal space land.
+          if (e.key === " " && (cmdOpen ? cmdQuery : fileQuery).length === 0) {
             return;
           }
           e.preventDefault();
-          const picked = filteredRef.current[pickerSelectedIndex];
-          if (picked) acceptPickerSelection(picked.item);
+          if (cmdOpen) {
+            const picked = cmdFilteredRef.current[cmdSelectedIndex];
+            if (picked) acceptCommandSelection(picked.item);
+          } else {
+            const picked = fileFilteredRef.current[fileSelectedIndex];
+            if (picked) acceptFileSelection(picked.path);
+          }
           return;
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          setPickerDismissed(true);
+          if (cmdOpen) setCmdDismissed(true);
+          else setFileDismissed(true);
           return;
         }
       }
@@ -450,16 +519,20 @@ export function InputArea({
       }
     },
     [
-      acceptPickerSelection,
+      acceptCommandSelection,
+      acceptFileSelection,
       bridge,
+      cmdActive,
+      cmdQuery,
+      cmdSelectedIndex,
+      fileActive,
+      fileQuery,
+      fileSelectedIndex,
       input,
       isTauriRuntime,
       onInputChange,
       onInterrupt,
       onSend,
-      pickerActive,
-      pickerQuery,
-      pickerSelectedIndex,
     ],
   );
 
@@ -527,12 +600,22 @@ export function InputArea({
       >
         {/* Skill / slash-command picker — anchored above the textarea */}
         <CommandPicker
-          isOpen={pickerActive}
+          isOpen={cmdActive}
           items={commandItems}
-          query={pickerQuery}
-          selectedIndex={pickerSelectedIndex}
-          onSelectedIndexChange={setPickerSelectedIndex}
-          onPick={acceptPickerSelection}
+          query={cmdQuery}
+          selectedIndex={cmdSelectedIndex}
+          onSelectedIndexChange={setCmdSelectedIndex}
+          onPick={acceptCommandSelection}
+        />
+
+        {/* File `@` picker — anchored above the textarea */}
+        <FilePicker
+          isOpen={fileActive}
+          files={files}
+          query={fileQuery}
+          selectedIndex={fileSelectedIndex}
+          onSelectedIndexChange={setFileSelectedIndex}
+          onPick={acceptFileSelection}
         />
 
         {/* Bogart the cat 🐱 */}
@@ -542,6 +625,7 @@ export function InputArea({
           value={input}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
+          onSelect={handleSelect}
           onPaste={handlePaste}
           onBlur={handleBlur}
           placeholder={
