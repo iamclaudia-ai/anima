@@ -15,11 +15,74 @@ Use this skill when creating new skills to ensure they are discoverable and usef
 
 ```
 skills/
-└── skill-name/           # lowercase-with-hyphens, matches name in frontmatter
-    └── SKILL.md          # The skill definition
-    └── scripts/          # any executable scripts or tools go in this folder
-        └── my-script.ts  # actual script
+└── skill-name/             # lowercase-with-hyphens, matches name in frontmatter
+    ├── SKILL.md            # The skill definition (mandatory)
+    ├── skill.json          # Optional: declares commands for the runner (see below)
+    └── scripts/            # Executable scripts (one per skill command)
+        └── my-script.ts    # Convention: scripts/<command-name>.{js,ts,py,sh}
 ```
+
+## Running Skills via the Anima Skill Runner
+
+**All skill scripts are invoked through the Anima runner**, which resolves the
+script, sets cwd, and injects env vars. Scripts no longer need a `cd` dance:
+
+```bash
+anima skill run <skill-id> <command> [args...]      # synchronous
+anima skill run <skill-id> <command> [...] --task   # queue via scheduler
+anima skill task <task-id> --watch                  # poll a queued task
+anima skill list                                    # discovery
+anima skill help <skill-id> <command>               # per-command help
+```
+
+The runner injects these env vars before exec:
+
+- **`SKILL_DIR`** — Absolute path to the skill directory. Use this for any
+  skill-internal resource. Never use `process.cwd()`.
+- **`SKILL_ID`** — Skill identifier
+- **`SKILL_COMMAND`** — Command name
+- **`ANIMA_TASK_ID`** — Only set in `--task` mode. Pass to
+  `anima scheduler update_progress --taskId "$ANIMA_TASK_ID" --message "..."`
+  for live progress reporting.
+- **`ANIMA_EXECUTION_ID`** — Only set in `--task` mode
+
+## skill.json — Optional Metadata
+
+When absent, any executable file under `scripts/` is callable by basename
+(e.g., `scripts/foo.js` → `anima skill run myskill foo`). Runtime is
+auto-detected by extension or shebang.
+
+For richer behavior — argv help, longRunning auto-queue, required env
+checks — add a `skill.json`:
+
+```json
+{
+  "id": "writing-romance-novels",
+  "description": "Generate full-length romance novels — chapter MP3s and AI cover art.",
+  "commands": {
+    "generate-audio": {
+      "script": "scripts/generate-audio.js",
+      "runtime": "node",
+      "longRunning": true,
+      "description": "Generate MP3 audio from chapter markdown using ElevenLabs v3.",
+      "args": [
+        {
+          "name": "chapter-path",
+          "type": "absolute-file",
+          "required": true,
+          "description": "Absolute path to the chapter .md file"
+        }
+      ],
+      "env": ["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"],
+      "timeoutMs": 1800000
+    }
+  }
+}
+```
+
+**Effects of `longRunning: true`**: The runner auto-enables `--task` mode
+(returns task ID immediately, executes via the scheduler). Pass `--sync` to
+override and run inline.
 
 ## Frontmatter Format
 
@@ -80,10 +143,41 @@ Test against multiple phrasings:
 After the frontmatter, include:
 
 - **When to Use** section with bullet points
-- **Available Scripts** list scripts and their uses (always include instruction to cd to skill directory)
+- **Available Commands** — list the commands the skill exposes through the runner
 - **Instructions** for how to accomplish the task
-- **Examples** of commands or workflows
+- **Examples** showing `anima skill run …` invocations
 - **Notes** for edge cases or important details
+
+## Writing Scripts that Work with the Runner
+
+1. **Take absolute paths in argv.** Don't infer paths from CWD. The runner sets
+   cwd to `SKILL_DIR` for safety, but explicit absolute paths are clearer.
+2. **Use `process.env.SKILL_DIR`** for any skill-internal resource (data files,
+   playlists, prompt templates) instead of relative paths or `process.cwd()`.
+3. **Report progress for long tasks** via `anima scheduler update_progress`
+   when `ANIMA_TASK_ID` is set (no-op when not):
+
+   ```js
+   const { spawnSync } = require("child_process");
+   function progress(message) {
+     if (!process.env.ANIMA_TASK_ID) return;
+     spawnSync(
+       "anima",
+       [
+         "scheduler",
+         "update_progress",
+         "--taskId",
+         process.env.ANIMA_TASK_ID,
+         "--message",
+         message,
+       ],
+       { stdio: "ignore", timeout: 5000 },
+     );
+   }
+   ```
+
+4. **Validate required env vars early** and exit with a clear error. The runner
+   also checks `commands.*.env` from `skill.json` before exec.
 
 ## Template
 
@@ -103,24 +197,59 @@ Use this skill when the user wants to [goal].
 - [Scenario 2]
 - [Scenario 3]
 
-## Available scripts
+## Available Commands
 
-When executing a script, `cd` to the skill folder first
+This skill is invoked through the **anima skill runner**.
 
-- **`scripts/my-script.ts`** — description of script
+- **`<command-name>`** — description of what the command does
+
+Inspect:
+
+\`\`\`bash
+anima skill help doing-something <command-name>
+\`\`\`
 
 ## Instructions
 
 1. [Step 1]
 2. [Step 2]
-3. [Step 3] execute script `node scripts/my-script.ts args`
+3. [Step 3] — `anima skill run doing-something <command> <absolute-path-arg>`
 
 ## Examples
 
-[Example usage]
+\`\`\`bash
+anima skill run doing-something <command> /absolute/path/to/input
+\`\`\`
 
 ## Notes
 
 - [Important note 1]
 - [Important note 2]
+```
+
+### skill.json template
+
+```json
+{
+  "id": "doing-something",
+  "description": "Short description shown in `anima skill list`.",
+  "commands": {
+    "<command-name>": {
+      "script": "scripts/<command-name>.<ext>",
+      "runtime": "node | bun | python3 | bash",
+      "longRunning": false,
+      "description": "What the command does.",
+      "args": [
+        {
+          "name": "arg-name",
+          "type": "absolute-file | absolute-folder | string | number | boolean",
+          "required": true,
+          "description": "What this argument is for"
+        }
+      ],
+      "env": ["REQUIRED_ENV_VAR_1", "REQUIRED_ENV_VAR_2"],
+      "timeoutMs": 600000
+    }
+  }
+}
 ```
