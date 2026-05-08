@@ -1,0 +1,40 @@
+{
+  "id": "generating-images",
+  "description": "Generate images from text prompts using Gemini Imagen.",
+  "commands": {
+    "generate": {
+      "script": "scripts/generate.ts",
+      "runtime": "bun",
+      "longRunning": false,
+      "description": "Generate a PNG image from a text prompt. Synchronous (typically 10-30s).",
+      "args": [
+        {
+          "name": "prompt",
+          "type": "string",
+          "required": true,
+          "description": "Text description of the image (quoted)"
+        },
+        {
+          "name": "output-path",
+          "type": "absolute-file",
+          "required": true,
+          "description": "Absolute path where the PNG will be written"
+        },
+        {
+          "name": "--aspect-ratio",
+          "type": "string",
+          "required": false,
+          "description": "1:1 (default), 16:9, 9:16, 4:3, 3:4, 2:3, 3:2"
+        },
+        {
+          "name": "--size",
+          "type": "string",
+          "required": false,
+          "description": "1K, 2K (default), or 4K"
+        }
+      ],
+      "env": ["GEMINI_API_KEY"],
+      "timeoutMs": 180000
+    }
+  }
+}

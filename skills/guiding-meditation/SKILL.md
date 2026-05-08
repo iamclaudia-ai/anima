@@ -141,11 +141,18 @@ Meditation scripts should be chunked for natural pauses:
 - Transition to rest state
 - Dream intention setting
 
-## Available scripts
+## Available Commands
 
-When executing a script, cd to the skill folder first
+This skill is invoked through the **anima skill runner** — long-running audio generation
+auto-queues via the scheduler with live progress reporting.
 
-- **`scripts/generate-audio.js`** — Generates MP3 audio from you session transcript
+- **`generate-audio`** — Generate MP3 from meditation markdown using ElevenLabs v3 (long-running, auto-queued)
+
+Inspect:
+
+```bash
+anima skill help guiding-meditation generate-audio
+```
 
 ## Instructions
 
@@ -153,7 +160,8 @@ When executing a script, cd to the skill folder first
 2. **Set the tone** - Use appropriate ElevenLabs v3 audio tags
 3. **Guide breathing** - Include specific breathing instructions with `[pauses]`
 4. **Save to markdown file** - Write meditation to `~/meditations/YYYY-MM-DD-session-name.md`
-5. **Generate MP3 audio** - Use `node scripts/generate-audio.js <markdown-path>` to create .mp3 file
+5. **Generate MP3 audio** - `anima skill run guiding-meditation generate-audio <markdown-path>`
+   - Returns a task ID immediately. Watch progress: `anima skill task <task-id> --watch`
 6. **Ensure proper spacing** - Always add space after punctuation before tags
 7. **Include body awareness** - Progressive relaxation elements
 8. **Close gently** - Peaceful return to normal awareness with `[sigh]`

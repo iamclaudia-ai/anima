@@ -1,0 +1,50 @@
+{
+  "id": "controlling-lights",
+  "description": "Control Govee smart lights — colors, brightness, scenes, auto-play playlists.",
+  "commands": {
+    "govee": {
+      "script": "scripts/govee.ts",
+      "runtime": "bun",
+      "longRunning": false,
+      "description": "Govee light control CLI: list / on / off / color / brightness / temperature / scene / state / colors / scenes.",
+      "args": [
+        {
+          "name": "subcommand",
+          "type": "string",
+          "required": true,
+          "description": "list, on, off, color, brightness, temperature, scene, state, colors, scenes"
+        },
+        {
+          "name": "...",
+          "type": "string",
+          "required": false,
+          "description": "Subcommand arguments — see SKILL.md for the full reference"
+        }
+      ],
+      "env": ["GOVEE_API_KEY"],
+      "timeoutMs": 30000
+    },
+    "auto-play": {
+      "script": "scripts/auto-play.ts",
+      "runtime": "bun",
+      "longRunning": false,
+      "description": "DIY scene rotation: advance/--status/--reset/--list a playlist of scenes.",
+      "args": [
+        {
+          "name": "playlist-path",
+          "type": "string",
+          "required": true,
+          "description": "Path to a playlist JSON (relative paths resolve under SKILL_DIR, absolute paths used as-is)"
+        },
+        {
+          "name": "--status | --reset | --list",
+          "type": "string",
+          "required": false,
+          "description": "Optional subcommand. Default action is to advance to the next scene."
+        }
+      ],
+      "env": ["GOVEE_API_KEY"],
+      "timeoutMs": 30000
+    }
+  }
+}

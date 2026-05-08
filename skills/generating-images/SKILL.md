@@ -16,23 +16,29 @@ Generate high-quality images from text prompts using Gemini's Imagen model.
 - Visualizing ideas or concepts
 - Creating custom graphics for any purpose
 
-## Available Scripts
+## Available Commands
 
-When executing the script, `cd` to the skill folder first.
+This skill is invoked through the **anima skill runner** — `anima skill run` handles
+the working directory and env injection so there's no `cd` dance.
 
-- **`scripts/generate.ts`** — Generates an image via Gemini 3 Pro Image model and saves as PNG
+- **`generate`** — Generate a PNG via Gemini 3 Pro Image (synchronous; typically 10–30s)
+
+Inspect:
+
+```bash
+anima skill help generating-images generate
+```
 
 ## Usage
 
 ```bash
-cd ~/.claude/skills/generating-images
-bun scripts/generate.ts "<prompt>" <output-path> [options]
+anima skill run generating-images generate "<prompt>" <output-path> [options]
 ```
 
 ### Arguments
 
 - `<prompt>` — Text description of the image to generate (required, quoted)
-- `<output-path>` — Where to save the PNG file (required)
+- `<output-path>` — Absolute path where the PNG will be written (required)
 - `--aspect-ratio <ratio>` — Image aspect ratio (optional, default: "1:1")
   - Options: "1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2"
 - `--size <size>` — Image resolution (optional, default: "2K")
@@ -41,19 +47,17 @@ bun scripts/generate.ts "<prompt>" <output-path> [options]
 ### Examples
 
 ```bash
-cd ~/.claude/skills/generating-images
-
 # Square image (default)
-bun scripts/generate.ts "A serene mountain lake at sunset" ~/images/lake.png
+anima skill run generating-images generate "A serene mountain lake at sunset" ~/images/lake.png
 
 # Widescreen landscape
-bun scripts/generate.ts "Futuristic cityscape at night" ~/images/city.png --aspect-ratio 16:9 --size 4K
+anima skill run generating-images generate "Futuristic cityscape at night" ~/images/city.png --aspect-ratio 16:9 --size 4K
 
 # Portrait orientation
-bun scripts/generate.ts "Portrait of a wise elder" ~/images/portrait.png --aspect-ratio 2:3
+anima skill run generating-images generate "Portrait of a wise elder" ~/images/portrait.png --aspect-ratio 2:3
 
 # Phone wallpaper
-bun scripts/generate.ts "Abstract geometric patterns" ~/images/wallpaper.png --aspect-ratio 9:16 --size 4K
+anima skill run generating-images generate "Abstract geometric patterns" ~/images/wallpaper.png --aspect-ratio 9:16 --size 4K
 ```
 
 ## How It Works

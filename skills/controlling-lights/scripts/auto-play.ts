@@ -66,7 +66,9 @@ Usage:
   bun scripts/auto-play.ts <playlist.json> --list     List all scenes`);
   process.exit(0);
 }
-const skillsPath = "/Users/michael/.anima/skills/controlling-lights";
+// SKILL_DIR is injected by `anima skill run`. Falls back to the script's own
+// directory (one level up from scripts/) for direct invocation.
+const skillsPath = process.env.SKILL_DIR ?? resolve(import.meta.dirname ?? __dirname, "..");
 const resolvedPath = resolve(skillsPath, playlistPath);
 if (!existsSync(resolvedPath)) {
   console.error(`Playlist not found: ${resolvedPath}`);

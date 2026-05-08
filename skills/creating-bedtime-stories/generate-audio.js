@@ -12,10 +12,27 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 
 const API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
+
+/**
+ * Report progress to the scheduler when running under `anima skill run --task`.
+ * No-op in synchronous mode (ANIMA_TASK_ID not set).
+ */
+function progress(message) {
+  if (!process.env.ANIMA_TASK_ID) return;
+  try {
+    spawnSync(
+      "anima",
+      ["scheduler", "update_progress", "--taskId", process.env.ANIMA_TASK_ID, "--message", message],
+      { stdio: "ignore", timeout: 5000 },
+    );
+  } catch {
+    // Silently swallow — never let progress reporting break the script.
+  }
+}
 
 // ElevenLabs eleven_v3 model has a 3000 character limit
 const MAX_CHUNK_SIZE = 2900; // Leave buffer for safety
@@ -230,6 +247,7 @@ async function generateAudio(markdownPath) {
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const partNum = i + 1;
+      progress(`Generating part ${partNum} of ${chunks.length}`);
       console.log(`🎙️  Generating part ${partNum}/${chunks.length} (${chunk.length} chars)...`);
 
       const partPath = path.join(tempDir, `${path.basename(audioPath, ".mp3")}-part${partNum}.mp3`);
@@ -243,11 +261,13 @@ async function generateAudio(markdownPath) {
 
     // Merge parts if multiple chunks, otherwise just rename single part
     if (chunks.length > 1) {
+      progress(`Merging ${chunks.length} parts`);
       mergeAudioParts(partPaths, audioPath);
     } else {
       // Single chunk - just rename to final path
       fs.renameSync(partPaths[0], audioPath);
     }
+    progress("Audio generation complete");
 
     const sizeKB = (totalSize / 1024).toFixed(1);
     const estimatedCredits = Math.ceil(meditationText.length / 1000);

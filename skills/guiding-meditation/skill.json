@@ -1,0 +1,22 @@
+{
+  "id": "guiding-meditation",
+  "description": "Generate guided meditation MP3s with ElevenLabs v3 emotion markup.",
+  "commands": {
+    "generate-audio": {
+      "script": "scripts/generate-audio.js",
+      "runtime": "node",
+      "longRunning": true,
+      "description": "Generate MP3 audio from a meditation markdown file using ElevenLabs v3 (auto-chunks long sessions and merges with ffmpeg).",
+      "args": [
+        {
+          "name": "meditation-path",
+          "type": "absolute-file",
+          "required": true,
+          "description": "Absolute path to the meditation .md file"
+        }
+      ],
+      "env": ["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"],
+      "timeoutMs": 1800000
+    }
+  }
+}

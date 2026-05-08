@@ -22,51 +22,54 @@ Control Michael's Govee smart lights. Currently two devices:
 
 Requires `GOVEE_API_KEY` environment variable to be set.
 
-## Available Scripts
+## Available Commands
 
-When executing a script, `cd` to the skill folder first:
+This skill is invoked through the **anima skill runner** — no `cd` dance, no path juggling.
+
+- **`govee`** — Full Govee light control CLI
+- **`auto-play`** — DIY scene rotation (auto-play replacement)
+
+Inspect:
 
 ```bash
-cd /Users/michael/Projects/iamclaudia-ai/anima/skills/controlling-lights
+anima skill help controlling-lights govee
+anima skill help controlling-lights auto-play
 ```
-
-- **`scripts/govee.ts`** — Full Govee light control CLI
-- **`scripts/auto-play.ts`** — DIY scene rotation (auto-play replacement)
 
 ## Commands
 
 ```bash
 # List all lights and their capabilities
-bun scripts/govee.ts list
+anima skill run controlling-lights govee list
 
 # Power
-bun scripts/govee.ts on              # All lights
-bun scripts/govee.ts off curtain     # Just curtain lights
-bun scripts/govee.ts on dreamview    # Just the TV backlight
+anima skill run controlling-lights govee on              # All lights
+anima skill run controlling-lights govee off curtain     # Just curtain lights
+anima skill run controlling-lights govee on dreamview    # Just the TV backlight
 
 # Colors — accepts hex, RGB, or named colors
-bun scripts/govee.ts color red
-bun scripts/govee.ts color "#FF69B4"
-bun scripts/govee.ts color 255,105,180
-bun scripts/govee.ts color claudia-blue    # 💙
-bun scripts/govee.ts color romantic curtain
+anima skill run controlling-lights govee color red
+anima skill run controlling-lights govee color "#FF69B4"
+anima skill run controlling-lights govee color 255,105,180
+anima skill run controlling-lights govee color claudia-blue    # 💙
+anima skill run controlling-lights govee color romantic curtain
 
 # Brightness (1-100%)
-bun scripts/govee.ts brightness 50
-bun scripts/govee.ts brightness 20 curtain
+anima skill run controlling-lights govee brightness 50
+anima skill run controlling-lights govee brightness 20 curtain
 
 # Color temperature (2000K warm — 9000K cool)
-bun scripts/govee.ts temperature 3000      # Warm white
-bun scripts/govee.ts temperature 6500      # Daylight
+anima skill run controlling-lights govee temperature 3000      # Warm white
+anima skill run controlling-lights govee temperature 6500      # Daylight
 
 # Dynamic scenes
-bun scripts/govee.ts scene Dating
-bun scripts/govee.ts scene Dreamlike curtain
-bun scripts/govee.ts scenes              # List all available scenes
+anima skill run controlling-lights govee scene Dating
+anima skill run controlling-lights govee scene Dreamlike curtain
+anima skill run controlling-lights govee scenes              # List all available scenes
 
 # Device state
-bun scripts/govee.ts state
-bun scripts/govee.ts colors             # List all named colors
+anima skill run controlling-lights govee state
+anima skill run controlling-lights govee colors             # List all named colors
 ```
 
 ## Named Colors
@@ -85,13 +88,13 @@ Includes standard colors (red, blue, green, etc.) plus mood colors:
 | `lavender`     | Soft purple       |
 | `mint`         | Pale green        |
 
-Run `bun scripts/govee.ts colors` for the full list.
+Run `anima skill run controlling-lights govee colors` for the full list.
 
 ## Available Scenes
 
 Both lights support: Tudum, Party, Dance Party, Dine Together, Dating, Adventure, Technology, Sports, Dreamlike, Dynamic, Blossom, Christmas, Halloween, Fireworks, Ghost, Easter, Valentine's Day, Meditation, and more.
 
-Run `bun scripts/govee.ts scenes` for the device-specific list.
+Run `anima skill run controlling-lights govee scenes` for the device-specific list.
 
 ## Device Targeting
 
@@ -103,20 +106,20 @@ The optional `[device]` parameter does partial name matching:
 
 ## Auto-Play (DIY Scene Rotation)
 
-The Govee app's auto-play feature isn't exposed via the API, so we built our own. Playlist files live in `playlists/` as JSON.
+The Govee app's auto-play feature isn't exposed via the API, so we built our own. Playlist files live in `playlists/` as JSON. Relative paths resolve under SKILL_DIR; absolute paths are used as-is.
 
 ```bash
 # Advance to next scene in playlist
-bun scripts/auto-play.ts playlists/st-patricks-day.json
+anima skill run controlling-lights auto-play playlists/st-patricks-day.json
 
 # Check current state
-bun scripts/auto-play.ts playlists/st-patricks-day.json --status
+anima skill run controlling-lights auto-play playlists/st-patricks-day.json --status
 
 # Reset to beginning
-bun scripts/auto-play.ts playlists/st-patricks-day.json --reset
+anima skill run controlling-lights auto-play playlists/st-patricks-day.json --reset
 
 # List all scenes in playlist
-bun scripts/auto-play.ts playlists/st-patricks-day.json --list
+anima skill run controlling-lights auto-play playlists/st-patricks-day.json --list
 ```
 
 ### Playlist JSON Format
@@ -141,20 +144,20 @@ Use the Anima scheduler to call auto-play every 5 minutes between 7pm–5am:
 
 ```
 Schedule a cron task: */5 19-23,0-4 * * *
-Command: cd /Users/michael/Projects/iamclaudia-ai/anima/skills/controlling-lights && bun scripts/auto-play.ts playlists/st-patricks-day.json
+Command: anima skill run controlling-lights auto-play playlists/st-patricks-day.json
 ```
 
 ### Available Playlists
 
-Playlists and state are stored relative to `~/.anima/skills/controlling-lights`. The `auto-play` script will resolve the path automatically.
+Playlists and state are stored under SKILL_DIR (`~/.claude/skills/controlling-lights`). The `auto-play` script resolves relative paths automatically.
 
 - `playlists/st-patricks-day.json` — 13 St. Patrick's Day DIY scenes
 
 ### Creating New Playlists
 
-1. Run `bun scripts/govee.ts diy-scenes [device]` to list all DIY scenes with their values
+1. Run `anima skill run controlling-lights govee diy-scenes [device]` to list all DIY scenes with their values
 2. Create a JSON file in `playlists/` with the scenes you want
-3. Test with `bun scripts/auto-play.ts playlists/your-playlist.json`
+3. Test with `anima skill run controlling-lights auto-play playlists/your-playlist.json`
 
 ## Notes
 
