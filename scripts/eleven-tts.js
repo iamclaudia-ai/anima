@@ -14,6 +14,8 @@
  *
  * Features:
  *   - Auto-chunks long inputs at the eleven_v3 3000-char limit
+ *   - Persists each chunk to <basename>-partN.md so re-runs after a partial
+ *     failure (or input edit) regenerate only the changed or missing parts
  *   - Merges chunks with ffmpeg (re-encoded for seamless playback) plus
  *     a short silence between chunks
  *   - Detects meditation vs prose markdown formats and strips headings
@@ -210,7 +212,7 @@ function mergeAudioParts(partPaths, outputPath) {
   // partPaths are kept for verification - delete manually if merge is good
 
   console.log("✅ Audio parts merged successfully!");
-  console.log("📦 Part files kept for verification - delete manually if merge sounds good");
+  console.log("📦 Part files kept for resume support — delete manually to force full regeneration");
 }
 
 /**
@@ -278,40 +280,106 @@ async function generateAudio(markdownPath) {
     const audioPath = markdownPath.replace(/\.md$/, ".mp3");
     const tempDir = path.dirname(audioPath);
 
-    // Generate audio for each chunk
+    // Generate audio for each chunk, with resume support:
+    //   - Persist each chunk's text to <basename>-partN.md before generating
+    //     audio. A partial failure leaves the chunk MD on disk so a rerun
+    //     knows what was attempted.
+    //   - On rerun, if partN.md content matches the current chunk text AND
+    //     partN.mp3 exists, skip generation. If only the audio is missing,
+    //     re-generate just the audio (don't rewrite the MD). If the chunk
+    //     text changed, overwrite both MD and audio.
+    //   - Stale part files (beyond chunks.length) are pruned after the loop.
     const partPaths = [];
     let totalSize = 0;
+    let regenerated = 0;
+    let skipped = 0;
+    let regeneratedCharCount = 0;
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const partNum = i + 1;
+      const partBase = `${path.basename(audioPath, ".mp3")}-part${partNum}`;
+      const partMdPath = path.join(tempDir, `${partBase}.md`);
+      const partMp3Path = path.join(tempDir, `${partBase}.mp3`);
+
+      const mdExisted = fs.existsSync(partMdPath);
+      const mdMatches = mdExisted && fs.readFileSync(partMdPath, "utf8") === chunk;
+      const mp3Exists = fs.existsSync(partMp3Path);
+
+      if (mdMatches && mp3Exists) {
+        // Cached: chunk text unchanged and audio already on disk.
+        const size = fs.statSync(partMp3Path).size;
+        totalSize += size;
+        partPaths.push(partMp3Path);
+        skipped++;
+        console.log(
+          `⏭️  Part ${partNum}/${chunks.length} unchanged, skipping (${(size / 1024).toFixed(1)} KB)`,
+        );
+        progress(`Skipping part ${partNum} of ${chunks.length} (cached)`);
+        continue;
+      }
+
+      // Persist chunk text first so a partial failure leaves enough state
+      // for a future rerun to resume from the right place.
+      if (!mdMatches) {
+        fs.writeFileSync(partMdPath, chunk);
+      }
+
+      const reason = mdMatches ? "missing audio" : mdExisted ? "changed" : "new";
       progress(`Generating part ${partNum} of ${chunks.length}`);
-      console.log(`🎙️  Generating part ${partNum}/${chunks.length} (${chunk.length} chars)...`);
+      console.log(
+        `🎙️  Generating part ${partNum}/${chunks.length} (${chunk.length} chars, ${reason})...`,
+      );
 
-      const partPath = path.join(tempDir, `${path.basename(audioPath, ".mp3")}-part${partNum}.mp3`);
-
-      const size = await generateChunkAudio(chunk, partPath);
+      const size = await generateChunkAudio(chunk, partMp3Path);
       totalSize += size;
-      partPaths.push(partPath);
-
+      partPaths.push(partMp3Path);
+      regenerated++;
+      regeneratedCharCount += chunk.length;
       console.log(`✅ Part ${partNum} generated (${(size / 1024).toFixed(1)} KB)`);
     }
 
-    // Merge parts if multiple chunks, otherwise just rename single part
+    // Clean up stale part files left over from a previous, longer run.
+    let staleNum = chunks.length + 1;
+    while (true) {
+      const stalePartBase = `${path.basename(audioPath, ".mp3")}-part${staleNum}`;
+      const staleMdPath = path.join(tempDir, `${stalePartBase}.md`);
+      const staleMp3Path = path.join(tempDir, `${stalePartBase}.mp3`);
+      let removed = false;
+      if (fs.existsSync(staleMdPath)) {
+        fs.unlinkSync(staleMdPath);
+        removed = true;
+      }
+      if (fs.existsSync(staleMp3Path)) {
+        fs.unlinkSync(staleMp3Path);
+        removed = true;
+      }
+      if (!removed) break;
+      console.log(`🧹 Removed stale part ${staleNum}`);
+      staleNum++;
+    }
+
+    // Merge parts if multiple chunks, otherwise copy single part to final path.
     if (chunks.length > 1) {
       progress(`Merging ${chunks.length} parts`);
       mergeAudioParts(partPaths, audioPath);
     } else {
-      // Single chunk - just rename to final path
-      fs.renameSync(partPaths[0], audioPath);
+      // Single chunk — copy (don't rename) so the part file survives for the
+      // next run's cache check.
+      fs.copyFileSync(partPaths[0], audioPath);
     }
     progress("Audio generation complete");
 
     const sizeKB = (totalSize / 1024).toFixed(1);
-    const estimatedCredits = Math.ceil(bodyText.length / 1000);
+    const estimatedCredits = Math.ceil(regeneratedCharCount / 1000);
 
     console.log(`💾 Audio saved: ${path.basename(audioPath)}`);
     console.log(`📏 File size: ${sizeKB} KB`);
+    if (skipped > 0) {
+      console.log(
+        `🔁 Reused ${skipped} cached part${skipped === 1 ? "" : "s"}, regenerated ${regenerated}`,
+      );
+    }
     console.log(`💳 Estimated credits used: ${estimatedCredits}`);
 
     return audioPath;
