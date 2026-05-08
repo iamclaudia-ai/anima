@@ -472,13 +472,17 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     {
       name: "scheduler.update_progress",
       description:
-        "Update the progress message on a running task execution. Pass either taskId (looks up latest running execution) or executionId. Read $ANIMA_TASK_ID / $ANIMA_EXECUTION_ID inside an exec task to find these values.",
+        "Update the progress message on a running task execution. taskId is always required (read $ANIMA_TASK_ID inside an exec task). Pass executionId too for precision when multiple executions could be in flight; otherwise the scheduler resolves the latest 'running' execution for the task.",
       inputSchema: z.object({
-        taskId: z.string().optional().describe("Task id — looks up the latest running execution"),
+        taskId: z.string().describe("Task id — required. Read $ANIMA_TASK_ID inside an exec task."),
         executionId: z
           .string()
           .optional()
-          .describe("Specific execution id (alternative to taskId)"),
+          .describe(
+            "Optional — pin the update to a specific execution. When omitted, " +
+              "scheduler picks the latest 'running' execution for the task. Read " +
+              "$ANIMA_EXECUTION_ID inside an exec task.",
+          ),
         message: z.string().describe("Progress message (e.g. 'Generated part 5 of 9')"),
         meta: z.record(z.string(), z.unknown()).optional().describe("Optional structured data"),
       }),
@@ -714,18 +718,17 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
       case "scheduler.update_progress": {
         const { taskId, executionId, message, meta } = params as {
-          taskId?: string;
+          taskId: string;
           executionId?: string;
           message: string;
           meta?: Record<string, unknown>;
         };
 
-        if (!taskId && !executionId) {
-          throw new Error("Either taskId or executionId is required");
-        }
-
+        // taskId is schema-required so it's always present here. executionId
+        // is optional precision — when omitted we resolve the latest 'running'
+        // execution for the task (the common case for one-shot skill runs).
         let resolvedExecId = executionId;
-        if (!resolvedExecId && taskId) {
+        if (!resolvedExecId) {
           const exec = getLatestRunningExecution(taskId);
           if (!exec) {
             throw new Error(`No running execution found for task: ${taskId}`);
