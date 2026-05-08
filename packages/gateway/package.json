@@ -18,8 +18,7 @@
     "lucide-react": "catalog:",
     "react-markdown": "catalog:",
     "remark-gfm": "4.0.1",
-    "zod": "catalog:",
-    "zod-to-json-schema": "catalog:"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/typography": "catalog:",

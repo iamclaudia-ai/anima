@@ -64,8 +64,7 @@
     "oxlint": "latest",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
-    "zod": "catalog:",
-    "zod-to-json-schema": "catalog:"
+    "zod": "catalog:"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,mjs,cjs}": [
@@ -89,7 +88,6 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^6.0.3",
     "zod": "^4.3.6",
-    "zod-to-json-schema": "^3.25.2",
     "@types/node": "^25.6.0",
     "react-markdown": "^10.1.0",
     "lucide-react": "^0.563.0"

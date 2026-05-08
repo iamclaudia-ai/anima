@@ -8,10 +8,9 @@
  * come from the canonical BUILTIN_METHODS export (no duplication).
  */
 
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ZodTypeAny } from "zod";
+import { z, type ZodType, type ZodTypeAny } from "zod";
 import type { AnimaExtension } from "@anima/shared";
 import { BUILTIN_METHODS } from "../packages/gateway/src/methods";
 
@@ -25,12 +24,14 @@ type MethodDef = {
 };
 
 function requiredOptional(schema: ZodTypeAny): { required: string[]; optional: string[] } {
-  const json = zodToJsonSchema(schema, "schema") as {
-    definitions?: { schema?: { properties?: Record<string, unknown>; required?: string[] } };
+  // `io: "input"` so .default() fields are documented as optional (the caller
+  // doesn't have to provide them — Zod fills the default).
+  const json = z.toJSONSchema(schema as ZodType, { io: "input" }) as {
+    properties?: Record<string, unknown>;
+    required?: string[];
   };
-  const root = json.definitions?.schema;
-  const props = Object.keys(root?.properties || {});
-  const req = new Set(root?.required || []);
+  const props = Object.keys(json.properties || {});
+  const req = new Set(json.required || []);
   return {
     required: props.filter((p) => req.has(p)),
     optional: props.filter((p) => !req.has(p)),

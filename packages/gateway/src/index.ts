@@ -31,7 +31,7 @@ import {
   renewExtensionRuntimeLock,
 } from "./db/runtime-locks";
 import { homedir } from "node:os";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { BUILTIN_METHODS, BUILTIN_METHODS_BY_NAME } from "./methods";
 import { WebSocketExtensionHost } from "./ws-extension-host";
 import type { ExtensionRegistration, OnCallCallback } from "./extension-host";
@@ -506,23 +506,27 @@ function resolveLockExtensionId(
 }
 
 function buildListMethodsResponse(): { methods: Array<Record<string, unknown>> } {
+  // `io: "input"` for inputs: fields with .default() are not required (the
+  // user doesn't have to send them — Zod fills the default). For outputs we
+  // use the default "output" mode: defaulted fields are guaranteed present in
+  // responses, so they're correctly required there.
   const builtin = BUILTIN_METHODS.map((m) => ({
     method: m.method,
     source: "gateway",
     description: m.description,
-    inputSchema: zodToJsonSchema(m.inputSchema as never, m.method),
+    inputSchema: z.toJSONSchema(m.inputSchema as z.ZodType, { io: "input" }),
   }));
   const extensionMethods = extensions.getMethodDefinitions().map((m) => {
     let inputSchema: unknown;
     try {
-      inputSchema = zodToJsonSchema(m.method.inputSchema as never, m.method.name);
+      inputSchema = z.toJSONSchema(m.method.inputSchema as z.ZodType, { io: "input" });
     } catch {
       inputSchema = m.method.inputSchema ?? {};
     }
     let outputSchema: unknown;
     if (m.method.outputSchema) {
       try {
-        outputSchema = zodToJsonSchema(m.method.outputSchema as never, `${m.method.name}.output`);
+        outputSchema = z.toJSONSchema(m.method.outputSchema as z.ZodType);
       } catch {
         outputSchema = m.method.outputSchema;
       }

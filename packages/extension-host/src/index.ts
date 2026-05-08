@@ -18,7 +18,7 @@ import type {
   ExtensionMcpToolDefinition,
   GatewayEvent,
 } from "@anima/shared";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { createLogger, matchesEventPattern } from "@anima/shared";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
@@ -265,10 +265,14 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     // Register first — makes methods available to other extensions immediately.
     // start() runs after, so extensions can set up ctx.on() handlers for
     // gateway.extensions_ready without worrying about load order.
+    // `io: "input"` makes fields with .default() show up as not-required, which
+    // is correct for input validation / CLI help (the user doesn't have to
+    // provide them — Zod fills the default). The default `output` mode treats
+    // them as required since they're guaranteed to be present after parsing.
     const serializeSchema = (schema: ExtensionMcpToolDefinition["inputSchema"]): unknown => {
       if (schema && typeof schema === "object" && "safeParse" in schema) {
         try {
-          return zodToJsonSchema(schema as never);
+          return z.toJSONSchema(schema as z.ZodType, { io: "input" });
         } catch {
           return (schema as { _def?: unknown })._def ?? {};
         }
@@ -279,7 +283,7 @@ export async function runExtensionHost(factory: ExtensionFactory): Promise<void>
     const methods = ext.methods.map((m) => {
       let inputSchema: unknown;
       try {
-        inputSchema = zodToJsonSchema(m.inputSchema as never, m.name);
+        inputSchema = z.toJSONSchema(m.inputSchema as z.ZodType, { io: "input" });
       } catch {
         inputSchema = m.inputSchema._def; // fallback to raw Zod _def
       }

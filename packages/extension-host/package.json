@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "@anima/shared": "workspace:*",
-    "zod-to-json-schema": "catalog:"
+    "zod": "catalog:"
   }
 }
