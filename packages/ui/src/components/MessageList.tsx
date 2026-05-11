@@ -194,12 +194,12 @@ export function MessageList({
           )}
         </button>
       )}
-      {segments.map((seg, idx) => {
+      {segments.map((seg) => {
         // ── Compaction boundary ──
         if (seg.kind === "boundary") {
           return (
             <CompactionBoundary
-              key={`boundary-${idx}`}
+              key={`boundary-${seg.msgIdx}`}
               trigger={seg.msg.compaction?.trigger || "auto"}
               preTokens={seg.msg.compaction?.pre_tokens || 0}
               timestamp={seg.msg.timestamp}
@@ -220,8 +220,10 @@ export function MessageList({
         // ── Tool timeline (may span multiple messages) ──
         if (seg.kind === "tool-row") {
           const isLatestRow = seg.entries.some((e) => e.msgIdx === lastMsgIdx);
+          // Tool rows always have at least one entry (see buildSegments).
+          const head = seg.entries[0]!;
           return (
-            <div key={`toolrow-${idx}`} className="md:mr-12">
+            <div key={`toolrow-${head.msgIdx}-${head.blockIdx}`} className="md:mr-12">
               <ToolTimeline>
                 {seg.entries.map((entry) => {
                   const { block, isLastInAllMessages, msgIdx, blockIdx } = entry;
@@ -351,9 +353,12 @@ export function MessageList({
         }
 
         // ── Unknown block fallback ──
+        // Defensive branch: the Segment discriminated union is exhaustive above,
+        // so this is unreachable in practice. Key derived from the segment's
+        // JSON shape so it remains stable across renders of the same payload.
         return (
           <div
-            key={`unknown-${idx}`}
+            key={`unknown-${JSON.stringify(seg).slice(0, 64)}`}
             className="md:mr-12 mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
           >
             <div className="text-sm font-mono text-yellow-800">
@@ -399,45 +404,59 @@ function AssistantHeader({ msg }: { msg: Message }) {
 }
 
 function UserMessage({ msg }: { msg: Message }) {
+  // Enumerate before filtering so each rendered block carries its original
+  // position in msg.blocks — stable across renders, unique within the message.
+  const images = msg.blocks
+    .map((block, originalIdx) =>
+      block.type === "image" ? { img: block as ImageBlock, originalIdx } : null,
+    )
+    .filter((e): e is { img: ImageBlock; originalIdx: number } => e !== null);
+
+  const files = msg.blocks
+    .map((block, originalIdx) =>
+      block.type === "file" ? { file: block as FileBlock, originalIdx } : null,
+    )
+    .filter((e): e is { file: FileBlock; originalIdx: number } => e !== null);
+
+  const texts = msg.blocks
+    .map((block, originalIdx) =>
+      block.type === "text" ? { block: block as TextBlock, originalIdx } : null,
+    )
+    .filter((e): e is { block: TextBlock; originalIdx: number } => e !== null);
+
   return (
     <div className="space-y-2">
-      {msg.blocks.filter((b) => b.type === "image").length > 0 && (
+      {images.length > 0 && (
         <div className="flex flex-wrap gap-2 justify-end">
-          {msg.blocks
-            .filter((b): b is ImageBlock => b.type === "image")
-            .map((img, idx) => (
-              <img
-                key={idx}
-                src={`data:${img.mediaType};base64,${img.data}`}
-                alt={`Attachment ${idx + 1}`}
-                className="max-h-48 max-w-xs rounded-md border border-gray-300"
-              />
-            ))}
+          {images.map(({ img, originalIdx }, displayIdx) => (
+            <img
+              key={`img-${originalIdx}`}
+              src={`data:${img.mediaType};base64,${img.data}`}
+              alt={`Attachment ${displayIdx + 1}`}
+              className="max-h-48 max-w-xs rounded-md border border-gray-300"
+            />
+          ))}
         </div>
       )}
-      {msg.blocks.filter((b) => b.type === "file").length > 0 && (
+      {files.length > 0 && (
         <div className="flex flex-wrap gap-2 justify-end">
-          {msg.blocks
-            .filter((b): b is FileBlock => b.type === "file")
-            .map((file, idx) => {
-              const FileIcon = getFileIcon(file.mediaType);
-              return (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-50"
-                >
-                  <FileIcon className="size-5 text-gray-500" />
-                  <span className="text-sm text-gray-700">{file.filename || "file"}</span>
-                </div>
-              );
-            })}
+          {files.map(({ file, originalIdx }) => {
+            const FileIcon = getFileIcon(file.mediaType);
+            return (
+              <div
+                key={`file-${originalIdx}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-50"
+              >
+                <FileIcon className="size-5 text-gray-500" />
+                <span className="text-sm text-gray-700">{file.filename || "file"}</span>
+              </div>
+            );
+          })}
         </div>
       )}
-      {msg.blocks
-        .filter((b): b is TextBlock => b.type === "text")
-        .map((block, idx) => (
-          <MessageContent key={idx} content={block.content} type="user" />
-        ))}
+      {texts.map(({ block, originalIdx }) => (
+        <MessageContent key={`text-${originalIdx}`} content={block.content} type="user" />
+      ))}
     </div>
   );
 }

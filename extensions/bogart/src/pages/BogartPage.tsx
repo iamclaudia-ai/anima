@@ -208,7 +208,7 @@ export function BogartPage() {
             }}
           >
             {SPRITE_SHEETS.map((s, i) => (
-              <option key={i} value={i}>
+              <option key={s.name} value={i}>
                 {s.name} — baselines: [{s.baselines.join(", ")}]
               </option>
             ))}
@@ -280,8 +280,12 @@ export function BogartPage() {
               const isCurrentFrame = currentFrame === i && isPlaying;
               const selIdx = selectedFrames.indexOf(i);
               return (
+                // Sprite grid is a fixed Array.from() — the frame number IS the
+                // identity, never reordered or filtered, so the index is the
+                // correct stable key here.
+                // react-doctor-disable-next-line react-doctor/no-array-index-as-key
                 <div
-                  key={i}
+                  key={`frame-${i}`}
                   onClick={() => toggleFrame(i)}
                   style={{
                     width: displayW,
@@ -479,7 +483,7 @@ export function BogartPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {animations.map((anim, i) => (
                 <div
-                  key={i}
+                  key={`${anim.sheet}:${anim.name}`}
                   style={{
                     display: "flex",
                     alignItems: "center",

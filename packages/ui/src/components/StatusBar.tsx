@@ -75,8 +75,11 @@ function GitStatusBadge({ data }: { data: GitStatusData }) {
 
       {expanded && (
         <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-xl p-2 min-w-[240px] max-h-[200px] overflow-y-auto z-50">
-          {data.files.map((file, i) => (
-            <div key={i} className="flex items-center gap-2 py-0.5 text-xs font-mono">
+          {data.files.map((file) => (
+            <div
+              key={`${file.status}:${file.path}`}
+              className="flex items-center gap-2 py-0.5 text-xs font-mono"
+            >
               <span className={`w-4 text-center font-bold ${statusColor(file.status)}`}>
                 {statusIcon(file.status)}
               </span>

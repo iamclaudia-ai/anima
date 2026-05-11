@@ -282,14 +282,17 @@ export function EpisodeDetailPage({ id }: { id: string }) {
           <div className="mb-8 pt-6 border-t border-stone-200/60">
             <h3 className="text-xs text-stone-400 uppercase tracking-wider mb-3">Topics</h3>
             <div className="flex flex-wrap gap-1.5">
-              {meta.topics.split(",").map((topic, i) => (
-                <span
-                  key={i}
-                  className="px-2.5 py-1 rounded-md text-xs bg-white border border-stone-200/80 text-stone-500 shadow-sm"
-                >
-                  {topic.trim()}
-                </span>
-              ))}
+              {meta.topics.split(",").map((topic) => {
+                const trimmed = topic.trim();
+                return (
+                  <span
+                    key={trimmed}
+                    className="px-2.5 py-1 rounded-md text-xs bg-white border border-stone-200/80 text-stone-500 shadow-sm"
+                  >
+                    {trimmed}
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}

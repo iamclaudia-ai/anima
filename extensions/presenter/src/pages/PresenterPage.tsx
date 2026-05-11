@@ -109,7 +109,7 @@ function BulletsSlide({ slide }: { slide: Slide }) {
           const subs = typeof bullet === "string" ? undefined : bullet.sub;
           return (
             <li
-              key={i}
+              key={text}
               className="flex gap-4 items-start"
               style={{
                 animation: "fadeSlideIn 0.4s ease-out both",
@@ -121,8 +121,8 @@ function BulletsSlide({ slide }: { slide: Slide }) {
                 <span className="text-xl text-white/90 leading-relaxed">{text}</span>
                 {subs && (
                   <ul className="mt-2 ml-2 space-y-1.5">
-                    {subs.map((sub, j) => (
-                      <li key={j} className="flex gap-3 items-start">
+                    {subs.map((sub) => (
+                      <li key={sub} className="flex gap-3 items-start">
                         <span className="size-1 rounded-full bg-white/20 mt-2.5 shrink-0" />
                         <span className="text-base text-white/50">{sub}</span>
                       </li>
@@ -207,14 +207,17 @@ function DemoSlide({ slide }: { slide: Slide }) {
       {slide.subtitle && <p className="text-xl text-white/40 max-w-2xl">{slide.subtitle}</p>}
       {slide.bullets && (
         <ul className="mt-10 space-y-3 text-left">
-          {slide.bullets.map((bullet, i) => (
-            <li key={i} className="flex gap-3 items-center text-lg text-white/60">
-              <span className="size-6 rounded-full border border-white/20 flex items-center justify-center text-xs text-white/40 shrink-0">
-                {i + 1}
-              </span>
-              {typeof bullet === "string" ? bullet : bullet.text}
-            </li>
-          ))}
+          {slide.bullets.map((bullet, i) => {
+            const text = typeof bullet === "string" ? bullet : bullet.text;
+            return (
+              <li key={text} className="flex gap-3 items-center text-lg text-white/60">
+                <span className="size-6 rounded-full border border-white/20 flex items-center justify-center text-xs text-white/40 shrink-0">
+                  {i + 1}
+                </span>
+                {text}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -238,8 +241,8 @@ function BigStatSlide({ slide }: { slide: Slide }) {
         </h2>
       )}
       <div className="flex gap-16 flex-wrap justify-center">
-        {slide.stats?.map((stat, i) => (
-          <div key={i} className="text-center">
+        {slide.stats?.map((stat) => (
+          <div key={stat.label} className="text-center">
             <div className="text-6xl font-light text-white tabular-nums mb-2">{stat.value}</div>
             <div className="text-sm text-white/40 uppercase tracking-wider">{stat.label}</div>
           </div>
@@ -269,14 +272,15 @@ function SplitSlide({ slide }: { slide: Slide }) {
         )}
         {slide.bullets && (
           <ul className="space-y-4">
-            {slide.bullets.map((bullet, i) => (
-              <li key={i} className="flex gap-3 items-start">
-                <span className="size-1.5 rounded-full bg-violet-400/70 mt-2.5 shrink-0" />
-                <span className="text-lg text-white/80 leading-relaxed">
-                  {typeof bullet === "string" ? bullet : bullet.text}
-                </span>
-              </li>
-            ))}
+            {slide.bullets.map((bullet) => {
+              const text = typeof bullet === "string" ? bullet : bullet.text;
+              return (
+                <li key={text} className="flex gap-3 items-start">
+                  <span className="size-1.5 rounded-full bg-violet-400/70 mt-2.5 shrink-0" />
+                  <span className="text-lg text-white/80 leading-relaxed">{text}</span>
+                </li>
+              );
+            })}
           </ul>
         )}
         {slide.body && (

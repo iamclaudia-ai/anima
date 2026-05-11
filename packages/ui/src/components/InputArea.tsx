@@ -566,8 +566,12 @@ export function InputArea({
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((attachment, idx) => {
             const FileIcon = getFileIcon(attachment.mediaType);
+            // Content-derived key — Attachment has no stable id and a single
+            // message can carry multiple files with identical names/types, so
+            // hash a slice of the base64 data for uniqueness within the list.
+            const key = `${attachment.type}:${attachment.filename ?? ""}:${attachment.data.slice(0, 24)}`;
             return (
-              <div key={idx} className="relative group">
+              <div key={key} className="relative group">
                 {attachment.type === "image" ? (
                   <img
                     src={`data:${attachment.mediaType};base64,${attachment.data}`}

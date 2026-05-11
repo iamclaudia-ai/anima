@@ -24,8 +24,11 @@ export default function TodoWriteTool({
     todos.length > 0 ? (
       <div className="rounded border border-neutral-200/40 bg-neutral-50/30 px-2 py-1.5">
         <div className="space-y-1">
-          {todos.map((todo, index) => (
-            <div key={index} className="flex items-start gap-1.5 text-sm">
+          {todos.map((todo) => (
+            <div
+              key={`${todo.status ?? ""}:${todo.content ?? ""}`}
+              className="flex items-start gap-1.5 text-sm"
+            >
               <span className="mt-0.5 flex-shrink-0">
                 {todo.status === "completed" ? (
                   <CheckCircle2 className="size-3 text-green-600" />

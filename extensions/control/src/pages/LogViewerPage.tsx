@@ -244,7 +244,13 @@ export function LogViewerPage() {
             {selectedFile ? "Waiting for log entries..." : "Select a log file"}
           </div>
         ) : (
-          filteredLines.map((line, i) => <LogLine key={i} line={line} />)
+          // Log lines are append-only and may repeat (heartbeats), so the
+          // composite of position + content prefix is the most stable key
+          // available for this view.
+          filteredLines.map((line, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <LogLine key={`${i}:${line.slice(0, 48)}`} line={line} />
+          ))
         )}
       </div>
 

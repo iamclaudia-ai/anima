@@ -398,8 +398,11 @@ export function PresenterNotesPage({ id }: { id: string }) {
             </div>
             <div className="space-y-0.5">
               {presentation.slides.map((s, i) => (
+                // Slides are a fixed ordered list — slide N is slide N, never
+                // reordered or filtered, so the index is the correct identity.
+                // react-doctor-disable-next-line react-doctor/no-array-index-as-key
                 <button
-                  key={i}
+                  key={`slide-${i}`}
                   onClick={() => goTo(i)}
                   className={`w-full text-left px-2 py-1 rounded text-xs truncate transition-colors ${
                     i === currentSlide

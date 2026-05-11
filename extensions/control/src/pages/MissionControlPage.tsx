@@ -235,8 +235,8 @@ function ItemRow({
         </span>
       </td>
       {item.details &&
-        Object.values(item.details).map((value, i) => (
-          <td key={i} className="py-2 pr-3">
+        Object.entries(item.details).map(([key, value]) => (
+          <td key={key} className="py-2 pr-3">
             {value}
           </td>
         ))}

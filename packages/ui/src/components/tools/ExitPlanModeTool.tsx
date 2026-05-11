@@ -98,9 +98,9 @@ export default function ExitPlanModeTool({
               Permissions requested
             </span>
             <div className="space-y-1">
-              {allowedPrompts.map((ap, idx) => (
+              {allowedPrompts.map((ap) => (
                 <div
-                  key={idx}
+                  key={`${ap.tool}:${ap.prompt}`}
                   className="flex items-center gap-2 rounded-md border border-neutral-200 bg-white px-3 py-1.5"
                 >
                   <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono font-medium bg-neutral-100 text-neutral-600">
