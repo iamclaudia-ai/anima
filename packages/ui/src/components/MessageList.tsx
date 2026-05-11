@@ -282,7 +282,7 @@ export function MessageList({
                 className="md:mr-12 mt-2 px-3 py-2 text-sm bg-amber-50 border border-amber-200 rounded-md flex items-center gap-2"
               >
                 <svg
-                  className="w-4 h-4 text-amber-500 animate-spin shrink-0"
+                  className="size-4 text-amber-500 animate-spin shrink-0"
                   fill="none"
                   viewBox="0 0 24 24"
                 >
@@ -316,7 +316,7 @@ export function MessageList({
             >
               <div className="flex items-center gap-2">
                 <svg
-                  className="w-4 h-4 text-red-500 shrink-0"
+                  className="size-4 text-red-500 shrink-0"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -344,7 +344,7 @@ export function MessageList({
               key={`aborted-${seg.msgIdx}`}
               className="md:mr-12 mt-3 flex items-center gap-2 px-3 py-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md w-fit"
             >
-              <OctagonX className="w-4 h-4 flex-shrink-0" />
+              <OctagonX className="size-4 flex-shrink-0" />
               <span>Interrupted · What should Claudia do instead?</span>
             </div>
           );
@@ -426,7 +426,7 @@ function UserMessage({ msg }: { msg: Message }) {
                   key={idx}
                   className="flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-gray-50"
                 >
-                  <FileIcon className="w-5 h-5 text-gray-500" />
+                  <FileIcon className="size-5 text-gray-500" />
                   <span className="text-sm text-gray-700">{file.filename || "file"}</span>
                 </div>
               );

@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, use, type ReactNode } from "react";
 
 interface WorkspaceContextValue {
   /** Current workspace CWD for stripping from file paths */
@@ -12,5 +12,5 @@ export function WorkspaceProvider({ children, cwd }: { children: ReactNode; cwd?
 }
 
 export function useWorkspace(): WorkspaceContextValue {
-  return useContext(WorkspaceContext);
+  return use(WorkspaceContext);
 }

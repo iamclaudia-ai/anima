@@ -42,7 +42,7 @@ function ToastNotification({ toast, onDismiss }: { toast: ToastData; onDismiss: 
     <div className="animate-in slide-in-from-top-2 fade-in duration-300 pointer-events-auto">
       <div className="bg-violet-500/20 backdrop-blur-xl border border-violet-500/30 rounded-xl px-5 py-4 shadow-2xl shadow-violet-500/10 max-w-md">
         <div className="flex items-start gap-3">
-          <div className="shrink-0 w-8 h-8 rounded-full bg-violet-500/30 flex items-center justify-center text-sm">
+          <div className="shrink-0 size-8 rounded-full bg-violet-500/30 flex items-center justify-center text-sm">
             💙
           </div>
           <div className="flex-1 min-w-0">
@@ -249,7 +249,7 @@ export function PresenterNotesPage({ id }: { id: string }) {
     return (
       <div className="fixed inset-0 bg-zinc-900 flex items-center justify-center">
         <div className="flex items-center gap-3 text-zinc-500">
-          <div className="w-4 h-4 border-2 border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
+          <div className="size-4 border-2 border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
           <span className="text-sm">Loading presenter view...</span>
         </div>
       </div>
@@ -296,7 +296,7 @@ export function PresenterNotesPage({ id }: { id: string }) {
             <span className="text-[10px] text-white/20 uppercase tracking-wider mr-1.5">Zoom</span>
             <button
               onClick={zoomOut}
-              className="w-6 h-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
+              className="size-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
               title="Zoom out (−)"
             >
               −
@@ -310,7 +310,7 @@ export function PresenterNotesPage({ id }: { id: string }) {
             </button>
             <button
               onClick={zoomIn}
-              className="w-6 h-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
+              className="size-6 rounded flex items-center justify-center text-xs bg-white/5 border border-white/10 text-white/50 hover:text-white/80 hover:bg-white/10 transition-all"
               title="Zoom in (+)"
             >
               +

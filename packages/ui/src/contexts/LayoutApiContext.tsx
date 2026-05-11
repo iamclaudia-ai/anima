@@ -9,7 +9,7 @@
  * route).
  */
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, use, useState, type ReactNode } from "react";
 import type { DockviewApi } from "dockview-react";
 
 interface LayoutApiContextValue {
@@ -35,7 +35,7 @@ export function LayoutApiProvider({ children }: LayoutApiProviderProps) {
  * to layout events, etc.
  */
 export function useLayoutApi(): DockviewApi | null {
-  const ctx = useContext(LayoutApiContext);
+  const ctx = use(LayoutApiContext);
   return ctx?.api ?? null;
 }
 
@@ -45,6 +45,6 @@ export function useLayoutApi(): DockviewApi | null {
  * here.
  */
 export function useSetLayoutApi(): (api: DockviewApi | null) => void {
-  const ctx = useContext(LayoutApiContext);
+  const ctx = use(LayoutApiContext);
   return ctx?.setApi ?? (() => {});
 }

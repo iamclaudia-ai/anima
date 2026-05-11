@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createGatewayClient, type GatewayClient } from "@anima/shared/gateway-client";
 import { resolveGatewayUrl } from "../hooks/gateway-url";
 
@@ -55,5 +55,5 @@ export function GatewayClientProvider({
 }
 
 export function useGatewayClientContext(): GatewayClientContextValue | null {
-  return useContext(GatewayClientContext);
+  return use(GatewayClientContext);
 }

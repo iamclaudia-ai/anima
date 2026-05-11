@@ -48,7 +48,7 @@ export function Header({
               title="Open navigation"
               aria-label="Open navigation"
             >
-              <Menu className="w-6 h-6" />
+              <Menu className="size-6" />
             </button>
           )}
           {onBack && (
@@ -57,7 +57,7 @@ export function Header({
               className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
               title="Back to sessions"
             >
-              <ChevronLeft className="w-6 h-6" />
+              <ChevronLeft className="size-6" />
             </button>
           )}
           <div className="min-w-0">
@@ -95,13 +95,13 @@ export function Header({
                 voiceEnabled ? "Voice enabled — click to mute" : "Voice muted — click to enable"
               }
             >
-              {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              {voiceEnabled ? <Volume2 className="size-5" /> : <VolumeX className="size-5" />}
             </button>
           )}
 
           {/* Connection indicator */}
           <div
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+            className={`size-2 rounded-full flex-shrink-0 ${
               isConnected ? "bg-green-500" : "bg-red-500"
             }`}
             title={isConnected ? "Connected" : "Disconnected"}

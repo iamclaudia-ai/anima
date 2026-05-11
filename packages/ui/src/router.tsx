@@ -5,7 +5,7 @@
  * Supports :param patterns, back/forward, and Link components.
  */
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { createContext, use, useState, useEffect, useCallback, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { LayoutDefinition, LayoutNode } from "@anima/shared";
@@ -154,7 +154,7 @@ const RouterContext = createContext<RouterState>({
 });
 
 export function useRouter(): RouterState {
-  return useContext(RouterContext);
+  return use(RouterContext);
 }
 
 // ── Document Title ───────────────────────────────────────────

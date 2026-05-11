@@ -680,7 +680,7 @@ export function SchedulerPage() {
   }
 
   // Group tasks: cron first, then interval, then once
-  const sortedTasks = [...tasks].sort((a, b) => {
+  const sortedTasks = tasks.toSorted((a, b) => {
     const typeOrder = { cron: 0, interval: 1, once: 2 };
     const orderDiff = typeOrder[a.type] - typeOrder[b.type];
     if (orderDiff !== 0) return orderDiff;

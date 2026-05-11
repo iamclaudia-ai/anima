@@ -87,7 +87,7 @@ export function CreateWorkspaceModal({
             onClick={onClose}
             className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="size-5" />
           </button>
         </div>
 
@@ -105,7 +105,7 @@ export function CreateWorkspaceModal({
                 className="p-2 rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Go up"
               >
-                <ChevronUp className="w-4 h-4" />
+                <ChevronUp className="size-4" />
               </button>
               <div className="flex-1 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono text-gray-600">
                 {currentPath}
@@ -124,7 +124,7 @@ export function CreateWorkspaceModal({
                       onClick={() => handleNavigateToDir(dir)}
                       className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
                     >
-                      <Folder className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                      <Folder className="size-4 text-blue-500 flex-shrink-0" />
                       <span className="text-sm text-gray-700">{dir}</span>
                     </button>
                   ))}
@@ -175,7 +175,7 @@ export function CreateWorkspaceModal({
               onChange={(e) => setGeneral(e.target.checked)}
               onKeyDown={handleKeyDown}
               disabled={isCreating}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="mt-0.5 size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <div>
               <div className="text-sm font-medium text-gray-800">General workspace</div>

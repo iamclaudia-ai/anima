@@ -127,7 +127,7 @@ function TimelineCard({
 
         {/* Dot */}
         <div className="relative">
-          <div className={`w-3 h-3 rounded-full ${status.dot} z-10 relative shadow-sm`} />
+          <div className={`size-3 rounded-full ${status.dot} z-10 relative shadow-sm`} />
         </div>
 
         {/* Connecting line */}
@@ -182,7 +182,7 @@ function TimelineCard({
         <div className="flex items-center justify-between">
           {cwd && (
             <div className="flex items-center gap-1.5">
-              <svg className="w-3 h-3 text-stone-400" viewBox="0 0 16 16" fill="currentColor">
+              <svg className="size-3 text-stone-400" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
               </svg>
               <span className="text-xs text-stone-400 font-mono">{shortenCwd(cwd)}</span>
@@ -255,7 +255,7 @@ export function DayTimelinePage({ date }: { date: string }) {
               &larr;
             </Link>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-violet-400" />
+              <div className="size-2 rounded-full bg-violet-400" />
               <h1
                 className="text-xl tracking-tight text-stone-700"
                 style={{ fontFamily: "'Newsreader', 'Georgia', serif" }}
@@ -284,7 +284,7 @@ export function DayTimelinePage({ date }: { date: string }) {
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <div className="flex items-center gap-3 text-stone-400">
-              <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
+              <div className="size-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
               <span className="text-sm">Loading timeline...</span>
             </div>
           </div>
@@ -312,7 +312,7 @@ export function DayTimelinePage({ date }: { date: string }) {
             {/* End marker */}
             <div className="flex items-center gap-6">
               <div className="flex flex-col items-center w-16 shrink-0">
-                <div className="w-2 h-2 rounded-full bg-stone-300" />
+                <div className="size-2 rounded-full bg-stone-300" />
               </div>
               <p className="text-xs text-stone-400 italic pb-2">
                 End of day — {conversations.length} conversation

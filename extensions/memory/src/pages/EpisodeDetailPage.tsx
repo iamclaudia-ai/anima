@@ -158,7 +158,7 @@ export function EpisodeDetailPage({ id }: { id: string }) {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
         <div className="flex items-center gap-3 text-stone-400">
-          <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
+          <div className="size-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
           <span className="text-sm">Loading episode...</span>
         </div>
       </div>
@@ -201,7 +201,7 @@ export function EpisodeDetailPage({ id }: { id: string }) {
             </Link>
             <div>
               <div className="flex items-center gap-2 mb-0.5">
-                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                <div className="size-2 rounded-full bg-emerald-400" />
                 <span className="text-xs text-emerald-600 uppercase tracking-wider font-semibold">
                   Episode #{id}
                 </span>
@@ -228,7 +228,7 @@ export function EpisodeDetailPage({ id }: { id: string }) {
         <div className="flex flex-wrap gap-2 mb-8">
           {meta?.project && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-stone-200/80 shadow-sm">
-              <svg className="w-3 h-3 text-stone-400" viewBox="0 0 16 16" fill="currentColor">
+              <svg className="size-3 text-stone-400" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z" />
               </svg>
               <span className="text-xs text-stone-500 font-mono">{shortenCwd(meta.project)}</span>
@@ -301,7 +301,7 @@ export function EpisodeDetailPage({ id }: { id: string }) {
             className="flex items-center gap-2 text-sm text-stone-400 hover:text-stone-600 transition-colors"
           >
             <svg
-              className={`w-4 h-4 transition-transform ${showTranscript ? "rotate-90" : ""}`}
+              className={`size-4 transition-transform ${showTranscript ? "rotate-90" : ""}`}
               viewBox="0 0 16 16"
               fill="currentColor"
             >

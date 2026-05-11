@@ -58,7 +58,7 @@ describe("filterFiles", () => {
     const inputArea = result.find((r) => r.path.endsWith("InputArea.tsx"))!;
     expect(inputArea.matchIndices.length).toBeGreaterThan(0);
     // Indices should be sorted ascending (we render highlights in document order).
-    const sorted = [...inputArea.matchIndices].sort((a, b) => a - b);
+    const sorted = inputArea.matchIndices.toSorted((a, b) => a - b);
     expect([...inputArea.matchIndices]).toEqual(sorted);
   });
 });

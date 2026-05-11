@@ -143,7 +143,7 @@ function TopAction({
           : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
       }`}
     >
-      <Icon className="h-4 w-4 flex-shrink-0" />
+      <Icon className="size-4 flex-shrink-0" />
       <span className="truncate">{label}</span>
     </button>
   );
@@ -250,12 +250,12 @@ function WorkspaceItem({
           className="relative flex-shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
           title={expanded ? "Collapse" : "Expand"}
         >
-          {expanded ? <FolderOpen className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+          {expanded ? <FolderOpen className="size-4" /> : <Folder className="size-4" />}
           {workspace.pinned && (
             // Pinned indicator — small blue dot on the upper-right corner
             // of the folder icon, like a notification badge.
             <span
-              className="absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-blue-500"
+              className="absolute right-0 top-0 size-1.5 rounded-full bg-blue-500"
               aria-label="Pinned"
             />
           )}
@@ -279,7 +279,7 @@ function WorkspaceItem({
               className="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
               title="More actions"
             >
-              <MoreHorizontal className="h-4 w-4" />
+              <MoreHorizontal className="size-4" />
             </button>
             <button
               type="button"
@@ -287,7 +287,7 @@ function WorkspaceItem({
               className="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700"
               title="New session"
             >
-              <SquarePlus className="h-4 w-4" />
+              <SquarePlus className="size-4" />
             </button>
           </div>
           {menuOpen && (
@@ -410,7 +410,7 @@ function WorkspaceMenuItem({
         destructive ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-100"
       }`}
     >
-      <Icon className="h-4 w-4 flex-shrink-0" />
+      <Icon className="size-4 flex-shrink-0" />
       <span>{label}</span>
     </button>
   );
@@ -433,7 +433,7 @@ function SettingsPopup({
     >
       <div className="border-b border-gray-200 px-3 py-2">
         <div className="flex items-center gap-2 text-sm text-gray-700">
-          <User className="h-4 w-4 text-gray-500" />
+          <User className="size-4 text-gray-500" />
           <span className="truncate">kiliman@gmail.com</span>
         </div>
         <div className="mt-1 ml-6 text-xs text-gray-500">Personal account</div>

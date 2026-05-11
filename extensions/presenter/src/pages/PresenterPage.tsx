@@ -116,14 +116,14 @@ function BulletsSlide({ slide }: { slide: Slide }) {
                 animationDelay: `${i * 100}ms`,
               }}
             >
-              <span className="w-2 h-2 rounded-full bg-violet-400/70 mt-3 shrink-0" />
+              <span className="size-2 rounded-full bg-violet-400/70 mt-3 shrink-0" />
               <div>
                 <span className="text-xl text-white/90 leading-relaxed">{text}</span>
                 {subs && (
                   <ul className="mt-2 ml-2 space-y-1.5">
                     {subs.map((sub, j) => (
                       <li key={j} className="flex gap-3 items-start">
-                        <span className="w-1 h-1 rounded-full bg-white/20 mt-2.5 shrink-0" />
+                        <span className="size-1 rounded-full bg-white/20 mt-2.5 shrink-0" />
                         <span className="text-base text-white/50">{sub}</span>
                       </li>
                     ))}
@@ -175,9 +175,9 @@ function CodeSlide({ slide }: { slide: Slide }) {
         {slide.code?.language && (
           <div className="px-5 py-3 border-b border-white/5 flex items-center gap-2">
             <div className="flex gap-1.5">
-              <div className="w-3 h-3 rounded-full bg-red-500/60" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
-              <div className="w-3 h-3 rounded-full bg-green-500/60" />
+              <div className="size-3 rounded-full bg-red-500/60" />
+              <div className="size-3 rounded-full bg-yellow-500/60" />
+              <div className="size-3 rounded-full bg-green-500/60" />
             </div>
             <span className="text-xs text-white/30 ml-3 font-mono">{slide.code.language}</span>
           </div>
@@ -195,7 +195,7 @@ function CodeSlide({ slide }: { slide: Slide }) {
 function DemoSlide({ slide }: { slide: Slide }) {
   return (
     <div className="flex flex-col items-center justify-center h-full px-16 text-center">
-      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500/20 to-rose-500/20 border border-white/10 flex items-center justify-center mb-8">
+      <div className="size-20 rounded-2xl bg-gradient-to-br from-violet-500/20 to-rose-500/20 border border-white/10 flex items-center justify-center mb-8">
         <span className="text-4xl">🎬</span>
       </div>
       <h2
@@ -209,7 +209,7 @@ function DemoSlide({ slide }: { slide: Slide }) {
         <ul className="mt-10 space-y-3 text-left">
           {slide.bullets.map((bullet, i) => (
             <li key={i} className="flex gap-3 items-center text-lg text-white/60">
-              <span className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center text-xs text-white/40 shrink-0">
+              <span className="size-6 rounded-full border border-white/20 flex items-center justify-center text-xs text-white/40 shrink-0">
                 {i + 1}
               </span>
               {typeof bullet === "string" ? bullet : bullet.text}
@@ -271,7 +271,7 @@ function SplitSlide({ slide }: { slide: Slide }) {
           <ul className="space-y-4">
             {slide.bullets.map((bullet, i) => (
               <li key={i} className="flex gap-3 items-start">
-                <span className="w-1.5 h-1.5 rounded-full bg-violet-400/70 mt-2.5 shrink-0" />
+                <span className="size-1.5 rounded-full bg-violet-400/70 mt-2.5 shrink-0" />
                 <span className="text-lg text-white/80 leading-relaxed">
                   {typeof bullet === "string" ? bullet : bullet.text}
                 </span>
@@ -569,7 +569,7 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
     return (
       <div className="fixed inset-0 bg-zinc-950 flex items-center justify-center">
         <div className="flex items-center gap-3 text-zinc-500">
-          <div className="w-4 h-4 border-2 border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
+          <div className="size-4 border-2 border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
           <span className="text-sm">Loading presentation...</span>
         </div>
       </div>

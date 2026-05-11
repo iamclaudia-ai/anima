@@ -11,7 +11,7 @@
  * defaults). API keys, tokens, and paths belong in the server-side `config`.
  */
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, use, useMemo, type ReactNode } from "react";
 
 export type ExtensionWebConfig = Record<string, unknown>;
 export type ExtensionConfigMap = Record<string, ExtensionWebConfig>;
@@ -44,6 +44,6 @@ export function ExtensionConfigProvider({ children, configs }: ExtensionConfigPr
  * ```
  */
 export function useExtensionConfig<T = ExtensionWebConfig>(id: string): T {
-  const map = useContext(ExtensionConfigContext);
+  const map = use(ExtensionConfigContext);
   return (map[id] ?? {}) as T;
 }

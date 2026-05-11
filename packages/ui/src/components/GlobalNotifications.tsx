@@ -20,7 +20,7 @@ function Toast({ toast, onDismiss }: { toast: ToastData; onDismiss: () => void }
     <div className="animate-in slide-in-from-top-2 fade-in duration-300 pointer-events-auto">
       <div className="bg-violet-200/90 backdrop-blur-xl border border-violet-300 rounded-xl px-5 py-4 shadow-2xl shadow-violet-400/20 max-w-md">
         <div className="flex items-start gap-3">
-          <div className="shrink-0 w-8 h-8 rounded-full bg-violet-300/60 flex items-center justify-center text-sm">
+          <div className="shrink-0 size-8 rounded-full bg-violet-300/60 flex items-center justify-center text-sm">
             💙
           </div>
           <div className="flex-1 min-w-0">

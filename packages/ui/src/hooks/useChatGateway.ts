@@ -242,7 +242,7 @@ export function useChatGateway(
   }, []);
 
   const sortSubagents = useCallback((items: SubagentInfo[]): SubagentInfo[] => {
-    return [...items].sort((a, b) => {
+    return items.toSorted((a, b) => {
       if (a.status === "running" && b.status !== "running") return -1;
       if (a.status !== "running" && b.status === "running") return 1;
       const aTime = Date.parse(a.updatedAt || a.startedAt || "") || 0;

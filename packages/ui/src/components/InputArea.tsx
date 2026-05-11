@@ -571,11 +571,11 @@ export function InputArea({
                   <img
                     src={`data:${attachment.mediaType};base64,${attachment.data}`}
                     alt={attachment.filename || `Attachment ${idx + 1}`}
-                    className="h-16 w-16 object-cover rounded-md border border-gray-300"
+                    className="size-16 object-cover rounded-md border border-gray-300"
                   />
                 ) : (
                   <div className="h-16 px-3 flex items-center gap-2 rounded-md border border-gray-300 bg-gray-50">
-                    <FileIcon className="w-5 h-5 text-gray-500" />
+                    <FileIcon className="size-5 text-gray-500" />
                     <span className="text-xs text-gray-700 max-w-24 truncate">
                       {attachment.filename || "file"}
                     </span>
@@ -583,9 +583,9 @@ export function InputArea({
                 )}
                 <button
                   onClick={() => removeAttachment(idx)}
-                  className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute -top-1 -right-1 size-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="size-3" />
                 </button>
               </div>
             );
@@ -694,14 +694,14 @@ export function InputArea({
             <button
               onClick={showSend ? onSend : onInterrupt}
               disabled={showSend && (!isConnected || !hasContent)}
-              className={`absolute bottom-4 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+              className={`absolute bottom-4 right-2 size-8 rounded-full flex items-center justify-center transition-colors ${
                 showSend
                   ? "bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   : "bg-red-500 hover:bg-red-600"
               } text-white`}
               aria-label={showSend ? "Send message" : "Stop"}
             >
-              {showSend ? <ArrowUp className="w-4 h-4" /> : <X className="w-4 h-4" />}
+              {showSend ? <ArrowUp className="size-4" /> : <X className="size-4" />}
             </button>
           );
         })()}

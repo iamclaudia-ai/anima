@@ -15,7 +15,7 @@
  * times in one layout (e.g., two terminals, two chats on different sessions).
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo } from "react";
+import { createContext, useCallback, use, useEffect, useMemo } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   DockviewReact,
@@ -96,7 +96,7 @@ interface PanelWrapperParams {
  */
 function PanelWrapper(props: IDockviewPanelProps<PanelWrapperParams>) {
   const { panelId, params } = props.params;
-  const registry = useContext(PanelRegistryContext);
+  const registry = use(PanelRegistryContext);
   const registration = registry.get(panelId);
 
   if (!registration) {

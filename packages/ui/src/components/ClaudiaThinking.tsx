@@ -28,9 +28,9 @@ export function ClaudiaThinking({
 }: ClaudiaThinkingProps) {
   const adjustedCount = Math.floor(count / speed);
   const sizeClasses = {
-    sm: "w-12 h-12",
-    md: "w-24 h-24",
-    lg: "w-32 h-32",
+    sm: "size-12",
+    md: "size-24",
+    lg: "size-32",
   };
 
   return (

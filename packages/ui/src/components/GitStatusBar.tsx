@@ -123,7 +123,7 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
           className="inline-flex items-center gap-1 font-medium leading-none min-w-0"
           title={`Branch: ${branch}`}
         >
-          <GitIcon className="w-4 h-4 shrink-0" />
+          <GitIcon className="size-4 shrink-0" />
           <span className="font-mono truncate">{branch}</span>
         </span>
 
@@ -134,7 +134,7 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
                 className="inline-flex items-center gap-0.5 text-indigo-600"
                 title={`${ahead} ahead of upstream`}
               >
-                <CloudUpload className="w-4 h-4" />
+                <CloudUpload className="size-4" />
                 {ahead}
               </span>
             )}
@@ -143,7 +143,7 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
                 className="inline-flex items-center gap-0.5 text-gray-500"
                 title={`${behind} behind upstream`}
               >
-                <CloudDownload className="w-4 h-4" />
+                <CloudDownload className="size-4" />
                 {behind}
               </span>
             )}
@@ -158,13 +158,13 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
                 className={`inline-flex items-center gap-0.5 ${b.color}`}
                 title={`${b.count} ${b.label}`}
               >
-                <b.Icon className="w-4 h-4" />
+                <b.Icon className="size-4" />
                 {b.count}
               </span>
             ))}
           </span>
         ) : (
-          <Check className="w-4 h-4 text-emerald-600 shrink-0" aria-label="clean working tree" />
+          <Check className="size-4 text-emerald-600 shrink-0" aria-label="clean working tree" />
         )}
       </div>
 
@@ -176,7 +176,7 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
           className={`inline-flex items-center gap-1 min-w-0 sm:ml-auto hover:underline ${prStateColor}`}
           title={`#${pr.number} — ${pr.title} (${pr.isDraft ? "draft" : pr.state.toLowerCase()})`}
         >
-          <GithubIcon className="w-4 h-4 shrink-0" />
+          <GithubIcon className="size-4 shrink-0" />
           <span className="font-mono shrink-0">#{pr.number}</span>
           <span className="truncate sm:max-w-[28ch]">{pr.title}</span>
         </a>

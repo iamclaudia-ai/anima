@@ -75,7 +75,7 @@ export function SubagentActivityStrip({ subagents }: SubagentActivityStripProps)
               >
                 <div className="flex items-center gap-2">
                   <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusClasses(subagent.status)} ${
+                    className={`size-2.5 shrink-0 rounded-full ${statusClasses(subagent.status)} ${
                       subagent.status === "running" ? "animate-pulse" : ""
                     }`}
                   />
@@ -93,9 +93,9 @@ export function SubagentActivityStrip({ subagents }: SubagentActivityStripProps)
                     {formatAgo(subagent.updatedAt || subagent.startedAt)}
                   </span>
                   {expanded ? (
-                    <ChevronUp className="h-3.5 w-3.5 text-zinc-500" />
+                    <ChevronUp className="size-3.5 text-zinc-500" />
                   ) : (
-                    <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                    <ChevronDown className="size-3.5 text-zinc-500" />
                   )}
                 </div>
                 <p className="mt-1 truncate text-xs text-zinc-300">{preview}</p>

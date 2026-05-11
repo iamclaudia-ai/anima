@@ -89,6 +89,8 @@ export class CronParser {
         const parsed = this.parseField(item.trim(), min, max);
         for (const v of parsed.values) allValues.add(v);
       }
+      // Spread is required to convert Set → Array; toSorted would double-allocate.
+      // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
       result.values = [...allValues].sort((a, b) => a - b);
       return result;
     }

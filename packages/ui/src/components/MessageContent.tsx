@@ -52,9 +52,9 @@ function CodeBlock({ children, className, ...props }: any) {
         title="Copy code"
       >
         {copied ? (
-          <Check className="w-4 h-4 text-green-400" />
+          <Check className="size-4 text-green-400" />
         ) : (
-          <Copy className="w-4 h-4 text-gray-300" />
+          <Copy className="size-4 text-gray-300" />
         )}
       </button>
       <code className={className} {...props}>

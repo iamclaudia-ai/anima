@@ -17,8 +17,8 @@
 
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -132,7 +132,7 @@ export interface ChatPageContextValue {
 const ChatPageContext = createContext<ChatPageContextValue | null>(null);
 
 export function useChatPage(): ChatPageContextValue {
-  const value = useContext(ChatPageContext);
+  const value = use(ChatPageContext);
   if (!value) {
     throw new Error("useChatPage must be used within a ChatPageProvider");
   }

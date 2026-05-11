@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import type { EditorContext } from "./types";
 
 /**
@@ -59,7 +59,7 @@ export interface PlatformBridge {
 export const BridgeContext = createContext<PlatformBridge | null>(null);
 
 export function useBridge(): PlatformBridge {
-  const bridge = useContext(BridgeContext);
+  const bridge = use(BridgeContext);
   if (!bridge) {
     throw new Error("useBridge must be used within a BridgeContext.Provider");
   }

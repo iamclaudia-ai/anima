@@ -87,7 +87,7 @@ function StatusDot({ status }: { status: string }) {
   const color = colors[status] || "bg-zinc-500";
   return (
     <span
-      className={`inline-block w-2.5 h-2.5 rounded-full ${color} ${status === "healthy" ? "animate-pulse" : ""}`}
+      className={`inline-block size-2.5 rounded-full ${color} ${status === "healthy" ? "animate-pulse" : ""}`}
     />
   );
 }

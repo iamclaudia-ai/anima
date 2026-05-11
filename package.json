@@ -96,6 +96,7 @@
     "ignore": {
       "rules": [
         "react-doctor/design-no-default-tailwind-palette",
+        "react-doctor/design-no-em-dash-in-jsx-text",
         "react-doctor/js-combine-iterations",
         "react-doctor/no-generic-handler-names",
         "react-doctor/design-no-three-period-ellipsis"

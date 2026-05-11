@@ -297,7 +297,7 @@ export function MemoryCalendarPage() {
               &larr;
             </Link>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+              <div className="size-2 rounded-full bg-violet-400 animate-pulse" />
               <h1
                 className="text-xl tracking-tight text-stone-700"
                 style={{ fontFamily: "'Newsreader', 'Georgia', serif" }}
@@ -361,7 +361,7 @@ export function MemoryCalendarPage() {
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <div className="flex items-center gap-3 text-stone-400">
-              <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
+              <div className="size-4 border-2 border-violet-300 border-t-violet-500 rounded-full animate-spin" />
               <span className="text-sm">Loading memories...</span>
             </div>
           </div>
@@ -402,7 +402,7 @@ export function MemoryCalendarPage() {
               "bg-violet-100/70 border-violet-300/50",
               "bg-violet-200/50 border-violet-300/60",
             ];
-            return <div key={level} className={`w-4 h-4 rounded border ${styles[level]}`} />;
+            return <div key={level} className={`size-4 rounded border ${styles[level]}`} />;
           })}
           <span className="text-xs text-stone-400">More</span>
         </div>

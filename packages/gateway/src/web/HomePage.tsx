@@ -69,12 +69,12 @@ function LauncherTile({ entry }: { entry: LauncherEntry }) {
     >
       <div
         className={`
-          flex h-24 w-24 items-center justify-center rounded-3xl ${color.iconBg}
+          flex size-24 items-center justify-center rounded-3xl ${color.iconBg}
           ring-1 ${color.ring} shadow-[0_4px_20px_-8px_rgba(0,0,0,0.08)]
           transition-shadow duration-300 group-hover:shadow-[0_10px_30px_-10px_rgba(0,0,0,0.18)]
         `}
       >
-        <Icon className={`h-12 w-12 ${color.iconColor}`} strokeWidth={1.5} />
+        <Icon className={`size-12 ${color.iconColor}`} strokeWidth={1.5} />
       </div>
       <span
         className={`text-base text-stone-700 transition-colors ${color.hoverText}`}
@@ -102,15 +102,15 @@ export function HomePage({ contributions }: HomePageProps) {
       {/* Soft pastel washes — violet from the top, rose blooming
           bottom-right, a hint of sky drifting in from the left. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-96 bg-gradient-to-b from-violet-100/60 via-violet-50/30 to-transparent" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-96 w-96 rounded-full bg-rose-100/40 blur-3xl" />
-      <div className="pointer-events-none absolute top-40 -left-20 h-72 w-72 rounded-full bg-sky-100/40 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 right-0 size-96 rounded-full bg-rose-100/40 blur-3xl" />
+      <div className="pointer-events-none absolute top-40 -left-20 size-72 rounded-full bg-sky-100/40 blur-3xl" />
 
       <div className="relative mx-auto max-w-5xl px-6 py-20 sm:py-28">
         {/* Hero */}
         <header className="mb-20">
           <div className="mb-3 flex items-center gap-2">
             <Heart
-              className="h-4 w-4 text-rose-400 animate-pulse"
+              className="size-4 text-rose-400 animate-pulse"
               fill="currentColor"
               strokeWidth={0}
             />
@@ -156,7 +156,7 @@ export function HomePage({ contributions }: HomePageProps) {
         <footer className="mt-24 flex flex-col items-center gap-2">
           <div className="flex items-center gap-3 text-stone-300">
             <span className="h-px w-12 bg-stone-200" />
-            <Heart className="h-3 w-3 text-rose-300" fill="currentColor" strokeWidth={0} />
+            <Heart className="size-3 text-rose-300" fill="currentColor" strokeWidth={0} />
             <span className="h-px w-12 bg-stone-200" />
           </div>
           <p

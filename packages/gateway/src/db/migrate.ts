@@ -110,7 +110,7 @@ export function migrate(db: Database, options: MigrateOptions = {}): Database {
 
   // Undo migrations that exist only in the database but not in files
   const lastMigration = migrationFiles[migrationFiles.length - 1];
-  const reversedDbMigrations = [...dbMigrations].sort((a, b) => Math.sign(b.id - a.id));
+  const reversedDbMigrations = dbMigrations.toSorted((a, b) => Math.sign(b.id - a.id));
 
   for (const migration of reversedDbMigrations) {
     const isForceLastMigration =

@@ -184,13 +184,13 @@ export default function AskUserQuestionTool({
                     <div className="flex items-start gap-2">
                       {/* Radio/checkbox indicator */}
                       <div
-                        className={`mt-0.5 flex-shrink-0 h-4 w-4 rounded-${q.multiSelect ? "sm" : "full"} border-2 flex items-center justify-center ${
+                        className={`mt-0.5 flex-shrink-0 size-4 rounded-${q.multiSelect ? "sm" : "full"} border-2 flex items-center justify-center ${
                           isSelected ? "border-blue-500 bg-blue-500" : "border-neutral-300 bg-white"
                         }`}
                       >
                         {isSelected && (
                           <svg
-                            className="h-2.5 w-2.5 text-white"
+                            className="size-2.5 text-white"
                             viewBox="0 0 12 12"
                             fill="currentColor"
                           >

@@ -24,9 +24,9 @@ export function CopyButton({ text, className = "" }: CopyButtonProps) {
       title="Copy"
     >
       {copied ? (
-        <Check className="w-3.5 h-3.5 text-green-500" />
+        <Check className="size-3.5 text-green-500" />
       ) : (
-        <Copy className="w-3.5 h-3.5 text-gray-400" />
+        <Copy className="size-3.5 text-gray-400" />
       )}
     </button>
   );
