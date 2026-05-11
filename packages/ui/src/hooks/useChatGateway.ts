@@ -1162,6 +1162,13 @@ export function useChatGateway(
       // Just get basic info
       sendRequest("session.get_info");
     }
+
+    // Unsubscribe from globals on disconnect/teardown so reconnect cycles
+    // don't accumulate duplicate registrations. Session-scoped cleanup is
+    // handled by the sibling unmount effect below.
+    return () => {
+      void client?.unsubscribe([...GLOBAL_EVENT_SUBSCRIPTIONS]).catch(() => {});
+    };
   }, [client, isConnected, sendRequest, subscribeToSession]);
 
   useEffect(() => {

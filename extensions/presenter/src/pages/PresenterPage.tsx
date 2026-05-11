@@ -395,6 +395,7 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
   // Subscribe to slide sync events (display mode follows presenter)
   useEffect(() => {
     if (!connected || !isDisplay) return;
+    const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
     subscribe(["presenter.slide_changed"]);
     const unsub = on("presenter.slide_changed", (_event, raw) => {
       const payload = raw as { presentationId: string; slide: number; scale?: number };
@@ -407,12 +408,18 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
         }
         window.history.replaceState(null, "", `#${payload.slide}`);
         // Reset syncing flag after state update
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          pendingTimers.delete(timer);
           syncingRef.current = false;
         }, 50);
+        pendingTimers.add(timer);
       }
     });
-    return unsub;
+    return () => {
+      for (const timer of pendingTimers) clearTimeout(timer);
+      pendingTimers.clear();
+      unsub();
+    };
   }, [connected, isDisplay, subscribe, on, id]);
 
   const totalSlides = presentation?.slides.length ?? 0;

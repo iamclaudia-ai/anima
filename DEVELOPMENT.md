@@ -71,18 +71,27 @@ bun run format
 
 [react-doctor](https://github.com/millionco/react-doctor) audits the React surface for anti-patterns, deprecated APIs, accessibility issues, and design-system drift. Configuration lives in `package.json` under the `reactDoctor` key.
 
-Run against a workspace:
+Three bun scripts wrap react-doctor for common workflows:
 
 ```bash
-npx react-doctor@latest packages/ui
+bun run react-doctor          # full monorepo scan
+bun run react-doctor:diff     # only files changed vs main (runs in pre-push)
+bun run react-doctor:staged   # only staged files (pre-commit ready)
 ```
 
-Run against changed files only (pre-push friendly):
+Or invoke directly for ad-hoc scans:
 
 ```bash
-npx react-doctor@latest --diff main
-npx react-doctor@latest --staged
+npx react-doctor@latest packages/ui            # specific workspace
+npx react-doctor@latest --verbose              # show every rule
+npx react-doctor@latest --explain file.tsx:42  # debug why a rule fired
 ```
+
+The pre-push hook runs `react-doctor:diff --fail-on error`, so existing
+warnings don't block pushes but any new errors introduced in changed files
+will. This is a deliberate ratchet: the codebase's error count can only go
+down from here, never up. Warnings are tracked separately and worked
+through in cleanup PRs.
 
 Inline ignore for a single line:
 
@@ -135,6 +144,9 @@ Runs:
 
 1. `bun run typecheck`
 2. `bun run test:unit`
+3. `bun run test:ios`
+4. `bun run docs:api:check`
+5. `bun run react-doctor:diff` — fails on any new react-doctor errors in changed files
 
 ## Workspace Script Convention
 

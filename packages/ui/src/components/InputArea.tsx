@@ -178,7 +178,7 @@ export function InputArea({
     const el = textareaRef.current;
     if (isConnected && el && hadFocusBeforeDisconnectRef.current && document.activeElement !== el) {
       // Small delay to ensure UI has updated
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         // Save the cursor position before focusing
         const savedPosition = cursorPositionRef.current;
         el.focus();
@@ -190,6 +190,7 @@ export function InputArea({
           });
         }
       }, 50);
+      return () => clearTimeout(timer);
     }
   }, [isConnected]);
 
