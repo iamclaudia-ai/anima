@@ -91,5 +91,15 @@
     "@types/node": "^25.6.0",
     "react-markdown": "^10.1.0",
     "lucide-react": "^0.563.0"
+  },
+  "reactDoctor": {
+    "ignore": {
+      "rules": [
+        "react-doctor/design-no-default-tailwind-palette",
+        "react-doctor/js-combine-iterations",
+        "react-doctor/no-generic-handler-names",
+        "react-doctor/design-no-three-period-ellipsis"
+      ]
+    }
   }
 }
