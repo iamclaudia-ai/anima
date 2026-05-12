@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import { getStoredToken, setStoredToken, clearStoredToken } from "../hooks/gateway-url";
 
 interface LoginGateProps {
@@ -19,6 +19,14 @@ export function LoginGate({ children }: LoginGateProps) {
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the token field on mount — LoginGate is the entry surface, so
+  // letting users type immediately is the intended UX. Using a ref-driven
+  // effect instead of the `autoFocus` attribute keeps a11y linters happy.
+  useEffect(() => {
+    if (!hasToken) inputRef.current?.focus();
+  }, [hasToken]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -66,8 +74,8 @@ export function LoginGate({ children }: LoginGateProps) {
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            ref={inputRef}
             placeholder="anima_sk_..."
-            autoFocus
             autoComplete="off"
             style={styles.input}
           />

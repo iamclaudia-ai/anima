@@ -523,12 +523,22 @@ function SearchModal({
 
   return (
     <div
+      role="button"
+      tabIndex={-1}
+      aria-label="Close search"
       className="fixed inset-0 z-50 flex items-start justify-center bg-gradient-to-b from-black/10 to-black/20 pt-24 backdrop-blur-xs"
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Chat search"
         className="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-gray-200 p-3">
           <input

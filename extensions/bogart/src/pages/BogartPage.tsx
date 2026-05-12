@@ -190,8 +190,8 @@ export function BogartPage() {
           flexWrap: "wrap",
         }}
       >
-        <div>
-          <label style={{ fontSize: 12, color: "#888" }}>Sheet</label>
+        <label>
+          <span style={{ fontSize: 12, color: "#888" }}>Sheet</span>
           <select
             value={selectedSheet}
             onChange={(e) => {
@@ -213,10 +213,10 @@ export function BogartPage() {
               </option>
             ))}
           </select>
-        </div>
+        </label>
 
-        <div>
-          <label style={{ fontSize: 12, color: "#888" }}>FPS: {fps}</label>
+        <label>
+          <span style={{ fontSize: 12, color: "#888" }}>FPS: {fps}</span>
           <input
             type="range"
             min={1}
@@ -225,7 +225,7 @@ export function BogartPage() {
             onChange={(e) => setFps(Number(e.target.value))}
             style={{ display: "block", width: 120 }}
           />
-        </div>
+        </label>
 
         <div>
           <label style={{ fontSize: 12, color: "#888" }}>Zoom: {zoom.toFixed(1)}x</label>
@@ -284,9 +284,12 @@ export function BogartPage() {
                 // identity, never reordered or filtered, so the index is the
                 // correct stable key here.
                 // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-                <div
+                <button
+                  type="button"
                   key={`frame-${i}`}
                   onClick={() => toggleFrame(i)}
+                  aria-label={`Frame ${i}`}
+                  aria-pressed={isSelected}
                   style={{
                     width: displayW,
                     height: displayH,
@@ -303,6 +306,8 @@ export function BogartPage() {
                     outlineOffset: -3,
                     borderRadius: 4,
                     overflow: "hidden",
+                    padding: 0,
+                    border: "none",
                   }}
                 >
                   {/* Frame number badge */}
@@ -343,7 +348,7 @@ export function BogartPage() {
                       {selIdx + 1}
                     </span>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
@@ -484,6 +489,9 @@ export function BogartPage() {
               {animations.map((anim, i) => (
                 <div
                   key={`${anim.sheet}:${anim.name}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={activeAnimation === anim}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -495,6 +503,12 @@ export function BogartPage() {
                     cursor: "pointer",
                   }}
                   onClick={() => playAnimation(anim)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      playAnimation(anim);
+                    }
+                  }}
                 >
                   <span style={{ flex: 1, fontSize: 13 }}>{anim.name}</span>
                   <span style={{ fontSize: 11, color: "#666" }}>

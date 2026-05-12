@@ -265,11 +265,11 @@ function ChatInner({
                   inactivityTimeout={thinkingInactivityMs}
                 />
                 <div className="mt-3 space-y-2 text-xs text-purple-900">
-                  <label className="block">
-                    <div className="mb-1 flex items-center justify-between">
+                  <label className="block" aria-label="Simulated tick (ms)">
+                    <span className="mb-1 flex items-center justify-between">
                       <span>Simulated Tick</span>
                       <span>{toolTickMs}ms</span>
-                    </div>
+                    </span>
                     <input
                       type="range"
                       min={30}
@@ -280,11 +280,11 @@ function ChatInner({
                       className="w-full accent-purple-600"
                     />
                   </label>
-                  <label className="block">
-                    <div className="mb-1 flex items-center justify-between">
+                  <label className="block" aria-label="Fade to black (ms)">
+                    <span className="mb-1 flex items-center justify-between">
                       <span>Fade To Black</span>
                       <span>{thinkingInactivityMs}ms</span>
-                    </div>
+                    </span>
                     <input
                       type="range"
                       min={100}

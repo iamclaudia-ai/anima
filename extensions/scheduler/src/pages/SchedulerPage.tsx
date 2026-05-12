@@ -161,8 +161,8 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
       <h3 className="text-sm font-medium text-zinc-200">New Task</h3>
 
       {/* Name */}
-      <div>
-        <label className="block text-xs text-zinc-400 mb-1">Name</label>
+      <label className="block">
+        <span className="block text-xs text-zinc-400 mb-1">Name</span>
         <input
           type="text"
           value={name}
@@ -170,11 +170,11 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
           placeholder="My task"
           className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500"
         />
-      </div>
+      </label>
 
       {/* Type */}
       <div>
-        <label className="block text-xs text-zinc-400 mb-1">Type</label>
+        <span className="block text-xs text-zinc-400 mb-1">Type</span>
         <div className="flex gap-2">
           {(["once", "interval", "cron"] as const).map((t) => (
             <button
@@ -195,8 +195,8 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
 
       {/* Schedule config */}
       {type === "once" && (
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Delay (minutes)</label>
+        <label className="block">
+          <span className="block text-xs text-zinc-400 mb-1">Delay (minutes)</span>
           <input
             type="number"
             min={1}
@@ -204,12 +204,12 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
             onChange={(e) => setDelayMinutes(Number(e.target.value))}
             className="w-24 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500"
           />
-        </div>
+        </label>
       )}
 
       {type === "interval" && (
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Interval (minutes)</label>
+        <label className="block">
+          <span className="block text-xs text-zinc-400 mb-1">Interval (minutes)</span>
           <input
             type="number"
             min={1}
@@ -217,19 +217,21 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
             onChange={(e) => setIntervalMinutes(Number(e.target.value))}
             className="w-24 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500"
           />
-        </div>
+        </label>
       )}
 
       {type === "cron" && (
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Cron Expression</label>
-          <input
-            type="text"
-            value={cronExpr}
-            onChange={(e) => setCronExpr(e.target.value)}
-            placeholder="0 9 * * 1-5"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
-          />
+          <label className="block">
+            <span className="block text-xs text-zinc-400 mb-1">Cron Expression</span>
+            <input
+              type="text"
+              value={cronExpr}
+              onChange={(e) => setCronExpr(e.target.value)}
+              placeholder="0 9 * * 1-5"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
+            />
+          </label>
           <div className="flex flex-wrap gap-1.5 mt-2">
             {CRON_PRESETS.map((p) => (
               <button
@@ -251,7 +253,7 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
 
       {/* Action */}
       <div>
-        <label className="block text-xs text-zinc-400 mb-1">Action</label>
+        <span className="block text-xs text-zinc-400 mb-1">Action</span>
         <div className="flex gap-2 mb-2">
           {(["notification", "extension_call", "emit", "exec"] as const).map((a) => (
             <button
@@ -288,8 +290,8 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
       {/* Exec options */}
       {actionType === "exec" && (
         <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Arguments (space-separated)</label>
+          <label className="block">
+            <span className="block text-xs text-zinc-400 mb-1">Arguments (space-separated)</span>
             <input
               type="text"
               value={execArgs}
@@ -297,9 +299,9 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
               placeholder="~/.anima/anima.db .backup ~/.anima/backups/anima.db"
               className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
             />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Working directory (optional)</label>
+          </label>
+          <label className="block">
+            <span className="block text-xs text-zinc-400 mb-1">Working directory (optional)</span>
             <input
               type="text"
               value={execCwd}
@@ -307,7 +309,7 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
               placeholder="/Users/michael/.anima"
               className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-purple-500"
             />
-          </div>
+          </label>
           <label className="flex items-center gap-2 text-xs text-zinc-400">
             <input
               type="checkbox"
@@ -322,8 +324,8 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
 
       {/* Missed policy (cron only) */}
       {type === "cron" && (
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Missed Policy</label>
+        <label className="block">
+          <span className="block text-xs text-zinc-400 mb-1">Missed Policy</span>
           <select
             value={missedPolicy}
             onChange={(e) => setMissedPolicy(e.target.value)}
@@ -333,12 +335,12 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
             <option value="skip">Skip if missed</option>
             <option value="fire_all">Fire all missed</option>
           </select>
-        </div>
+        </label>
       )}
 
       {/* Tags */}
-      <div>
-        <label className="block text-xs text-zinc-400 mb-1">Tags (comma-separated)</label>
+      <label className="block">
+        <span className="block text-xs text-zinc-400 mb-1">Tags (comma-separated)</span>
         <input
           type="text"
           value={tags}
@@ -346,7 +348,7 @@ function AddTaskForm({ onSubmit, onCancel }: AddTaskFormProps) {
           placeholder="voice, maintenance"
           className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500"
         />
-      </div>
+      </label>
 
       {/* Submit */}
       <div className="flex gap-2 pt-2">

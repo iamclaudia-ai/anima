@@ -95,9 +95,7 @@ export function CreateWorkspaceModal({
         <div className="p-6 space-y-4">
           {/* Current Path Display */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Browse Directories
-            </label>
+            <div className="block text-sm font-medium text-gray-700 mb-2">Browse Directories</div>
             <div className="flex items-center gap-2 mb-2">
               <button
                 onClick={handleNavigateUp}
@@ -136,10 +134,10 @@ export function CreateWorkspaceModal({
           </div>
 
           {/* New Folder Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block">
+            <span className="block text-sm font-medium text-gray-700 mb-1">
               New Folder Name <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
+            </span>
             <input
               type="text"
               value={newFolderName}
@@ -150,12 +148,12 @@ export function CreateWorkspaceModal({
               disabled={isCreating}
             />
             <p className="mt-1 text-xs text-gray-500">Create a new folder in the current path</p>
-          </div>
+          </label>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block">
+            <span className="block text-sm font-medium text-gray-700 mb-1">
               Workspace Name <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
+            </span>
             <input
               type="text"
               value={name}
@@ -166,7 +164,7 @@ export function CreateWorkspaceModal({
               disabled={isCreating}
             />
             <p className="mt-1 text-xs text-gray-500">Defaults to folder name if not provided</p>
-          </div>
+          </label>
 
           <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50">
             <input
@@ -175,10 +173,11 @@ export function CreateWorkspaceModal({
               onChange={(e) => setGeneral(e.target.checked)}
               onKeyDown={handleKeyDown}
               disabled={isCreating}
+              aria-label="General workspace"
               className="mt-0.5 size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <div>
-              <div className="text-sm font-medium text-gray-800">General workspace</div>
+              <span className="block text-sm font-medium text-gray-800">General workspace</span>
               <p className="mt-1 text-xs text-gray-500">
                 Archived summaries will be injected across all workspaces. Recent unsummarized
                 messages still stay scoped to this folder.

@@ -676,9 +676,19 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
 
       {/* Click zones — invisible left/right halves for navigation */}
       <div className="absolute inset-0 flex pointer-events-auto" style={{ zIndex: 10 }}>
-        <div className="w-1/3 h-full" onClick={prev} />
+        <button
+          type="button"
+          aria-label="Previous slide"
+          className="w-1/3 h-full bg-transparent border-0 cursor-default"
+          onClick={prev}
+        />
         <div className="w-1/3 h-full" /> {/* Center — no action */}
-        <div className="w-1/3 h-full" onClick={next} />
+        <button
+          type="button"
+          aria-label="Next slide"
+          className="w-1/3 h-full bg-transparent border-0 cursor-default"
+          onClick={next}
+        />
       </div>
 
       {/* Speaker notes overlay */}
