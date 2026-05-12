@@ -1,22 +1,23 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import fuzzysort from "fuzzysort";
 import type { CommandItem } from "../hooks/useCommands";
 
 interface CommandPickerProps {
   /** Whether the picker is rendered. When false, returns null. */
   isOpen: boolean;
-  /** Full skill/command catalog to filter against. */
-  items: CommandItem[];
-  /** Search query — everything after the leading `/`. */
+  /** Search query — everything after the leading `/`. Used for the empty-state. */
   query: string;
-  /** Currently highlighted index into the *filtered* results. */
+  /**
+   * Pre-filtered results — parent owns the filter so the heavy fuzzysort
+   * work isn't duplicated and doesn't run when the picker is closed.
+   */
+  filtered: FilteredItem[];
+  /** Currently highlighted index into `filtered`. */
   selectedIndex: number;
   /** Index of the current selection — parent owns navigation state. */
   onSelectedIndexChange(index: number): void;
   /** Fired when the user picks an entry (Tab/Enter/Space/click). */
   onPick(item: CommandItem): void;
-  /** Filtered results — exposed up so parent can compute selectedIndex bounds. */
-  onFilteredChange?(items: FilteredItem[]): void;
 }
 
 export interface FilteredItem {
@@ -89,20 +90,13 @@ function highlight(name: string, indices: ReadonlyArray<number>): React.ReactEle
 
 export function CommandPicker({
   isOpen,
-  items,
   query,
+  filtered,
   selectedIndex,
   onSelectedIndexChange,
   onPick,
-  onFilteredChange,
 }: CommandPickerProps) {
-  const filtered = useMemo(() => filterCommands(items, query), [items, query]);
   const listRef = useRef<HTMLUListElement>(null);
-
-  // Notify parent whenever filtered list changes (so it can clamp selectedIndex).
-  useEffect(() => {
-    onFilteredChange?.(filtered);
-  }, [filtered, onFilteredChange]);
 
   // Auto-scroll the highlighted item into view.
   useEffect(() => {

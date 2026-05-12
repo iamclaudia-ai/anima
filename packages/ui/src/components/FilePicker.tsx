@@ -1,17 +1,19 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import fuzzysort from "fuzzysort";
 
 interface FilePickerProps {
   isOpen: boolean;
-  /** Full file catalog to filter against (relative paths from cwd). */
-  files: string[];
-  /** Search query — text after the `@` up to the cursor. */
+  /** Search query — text after the `@` up to the cursor. Used for the empty-state. */
   query: string;
-  /** Currently highlighted index into the *filtered* results. */
+  /**
+   * Pre-filtered results — parent owns the filter so the heavy fuzzysort work
+   * isn't duplicated and doesn't run when the picker is closed.
+   */
+  filtered: FilteredFile[];
+  /** Currently highlighted index into `filtered`. */
   selectedIndex: number;
   onSelectedIndexChange(index: number): void;
   onPick(path: string): void;
-  onFilteredChange?(items: FilteredFile[]): void;
 }
 
 export interface FilteredFile {
@@ -141,19 +143,13 @@ function splitPath(path: string): { dir: string; base: string } {
 
 export function FilePicker({
   isOpen,
-  files,
   query,
+  filtered,
   selectedIndex,
   onSelectedIndexChange,
   onPick,
-  onFilteredChange,
 }: FilePickerProps) {
-  const filtered = useMemo(() => filterFiles(files, query), [files, query]);
   const listRef = useRef<HTMLUListElement>(null);
-
-  useEffect(() => {
-    onFilteredChange?.(filtered);
-  }, [filtered, onFilteredChange]);
 
   useEffect(() => {
     if (!isOpen) return;
