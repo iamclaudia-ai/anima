@@ -16,7 +16,7 @@
  *   Escape                 = exit to list
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useEffectEvent, useCallback, useRef } from "react";
 import { navigate } from "@anima/ui";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -186,55 +186,60 @@ export function PresenterNotesPage({ id }: { id: string }) {
   const next = useCallback(() => goTo(currentSlide + 1), [goTo, currentSlide]);
   const prev = useCallback(() => goTo(currentSlide - 1), [goTo, currentSlide]);
 
-  // Keyboard handler
+  // Keyboard handler. Every callback used here is only invoked via the
+  // window listener, so wrap the handler in `useEffectEvent` and let the
+  // effect mount/unmount the listener exactly once.
+  const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    switch (e.key) {
+      case "ArrowRight":
+      case " ":
+      case "PageDown":
+        e.preventDefault();
+        next();
+        break;
+      case "ArrowLeft":
+      case "PageUp":
+        e.preventDefault();
+        prev();
+        break;
+      case "Home":
+        e.preventDefault();
+        goTo(0);
+        break;
+      case "End":
+        e.preventDefault();
+        goTo(totalSlides - 1);
+        break;
+      case "=":
+      case "+":
+        e.preventDefault();
+        zoomIn();
+        break;
+      case "-":
+      case "_":
+        e.preventDefault();
+        zoomOut();
+        break;
+      case "0":
+        e.preventDefault();
+        zoomReset();
+        break;
+      case "Escape":
+        e.preventDefault();
+        navigate("/present");
+        break;
+    }
+  });
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      switch (e.key) {
-        case "ArrowRight":
-        case " ":
-        case "PageDown":
-          e.preventDefault();
-          next();
-          break;
-        case "ArrowLeft":
-        case "PageUp":
-          e.preventDefault();
-          prev();
-          break;
-        case "Home":
-          e.preventDefault();
-          goTo(0);
-          break;
-        case "End":
-          e.preventDefault();
-          goTo(totalSlides - 1);
-          break;
-        case "=":
-        case "+":
-          e.preventDefault();
-          zoomIn();
-          break;
-        case "-":
-        case "_":
-          e.preventDefault();
-          zoomOut();
-          break;
-        case "0":
-          e.preventDefault();
-          zoomReset();
-          break;
-        case "Escape":
-          e.preventDefault();
-          navigate("/present");
-          break;
-      }
+      onKeyDown(e);
     }
-
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [next, prev, goTo, totalSlides, zoomIn, zoomOut, zoomReset]);
+  }, []);
 
   // Format elapsed time
   const formatTime = (secs: number) => {

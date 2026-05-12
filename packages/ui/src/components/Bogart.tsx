@@ -13,7 +13,14 @@
  * Baselines align shadows so animations transition smoothly.
  */
 
-import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import {
+  useState,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useCallback,
+  type CSSProperties,
+} from "react";
 
 // Sprite sheets are colocated with this component under packages/ui/static/.
 // Bun's bundler emits each .png as a hashed asset and resolves these imports
@@ -229,65 +236,66 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   }, [state, playAnim, playChain, clearChain]);
 
   // ── Idle behavior: occasional random animations ──────────
+  // `playChain` is only called inside the setInterval, so it doesn't need to
+  // be a reactive dep — wrap the tick in `useEffectEvent` so identity changes
+  // to `playChain` don't tear down/recreate the interval.
+  const onIdleTick = useEffectEvent(() => {
+    if (stateRef.current !== "idle") return;
+    const roll = Math.random();
+    if (roll < 0.25) {
+      // Lick paw then sit again
+      playChain(["lick-paw", 1500, "sit"]);
+    } else if (roll < 0.4) {
+      // Stretch then sit
+      playChain(["stretch", 1000, "sit"]);
+    } else if (roll < 0.6) {
+      // Short walk
+      setState("walking");
+      setDirection(Math.random() > 0.5 ? 1 : -1);
+      setTimeout(() => {
+        if (stateRef.current === "walking") {
+          setState("idle");
+        }
+      }, 3000);
+    }
+    // else: just keep sitting (40% chance of doing nothing)
+  });
+
   useEffect(() => {
     if (state === "idle") {
       playAnim("sit");
       resetIdleTimer();
 
       // Random idle actions every 10-20 seconds
-      const idleAction = setInterval(
-        () => {
-          if (stateRef.current !== "idle") return;
-          const roll = Math.random();
-          if (roll < 0.25) {
-            // Lick paw then sit again
-            playChain(["lick-paw", 1500, "sit"]);
-          } else if (roll < 0.4) {
-            // Stretch then sit
-            playChain(["stretch", 1000, "sit"]);
-          } else if (roll < 0.6) {
-            // Short walk
-            setState("walking");
-            setDirection(Math.random() > 0.5 ? 1 : -1);
-            setTimeout(() => {
-              if (stateRef.current === "walking") {
-                setState("idle");
-              }
-            }, 3000);
-          }
-          // else: just keep sitting (40% chance of doing nothing)
-        },
-        10000 + Math.random() * 10000,
-      );
+      const idleAction = setInterval(onIdleTick, 10000 + Math.random() * 10000);
 
       return () => {
         clearInterval(idleAction);
         clearChain();
       };
     }
-  }, [state, playAnim, playChain, clearChain, resetIdleTimer]);
+  }, [state, playAnim, clearChain, resetIdleTimer]);
 
   // ── Chasing behavior: switch between yarn and walking ────
+  // `playAnim` is only invoked inside the setInterval, so wrap the tick in
+  // `useEffectEvent` and drop it from the effect's reactive deps.
+  const onChasingTick = useEffectEvent(() => {
+    if (stateRef.current !== "chasing") return;
+    const roll = Math.random();
+    if (roll < 0.4) {
+      playAnim("chase-yarn");
+    } else {
+      const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
+      setDirection(walkDir === "walk-right" ? 1 : -1);
+      playAnim(walkDir);
+    }
+  });
+
   useEffect(() => {
     if (state !== "chasing") return;
-
-    const switchAnim = setInterval(
-      () => {
-        if (stateRef.current !== "chasing") return;
-        const roll = Math.random();
-        if (roll < 0.4) {
-          playAnim("chase-yarn");
-        } else {
-          const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
-          setDirection(walkDir === "walk-right" ? 1 : -1);
-          playAnim(walkDir);
-        }
-      },
-      4000 + Math.random() * 3000,
-    );
-
+    const switchAnim = setInterval(onChasingTick, 4000 + Math.random() * 3000);
     return () => clearInterval(switchAnim);
-  }, [state, playAnim]);
+  }, [state]);
 
   // ── Walking state ────────────────────────────────────────
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useEffectEvent, useRef } from "react";
 import { Transition } from "@headlessui/react";
 import { BridgeContext, useBridge } from "../bridge";
 import type { PlatformBridge } from "../bridge";
@@ -135,19 +135,24 @@ function ChatInner({
   // Get editor context if bridge provides it
   const editorContext = bridge.useEditorContext?.();
 
-  // Listen for external send requests (e.g. "Explain This Code" from VS Code)
+  // Listen for external send requests (e.g. "Explain This Code" from VS Code).
+  // The deferred send reads `gateway`/`getVoiceTags`/`bridge.saveDraft` only
+  // from inside the setTimeout, so wrap it in `useEffectEvent` to keep the
+  // listener subscription stable across renders.
+  const onExternalSend = useEffectEvent((text: string) => {
+    gateway.sendPrompt(text, [], getVoiceTags());
+    setInput("");
+    bridge.saveDraft("");
+  });
+
   useEffect(() => {
     if (!bridge.onSendRequest) return;
     return bridge.onSendRequest((text) => {
       setInput(text);
       // Auto-send after a tick so the input renders first
-      setTimeout(() => {
-        gateway.sendPrompt(text, [], getVoiceTags());
-        setInput("");
-        bridge.saveDraft("");
-      }, 0);
+      setTimeout(() => onExternalSend(text), 0);
     });
-  }, [bridge, gateway, getVoiceTags]);
+  }, [bridge]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();

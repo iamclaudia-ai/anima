@@ -14,7 +14,7 @@
  *   Escape                 = exit to list
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useEffectEvent, useCallback, useRef } from "react";
 import { navigate } from "@anima/ui";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -456,104 +456,110 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
   const next = useCallback(() => goTo(currentSlide + 1), [goTo, currentSlide]);
   const prev = useCallback(() => goTo(currentSlide - 1), [goTo, currentSlide]);
 
-  // Keyboard handler
+  // Keyboard handler. All callbacks are only invoked via the window listener,
+  // so wrap the whole switch in `useEffectEvent` and mount the listener once.
+  const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // Don't capture when typing in input
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    switch (e.key) {
+      case "ArrowRight":
+      case " ":
+      case "PageDown":
+        e.preventDefault();
+        next();
+        break;
+      case "ArrowLeft":
+      case "PageUp":
+        e.preventDefault();
+        prev();
+        break;
+      case "Home":
+        e.preventDefault();
+        goTo(0);
+        break;
+      case "End":
+        e.preventDefault();
+        goTo(totalSlides - 1);
+        break;
+      case "f":
+      case "F":
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          document.documentElement.requestFullscreen();
+        }
+        break;
+      case "n":
+      case "N":
+        e.preventDefault();
+        setShowNotes((v) => !v);
+        break;
+      case "=":
+      case "+":
+        e.preventDefault();
+        setScale((s) => {
+          const next = Math.min(s + 0.1, 2.0);
+          scaleRef.current = next;
+          broadcastSync(currentSlide, next);
+          return next;
+        });
+        break;
+      case "-":
+      case "_":
+        e.preventDefault();
+        setScale((s) => {
+          const next = Math.max(s - 0.1, 0.5);
+          scaleRef.current = next;
+          broadcastSync(currentSlide, next);
+          return next;
+        });
+        break;
+      case "0":
+        e.preventDefault();
+        setScale(1.0);
+        scaleRef.current = 1.0;
+        broadcastSync(currentSlide, 1.0);
+        break;
+      case "Escape":
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          navigate("/present");
+        }
+        break;
+    }
+  });
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      // Don't capture when typing in input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      switch (e.key) {
-        case "ArrowRight":
-        case " ":
-        case "PageDown":
-          e.preventDefault();
-          next();
-          break;
-        case "ArrowLeft":
-        case "PageUp":
-          e.preventDefault();
-          prev();
-          break;
-        case "Home":
-          e.preventDefault();
-          goTo(0);
-          break;
-        case "End":
-          e.preventDefault();
-          goTo(totalSlides - 1);
-          break;
-        case "f":
-        case "F":
-          e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen();
-          } else {
-            document.documentElement.requestFullscreen();
-          }
-          break;
-        case "n":
-        case "N":
-          e.preventDefault();
-          setShowNotes((v) => !v);
-          break;
-        case "=":
-        case "+":
-          e.preventDefault();
-          setScale((s) => {
-            const next = Math.min(s + 0.1, 2.0);
-            scaleRef.current = next;
-            broadcastSync(currentSlide, next);
-            return next;
-          });
-          break;
-        case "-":
-        case "_":
-          e.preventDefault();
-          setScale((s) => {
-            const next = Math.max(s - 0.1, 0.5);
-            scaleRef.current = next;
-            broadcastSync(currentSlide, next);
-            return next;
-          });
-          break;
-        case "0":
-          e.preventDefault();
-          setScale(1.0);
-          scaleRef.current = 1.0;
-          broadcastSync(currentSlide, 1.0);
-          break;
-        case "Escape":
-          e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen();
-          } else {
-            navigate("/present");
-          }
-          break;
-      }
+      onKeyDown(e);
     }
-
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [next, prev, goTo, totalSlides, broadcastSync, currentSlide]);
+  }, []);
 
-  // Touch/swipe support
-  useEffect(() => {
-    let startX = 0;
-    let startY = 0;
-
-    function handleTouchStart(e: TouchEvent) {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
+  // Touch/swipe support. `next`/`prev` are only invoked from inside the
+  // touchend handler, so wrap the swipe decision in `useEffectEvent` and
+  // mount the listeners once.
+  const touchStartRef = useRef({ x: 0, y: 0 });
+  const onSwipe = useEffectEvent((dx: number, dy: number) => {
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+      if (dx < 0) next();
+      else prev();
     }
+  });
 
+  useEffect(() => {
+    function handleTouchStart(e: TouchEvent) {
+      touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
     function handleTouchEnd(e: TouchEvent) {
-      const dx = e.changedTouches[0].clientX - startX;
-      const dy = e.changedTouches[0].clientY - startY;
-      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-        if (dx < 0) next();
-        else prev();
-      }
+      const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+      const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+      onSwipe(dx, dy);
     }
 
     window.addEventListener("touchstart", handleTouchStart);
@@ -562,7 +568,7 @@ export function PresenterPage({ id, display }: { id: string; display?: boolean }
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [next, prev]);
+  }, []);
 
   // Scale the root font size — all rem-based Tailwind classes (text, spacing, etc.) scale naturally
   useEffect(() => {
