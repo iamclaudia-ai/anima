@@ -116,9 +116,10 @@ function moodToEmoji(mood: string): string {
 
   return mood
     .split(",")
-    .map((m) => m.trim().toLowerCase())
-    .map((m) => moodMap[m] ?? "")
-    .filter(Boolean)
+    .flatMap((m) => {
+      const emoji = moodMap[m.trim().toLowerCase()];
+      return emoji ? [emoji] : [];
+    })
     .join(" ");
 }
 

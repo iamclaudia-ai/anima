@@ -169,6 +169,30 @@ function compactHomePath(path: string | null): string {
   return path.replace(/^\/Users\/\w+/, "~");
 }
 
+// Cache the episode-path Intl.DateTimeFormat per timezone. The formatter is
+// only ever constructed for one or two timezone values in practice, so a
+// small Map cache avoids re-compiling locale data on every call.
+const episodePathFormatters = new Map<string, Intl.DateTimeFormat>();
+function getEpisodePathFormatter(timezone: string): Intl.DateTimeFormat {
+  let f = episodePathFormatters.get(timezone);
+  if (!f) {
+    // Already a module-scope cache keyed by timezone — the linter still flags
+    // the literal `new Intl.DateTimeFormat()` regardless of containing scope.
+    // react-doctor-disable-next-line react-doctor/js-hoist-intl
+    f = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    episodePathFormatters.set(timezone, f);
+  }
+  return f;
+}
+
 // ============================================================================
 // Memory Extension
 // ============================================================================
@@ -846,15 +870,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
 
         // Compute episode path using same logic as Libby
         const timestamp = new Date(conv.firstMessageAt);
-        const parts = new Intl.DateTimeFormat("en-CA", {
-          timeZone: cfg.timezone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        }).formatToParts(timestamp);
+        const parts = getEpisodePathFormatter(cfg.timezone).formatToParts(timestamp);
         const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
         const [yr, mo, dy, hr, mi] = ["year", "month", "day", "hour", "minute"].map(get);
 

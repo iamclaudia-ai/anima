@@ -28,7 +28,9 @@ function parseHistoricalAnswers(
   for (let qIdx = 0; qIdx < questions.length; qIdx++) {
     const q = questions[qIdx];
     for (const opt of q.options) {
-      // Match ="label" pattern from the CLI result format
+      // Match ="label" pattern from the CLI result format. String.includes,
+      // not array — Set hoisting doesn't apply.
+      // react-doctor-disable-next-line react-doctor/js-set-map-lookups
       if (resultContent.includes(`="${opt.label}"`)) {
         if (!answers[qIdx]) answers[qIdx] = new Set();
         answers[qIdx].add(opt.label);

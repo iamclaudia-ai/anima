@@ -261,8 +261,10 @@ export function createHooksExtension(config: HooksConfig = {}): AnimaExtension {
     }
 
     for (const hook of hooks) {
-      const matched = hook.events.find((pattern) => matchesPattern(event.type, pattern));
-      if (!matched) continue;
+      // Patterns can be globs/wildcards, so this is a predicate match, not a
+      // keyed lookup — Map-based dispatch wouldn't apply here.
+      // react-doctor-disable-next-line react-doctor/js-index-maps
+      if (!hook.events.some((pattern) => matchesPattern(event.type, pattern))) continue;
 
       try {
         await hook.definition.handler(createHookContext(hook.id), event.payload);

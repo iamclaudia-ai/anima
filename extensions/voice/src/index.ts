@@ -118,6 +118,8 @@ export class StreamingSpeechFilter {
       this.lineBuffer = this.lineBuffer.slice(newlineIndex + 1);
       const kept = this.processLine(rawLine);
       if (kept !== null) out.push(`${kept}\n`);
+      // String.indexOf for newline scan — not an array lookup.
+      // react-doctor-disable-next-line react-doctor/js-set-map-lookups
       newlineIndex = this.lineBuffer.indexOf("\n");
     }
 

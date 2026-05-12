@@ -329,9 +329,9 @@ async function loadExtensions(): Promise<void> {
     ),
   );
 
-  const failed = results
-    .map((r, i) => (r.status === "rejected" ? enabledExtensions[i][0] : null))
-    .filter(Boolean);
+  const failed = results.flatMap((r, i) =>
+    r.status === "rejected" ? [enabledExtensions[i][0]] : [],
+  );
   const succeeded = results.filter((r) => r.status === "fulfilled").length;
 
   if (failed.length > 0) {

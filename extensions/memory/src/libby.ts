@@ -54,6 +54,29 @@ const MEMORY_ROOT = join(homedir(), "memory");
 const LIBBY_LOGS_DIR = join(homedir(), ".anima", "memory", "libby", "logs");
 if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
 
+// Cache the episode-path Intl.DateTimeFormat per timezone. Constructing a
+// formatter lazily compiles locale data on every call; caching one per timezone
+// keeps `computeEpisodePath` allocation-free on the hot ingest path.
+const episodePathFormatters = new Map<string, Intl.DateTimeFormat>();
+function getEpisodePathFormatter(timezone: string): Intl.DateTimeFormat {
+  let f = episodePathFormatters.get(timezone);
+  if (!f) {
+    // Module-scope cache keyed by timezone — linter still flags the literal.
+    // react-doctor-disable-next-line react-doctor/js-hoist-intl
+    f = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    episodePathFormatters.set(timezone, f);
+  }
+  return f;
+}
+
 /**
  * Compute the episode file path for a conversation.
  * Format: episodes/YYYY-MM/YYYY-MM-DD-HHMM-{convId}.md
@@ -62,17 +85,7 @@ if (!existsSync(LIBBY_LOGS_DIR)) mkdirSync(LIBBY_LOGS_DIR, { recursive: true });
  */
 function computeEpisodePath(firstTimestamp: string, convId: number, timezone: string): string {
   const d = new Date(firstTimestamp);
-
-  // Format in local timezone
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
+  const parts = getEpisodePathFormatter(timezone).formatToParts(d);
 
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
   const year = get("year");
@@ -613,9 +626,11 @@ interface LibbyResult {
 
 function extractAssistantText(message: SessionHistoryMessage): string {
   return message.blocks
-    .filter((block) => block.type === "text" && typeof block.content === "string")
-    .map((block) => block.content?.trim() || "")
-    .filter(Boolean)
+    .flatMap((block) => {
+      if (block.type !== "text" || typeof block.content !== "string") return [];
+      const text = block.content.trim();
+      return text ? [text] : [];
+    })
     .join("\n");
 }
 

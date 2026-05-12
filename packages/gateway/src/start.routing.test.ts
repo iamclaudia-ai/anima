@@ -64,6 +64,9 @@ class WsClient {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       await Bun.sleep(10);
+      // Test fixture polling — tiny inbox, predicate-based search; map lookups
+      // don't apply.
+      // react-doctor-disable-next-line react-doctor/js-index-maps
       const found = this.inbox.find(predicate);
       if (found) return found;
     }

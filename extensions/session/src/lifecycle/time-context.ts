@@ -13,17 +13,21 @@ function parseTimestamp(value: unknown): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+// Hoist the formatter — constructing it lazily compiles locale data on every
+// call, but the options are static so we can build once at module load.
+const LOCAL_DATETIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  weekday: "long",
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZoneName: "short",
+});
+
 export function formatLocalDateTime(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
+  return LOCAL_DATETIME_FORMATTER.format(date);
 }
 
 export function buildSessionStartReminder(now = new Date()): string {

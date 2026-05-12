@@ -156,11 +156,14 @@ export function InputArea({
     return () => observer.disconnect();
   }, []);
 
-  // Auto-resize textarea to fit content
+  // Auto-resize textarea to fit content. The two assignments can't be batched
+  // — we must reset to `auto` first so the second read of `scrollHeight`
+  // reflects the new content height, not the previous explicit height.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
+    // react-doctor-disable-next-line react-doctor/js-batch-dom-css
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
 

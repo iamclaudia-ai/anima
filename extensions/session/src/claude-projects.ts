@@ -99,6 +99,9 @@ function extractFirstPrompt(filepath: string): string | undefined {
         const content = msg.message?.content;
         if (typeof content === "string") return content.slice(0, 200);
         if (Array.isArray(content)) {
+          // Per-message inner scan with a multi-condition predicate — there's
+          // no shared key to hoist into a Map across the outer line loop.
+          // react-doctor-disable-next-line react-doctor/js-index-maps
           const textBlock = content.find(
             (block: { type: string; text?: string }) =>
               block.type === "text" &&

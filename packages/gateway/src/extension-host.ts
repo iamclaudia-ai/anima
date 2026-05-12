@@ -420,6 +420,8 @@ export class ExtensionHostProcess implements ExtensionHost {
         this.stdoutBuffer += decoder.decode(value, { stream: true });
 
         let newlineIndex: number;
+        // String.indexOf newline scan — not an array lookup.
+        // react-doctor-disable-next-line react-doctor/js-set-map-lookups
         while ((newlineIndex = this.stdoutBuffer.indexOf("\n")) !== -1) {
           const line = this.stdoutBuffer.slice(0, newlineIndex).trim();
           this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);

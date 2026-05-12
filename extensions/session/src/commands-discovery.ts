@@ -41,6 +41,9 @@ function parseFrontmatter(content: string): Record<string, string> {
   if (!match) return {};
   const out: Record<string, string> = {};
   for (const line of match[1].split(/\r?\n/)) {
+    // `line.indexOf(":")` is a string method, not an array search — Set/Map
+    // lookups don't apply here.
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups
     const colonIdx = line.indexOf(":");
     if (colonIdx <= 0) continue;
     const key = line.slice(0, colonIdx).trim();

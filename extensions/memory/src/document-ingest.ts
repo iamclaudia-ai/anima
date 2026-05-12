@@ -163,6 +163,9 @@ export async function scanAndIngestMemoryDirCooperative(
       continue;
     }
 
+    // `match.includes("/.")` is a substring check on a string, not an array
+    // lookup — the rule is matching on `.includes()` regardless of receiver.
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups
     if (match.startsWith(".") || match.includes("/.")) continue;
 
     scanned++;

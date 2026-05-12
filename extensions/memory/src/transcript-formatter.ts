@@ -143,6 +143,27 @@ export function formatTranscript(
 // Helpers
 // ============================================================================
 
+// Cache Intl.DateTimeFormat instances per timezone. Constructing a formatter
+// lazily compiles locale data on every call; caching one per timezone (we only
+// ever see a couple of values in practice) keeps the hot path allocation-free.
+const localDateFormatters = new Map<string, Intl.DateTimeFormat>();
+const dateStringFormatters = new Map<string, Intl.DateTimeFormat>();
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+const tzAbbrFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function getOrCreate(
+  cache: Map<string, Intl.DateTimeFormat>,
+  timezone: string,
+  factory: () => Intl.DateTimeFormat,
+): Intl.DateTimeFormat {
+  let f = cache.get(timezone);
+  if (!f) {
+    f = factory();
+    cache.set(timezone, f);
+  }
+  return f;
+}
+
 /**
  * Detect the most frequently used cwd across entries.
  */
@@ -173,25 +194,38 @@ function detectPrimaryCwd(entries: TranscriptEntryRow[]): string | null {
  * Format a date as "Thursday, February 20, 2026" in local timezone.
  */
 function formatLocalDate(date: Date, timezone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: timezone,
-  }).format(date);
+  return getOrCreate(
+    localDateFormatters,
+    timezone,
+    () =>
+      // Module-scope cache keyed by timezone — linter flags the literal anyway.
+      // react-doctor-disable-next-line react-doctor/js-hoist-intl
+      new Intl.DateTimeFormat("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        timeZone: timezone,
+      }),
+  ).format(date);
 }
 
 /**
  * Format a date as "YYYY-MM-DD" in local timezone.
  */
 function formatDateString(date: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: timezone,
-  }).formatToParts(date);
+  const parts = getOrCreate(
+    dateStringFormatters,
+    timezone,
+    () =>
+      // react-doctor-disable-next-line react-doctor/js-hoist-intl
+      new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        timeZone: timezone,
+      }),
+  ).formatToParts(date);
 
   const year = parts.find((p) => p.type === "year")?.value;
   const month = parts.find((p) => p.type === "month")?.value;
@@ -204,22 +238,34 @@ function formatDateString(date: Date, timezone: string): string {
  * Format time as "8:00 PM" in local timezone.
  */
 function formatTime(date: Date, timezone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: timezone,
-  }).format(date);
+  return getOrCreate(
+    timeFormatters,
+    timezone,
+    () =>
+      // react-doctor-disable-next-line react-doctor/js-hoist-intl
+      new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: timezone,
+      }),
+  ).format(date);
 }
 
 /**
  * Get timezone abbreviation (e.g., "EST" or "EDT").
  */
 function getTimezoneAbbr(date: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    timeZoneName: "short",
-  }).formatToParts(date);
+  const parts = getOrCreate(
+    tzAbbrFormatters,
+    timezone,
+    () =>
+      // react-doctor-disable-next-line react-doctor/js-hoist-intl
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        timeZoneName: "short",
+      }),
+  ).formatToParts(date);
 
   return parts.find((p) => p.type === "timeZoneName")?.value || "ET";
 }

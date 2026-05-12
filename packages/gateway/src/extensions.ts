@@ -158,6 +158,9 @@ export class ExtensionManager {
       for (const tool of reg.mcpTools ?? []) {
         if (this.mcpToolOwners.get(tool.name) === extensionId) {
           this.mcpToolOwners.delete(tool.name);
+          // Cold path: runs once per extension unregister. Building an inverted
+          // index for this would cost more than the linear scan saves.
+          // react-doctor-disable-next-line react-doctor/js-index-maps
           const fallback = Array.from(this.remoteRegistrations.entries())
             .reverse()
             .find(([, candidate]) => candidate.mcpTools?.some((t) => t.name === tool.name));
@@ -168,9 +171,12 @@ export class ExtensionManager {
       }
       for (const prefix of reg.sourceRoutes) {
         // If another extension also declares this prefix, restore the most
-        // recently registered owner; otherwise remove the route.
+        // recently registered owner; otherwise remove the route. Same cold-
+        // path rationale as the mcpTool fallback above.
+        // react-doctor-disable-next-line react-doctor/js-index-maps
         const fallback = Array.from(this.remoteRegistrations.entries())
           .reverse()
+          // react-doctor-disable-next-line react-doctor/js-set-map-lookups
           .find(([, candidate]) => candidate.sourceRoutes.includes(prefix));
 
         if (!fallback) {

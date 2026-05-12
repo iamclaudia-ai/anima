@@ -177,7 +177,10 @@ async function buildVendorBundlesImpl(): Promise<Map<string, VendorBundle>> {
         continue;
       }
 
+      // Per-spec inner scan over a tiny outputs array — no shared key to
+      // hoist into a Map across the outer loop.
       const jsOutput =
+        // react-doctor-disable-next-line react-doctor/js-index-maps
         result.outputs.find((output) => output.kind === "entry-point") ?? result.outputs[0];
       if (!jsOutput) {
         log.error("Vendor bundle had no usable output", { specifier: spec.specifier });

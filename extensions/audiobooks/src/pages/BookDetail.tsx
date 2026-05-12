@@ -182,12 +182,16 @@ export function BookDetail() {
                   cursor: "pointer",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "#8b5cf6";
-                  e.currentTarget.style.background = "#faf5ff";
+                  Object.assign(e.currentTarget.style, {
+                    borderColor: "#8b5cf6",
+                    background: "#faf5ff",
+                  });
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "#e5e7eb";
-                  e.currentTarget.style.background = "#fff";
+                  Object.assign(e.currentTarget.style, {
+                    borderColor: "#e5e7eb",
+                    background: "#fff",
+                  });
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>

@@ -141,8 +141,13 @@ async function getDirty(cwd: string): Promise<GitDirtyCounts> {
     const status = line.slice(0, 2);
     counts.total += 1;
     if (status === "??") counts.untracked += 1;
+    // `status` is a 2-char string from line.slice(0, 2) — these are string
+    // substring checks, not array lookups, so Set hoisting doesn't apply.
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups
     else if (status.includes("R")) counts.renamed += 1;
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups
     else if (status.includes("A")) counts.added += 1;
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups
     else if (status.includes("D")) counts.deleted += 1;
     else counts.modified += 1;
   }
