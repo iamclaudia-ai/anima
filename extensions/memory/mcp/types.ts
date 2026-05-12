@@ -43,28 +43,10 @@ export interface RememberParams {
   category?: string;
 }
 
-export interface RememberResult {
-  success: boolean;
-  filepath: string;
-  section: string;
-  isNewFile: boolean;
-  isNewSection: boolean;
-  existingSections?: string[];
-}
-
 export interface RecallParams {
   query: string;
   limit?: number;
   category?: string;
-}
-
-export interface RecallResult {
-  memories: Array<{
-    filepath: string;
-    section: string;
-    content: string;
-    score: number;
-  }>;
 }
 
 export interface ReadParams {
@@ -77,17 +59,8 @@ export interface ListParams {
   recent?: number;
 }
 
-export interface ListResult {
-  files: Array<{
-    filepath: string;
-    title: string;
-    sections: string[];
-    updated_at: string;
-  }>;
-}
-
 // Memory categories matching existing structure
-export const MEMORY_CATEGORIES = [
+const MEMORY_CATEGORIES = [
   "core",
   "relationships",
   "milestones",

@@ -77,7 +77,7 @@ function detectSource(filePath: string): string {
 /**
  * Compute a relative file key from an absolute path and base directory.
  */
-export function toFileKey(absolutePath: string, basePath: string): string {
+function toFileKey(absolutePath: string, basePath: string): string {
   return relative(basePath, absolutePath);
 }
 
@@ -303,6 +303,9 @@ export function ingestFile(
 /**
  * Ingest all JSONL files in a directory (recursively).
  * The directory path is used as the base for computing relative file keys.
+ *
+ * Note: react-doctor flags this as unused because it doesn't scan `scripts/` —
+ * but `scripts/test-ingest.ts` imports and calls this for local testing.
  */
 export function ingestDirectory(
   dirPath: string,

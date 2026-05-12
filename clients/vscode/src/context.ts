@@ -28,7 +28,7 @@ export interface EditorContext {
   diagnostics: DiagnosticInfo[];
 }
 
-export interface DiagnosticInfo {
+interface DiagnosticInfo {
   message: string;
   severity: "error" | "warning" | "info" | "hint";
   line: number;
@@ -96,29 +96,4 @@ function getSeverityString(
     default:
       return "info";
   }
-}
-
-/**
- * Format context as a string for display or injection into prompts
- */
-export function formatContextForPrompt(ctx: EditorContext): string {
-  const lines: string[] = [];
-
-  lines.push(`File: ${ctx.relativePath || ctx.filePath}`);
-  lines.push(`Language: ${ctx.languageId}`);
-  lines.push(`Line: ${ctx.currentLine}/${ctx.totalLines}`);
-
-  if (ctx.selectionRange) {
-    lines.push(`Selection: lines ${ctx.selectionRange.startLine}-${ctx.selectionRange.endLine}`);
-  }
-
-  if (ctx.diagnostics.length > 0) {
-    const errors = ctx.diagnostics.filter((d) => d.severity === "error").length;
-    const warnings = ctx.diagnostics.filter((d) => d.severity === "warning").length;
-    if (errors > 0 || warnings > 0) {
-      lines.push(`Issues: ${errors} errors, ${warnings} warnings`);
-    }
-  }
-
-  return lines.join(" | ");
 }

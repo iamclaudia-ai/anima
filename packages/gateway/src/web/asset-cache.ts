@@ -43,10 +43,3 @@ export async function ingestBuildAssets(outputs: readonly Bun.BuildArtifact[]): 
 export function getAsset(filename: string): CachedAsset | null {
   return cache.get(filename) ?? null;
 }
-
-/** For diagnostics — count and total bytes. */
-export function assetStats(): { count: number; bytes: number } {
-  let bytes = 0;
-  for (const asset of cache.values()) bytes += asset.bytes.byteLength;
-  return { count: cache.size, bytes };
-}

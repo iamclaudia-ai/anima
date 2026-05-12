@@ -11,7 +11,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join, relative, basename, extname } from "node:path";
 import { Glob } from "bun";
-import { upsertMemoryDocument, deleteMemoryDocument, getMemoryDocumentMtime } from "./db";
+import { upsertMemoryDocument, getMemoryDocumentMtime } from "./db";
 import { yieldToEventLoop } from "./ingest";
 
 // ============================================================================
@@ -37,7 +37,7 @@ const KNOWN_CATEGORIES = new Set([
  * ~/memory/relationships/michael/overview.md → "relationships"
  * ~/memory/libby-questions.md → "other"
  */
-export function getCategoryFromPath(filePath: string, memoryRoot: string): string {
+function getCategoryFromPath(filePath: string, memoryRoot: string): string {
   const rel = relative(memoryRoot, filePath);
   const firstSegment = rel.split("/")[0];
 
@@ -135,13 +135,6 @@ export function ingestMemoryDocument(
   }
 }
 
-/**
- * Remove a document from the index (e.g., when file is deleted).
- */
-export function removeMemoryDocument(filePath: string): void {
-  deleteMemoryDocument(filePath);
-}
-
 // ============================================================================
 // Directory Scanning
 // ============================================================================
@@ -151,47 +144,6 @@ export function removeMemoryDocument(filePath: string): void {
  * - .git, node_modules: obvious
  */
 const IGNORED_DIRS = new Set(["libby", ".git", "node_modules"]);
-
-/**
- * Scan ~/memory recursively and ingest all .md files.
- * Skips libby/, .git/, node_modules/, and dotfiles.
- *
- * Returns the count of documents ingested.
- */
-export function scanAndIngestMemoryDir(
-  memoryRoot: string,
-  log?: (level: string, msg: string) => void,
-): number {
-  let count = 0;
-  let scanned = 0;
-  let skippedDir = 0;
-
-  const glob = new Glob("**/*.md");
-  for (const match of glob.scanSync({ cwd: memoryRoot, absolute: false })) {
-    // Skip ignored directories
-    const firstSegment = match.split("/")[0];
-    if (IGNORED_DIRS.has(firstSegment)) {
-      skippedDir++;
-      continue;
-    }
-
-    // Skip dotfiles
-    if (match.startsWith(".") || match.includes("/.")) continue;
-
-    scanned++;
-    const fullPath = join(memoryRoot, match);
-    if (ingestMemoryDocument(fullPath, memoryRoot, log)) {
-      count++;
-    }
-  }
-
-  log?.(
-    "INFO",
-    `DocumentIngest: Scan complete — ${scanned} files checked, ${count} indexed, ${scanned - count} unchanged, ${skippedDir} skipped (ignored dirs)`,
-  );
-
-  return count;
-}
 
 export async function scanAndIngestMemoryDirCooperative(
   memoryRoot: string,

@@ -9,7 +9,7 @@ const locationProtocol =
   typeof globalThis.location !== "undefined" ? globalThis.location.protocol : "http:";
 const locationHost =
   typeof globalThis.location !== "undefined" ? globalThis.location.host : "localhost";
-export const GATEWAY_URL = `${locationProtocol === "https:" ? "wss:" : "ws:"}//${locationHost}/ws`;
+const GATEWAY_URL = `${locationProtocol === "https:" ? "wss:" : "ws:"}//${locationHost}/ws`;
 
 const GLOBAL_DRAFT_KEY = "anima-draft";
 
@@ -38,5 +38,3 @@ export function createBridge(options?: {
     copyToClipboard: (text) => navigator.clipboard.writeText(text),
   };
 }
-
-export const bridge = createBridge();

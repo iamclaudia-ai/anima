@@ -209,20 +209,3 @@ async function buildVendorBundlesImpl(): Promise<Map<string, VendorBundle>> {
 export function getVendorBundle(slug: string): VendorBundle | null {
   return cache.get(slug) ?? null;
 }
-
-/**
- * Importmap mapping bare specifiers to /vendor/<slug>.js URLs. Phase 2 will
- * inject this into index.html so extension bundles can use bare imports.
- */
-export function getImportmap(): { imports: Record<string, string> } {
-  const imports: Record<string, string> = {};
-  for (const spec of VENDOR_SPECS) {
-    imports[spec.specifier] = `/vendor/${spec.slug}.js`;
-  }
-  return { imports };
-}
-
-/** Names of all vendor specs — used for /vendor/list endpoint sanity checks. */
-export function getVendorSlugs(): string[] {
-  return VENDOR_SPECS.map((spec) => spec.slug);
-}

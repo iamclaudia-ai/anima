@@ -257,52 +257,6 @@ export function deleteEntriesForFile(sourceFile: string): number {
   return result.changes;
 }
 
-/**
- * Get all entries for a session, optionally up to a timestamp watermark.
- */
-export function getEntriesForSession(
-  sessionId: string,
-  upToTimestamp?: string,
-): TranscriptEntryRow[] {
-  if (upToTimestamp) {
-    return getDb()
-      .query(
-        `SELECT
-          id, session_id AS sessionId, source_file AS sourceFile,
-          role, content, tool_names AS toolNames, timestamp,
-          cwd, ingested_at AS ingestedAt
-        FROM memory_transcript_entries
-        WHERE session_id = ? AND timestamp <= ?
-        ORDER BY timestamp ASC, id ASC`,
-      )
-      .all(sessionId, upToTimestamp) as TranscriptEntryRow[];
-  }
-
-  return getDb()
-    .query(
-      `SELECT
-        id, session_id AS sessionId, source_file AS sourceFile,
-        role, content, tool_names AS toolNames, timestamp,
-        cwd, ingested_at AS ingestedAt
-      FROM memory_transcript_entries
-      WHERE session_id = ?
-      ORDER BY timestamp ASC, id ASC`,
-    )
-    .all(sessionId) as TranscriptEntryRow[];
-}
-
-/**
- * Get distinct session IDs that have entries from a given source file.
- */
-export function getSessionIdsForFile(sourceFile: string): string[] {
-  const rows = getDb()
-    .query(
-      "SELECT DISTINCT session_id AS sessionId FROM memory_transcript_entries WHERE source_file = ?",
-    )
-    .all(sourceFile) as Array<{ sessionId: string }>;
-  return rows.map((r) => r.sessionId);
-}
-
 // ============================================================================
 // Conversations
 // ============================================================================
@@ -321,23 +275,6 @@ export interface ConversationRow {
   statusAt: string | null;
   metadata: string | null;
   createdAt: string;
-}
-
-export function getConversationsForSourceFile(sourceFile: string): ConversationRow[] {
-  return getDb()
-    .query(
-      `SELECT
-        id, session_id AS sessionId, source_file AS sourceFile,
-        first_message_at AS firstMessageAt,
-        last_message_at AS lastMessageAt, entry_count AS entryCount,
-        status, strategy, summary, processed_at AS processedAt,
-        status_at AS statusAt, metadata,
-        created_at AS createdAt
-      FROM memory_conversations
-      WHERE source_file = ?
-      ORDER BY first_message_at ASC`,
-    )
-    .all(sourceFile) as ConversationRow[];
 }
 
 export function upsertConversation(conv: {
@@ -770,10 +707,6 @@ export function upsertMemoryDocument(doc: {
     .run(doc.filePath, doc.category, doc.title, doc.content, doc.fileModifiedAt, doc.cwd ?? "");
 }
 
-export function deleteMemoryDocument(filePath: string): void {
-  getDb().query("DELETE FROM memory_documents WHERE file_path = ?").run(filePath);
-}
-
 /**
  * Get the stored file_modified_at for a document.
  * Used to skip re-ingestion of unchanged files on restart.
@@ -850,41 +783,6 @@ export function searchMemory(
       LIMIT ?`,
     )
     .all(...params) as SearchResult[];
-}
-
-/**
- * Backfill existing archived conversation summaries into the FTS index.
- * One-time operation — future archives are indexed via SQL trigger.
- * Returns the number of summaries inserted.
- */
-export function backfillSummariesIntoFts(): number {
-  const d = getDb();
-
-  // Check if we already have summaries in FTS
-  const existing = d
-    .query("SELECT count(*) AS n FROM memory_search_fts WHERE source_type = 'summary'")
-    .get() as { n: number };
-
-  if (existing.n > 0) return 0; // Already backfilled
-
-  const result = d
-    .query(
-      `INSERT INTO memory_search_fts(content, source_type, source_id, cwd, timestamp, category)
-       SELECT
-         summary,
-         'summary',
-         CAST(id AS TEXT),
-         COALESCE(json_extract(metadata, '$.cwd'), ''),
-         first_message_at,
-         'summary'
-       FROM memory_conversations
-       WHERE status = 'archived'
-         AND summary IS NOT NULL
-         AND length(summary) > 0`,
-    )
-    .run();
-
-  return result.changes;
 }
 
 /**

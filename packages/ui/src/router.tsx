@@ -186,7 +186,7 @@ export function useDocumentTitle(title: string | undefined | null): void {
 
 // ── Router Component ─────────────────────────────────────────
 
-export interface RouterProps {
+interface RouterProps {
   routes: Route[];
   fallback?: ReactNode;
   /** Layout registry — named layouts from extensions */

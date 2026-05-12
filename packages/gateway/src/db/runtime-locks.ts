@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "./index";
 
-export type ExtensionRuntimeLockType = "singleton" | "processing" | "lease";
-export const DEFAULT_RUNTIME_LOCK_STALE_MS = 3 * 60 * 1000;
+type ExtensionRuntimeLockType = "singleton" | "processing" | "lease";
+const DEFAULT_RUNTIME_LOCK_STALE_MS = 3 * 60 * 1000;
 
 export interface ExtensionRuntimeLockRow {
   extensionId: string;

@@ -57,7 +57,7 @@ export function ToolHeader({ toolName, label, isLoading = false }: ToolHeaderPro
 }
 
 /** Monospace text */
-export function MonoText({
+function MonoText({
   children,
   className = "",
   title,

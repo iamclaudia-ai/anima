@@ -17,7 +17,7 @@ import type { GatewayEvent, WebStaticPath } from "@anima/shared";
 const log = createLogger("ExtensionHost", join(homedir(), ".anima", "logs", "gateway.log"));
 
 /** Serialized method info from the host's register message (no Zod schemas) */
-export interface RemoteMethodInfo {
+interface RemoteMethodInfo {
   name: string;
   description: string;
 }

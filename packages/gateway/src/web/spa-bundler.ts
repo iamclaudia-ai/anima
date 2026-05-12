@@ -90,8 +90,3 @@ export async function buildSpaBundle(): Promise<SpaBundle | null> {
 
   return inFlight;
 }
-
-/** Clear cache. Useful for tests or future HMR support. */
-export function clearSpaBundleCache(): void {
-  cache = null;
-}

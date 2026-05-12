@@ -111,7 +111,7 @@ export interface UseChatGatewayOptions {
 // ─── Return Type ─────────────────────────────────────────────
 
 /** Callback for subscribing to raw gateway events */
-export type EventListener = (event: string, payload: unknown) => void;
+type EventListener = (event: string, payload: unknown) => void;
 
 export interface UseChatGatewayReturn {
   messages: Message[];

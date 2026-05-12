@@ -165,8 +165,3 @@ export async function buildExtensionBundle(extensionId: string): Promise<Extensi
   inFlight.set(extensionId, promise);
   return promise;
 }
-
-/** Clear all cached bundles. Useful for tests or manual cache busting. */
-export function clearExtensionBundleCache(): void {
-  cache.clear();
-}

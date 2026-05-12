@@ -12,36 +12,11 @@ import type { ParsedMemory, MemoryFrontmatter, MemorySection, MemoryCategory } f
 const MEMORY_ROOT = join(homedir(), "memory");
 
 /**
- * Git commit and push a memory file (runs async, doesn't block)
- */
-export function gitCommitAndPush(filepath: string, message: string): void {
-  const resolved = resolvePath(filepath);
-  const relativePath = getRelativePath(filepath);
-
-  // Run git operations in background (don't await)
-  (async () => {
-    try {
-      // git add
-      const add = spawn(["git", "add", resolved], { cwd: MEMORY_ROOT });
-      await add.exited;
-
-      // git commit
-      const commit = spawn(["git", "commit", "-m", message], { cwd: MEMORY_ROOT });
-      await commit.exited;
-
-      // git push
-      const push = spawn(["git", "push"], { cwd: MEMORY_ROOT });
-      await push.exited;
-
-      console.error(`[memory] Git pushed: ${relativePath}`);
-    } catch (err) {
-      console.error(`[memory] Git push failed for ${relativePath}:`, err);
-    }
-  })();
-}
-
-/**
- * Get the memory root path
+ * Get the memory root path.
+ *
+ * Note: react-doctor flags this as unused because it doesn't follow `.js`
+ * extension imports from sibling .ts files — but `mcp/sync.ts` imports this
+ * from "./storage.js" at startup.
  */
 export function getMemoryRoot(): string {
   return MEMORY_ROOT;
@@ -50,7 +25,7 @@ export function getMemoryRoot(): string {
 /**
  * Resolve a memory path (handles relative paths)
  */
-export function resolvePath(filepath: string): string {
+function resolvePath(filepath: string): string {
   if (filepath.startsWith("~/memory/")) {
     return filepath.replace("~/memory/", MEMORY_ROOT + "/");
   }
@@ -63,9 +38,32 @@ export function resolvePath(filepath: string): string {
 /**
  * Get relative path from memory root
  */
-export function getRelativePath(filepath: string): string {
+function getRelativePath(filepath: string): string {
   const resolved = resolvePath(filepath);
   return relative(MEMORY_ROOT, resolved);
+}
+
+/**
+ * Git commit and push a memory file (runs async, doesn't block)
+ */
+function gitCommitAndPush(filepath: string, message: string): void {
+  const resolved = resolvePath(filepath);
+  const relativePath = getRelativePath(filepath);
+
+  // Run git operations in background (don't await)
+  (async () => {
+    try {
+      const add = spawn(["git", "add", resolved], { cwd: MEMORY_ROOT });
+      await add.exited;
+      const commit = spawn(["git", "commit", "-m", message], { cwd: MEMORY_ROOT });
+      await commit.exited;
+      const push = spawn(["git", "push"], { cwd: MEMORY_ROOT });
+      await push.exited;
+      console.error(`[memory] Git pushed: ${relativePath}`);
+    } catch (err) {
+      console.error(`[memory] Git push failed for ${relativePath}:`, err);
+    }
+  })();
 }
 
 /**

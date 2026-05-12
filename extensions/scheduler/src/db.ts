@@ -10,12 +10,11 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DEFAULT_DB_PATH = join(homedir(), ".anima", "anima.db");
-let dbPath = DEFAULT_DB_PATH;
+const dbPath = join(homedir(), ".anima", "anima.db");
 
 let db: Database | null = null;
 
-export function getDb(): Database {
+function getDb(): Database {
   if (db) return db;
 
   db = new Database(dbPath);
@@ -33,73 +32,9 @@ export function closeDb(): void {
   }
 }
 
-/**
- * Test helper to redirect the SQLite file path.
- * Resets the active connection when changed.
- */
-export function setDbPathForTests(path: string | null): void {
-  closeDb();
-  dbPath = path ?? DEFAULT_DB_PATH;
-}
-
-/**
- * Test helper — creates scheduler tables in the test DB.
- * In production, the gateway migration system (018-scheduler-tables.sql) handles this.
- */
-export function setupSchemaForTests(): void {
-  const d = getDb();
-
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS scheduler_tasks (
-      id                     TEXT PRIMARY KEY,
-      name                   TEXT NOT NULL,
-      description            TEXT,
-      type                   TEXT NOT NULL CHECK(type IN ('once', 'interval', 'cron')),
-      fire_at                TEXT NOT NULL,
-      interval_seconds       INTEGER,
-      cron_expr              TEXT,
-      action_type            TEXT NOT NULL CHECK(action_type IN ('emit', 'extension_call', 'notification', 'exec')),
-      action_target          TEXT NOT NULL,
-      action_payload         TEXT,
-      missed_policy          TEXT NOT NULL DEFAULT 'fire_once' CHECK(missed_policy IN ('fire_once', 'skip', 'fire_all')),
-      concurrency            TEXT NOT NULL DEFAULT 'skip_if_running' CHECK(concurrency IN ('allow', 'skip_if_running', 'cancel_previous')),
-      start_deadline_seconds INTEGER,
-      enabled                INTEGER NOT NULL DEFAULT 1,
-      tags                   TEXT,
-      created_at             TEXT NOT NULL,
-      fired_count            INTEGER NOT NULL DEFAULT 0,
-      last_fired_at          TEXT,
-      keep_history           INTEGER NOT NULL DEFAULT 50,
-      output_dir             TEXT
-    )
-  `);
-
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS scheduler_task_executions (
-      id               TEXT PRIMARY KEY,
-      task_id          TEXT NOT NULL REFERENCES scheduler_tasks(id) ON DELETE CASCADE,
-      fired_at         TEXT NOT NULL,
-      completed_at     TEXT,
-      status           TEXT NOT NULL CHECK(status IN ('running', 'success', 'error', 'skipped', 'cancelled')),
-      duration_ms      INTEGER,
-      error            TEXT,
-      output           TEXT,
-      progress_message TEXT,
-      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
-
-  d.exec(
-    `CREATE INDEX IF NOT EXISTS idx_sched_exec_task ON scheduler_task_executions(task_id, fired_at DESC)`,
-  );
-  d.exec(
-    `CREATE INDEX IF NOT EXISTS idx_sched_tasks_fire ON scheduler_tasks(fire_at) WHERE enabled = 1`,
-  );
-}
-
 // ── Types ───────────────────────────────────────────────────
 
-export interface TaskRow {
+interface TaskRow {
   id: string;
   name: string;
   description: string | null;

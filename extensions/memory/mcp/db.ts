@@ -85,7 +85,7 @@ export interface ConversationInfo {
 /**
  * Get conversation metadata by ID.
  */
-export function getConversation(conversationId: number): ConversationInfo | null {
+function getConversation(conversationId: number): ConversationInfo | null {
   const d = getDb();
   if (!d) return null;
 
