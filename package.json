@@ -103,7 +103,8 @@
         "react-doctor/js-combine-iterations",
         "react-doctor/no-generic-handler-names",
         "react-doctor/design-no-three-period-ellipsis",
-        "react-doctor/no-gray-on-colored-background"
+        "react-doctor/no-gray-on-colored-background",
+        "react-doctor/rerender-state-only-in-handlers"
       ]
     }
   }
