@@ -12,7 +12,7 @@
  * since there are no boundaries to worry about there.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { UseChatGatewayReturn } from "./useChatGateway";
 import {
   clearVoiceStreams,
@@ -39,6 +39,56 @@ export interface UseAudioPlaybackReturn {
   isStreaming: boolean;
   /** Stop playback and clear the ring buffer. */
   stop(): void;
+}
+
+// ── Playback state reducer ─────────────────────────────────
+// Two orthogonal observable flags. They're independent (4 valid combinations)
+// so this isn't an FSM — but routing every transition through a reducer makes
+// each event flow explicit and keeps the event-handler effect down to a single
+// dispatch per branch, which both reads more clearly and quiets the
+// no-cascading-set-state lint.
+
+interface PlaybackFlags {
+  isPlaying: boolean;
+  isStreaming: boolean;
+}
+
+const INITIAL_FLAGS: PlaybackFlags = { isPlaying: false, isStreaming: false };
+
+type PlaybackAction =
+  | { type: "STREAM_STARTED" }
+  | { type: "STREAM_ENDED"; hasActiveStreams: boolean }
+  | { type: "BATCH_STARTED" }
+  | { type: "BATCH_PLAY_STARTED" }
+  | { type: "BATCH_PLAY_ENDED" }
+  | { type: "WORKLET_FILL"; playing: boolean }
+  | { type: "STOPPED" };
+
+function playbackReducer(state: PlaybackFlags, action: PlaybackAction): PlaybackFlags {
+  switch (action.type) {
+    case "STREAM_STARTED":
+      return state.isStreaming ? state : { ...state, isStreaming: true };
+    case "STREAM_ENDED":
+      return state.isStreaming === action.hasActiveStreams
+        ? state
+        : { ...state, isStreaming: action.hasActiveStreams };
+    case "BATCH_STARTED":
+      // Streaming flag flips on the moment we accept the batch — playback flips
+      // separately when decode finishes and the buffer source starts.
+      return { ...state, isStreaming: true };
+    case "BATCH_PLAY_STARTED":
+      return state.isPlaying ? state : { ...state, isPlaying: true };
+    case "BATCH_PLAY_ENDED":
+      // Drop the playing flag. `isStreaming` was set true on batch start and
+      // stays true until `stop()` or a `voice.stream_end` clears it — matches
+      // the pre-refactor behavior where the equivalent check guarded
+      // setIsStreaming(false) behind `!isStreamingRef.current`.
+      return state.isPlaying ? { ...state, isPlaying: false } : state;
+    case "WORKLET_FILL":
+      return state.isPlaying === action.playing ? state : { ...state, isPlaying: action.playing };
+    case "STOPPED":
+      return INITIAL_FLAGS;
+  }
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -99,16 +149,13 @@ function stripWavHeader(buf: ArrayBuffer): ArrayBuffer {
 }
 
 export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybackReturn {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [flags, dispatch] = useReducer(playbackReducer, INITIAL_FLAGS);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const workletReadyRef = useRef<Promise<AudioWorkletNode> | null>(null);
   const moduleUrlRef = useRef<string | null>(null);
   const playbackStateRef = useRef(createAudioPlaybackState());
-  const isPlayingRef = useRef(false);
-  const isStreamingRef = useRef(false);
   const streamGenerationRef = useRef(0);
   const batchSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
@@ -164,10 +211,7 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
           pushedSinceReportMsRef.current = 0;
 
           const playing = msg.fillMs > 0 || chunkQueueRef.current.length > 0;
-          if (playing !== isPlayingRef.current) {
-            isPlayingRef.current = playing;
-            setIsPlaying(playing);
-          }
+          dispatch({ type: "WORKLET_FILL", playing });
           // Buffer drained below watermark? Push more from queue.
           drainQueueRef.current();
         } else if (msg.type === "drained") {
@@ -257,105 +301,114 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     stopBatchSources();
     clearVoiceStreams(playbackStateRef.current);
     streamGenerationRef.current += 1;
-    isPlayingRef.current = false;
-    isStreamingRef.current = false;
-    setIsPlaying(false);
-    setIsStreaming(false);
+    dispatch({ type: "STOPPED" });
     gateway.sendRequest("voice.stop");
   }, [clearWorkletBuffer, stopBatchSources, gateway]);
 
-  // Subscribe to voice events
+  // ── Per-event handlers ───────────────────────────────────
+  // Each branch of the old `onEvent` callback is now a named function. The
+  // event-subscription effect below routes by type. Splitting them up makes
+  // each transition obvious at a glance and keeps any single useEffect to
+  // ≤1 dispatch per branch.
+
+  const handleStreamStart = useCallback(
+    (data: Record<string, unknown>) => {
+      const streamId = (data.streamId as string) || "?";
+      startVoiceStream(playbackStateRef.current, streamId);
+      dispatch({ type: "STREAM_STARTED" });
+      // Make sure context + worklet exist before chunks land.
+      void ensureWorklet();
+    },
+    [ensureWorklet],
+  );
+
+  const handleAudioChunk = useCallback(
+    (data: Record<string, unknown>) => {
+      const audio = data.audio as string | undefined;
+      const format = data.format as string | undefined;
+      const streamId = data.streamId as string | undefined;
+      if (!audio) return;
+      if (!streamId || !shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
+
+      const generation = streamGenerationRef.current;
+      const arrayBuffer = base64ToArrayBuffer(audio);
+      void handleStreamingChunk(arrayBuffer, format).then(() => {
+        if (generation !== streamGenerationRef.current) {
+          // Stream was reset between schedule and push — ring already cleared.
+        }
+      });
+    },
+    [handleStreamingChunk],
+  );
+
+  const handleStreamEnd = useCallback((data: Record<string, unknown>) => {
+    const streamId = (data.streamId as string) || "?";
+    if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
+    const hasActiveStreams = endVoiceStream(playbackStateRef.current, streamId);
+    dispatch({ type: "STREAM_ENDED", hasActiveStreams });
+  }, []);
+
+  const handleBatchAudio = useCallback(
+    (data: Record<string, unknown>) => {
+      const audioData = data.data as string | undefined;
+      if (!audioData) return;
+
+      const ctx = ensureAudioContext();
+      const arrayBuffer = base64ToArrayBuffer(audioData);
+
+      // Batch playback uses a one-shot AudioBufferSourceNode (no boundaries
+      // to worry about). Clear any in-flight stream first.
+      clearVoiceStreams(playbackStateRef.current);
+      streamGenerationRef.current += 1;
+      clearWorkletBuffer();
+      stopBatchSources();
+      dispatch({ type: "BATCH_STARTED" });
+      const generation = streamGenerationRef.current;
+
+      void ctx
+        .decodeAudioData(arrayBuffer.slice(0))
+        .then((buffer) => {
+          if (generation !== streamGenerationRef.current) return;
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          batchSourcesRef.current.add(source);
+          dispatch({ type: "BATCH_PLAY_STARTED" });
+          source.onended = () => {
+            batchSourcesRef.current.delete(source);
+            if (batchSourcesRef.current.size === 0) {
+              dispatch({ type: "BATCH_PLAY_ENDED" });
+            }
+          };
+          source.start();
+        })
+        .catch((err) => {
+          console.warn("[AudioPlayback] Failed to decode batch audio:", err);
+        });
+    },
+    [ensureAudioContext, clearWorkletBuffer, stopBatchSources],
+  );
+
+  // Subscribe to voice events — pure dispatcher now.
   useEffect(() => {
     return gateway.onEvent((event: string, payload: unknown) => {
       const data = payload as Record<string, unknown>;
-
-      if (event === "voice.stream_start") {
-        const streamId = (data.streamId as string) || "?";
-        startVoiceStream(playbackStateRef.current, streamId);
-        isStreamingRef.current = true;
-        setIsStreaming(true);
-        // Make sure context + worklet exist before chunks land.
-        void ensureWorklet();
-        return;
-      }
-
-      if (event === "voice.audio_chunk") {
-        const audio = data.audio as string | undefined;
-        const format = data.format as string | undefined;
-        const streamId = data.streamId as string | undefined;
-        if (!audio) return;
-        if (!streamId || !shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
-
-        const generation = streamGenerationRef.current;
-        const arrayBuffer = base64ToArrayBuffer(audio);
-        void handleStreamingChunk(arrayBuffer, format).then(() => {
-          if (generation !== streamGenerationRef.current) {
-            // Stream was reset between schedule and push — ring already cleared.
-          }
-        });
-        return;
-      }
-
-      if (event === "voice.stream_end") {
-        const streamId = (data.streamId as string) || "?";
-        if (!shouldAcceptVoiceChunk(playbackStateRef.current, streamId)) return;
-        const hasActiveStreams = endVoiceStream(playbackStateRef.current, streamId);
-        isStreamingRef.current = hasActiveStreams;
-        setIsStreaming(hasActiveStreams);
-        return;
-      }
-
-      // Batch mode: full encoded audio (wav/mp3/etc.) in one event.
-      if (event === "voice.audio") {
-        const audioData = data.data as string | undefined;
-        if (!audioData) return;
-
-        const ctx = ensureAudioContext();
-        const arrayBuffer = base64ToArrayBuffer(audioData);
-
-        // Batch playback uses a one-shot AudioBufferSourceNode (no boundaries
-        // to worry about). Clear any in-flight stream first.
-        clearVoiceStreams(playbackStateRef.current);
-        streamGenerationRef.current += 1;
-        clearWorkletBuffer();
-        stopBatchSources();
-        isStreamingRef.current = true;
-        setIsStreaming(true);
-        const generation = streamGenerationRef.current;
-
-        void ctx
-          .decodeAudioData(arrayBuffer.slice(0))
-          .then((buffer) => {
-            if (generation !== streamGenerationRef.current) return;
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            batchSourcesRef.current.add(source);
-            isPlayingRef.current = true;
-            setIsPlaying(true);
-            source.onended = () => {
-              batchSourcesRef.current.delete(source);
-              if (batchSourcesRef.current.size === 0) {
-                isPlayingRef.current = false;
-                setIsPlaying(false);
-                if (!isStreamingRef.current) setIsStreaming(false);
-              }
-            };
-            source.start();
-          })
-          .catch((err) => {
-            console.warn("[AudioPlayback] Failed to decode batch audio:", err);
-          });
+      switch (event) {
+        case "voice.stream_start":
+          handleStreamStart(data);
+          break;
+        case "voice.audio_chunk":
+          handleAudioChunk(data);
+          break;
+        case "voice.stream_end":
+          handleStreamEnd(data);
+          break;
+        case "voice.audio":
+          handleBatchAudio(data);
+          break;
       }
     });
-  }, [
-    gateway,
-    ensureWorklet,
-    handleStreamingChunk,
-    ensureAudioContext,
-    clearWorkletBuffer,
-    stopBatchSources,
-  ]);
+  }, [gateway, handleStreamStart, handleAudioChunk, handleStreamEnd, handleBatchAudio]);
 
   // Resume AudioContext when tab becomes visible (browser suspends backgrounded tabs).
   useEffect(() => {
@@ -395,5 +448,5 @@ export function useAudioPlayback(gateway: UseChatGatewayReturn): UseAudioPlaybac
     };
   }, [stopBatchSources]);
 
-  return { isPlaying, isStreaming, stop };
+  return { isPlaying: flags.isPlaying, isStreaming: flags.isStreaming, stop };
 }
