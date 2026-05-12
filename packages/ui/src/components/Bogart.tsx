@@ -11,16 +11,15 @@
  *
  * Sprites: 416×416 frames from 3 sheets (4 cols × 6 rows).
  * Baselines align shadows so animations transition smoothly.
+ *
+ * The behavior FSM lives in `./Bogart.machine.ts` — this file owns rendering,
+ * the frame ticker, and the prop→event bridge.
  */
 
-import {
-  useState,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useCallback,
-  type CSSProperties,
-} from "react";
+import { useEffect, useReducer, useRef, type CSSProperties } from "react";
+import { useMachine } from "@xstate/react";
+
+import { ANIMS, FPS, bogartMachine } from "./Bogart.machine";
 
 // Sprite sheets are colocated with this component under packages/ui/static/.
 // Bun's bundler emits each .png as a hashed asset and resolves these imports
@@ -65,41 +64,6 @@ const SHEETS = [
 
 const MAX_BASELINE = Math.max(...SHEETS.flatMap((s) => s.baselines));
 
-// ── Animation definitions ──────────────────────────────────
-// movement: "right" | "left" | "none" — whether the sprite moves during this animation
-// loop: true = repeats until state changes, false = plays once then stops on last frame
-interface AnimDef {
-  sheet: number;
-  frames: readonly number[];
-  loop: boolean;
-  movement: "right" | "left" | "none";
-}
-
-const ANIMS: Record<string, AnimDef> = {
-  "walk-right": { sheet: 0, frames: [4, 5, 6, 7], loop: true, movement: "right" },
-  "walk-left": { sheet: 0, frames: [12, 13, 14, 15], loop: true, movement: "left" },
-  sit: { sheet: 0, frames: [16, 17, 18, 19], loop: false, movement: "none" },
-  "lick-paw": { sheet: 0, frames: [20, 21, 22, 23], loop: false, movement: "none" },
-  sleep: { sheet: 2, frames: [0, 1, 2, 3], loop: true, movement: "none" },
-  stir: { sheet: 2, frames: [4, 5, 6, 7], loop: false, movement: "none" },
-  stand: { sheet: 2, frames: [8, 9, 10, 11], loop: false, movement: "none" },
-  stretch: { sheet: 2, frames: [12, 13, 14, 15, 15, 15, 15], loop: false, movement: "none" },
-  "walk-right-2": { sheet: 2, frames: [16, 19, 20, 21, 22, 23], loop: true, movement: "right" },
-  "chase-yarn": {
-    sheet: 1,
-    frames: [0, 1, 2, 3, 7, 5, 4, 6, 11, 10, 9, 8, 12, 13, 14, 15, 19, 18, 17, 16, 20, 21, 22, 23],
-    loop: true,
-    movement: "none",
-  },
-};
-
-type AnimName = keyof typeof ANIMS;
-
-// ── State machine ──────────────────────────────────────────
-type BogartState = "sleeping" | "waking" | "idle" | "walking" | "chasing" | "settling";
-
-const FPS = 6;
-const IDLE_SLEEP_TIMEOUT = 30_000; // sleep after 30s idle
 const WALK_SPEED = 1.5; // pixels per frame
 
 // ── Props ──────────────────────────────────────────────────
@@ -109,299 +73,123 @@ interface BogartProps {
   containerWidth: number;
 }
 
+// ── Render-tick reducer ────────────────────────────────────
+// frameIndex + posX both tick at 6fps in lockstep, so they share a reducer.
+// Keeping the per-tick logic pure here means the ticker effect only contains
+// one dispatch, and `send` side-effects live in the React effect body (not
+// inside a setState updater).
+
+interface TickState {
+  frame: number;
+  posX: number;
+}
+
+type TickAction = { type: "reset"; posX?: number } | { type: "set"; state: TickState };
+
+function tickReducer(prev: TickState, action: TickAction): TickState {
+  switch (action.type) {
+    case "reset":
+      return { frame: 0, posX: action.posX ?? prev.posX };
+    case "set":
+      return action.state;
+  }
+}
+
 // ── Component ──────────────────────────────────────────────
 export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
-  const [state, setState] = useState<BogartState>("sleeping");
-  const [currentAnim, setCurrentAnim] = useState<AnimName>("sleep");
-  const [frameIndex, setFrameIndex] = useState(0);
-  const [posX, setPosX] = useState(20); // horizontal position
-  const [direction, setDirection] = useState<1 | -1>(1); // 1 = right, -1 = left
+  const [snapshot, send] = useMachine(bogartMachine);
+  const { currentAnim, direction } = snapshot.context;
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stateRef = useRef(state);
-  const sequenceRef = useRef<AnimName[]>([]);
-  const sequenceIdxRef = useRef(0);
+  // Frame-rate state stays in React (ticking it through the machine would
+  // mean a 6Hz event per Bogart and defeat the point). `frame` and `posX`
+  // share a reducer because they always update together.
+  const [tick, dispatchTick] = useReducer(tickReducer, { frame: 0, posX: 20 });
 
-  stateRef.current = state;
+  // Track whether we've already dispatched ANIM_FINISHED for the current
+  // animation, so we don't flood the machine while sitting on the last frame.
+  const animFinishedRef = useRef(false);
 
-  // ── Play an animation ────────────────────────────────────
-  const playAnim = useCallback((name: AnimName) => {
-    setCurrentAnim(name);
-    setFrameIndex(0);
-  }, []);
-
-  // ── Play a sequence of animations ────────────────────────
-  const playSequence = useCallback(
-    (anims: AnimName[], thenState: BogartState) => {
-      sequenceRef.current = anims;
-      sequenceIdxRef.current = 0;
-      playAnim(anims[0]);
-
-      // We'll advance in the frame ticker when the current anim finishes a loop
-      const onSequenceDone = () => setState(thenState);
-      // Store callback on ref
-      (sequenceRef as { current: AnimName[] & { onDone?: () => void } }).current.onDone =
-        onSequenceDone;
-    },
-    [playAnim],
-  );
-
-  // ── Reset idle timer ─────────────────────────────────────
-  const resetIdleTimer = useCallback(() => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = setTimeout(() => {
-      if (stateRef.current === "idle") {
-        setState("settling");
-      }
-    }, IDLE_SLEEP_TIMEOUT);
-  }, []);
-
-  // ── State transitions based on props ─────────────────────
+  // ── Prop → event bridge ──────────────────────────────────
+  // `snapshot.value` is part of the deps so transitions re-fire this effect
+  // and we can re-send TYPING when state changes mid-typing — that preserves
+  // the old behavior where landing in `idle` while still typing would reset
+  // the 30s idle-sleep timer.
   useEffect(() => {
-    if (isQuerying && state !== "chasing") {
-      setState("chasing");
-      // Randomly pick between chase-yarn (stays put) and walking
-      const roll = Math.random();
-      if (roll < 0.4) {
-        playAnim("chase-yarn");
-      } else {
-        const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
-        setDirection(walkDir === "walk-right" ? 1 : -1);
-        playAnim(walkDir);
-      }
-    } else if (isTyping && (state === "sleeping" || state === "settling")) {
-      setState("waking");
-      playSequence(["stir", "stretch", "stand"], "idle");
-    } else if (isTyping && state === "idle") {
-      // Already awake, just reset idle timer
-      resetIdleTimer();
-    } else if (!isQuerying && state === "chasing") {
-      setState("idle");
-      playAnim("sit");
-      resetIdleTimer();
-    }
-  }, [isQuerying, isTyping, state, playAnim, playSequence, resetIdleTimer]);
+    if (isTyping) send({ type: "TYPING" });
+    if (isQuerying) send({ type: "QUERY_START" });
+    else send({ type: "QUERY_STOP" });
+  }, [isTyping, isQuerying, snapshot.value, send]);
 
-  // ── Chain helper: play animations with delays between them ─
-  const chainTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  const clearChain = useCallback(() => {
-    for (const t of chainTimersRef.current) clearTimeout(t);
-    chainTimersRef.current = [];
-  }, []);
-
-  // A chain step is either an animation name or a delay in ms
-  type ChainStep = AnimName | number;
-
-  const playChain = useCallback(
-    (steps: ChainStep[], onDone?: () => void) => {
-      clearChain();
-      let delay = 0;
-
-      for (const step of steps) {
-        if (typeof step === "number") {
-          delay += step;
-        } else {
-          const anim = step;
-          const animDuration = (ANIMS[anim].frames.length / FPS) * 1000;
-          const t = setTimeout(() => {
-            if (stateRef.current === "settling" || stateRef.current === "idle") {
-              playAnim(anim);
-            }
-          }, delay);
-          chainTimersRef.current.push(t);
-          delay += animDuration;
-        }
-      }
-
-      if (onDone) {
-        const t = setTimeout(() => onDone(), delay);
-        chainTimersRef.current.push(t);
-      }
-    },
-    [clearChain, playAnim],
-  );
-
-  // ── Settling → sleep ─────────────────────────────────────
-  // sit → (pause 8s) → lick-paw → (pause 3s) → stretch → sleep
+  // Reset per-anim render state whenever the machine picks a new clip.
   useEffect(() => {
-    if (state === "settling") {
-      playChain(["sit", 8000, "lick-paw", 3000, "stretch"], () => {
-        setState("sleeping");
-        playAnim("sleep");
-      });
-      return () => clearChain();
-    }
-  }, [state, playAnim, playChain, clearChain]);
-
-  // ── Idle behavior: occasional random animations ──────────
-  // `playChain` is only called inside the setInterval, so it doesn't need to
-  // be a reactive dep — wrap the tick in `useEffectEvent` so identity changes
-  // to `playChain` don't tear down/recreate the interval.
-  const onIdleTick = useEffectEvent(() => {
-    if (stateRef.current !== "idle") return;
-    const roll = Math.random();
-    if (roll < 0.25) {
-      // Lick paw then sit again
-      playChain(["lick-paw", 1500, "sit"]);
-    } else if (roll < 0.4) {
-      // Stretch then sit
-      playChain(["stretch", 1000, "sit"]);
-    } else if (roll < 0.6) {
-      // Short walk
-      setState("walking");
-      setDirection(Math.random() > 0.5 ? 1 : -1);
-      setTimeout(() => {
-        if (stateRef.current === "walking") {
-          setState("idle");
-        }
-      }, 3000);
-    }
-    // else: just keep sitting (40% chance of doing nothing)
-  });
-
-  useEffect(() => {
-    if (state === "idle") {
-      playAnim("sit");
-      resetIdleTimer();
-
-      // Random idle actions every 10-20 seconds
-      const idleAction = setInterval(onIdleTick, 10000 + Math.random() * 10000);
-
-      return () => {
-        clearInterval(idleAction);
-        clearChain();
-      };
-    }
-  }, [state, playAnim, clearChain, resetIdleTimer]);
-
-  // ── Chasing behavior: switch between yarn and walking ────
-  // `playAnim` is only invoked inside the setInterval, so wrap the tick in
-  // `useEffectEvent` and drop it from the effect's reactive deps.
-  const onChasingTick = useEffectEvent(() => {
-    if (stateRef.current !== "chasing") return;
-    const roll = Math.random();
-    if (roll < 0.4) {
-      playAnim("chase-yarn");
-    } else {
-      const walkDir = Math.random() > 0.5 ? "walk-right" : "walk-left";
-      setDirection(walkDir === "walk-right" ? 1 : -1);
-      playAnim(walkDir);
-    }
-  });
-
-  useEffect(() => {
-    if (state !== "chasing") return;
-    const switchAnim = setInterval(onChasingTick, 4000 + Math.random() * 3000);
-    return () => clearInterval(switchAnim);
-  }, [state]);
-
-  // ── Walking state ────────────────────────────────────────
-  useEffect(() => {
-    if (state === "walking") {
-      playAnim(direction === 1 ? "walk-right" : "walk-left");
-    }
-  }, [state, direction, playAnim]);
-
-  // Sync direction when walk animation bounces off edge
-  useEffect(() => {
-    if (currentAnim === "walk-right") setDirection(1);
-    else if (currentAnim === "walk-left") setDirection(-1);
+    animFinishedRef.current = false;
+    dispatchTick({ type: "reset" });
   }, [currentAnim]);
 
-  // ── Frame ticker ─────────────────────────────────────────
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+  // Keep a ref of the current tick so the setInterval body can compute the
+  // next state from the freshest value without going through a setState
+  // updater (which forbids side-effecty `send` calls).
+  const tickRef = useRef(tick);
+  tickRef.current = tick;
 
+  // ── Frame ticker ─────────────────────────────────────────
+  // Runs at 6 FPS, advancing frame and (for walking anims) posX. Emits
+  // ANIM_FINISHED when a non-looping animation reaches its last frame, and
+  // BOUNCE when a walking animation hits a container edge.
+  useEffect(() => {
     const anim = ANIMS[currentAnim];
     const totalFrames = anim.frames.length;
 
-    intervalRef.current = setInterval(() => {
-      setFrameIndex((prev) => {
-        const isLastFrame = prev === totalFrames - 1;
-
-        // Non-looping animation reached the end
-        if (isLastFrame && !anim.loop) {
-          // Check if we're in a sequence
-          if (sequenceRef.current.length > 0) {
-            const seqAnims = sequenceRef.current as AnimName[] & { onDone?: () => void };
-            sequenceIdxRef.current++;
-            if (sequenceIdxRef.current < seqAnims.length) {
-              const nextAnim = seqAnims[sequenceIdxRef.current];
-              setCurrentAnim(nextAnim);
-              return 0;
-            }
-            // Sequence complete
-            sequenceRef.current = [];
-            sequenceIdxRef.current = 0;
-            seqAnims.onDone?.();
-          }
-          // Stay on last frame
-          return prev;
-        }
-
-        const next = (prev + 1) % totalFrames;
-
-        // Looping animation completed a cycle — check sequence
-        if (next === 0 && anim.loop && sequenceRef.current.length > 0) {
-          const seqAnims = sequenceRef.current as AnimName[] & { onDone?: () => void };
-          sequenceIdxRef.current++;
-          if (sequenceIdxRef.current < seqAnims.length) {
-            const nextAnim = seqAnims[sequenceIdxRef.current];
-            setCurrentAnim(nextAnim);
-            return 0;
-          }
-          sequenceRef.current = [];
-          sequenceIdxRef.current = 0;
-          seqAnims.onDone?.();
-        }
-
-        return next;
-      });
-
-      // Movement — driven by the animation's movement property
-      const movement = ANIMS[currentAnim].movement;
-      if (movement !== "none") {
-        const dir = movement === "right" ? 1 : -1;
-        setPosX((prev) => {
-          let next = prev + WALK_SPEED * dir;
-
-          // Bounce off edges
-          const maxX = containerWidth - DISPLAY_W - 10;
-          if (next >= maxX) {
-            next = maxX;
-            setDirection(-1);
-            playAnim("walk-left");
-          } else if (next <= 10) {
-            next = 10;
-            setDirection(1);
-            playAnim("walk-right");
-          }
-          return next;
-        });
+    const interval = setInterval(() => {
+      const prev = tickRef.current;
+      const nextFrame = anim.loop
+        ? (prev.frame + 1) % totalFrames
+        : Math.min(prev.frame + 1, totalFrames - 1);
+      const reachedEnd = !anim.loop && nextFrame === totalFrames - 1;
+      if (reachedEnd && !animFinishedRef.current) {
+        animFinishedRef.current = true;
+        send({ type: "ANIM_FINISHED" });
       }
+
+      let nextPosX = prev.posX;
+      if (anim.movement !== "none") {
+        const dir = anim.movement === "right" ? 1 : -1;
+        nextPosX = prev.posX + WALK_SPEED * dir;
+        const maxX = containerWidth - DISPLAY_W - 10;
+        if (nextPosX >= maxX) {
+          nextPosX = maxX;
+          send({ type: "BOUNCE", nextDir: -1 });
+        } else if (nextPosX <= 10) {
+          nextPosX = 10;
+          send({ type: "BOUNCE", nextDir: 1 });
+        }
+      }
+
+      dispatchTick({ type: "set", state: { frame: nextFrame, posX: nextPosX } });
     }, 1000 / FPS);
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [currentAnim, containerWidth, playAnim]);
+    return () => clearInterval(interval);
+  }, [currentAnim, containerWidth, send]);
 
   // ── Rendering ────────────────────────────────────────────
   const anim = ANIMS[currentAnim];
   const sheet = SHEETS[anim.sheet];
-  const frameIdx = anim.frames[frameIndex % anim.frames.length];
+  const frameIdx = anim.frames[tick.frame % anim.frames.length];
   const col = frameIdx % COLS;
   const row = Math.floor(frameIdx / COLS);
   const baseline = sheet.baselines[row];
   const baselineShift = (MAX_BASELINE - baseline) * DISPLAY_SCALE;
 
+  // `direction` is part of context but the visible direction is encoded in the
+  // currentAnim (walk-right vs walk-left), so we don't need it to render —
+  // reference it so the linter doesn't drop the destructure.
+  void direction;
+
   return (
     <div
       style={{
         ...BOGART_CONTAINER_STATIC,
-        left: posX,
+        left: tick.posX,
         marginBottom: -8 + baselineShift, // overlap textarea edge slightly
       }}
     >
