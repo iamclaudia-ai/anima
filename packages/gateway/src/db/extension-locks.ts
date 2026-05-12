@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { getDb } from "./index";
+import { getDb } from "./connection";
 
 export const DEFAULT_EXTENSION_LOCK_STALE_MS = 2 * 60 * 1000;
 

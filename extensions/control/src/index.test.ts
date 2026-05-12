@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createControlExtension } from "./index";
+import { createControlExtension } from ".";
 
 describe("control extension", () => {
   const logsDir = join(homedir(), ".anima", "logs");

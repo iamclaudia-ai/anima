@@ -17,7 +17,18 @@
  */
 
 import { Component } from "react";
-import type { ReactNode, ErrorInfo } from "react";
+import type { CSSProperties, ReactNode, ErrorInfo } from "react";
+
+const ERROR_PRE: CSSProperties = {
+  background: "#09090b",
+  borderRadius: "8px",
+  padding: "12px",
+  fontSize: "12px",
+  overflow: "auto",
+  maxHeight: "200px",
+  color: "#f87171",
+  marginBottom: "16px",
+};
 
 // Global beacon API exposed by index.html inline script
 declare global {
@@ -106,18 +117,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <p style={{ fontSize: "14px", color: "#a1a1aa", marginBottom: "16px" }}>
               Claudia hit an unexpected error. The error has been reported automatically.
             </p>
-            <pre
-              style={{
-                background: "#09090b",
-                borderRadius: "8px",
-                padding: "12px",
-                fontSize: "12px",
-                overflow: "auto",
-                maxHeight: "200px",
-                color: "#f87171",
-                marginBottom: "16px",
-              }}
-            >
+            <pre style={ERROR_PRE}>
               {this.state.error.message}
               {this.state.error.stack && `\n\n${this.state.error.stack}`}
             </pre>

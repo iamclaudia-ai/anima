@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionContext, GatewayEvent, LoggerLike } from "@anima/shared";
-import { createEditorExtension } from "./index";
+import { createEditorExtension } from ".";
 
 type EventHandler = (event: GatewayEvent) => void | Promise<void>;
 

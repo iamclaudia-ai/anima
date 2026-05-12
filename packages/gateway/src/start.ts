@@ -6,7 +6,7 @@
  * Each enabled extension runs in its own host process via stdio NDJSON.
  */
 
-import { executeGatewayMethod, extensions, handleExtensionEvent } from "./index";
+import { executeGatewayMethod, extensions, handleExtensionEvent } from ".";
 import { getExtensionRoutesPath } from "./web/extension-bundler";
 import {
   getEnabledExtensions,
@@ -31,7 +31,7 @@ import {
   releaseExtensionProcessLock,
   DEFAULT_EXTENSION_LOCK_STALE_MS,
 } from "./db/extension-locks";
-import { getDb } from "./db";
+import { getDb } from "./db/connection";
 
 const log = createLogger("Startup", join(homedir(), ".anima", "logs", "gateway.log"));
 const ROOT_DIR = join(import.meta.dir, "..", "..", "..");

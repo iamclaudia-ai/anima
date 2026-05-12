@@ -22,7 +22,7 @@ import { existsSync } from "node:fs";
 import { getDb } from "./db";
 import { recoverStuckFiles, ingestDirectoryCooperative, type IngestResult } from "./ingest";
 import { MemoryWatcher } from "./watcher";
-import type { MemoryConfig } from "./index";
+import type { MemoryConfig } from "./config";
 
 // ============================================================================
 // Context & Events

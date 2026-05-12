@@ -22,7 +22,7 @@ export type { GatewayEvent };
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ExtensionManager } from "./extensions";
-import { getDb, closeDb } from "./db/index";
+import { getDb, closeDb } from "./db/connection";
 import { getExtensionProcessLocks } from "./db/extension-locks";
 import {
   acquireExtensionRuntimeLock,

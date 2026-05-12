@@ -2,8 +2,21 @@
  * BookDetail — Chapter list for an audiobook
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type CSSProperties } from "react";
 import { Link, useRouter, useGatewayClient } from "@anima/ui";
+
+const CHAPTER_BADGE: CSSProperties = {
+  width: "40px",
+  height: "40px",
+  borderRadius: "50%",
+  background: "#8b5cf6",
+  color: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontWeight: "600",
+  flexShrink: 0,
+};
 
 interface Audiobook {
   id: string;
@@ -178,22 +191,7 @@ export function BookDetail() {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                  <div
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      borderRadius: "50%",
-                      background: "#8b5cf6",
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "600",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {chapter.number}
-                  </div>
+                  <div style={CHAPTER_BADGE}>{chapter.number}</div>
                   <div style={{ flex: 1 }}>
                     <h3
                       style={{

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext, GatewayEvent } from "@anima/shared";
-import { createMemoryExtension } from "./index";
+import { createMemoryExtension } from ".";
 import { closeDb, getDb, setDbPathForTests } from "./db";
 
 function setupSchema(): void {

@@ -2,9 +2,21 @@
  * ChapterPlayer — Audible-style audio player with scrollable transcript
  */
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, type CSSProperties } from "react";
 import { useRouter, useGatewayClient } from "@anima/ui";
 import ReactMarkdown from "react-markdown";
+
+const FIXED_PLAYER_BAR: CSSProperties = {
+  position: "fixed",
+  bottom: 0,
+  left: 0,
+  right: 0,
+  background: "#1a1a1a",
+  borderTop: "1px solid #2a2a2a",
+  padding: "1rem 1.5rem",
+  boxShadow: "0 -4px 12px rgba(0,0,0,0.3)",
+  zIndex: 1000,
+};
 
 interface Chapter {
   number: number;
@@ -346,19 +358,7 @@ export function ChapterPlayer() {
       </div>
 
       {/* Fixed Player at Bottom */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: "#1a1a1a",
-          borderTop: "1px solid #2a2a2a",
-          padding: "1rem 1.5rem",
-          boxShadow: "0 -4px 12px rgba(0,0,0,0.3)",
-          zIndex: 1000,
-        }}
-      >
+      <div style={FIXED_PLAYER_BAR}>
         <audio
           ref={audioRef}
           src={chapter.audioUrl}

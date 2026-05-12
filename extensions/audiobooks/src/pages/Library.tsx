@@ -2,8 +2,19 @@
  * Library — Audiobooks grid view
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import { Link, useGatewayClient } from "@anima/ui";
+
+const DESCRIPTION_CLAMP: CSSProperties = {
+  fontSize: "0.875rem",
+  color: "#666",
+  marginBottom: "0.75rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  display: "-webkit-box",
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: "vertical",
+};
 
 interface Audiobook {
   id: string;
@@ -124,20 +135,7 @@ export function Library() {
                 <p style={{ fontSize: "0.875rem", color: "#8b5cf6", marginBottom: "0.5rem" }}>
                   by {book.author}
                 </p>
-                <p
-                  style={{
-                    fontSize: "0.875rem",
-                    color: "#666",
-                    marginBottom: "0.75rem",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                  }}
-                >
-                  {book.description}
-                </p>
+                <p style={DESCRIPTION_CLAMP}>{book.description}</p>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   <span
                     style={{

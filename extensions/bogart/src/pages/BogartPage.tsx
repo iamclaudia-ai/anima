@@ -291,63 +291,23 @@ export function BogartPage() {
                   aria-label={`Frame ${i}`}
                   aria-pressed={isSelected}
                   style={{
+                    ...FRAME_BTN_STATIC,
                     width: displayW,
                     height: displayH,
                     backgroundImage: `url(${SPRITE_SHEETS[selectedSheet].src})`,
                     backgroundPosition: `-${pos.x * zoom}px -${pos.y * zoom}px`,
                     backgroundSize: `${(sheetDimensions?.w || 0) * zoom}px ${(sheetDimensions?.h || 0) * zoom}px`,
-                    cursor: "pointer",
-                    position: "relative",
                     outline: isCurrentFrame
                       ? "3px solid #FFD700"
                       : isSelected
                         ? "3px solid #4CAF50"
                         : "none",
-                    outlineOffset: -3,
-                    borderRadius: 4,
-                    overflow: "hidden",
-                    padding: 0,
-                    border: "none",
                   }}
                 >
                   {/* Frame number badge */}
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: 2,
-                      left: 4,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#fff",
-                      textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)",
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {i}
-                  </span>
+                  <span style={FRAME_NUMBER_BADGE}>{i}</span>
                   {/* Selection order badge */}
-                  {isSelected && (
-                    <span
-                      style={{
-                        position: "absolute",
-                        top: 2,
-                        right: 4,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        background: "#4CAF50",
-                        color: "#fff",
-                        borderRadius: "50%",
-                        width: 18,
-                        height: 18,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      {selIdx + 1}
-                    </span>
-                  )}
+                  {isSelected && <span style={SELECTION_BADGE}>{selIdx + 1}</span>}
                 </button>
               );
             })}
@@ -363,31 +323,21 @@ export function BogartPage() {
           {/* Preview window — aligns frames on shadow baseline */}
           <div
             style={{
+              ...PREVIEW_WINDOW_STATIC,
               width: displayW + 40,
               height: displayH + 40,
-              background: "#e8dff0",
-              borderRadius: 8,
-              border: "1px solid #333",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "center",
-              marginBottom: 16,
-              overflow: "hidden",
-              position: "relative",
             }}
           >
             {sheetDimensions && (
               <div
                 style={{
+                  ...SPRITE_PREVIEW_STATIC,
                   width: displayW,
                   height: displayH,
-                  position: "relative",
-                  bottom: 20,
                   marginTop: getBaselineShift(currentFrame, activeAnimation?.sheet) * zoom,
                   backgroundImage: `url(${SPRITE_SHEETS[activeAnimation?.sheet ?? selectedSheet].src})`,
                   backgroundPosition: `-${getFramePos(currentFrame).x * zoom}px -${getFramePos(currentFrame).y * zoom}px`,
                   backgroundSize: `${sheetDimensions.w * zoom}px ${sheetDimensions.h * zoom}px`,
-                  imageRendering: "pixelated",
                 }}
               />
             )}
@@ -493,14 +443,9 @@ export function BogartPage() {
                   tabIndex={0}
                   aria-pressed={activeAnimation === anim}
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 10px",
+                    ...ANIMATION_ROW_STATIC,
                     background: activeAnimation === anim ? "#2a3a2a" : "#222",
-                    borderRadius: 4,
                     border: activeAnimation === anim ? "1px solid #4CAF50" : "1px solid #333",
-                    cursor: "pointer",
                   }}
                   onClick={() => playAnimation(anim)}
                   onKeyDown={(e) => {
@@ -550,4 +495,73 @@ const btnStyle: React.CSSProperties = {
   padding: "6px 12px",
   cursor: "pointer",
   fontSize: 13,
+};
+
+// ── Hoisted style objects ──────────────────────────────────
+// Inline-style hoists keep individual `style={{...}}` blocks under the
+// react-doctor 8-property threshold and stabilize object identity across renders.
+
+const FRAME_BTN_STATIC: React.CSSProperties = {
+  cursor: "pointer",
+  position: "relative",
+  outlineOffset: -3,
+  borderRadius: 4,
+  overflow: "hidden",
+  padding: 0,
+  border: "none",
+};
+
+const FRAME_NUMBER_BADGE: React.CSSProperties = {
+  position: "absolute",
+  top: 2,
+  left: 4,
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#fff",
+  textShadow: "0 0 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)",
+  pointerEvents: "none",
+};
+
+const SELECTION_BADGE: React.CSSProperties = {
+  position: "absolute",
+  top: 2,
+  right: 4,
+  fontSize: 11,
+  fontWeight: 700,
+  background: "#4CAF50",
+  color: "#fff",
+  borderRadius: "50%",
+  width: 18,
+  height: 18,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  pointerEvents: "none",
+};
+
+const PREVIEW_WINDOW_STATIC: React.CSSProperties = {
+  background: "#e8dff0",
+  borderRadius: 8,
+  border: "1px solid #333",
+  display: "flex",
+  alignItems: "flex-end",
+  justifyContent: "center",
+  marginBottom: 16,
+  overflow: "hidden",
+  position: "relative",
+};
+
+const SPRITE_PREVIEW_STATIC: React.CSSProperties = {
+  position: "relative",
+  bottom: 20,
+  imageRendering: "pixelated",
+};
+
+const ANIMATION_ROW_STATIC: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "6px 10px",
+  borderRadius: 4,
+  cursor: "pointer",
 };

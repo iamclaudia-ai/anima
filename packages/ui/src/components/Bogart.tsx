@@ -13,7 +13,7 @@
  * Baselines align shadows so animations transition smoothly.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 
 // Sprite sheets are colocated with this component under packages/ui/static/.
 // Bun's bundler emits each .png as a hashed asset and resolves these imports
@@ -32,6 +32,17 @@ const FRAME_H = 416;
 const DISPLAY_SCALE = 0.15; // ~62px tall
 const DISPLAY_W = FRAME_W * DISPLAY_SCALE;
 const DISPLAY_H = FRAME_H * DISPLAY_SCALE;
+
+const BOGART_CONTAINER_STATIC: CSSProperties = {
+  position: "absolute",
+  bottom: "100%",
+  width: DISPLAY_W,
+  height: DISPLAY_H,
+  pointerEvents: "none",
+  zIndex: 10,
+  overflow: "hidden",
+  transition: "left 0.05s linear",
+};
 
 /**
  * Bogart sprite sheet URLs, exported so consumers (e.g. the bogart
@@ -381,16 +392,9 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   return (
     <div
       style={{
-        position: "absolute",
-        bottom: "100%",
+        ...BOGART_CONTAINER_STATIC,
         left: posX,
-        width: DISPLAY_W,
-        height: DISPLAY_H,
         marginBottom: -8 + baselineShift, // overlap textarea edge slightly
-        pointerEvents: "none",
-        zIndex: 10,
-        overflow: "hidden",
-        transition: "left 0.05s linear",
       }}
     >
       <div
