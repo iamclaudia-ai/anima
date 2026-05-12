@@ -102,7 +102,8 @@
         "react-doctor/design-no-em-dash-in-jsx-text",
         "react-doctor/js-combine-iterations",
         "react-doctor/no-generic-handler-names",
-        "react-doctor/design-no-three-period-ellipsis"
+        "react-doctor/design-no-three-period-ellipsis",
+        "react-doctor/no-gray-on-colored-background"
       ]
     }
   }

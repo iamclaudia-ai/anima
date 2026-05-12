@@ -169,9 +169,6 @@ function TimelineCard({
 
         {/* Summary — rendered as markdown */}
         {conversation.summary ? (
-          // `bg-violet-50` is `prose-code:bg-violet-50` for inline code only;
-          // stone text sits on the parent's white card background.
-          // react-doctor-disable-next-line react-doctor/no-gray-on-colored-background
           <div className="text-sm text-stone-600 leading-relaxed mb-3 line-clamp-4 prose prose-sm prose-stone max-w-none prose-p:my-1 prose-strong:text-stone-700 prose-code:text-violet-600 prose-code:bg-violet-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-[''] prose-code:after:content-['']">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{conversation.summary}</ReactMarkdown>
           </div>

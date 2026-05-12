@@ -108,6 +108,7 @@ The `reactDoctor.ignore.rules` list in `package.json` silences rules that are wr
 - **`js-combine-iterations`** — `.map().filter()` is more readable than fused `for...of`/`reduce` loops on the small arrays we render (chat history, todo lists). Revisit per-site only if profiling identifies a hot loop.
 - **`no-generic-handler-names`** — `handleX` paired with `onX` props is idiomatic React. Renaming to action verbs is taste, not correctness.
 - **`design-no-three-period-ellipsis`** — `...` vs `…` is pure typography preference.
+- **`jsx-a11y/no-gray-on-colored-background`** — the rule does pure class-name pattern matching and false-positives on Tailwind's `prose-*` selectors: classes like `prose-code:bg-violet-50` apply to nested `<code>` tags, not the parent text container, so what looks like "gray text on colored background" is actually "gray text on white" with separately colored inline code chips. Verified visually that the actual rendered contrast is fine in every flagged site.
 
 For one-off exceptions to otherwise-valid rules, prefer the inline `react-doctor-disable-next-line` comment over expanding the global ignore list.
 

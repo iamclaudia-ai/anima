@@ -263,9 +263,6 @@ export function EpisodeDetailPage({ id }: { id: string }) {
 
         {/* Narrative body — full episode markdown */}
         {meta?.bodyMarkdown ? (
-          // `bg-violet-50` here is `prose-code:bg-violet-50` — applies only to
-          // inline code, not the article background. Stone text is on white.
-          // react-doctor-disable-next-line react-doctor/no-gray-on-colored-background
           <article
             className="prose prose-stone max-w-none mb-8 prose-headings:text-stone-700 prose-h2:text-lg prose-h2:font-medium prose-h2:text-stone-500 prose-h2:border-b prose-h2:border-stone-200/60 prose-h2:pb-2 prose-p:text-stone-600 prose-p:leading-[1.8] prose-strong:text-stone-700 prose-em:text-violet-600/80 prose-code:text-violet-600 prose-code:bg-violet-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-[''] prose-code:after:content-[''] prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline prose-blockquote:border-violet-200 prose-blockquote:text-stone-500 prose-blockquote:italic prose-li:text-stone-600 prose-hr:border-stone-200/60"
             style={{ fontFamily: "'Newsreader', 'Georgia', serif" }}
@@ -320,9 +317,6 @@ export function EpisodeDetailPage({ id }: { id: string }) {
           </button>
 
           {showTranscript && (
-            // `bg-violet-50` is `prose-code:bg-violet-50` for inline code only;
-            // container background is bg-white, stone text reads fine on it.
-            // react-doctor-disable-next-line react-doctor/no-gray-on-colored-background
             <div className="mt-4 rounded-xl border border-stone-200/80 bg-white p-5 max-h-[60vh] overflow-y-auto shadow-sm prose prose-sm prose-stone max-w-none prose-p:text-stone-500 prose-p:leading-relaxed prose-headings:text-stone-600 prose-strong:text-stone-600 prose-code:text-violet-600 prose-code:bg-violet-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-[''] prose-code:after:content-[''] prose-hr:border-stone-200/60 prose-li:text-stone-500">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{transcript.transcript}</ReactMarkdown>
             </div>

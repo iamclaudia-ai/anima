@@ -89,10 +89,6 @@ export const MessageContent = memo(function MessageContent({
 
   if (type === "user") {
     return (
-      // `prose-pre:text-gray-100` applies to nested <pre> elements which carry
-      // their own `prose-pre:bg-gray-900` — not gray text on the bubble's
-      // bg-blue-50 background. Rule can't see the prose-* selector nesting.
-      // react-doctor-disable-next-line react-doctor/no-gray-on-colored-background
       <div
         className="prose max-w-none font-sans bg-blue-50 border-l-4 border-blue-500 rounded-r-lg px-4 py-2 overflow-hidden break-words
         prose-headings:font-bold prose-headings:text-foreground
@@ -185,9 +181,6 @@ export const MessageContent = memo(function MessageContent({
 
   // Assistant
   return (
-    // Same false positive as above — `text-gray-100` is for nested <pre> on
-    // its own `bg-gray-900`, not text on the parent's bg-pink-50.
-    // react-doctor-disable-next-line react-doctor/no-gray-on-colored-background
     <div
       className="prose max-w-none font-serif overflow-hidden break-words
       prose-headings:font-bold prose-headings:text-foreground
