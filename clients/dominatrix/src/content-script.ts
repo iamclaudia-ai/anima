@@ -1036,6 +1036,7 @@ function initDominatrix() {
       return interpreter.evaluate(parse(script));
     } catch (jailError) {
       try {
+        // react-doctor-disable-next-line react-doctor/no-eval -- intentional CSP-bypass fallback when JailJS can't parse the script
         return new Function(script)();
       } catch {
         throw new Error(
@@ -1050,6 +1051,7 @@ function initDominatrix() {
       return interpreter.evaluate(parse(expression));
     } catch (jailError) {
       try {
+        // react-doctor-disable-next-line react-doctor/no-eval -- intentional CSP-bypass fallback when JailJS can't parse the expression
         return eval(expression);
       } catch {
         throw new Error(
