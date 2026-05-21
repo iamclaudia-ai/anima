@@ -28,8 +28,7 @@ lin child <parent> ...     # create child issue — inherits parent's team + pro
 lin update <id> [opts]     # update title/assignee/state/parent/project/labels/priority
 lin comment <id> [opts]    # add a comment
 
-lin learn user <alias> <email|id> [--project P | --team T]   # teach a name→user mapping
-lin learn list             # show learned mappings
+lin cache [clear]          # show (or clear) the learned MRU cache
 lin gql '<query>' ['<vars-json>']   # raw GraphQL escape hatch
 ```
 
@@ -54,19 +53,18 @@ lin update BEE-20001 -a "Phil Mills" -s "In Review"
 
 ## Name resolution rules (how ambiguity is handled)
 
-Resolution is **fail-loud, never silent**. For users specifically:
+Resolution is **fail-loud, never silent**. For users, in order:
 
 1. **`me`** → the authenticated viewer.
-2. **Learned cache** (`~/.config/lin/user-mapping.json`), precedence: project → team → global.
-3. **Exact** email / displayName / full-name match wins.
-4. **Team-membership filter** — if the issue's team is known, candidates not on that team are dropped. _This dissolves most "two people, same name" cases for free._ (Example: there are two Phils, but they never share a team, so `--team BEE` or a BEE project resolves "phil" → Phil Mills unaided.)
-5. Still multiple → **stop with exit 1** and print candidates, each with a ready-to-run `lin learn` line.
+2. **Exact** email / displayName / full-name match wins.
+3. **Team-membership filter** — if the issue's team is known, candidates not on that team are dropped. _This dissolves most "two people, same name" cases for free._ (Example: there are two Phils, but they never share a team, so `--team BEE` or a BEE project resolves "phil" → Phil Mills unaided.)
+4. **Recency (scoped MRU)** — if still ambiguous, the most-recently-resolved matching user _in this scope_ wins, with an `ℹ …` note to stderr.
+5. Still ambiguous → **stop with exit 1** and list candidates.
 
-When you hit an ambiguity error, you have three moves:
+When you hit an ambiguity error, you have two moves:
 
-- Pass an unambiguous value once: `--assignee phil@example.com`
-- Add context that disambiguates: `--team BEE`
-- Teach it permanently (see below)
+- Pass an unambiguous value once: `--assignee phil@beehiiv.com` (or the exact display name). **This also teaches it** — see below.
+- Add context that disambiguates: `--team BEE`.
 
 ## Projects: partial names + the MRU cache
 
@@ -85,23 +83,21 @@ Projects often cluster (`Foo — MVP`, `Foo V2`, `Foo — Phase 2`…), so a par
 
 The MRU (`projectMru` in the cache) is also fed whenever you **work a specific ticket** — `lin child <id>` / `lin update <id>` push that ticket's project to the front. So in a normal session you rarely hit ambiguity for `new`: you've already touched tickets in the active project, and the loose `--project` partial resolves straight to it.
 
-**Don't hardcode the project** — infer it from the ticket you're working from or the conversation, pass a partial, and let the MRU do the disambiguating. `lin learn list` shows the current MRU.
+**Don't hardcode the project** — infer it from the ticket you're working from or the conversation, pass a partial, and let the MRU do the disambiguating. `lin cache` shows the current MRU.
 
-## The learned disambiguation cache
+## How learning works: success IS the learning
 
-When a name is genuinely ambiguous _within the same team_, teach `lin` the de-facto mapping for that context. Two ways:
+There is **no explicit teach step** (no `--learn` flag). Every time a name resolves to exactly one user or project, `lin` records it to an MRU; the next ambiguous lookup uses that recency. The cache is "frozen intelligence" — you make the smart call once (by typing an exact name/email), and the dumb script replays it forever.
+
+The flow when two people genuinely share a team:
 
 ```bash
-# Standalone — explicit
-lin learn user phil "Phil Mills" --project group
-
-# Inline during a write — resolves "Phil Mills" now, remembers it under alias "phil"
-lin child BEE-20001 --title "..." --assignee "Phil Mills" --project group --learn phil
+lin child BEE-20001 --title "..." --assignee chris      # ✗ two Chrises on BEE → fail loud, lists both
+lin child BEE-20001 --title "..." --assignee "Chris Smith"   # ✓ exact → resolves AND records
+lin child BEE-20002 --title "..." --assignee chris      # ✓ auto-resolves Chris Smith (recency)
 ```
 
-After that, `--assignee phil` with that project (or team, or globally — depending on scope) auto-resolves. Scope is chosen by what context you pass: `--project` → project-scoped, else `--team` → team-scoped, else global.
-
-**The flow Michael described:** ask for "Phil", get an ambiguity error, confirm which Phil, then run with `--learn phil` so it never asks again in that project.
+**Scoping matters and is deliberate:** projects use one **global** MRU (you move between projects sequentially, so recency = current focus). Users are scoped **project → team → global**, recording into the most specific scope available. A global user MRU would silently mis-pick the same first-name across different projects — exactly the clever-but-silent failure to avoid. So `chris` learned in one project does **not** leak to another; it'll fail loud there until you resolve it once in that context.
 
 ## Multi-line descriptions & comments
 
@@ -120,7 +116,7 @@ EOF
 
 ## Flags (kept close to linctl where they overlap)
 
-`-t/--team` · `--project` · `--parent` · `-a/--assignee` · `-m/--assign-me` · `--learn` · `-d/--description` · `--description-file` · `-b/--body` · `--body-file` · `-s/--state` · `--labels a,b` · `--priority none|urgent|high|normal|low|0-4` · `--query` · `--limit` · `--include-completed` · `-j/--json`
+`-t/--team` · `--project` · `--parent` · `-a/--assignee` · `-m/--assign-me` · `-d/--description` · `--description-file` · `-b/--body` · `--body-file` · `-s/--state` · `--labels a,b` · `--priority none|urgent|high|normal|low|0-4` · `--query` · `--limit` · `--include-completed` · `-j/--json`
 
 Use `-j/--json` when you need to parse output (e.g. grab `.id`/`.identifier` with `jq`).
 
