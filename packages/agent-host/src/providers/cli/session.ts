@@ -101,6 +101,8 @@ export class ClaudeCliSession extends EventEmitter {
 
   private readonly cwd: string;
   private readonly model: string;
+  /** True when the configured model carried the `[1m]` 1M-context variant. */
+  private readonly wants1m: boolean;
   private readonly systemPrompt?: string;
   private readonly isResume: boolean;
 
@@ -124,7 +126,9 @@ export class ClaudeCliSession extends EventEmitter {
     this.id = id;
     this.tmuxName = `anima-cli-${id}`;
     this.cwd = options.cwd;
-    this.model = sanitizeModel(options.model || config.model || "claude-opus-4-6");
+    const rawModel = options.model || config.model || "claude-opus-4-6";
+    this.wants1m = /\[1m\]/i.test(rawModel);
+    this.model = sanitizeModel(rawModel);
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.isResume = isResume;
   }
@@ -137,6 +141,7 @@ export class ClaudeCliSession extends EventEmitter {
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
       onRequestBody: (b, ctx) => this.handleRequestBody(b, ctx),
       capture: this.config.capture,
+      context1m: this.wants1m,
     });
     this.proxyPort = this.proxy.start();
 

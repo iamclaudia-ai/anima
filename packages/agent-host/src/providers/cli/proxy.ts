@@ -12,6 +12,7 @@
  */
 
 import { createLogger } from "@anima/shared";
+import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,13 @@ const ANTHROPIC_API = "https://api.anthropic.com";
  * generated text, then read that line's request to see what marks it.
  */
 const CAPTURE_FILE = join(homedir(), ".anima", "logs", "cli-proxy-capture.jsonl");
+
+/**
+ * Per-event SSE capture sink — one JSON line per SSE event (not a giant inline
+ * array), so the stream is readable and greppable. Each line carries `reqId`
+ * (correlates back to the CAPTURE_FILE request line) plus the raw event.
+ */
+const EVENTS_FILE = join(homedir(), ".anima", "logs", "cli-proxy-events.jsonl");
 
 /** Per-stream context derived from the originating request. */
 export interface StreamContext {
@@ -48,7 +56,16 @@ export interface TeeProxyOptions {
   onRequestBody?: (body: unknown, ctx: StreamContext) => void;
   /** When true, append full request + response JSON to CAPTURE_FILE. */
   capture?: boolean;
+  /**
+   * When true, inject the 1M-context beta into every forwarded request's
+   * `anthropic-beta` header. Lets us pass the bare model id (avoiding the CLI's
+   * broken `[1m]` preflight 404) while keeping the 1M context window.
+   */
+  context1m?: boolean;
 }
+
+/** Anthropic beta flag that enables the 1M-token context window. */
+const CONTEXT_1M_BETA = "context-1m-2025-08-07";
 
 /**
  * Concatenate the text of the final user message — used to sniff internal
@@ -68,14 +85,23 @@ function lastUserText(body: unknown): string {
 }
 
 /**
- * Detect Claude Code's auto-compaction call. It reuses the full agent toolset
- * and system prompt — so it looks identical to a real turn by tools/system
- * alone — but appends a summary instruction as the final user content block and
- * streams an `<analysis>`/`<summary>` blob. Confirmed by capture: it is the only
- * 32-tool request carrying this instruction. Its output must stay OUT of chat.
+ * Internal maintenance calls that reuse the FULL agent toolset + system prompt
+ * (so tools/system can't tell them apart from a real turn) but inject a
+ * recognizable instruction as the final user message. Both confirmed by capture:
+ *
+ *   - Auto-compaction: "...create a detailed summary of the conversation..." →
+ *     streams an `<analysis>`/`<summary>` blob.
+ *   - Suggestion mode: "[SUGGESTION MODE: Suggest what the user might naturally
+ *     type next...]" → streams a predicted *user* prompt (e.g. "reloaded, let's
+ *     test again"), which previously leaked into chat as an assistant message.
+ *
+ * Their output must stay OUT of the chat.
  */
-function isCompactionRequest(body: unknown): boolean {
-  return /create a detailed summary of the conversation/i.test(lastUserText(body));
+function isMaintenanceRequest(body: unknown): boolean {
+  const text = lastUserText(body);
+  return (
+    /create a detailed summary of the conversation/i.test(text) || /\[SUGGESTION MODE:/i.test(text)
+  );
 }
 
 /**
@@ -84,14 +110,14 @@ function isCompactionRequest(body: unknown): boolean {
  *   1. Real turns always carry the Claude Code toolset; auxiliary calls
  *      (title-gen, the `max_tokens:1` quota probe, topic/count_tokens) send no
  *      tools.
- *   2. Auto-compaction DOES carry the toolset, so tools alone is insufficient —
- *      it is excluded by its summary-instruction signature.
+ *   2. Compaction and suggestion-mode DO carry the toolset, so tools alone is
+ *      insufficient — they are excluded by their final-user-message signature.
  */
 function isAgentRequest(body: unknown): boolean {
   if (!body || typeof body !== "object") return false;
   const b = body as { tools?: unknown };
   if (!Array.isArray(b.tools) || b.tools.length === 0) return false;
-  if (isCompactionRequest(body)) return false;
+  if (isMaintenanceRequest(body)) return false;
   return true;
 }
 
@@ -183,11 +209,34 @@ export class AnthropicTeeProxy {
     }
   }
 
+  /** Append a single SSE event to the events file, one per line (best-effort). */
+  private captureEvent(record: Record<string, unknown>): void {
+    if (!this.opts.capture) return;
+    try {
+      appendFileSync(EVENTS_FILE, JSON.stringify(record) + "\n");
+    } catch {
+      // best-effort debug aid
+    }
+  }
+
   private async handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const headers = new Headers(req.headers);
     headers.delete("host");
     headers.set("accept-encoding", "identity");
+
+    // Keep the 1M context window without sending the CLI's broken `[1m]` model
+    // id: merge the beta flag into whatever `anthropic-beta` list is present.
+    if (this.opts.context1m) {
+      const betas = new Set(
+        (headers.get("anthropic-beta") ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      betas.add(CONTEXT_1M_BETA);
+      headers.set("anthropic-beta", [...betas].join(","));
+    }
 
     const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
     const body = hasBody ? await req.arrayBuffer() : undefined;
@@ -214,8 +263,10 @@ export class AnthropicTeeProxy {
     });
 
     // Capture metadata carried into all response branches (one line per request).
+    const reqId = randomUUID().slice(0, 8);
     const reqMeta: Record<string, unknown> = {
       ts: new Date().toISOString(),
+      reqId,
       port: this._port,
       method: req.method,
       path: url.pathname + url.search,
@@ -284,7 +335,8 @@ export class AnthropicTeeProxy {
     let reads = 0;
     // Full-capture accumulators (only populated when capture is on).
     const cap = this.opts.capture === true;
-    const events: unknown[] = [];
+    const reqId = capMeta.reqId;
+    let eventCount = 0;
     let assembled = "";
     try {
       for (;;) {
@@ -305,9 +357,15 @@ export class AnthropicTeeProxy {
               if (firstDeltaMs < 0) firstDeltaMs = Math.round(performance.now() - t0);
             }
             if (cap) {
-              events.push(ev);
               const d = (ev as { delta?: { type?: string; text?: string } }).delta;
               if (d?.type === "text_delta" && d.text) assembled += d.text;
+              this.captureEvent({
+                reqId,
+                seq: eventCount++,
+                isAgentTurn: ctx.isAgentTurn,
+                type: (ev as { type?: string }).type,
+                event: ev,
+              });
             }
             this.opts.onEvent(ev, ctx);
           } catch {
@@ -326,6 +384,8 @@ export class AnthropicTeeProxy {
         totalMs: Math.round(performance.now() - t0),
       });
     }
-    this.capture({ ...capMeta, responseText: assembled, responseEvents: events });
+    // responseEvents live one-per-line in EVENTS_FILE (correlate via reqId);
+    // the request line keeps only the assembled text + an event count.
+    this.capture({ ...capMeta, responseText: assembled, eventCount });
   }
 }
