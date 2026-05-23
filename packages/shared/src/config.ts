@@ -112,6 +112,14 @@ export interface AgentHostConfig {
     cwd?: string;
     preambles?: { subagent?: string; review?: string; test?: string };
   };
+  /** Claude runtime: "sdk" (Agent SDK) or "cli" (real CLI + tee proxy, #33). Default "sdk". */
+  claudeRuntime?: "sdk" | "cli";
+  /** Claude CLI runtime configuration (used when claudeRuntime === "cli"). */
+  claudeCli?: {
+    cliPath?: string;
+    basePort?: number;
+    interception?: "base-url" | "mitm";
+  };
 }
 
 export interface FederationPeer {

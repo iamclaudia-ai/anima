@@ -20,6 +20,7 @@ import type { BufferedEvent } from "./event-buffer";
 import type { ThinkingEffort } from "@anima/shared";
 import { createAnthropicProvider } from "./providers/anthropic/sdk-session";
 import { createCodexProvider } from "./providers/codex/session";
+import { createClaudeCliProvider } from "./providers/cli/session";
 
 export interface SessionHostLike {
   on: (eventName: "session.event", listener: (msg: SessionEventMessage) => void) => unknown;
@@ -101,29 +102,37 @@ export async function createAgentHostServer(
   const extensionMcpHeaders = config.gateway.token
     ? { Authorization: `Bearer ${config.gateway.token}` }
     : undefined;
+  const claudeRuntime = config.agentHost?.claudeRuntime === "cli" ? "cli" : "sdk";
+  log.info("Claude runtime selected", { runtime: claudeRuntime });
   const providers = {
-    claude: createAnthropicProvider({
-      imageProcessing:
-        configuredImageProcessing &&
-        typeof configuredImageProcessing === "object" &&
-        !Array.isArray(configuredImageProcessing)
-          ? (configuredImageProcessing as AnimaConfig["session"]["imageProcessing"])
-          : config.session.imageProcessing,
-      skillsPaths:
-        configuredSkills &&
-        typeof configuredSkills === "object" &&
-        !Array.isArray(configuredSkills) &&
-        Array.isArray((configuredSkills as { paths?: unknown }).paths)
-          ? (configuredSkills as { paths: string[] }).paths || []
-          : config.session.skills.paths,
-      extensionMcp: {
-        enabled: extensionMcpEnabled,
-        serverName: extensionMcpConfig.serverName || "anima",
-        url: extensionMcpUrl,
-        headers: extensionMcpHeaders,
-        alwaysLoad: extensionMcpConfig.alwaysLoad,
-      },
-    }),
+    claude:
+      claudeRuntime === "cli"
+        ? createClaudeCliProvider({
+            ...config.agentHost?.claudeCli,
+            model: config.session.model,
+          })
+        : createAnthropicProvider({
+            imageProcessing:
+              configuredImageProcessing &&
+              typeof configuredImageProcessing === "object" &&
+              !Array.isArray(configuredImageProcessing)
+                ? (configuredImageProcessing as AnimaConfig["session"]["imageProcessing"])
+                : config.session.imageProcessing,
+            skillsPaths:
+              configuredSkills &&
+              typeof configuredSkills === "object" &&
+              !Array.isArray(configuredSkills) &&
+              Array.isArray((configuredSkills as { paths?: unknown }).paths)
+                ? (configuredSkills as { paths: string[] }).paths || []
+                : config.session.skills.paths,
+            extensionMcp: {
+              enabled: extensionMcpEnabled,
+              serverName: extensionMcpConfig.serverName || "anima",
+              url: extensionMcpUrl,
+              headers: extensionMcpHeaders,
+              alwaysLoad: extensionMcpConfig.alwaysLoad,
+            },
+          }),
     codex: createCodexProvider(config.agentHost?.codex),
   };
   const sessionHost =
