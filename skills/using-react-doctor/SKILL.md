@@ -23,24 +23,24 @@ Three bun scripts already wrap the common cases:
 
 ```bash
 bun run react-doctor          # full monorepo scan (all workspaces)
-bun run react-doctor:diff     # only files changed vs main — runs in pre-push
+bun run react-doctor:diff     # only files changed vs origin/main — runs in pre-push
 bun run react-doctor:staged   # only staged files — pre-commit ready
 ```
 
 For ad-hoc scans of a single workspace, invoke directly:
 
 ```bash
-NO_COLOR=1 npx react-doctor@latest -y packages/ui                  # human-readable
-npx react-doctor@latest -y packages/ui --json --offline            # structured data
-npx react-doctor@latest -y packages/ui --explain src/foo.tsx:42    # why a rule fired
-npx react-doctor@latest -y packages/ui --verbose                   # every rule shown
+NO_COLOR=1 npx --yes react-doctor@latest -y packages/ui                  # human-readable
+npx --yes react-doctor@latest -y packages/ui --json --offline            # structured data
+npx --yes react-doctor@latest -y packages/ui --explain src/foo.tsx:42    # why a rule fired
+npx --yes react-doctor@latest -y packages/ui --verbose                   # every rule shown
 ```
 
-The `-y` flag suppresses the workspace-picker prompt — required for non-interactive use.
+Two yes-flags, two prompts: react-doctor's `-y` suppresses its workspace-picker; **npx's `--yes`** auto-confirms npx's own "Ok to install?" prompt. Without npx `--yes`, a non-interactive context (CI, the tmux command wrapper) blocks forever on npx's prompt — the `bun run react-doctor*` scripts already include it. (Alternatively, `</dev/null` on the command forces EOF.)
 
 ## Two output modes, two purposes
 
-**`--json` for analysis.** Writes a structured array of diagnostics to stdout. Pipe to `jq`. This is what you want 90% of the time when working through warnings.
+**`--json` for analysis.** Writes a structured JSON **object** to stdout (keys: `diagnostics`, `summary`, `diff`, `mode`, `projects`, …) — the diagnostics array lives under `.diagnostics`, not at the top level. Pipe to `jq` (e.g. `jq '.diagnostics[]'`). `.summary` has `errorCount`/`warningCount`; `.diff` has `baseBranch`/`changedFileCount`. This is what you want 90% of the time when working through warnings.
 
 **`NO_COLOR=1` (without `--json`) for reading.** Strips ANSI escape codes from the formatted human-friendly output. Use this when you just want to _look at_ the summary — score, top rules, totals — and show it verbatim to the user.
 
@@ -68,10 +68,10 @@ When aggregating across workspaces, tag each entry with its `package` for filter
 
 ## jq cookbook
 
-Save the JSON once and re-query:
+Save the JSON once and re-query. Extract `.diagnostics` into the file so the snippets below operate on a flat array (the raw output is an object — see "Two output modes" above):
 
 ```bash
-npx react-doctor@latest -y packages/ui --json --offline > /tmp/rd.json
+npx --yes react-doctor@latest -y packages/ui --json --offline | jq '.diagnostics' > /tmp/rd.json
 ```
 
 **Group by rule, sorted by frequency:**
@@ -172,9 +172,9 @@ Authoritative list lives in root `package.json` under `reactDoctor.ignore.rules`
 
 `bun run react-doctor:diff` runs in pre-push with `--fail-on error`. Behavior:
 
-- **Errors block the push.** Currently zero errors; any new error introduced in a changed file fails CI.
-- **Warnings are advisory.** The pre-existing 200-ish warnings don't block ordinary pushes — they get worked through in cleanup PRs.
-- **`--diff main`** scans only files changed vs main. Untouched files don't get re-evaluated.
+- **Errors block the push.** Any new error introduced in a changed file fails the push.
+- **Warnings are advisory.** The pre-existing warnings don't block ordinary pushes — they get worked through in cleanup PRs.
+- **`--diff origin/main`** scans only files changed vs `origin/main` (i.e. the commits you're about to push). Untouched files aren't re-evaluated. (Earlier it used `--diff main`, but on the `main` branch base==current is degenerate and react-doctor over-scans the whole project, surfacing pre-existing errors — `origin/main` scopes correctly to un-pushed work.)
 
 This means the error count can only go _down_ from here. If a future change introduces a real bug-class issue (e.g. a new `useEffect` without cleanup), pre-push catches it before it reaches main.
 
