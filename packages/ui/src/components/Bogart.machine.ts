@@ -58,7 +58,7 @@ const animDurationMs = (name: AnimName): number => (ANIMS[name].frames.length / 
 
 // ── Timings (replicates the old `playChain` schedule and idle/chase loops) ──
 
-const IDLE_SLEEP_TIMEOUT = 30_000;
+export const IDLE_SLEEP_TIMEOUT = 30_000;
 const IDLE_ACTION_MIN = 10_000;
 const IDLE_ACTION_RANGE = 10_000;
 const CHASE_SWITCH_MIN = 4_000;
@@ -85,6 +85,7 @@ export interface BogartContext {
 
 export type BogartEvent =
   | { type: "TYPING" }
+  | { type: "IDLE_TIMEOUT" }
   | { type: "QUERY_START" }
   | { type: "QUERY_STOP" }
   | { type: "ANIM_FINISHED" }
@@ -98,7 +99,9 @@ export const bogartMachine = setup({
     events: {} as BogartEvent,
   },
   actions: {
-    setAnim: assign((_, params: { name: AnimName }) => ({ currentAnim: params.name })),
+    setAnim: assign((_, params: { name: AnimName }) => ({
+      currentAnim: params.name,
+    })),
     setDirection: assign((_, params: { direction: 1 | -1 }) => ({ direction: params.direction })),
     randomDirection: assign({
       direction: (): 1 | -1 => (Math.random() > 0.5 ? 1 : -1),
@@ -185,13 +188,8 @@ export const bogartMachine = setup({
     // idle: sit, occasionally do random actions, eventually settle.
     idle: {
       initial: "sitting",
-      // 30s of total idle (no typing) → settle. Re-entering idle.* resets this.
-      after: {
-        [IDLE_SLEEP_TIMEOUT]: "settling",
-      },
       on: {
-        // Typing while idle pings the idle timer by re-entering the parent.
-        TYPING: { target: ".sitting", reenter: true },
+        IDLE_TIMEOUT: "settling",
       },
       states: {
         sitting: {

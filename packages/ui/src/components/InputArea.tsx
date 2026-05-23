@@ -57,7 +57,7 @@ export function InputArea({
   // ── Container width, autosize, typing/focus state ───────────────────────
   const containerWidth = useContainerWidth(textareaContainerRef);
   useTextareaAutosize(textareaRef, input);
-  const { isTyping, ping: pingTyping } = useTypingState();
+  const { typingPulse, ping: pingTyping } = useTypingState();
 
   // ── Pickers (slash + file `@`) ──────────────────────────────────────────
   const pickers = useInputPickers({
@@ -214,7 +214,7 @@ export function InputArea({
           onPick={pickers.acceptFileSelection}
         />
 
-        <Bogart isQuerying={isQuerying} isTyping={isTyping} containerWidth={containerWidth} />
+        <Bogart isQuerying={isQuerying} typingPulse={typingPulse} containerWidth={containerWidth} />
 
         <textarea
           ref={textareaRef}

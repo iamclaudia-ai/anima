@@ -1,23 +1,17 @@
-import { useCallback, useRef, useState } from "react";
-
-const TYPING_IDLE_MS = 2_000;
+import { useCallback, useState } from "react";
 
 /**
- * Track whether the user is actively typing, with an idle timeout. Bogart
- * uses this to perk up / settle down.
+ * Track textarea keystrokes as a monotonically increasing signal.
  *
- * Returns `{ isTyping, ping }`. Call `ping()` from your input handler on every
- * keystroke; `isTyping` flips false after `TYPING_IDLE_MS` of no pings.
+ * Bogart consumes the pulse to wake from sleep/settling and to reset its
+ * idle-sleep timeout without tying behavior to machine snapshot changes.
  */
-export function useTypingState(): { isTyping: boolean; ping: () => void } {
-  const [isTyping, setIsTyping] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+export function useTypingState(): { typingPulse: number; ping: () => void } {
+  const [typingPulse, setTypingPulse] = useState(0);
 
   const ping = useCallback(() => {
-    setIsTyping(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setIsTyping(false), TYPING_IDLE_MS);
+    setTypingPulse((pulse) => pulse + 1);
   }, []);
 
-  return { isTyping, ping };
+  return { typingPulse, ping };
 }

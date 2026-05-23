@@ -19,7 +19,7 @@
 import { useEffect, useReducer, useRef, type CSSProperties } from "react";
 import { useMachine } from "@xstate/react";
 
-import { ANIMS, FPS, bogartMachine } from "./Bogart.machine";
+import { ANIMS, FPS, IDLE_SLEEP_TIMEOUT, bogartMachine } from "./Bogart.machine";
 
 // Sprite sheets are colocated with this component under packages/ui/static/.
 // Bun's bundler emits each .png as a hashed asset and resolves these imports
@@ -69,7 +69,7 @@ const WALK_SPEED = 1.5; // pixels per frame
 // ── Props ──────────────────────────────────────────────────
 interface BogartProps {
   isQuerying: boolean;
-  isTyping: boolean;
+  typingPulse: number;
   containerWidth: number;
 }
 
@@ -96,9 +96,10 @@ function tickReducer(prev: TickState, action: TickAction): TickState {
 }
 
 // ── Component ──────────────────────────────────────────────
-export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
+export function Bogart({ isQuerying, typingPulse, containerWidth }: BogartProps) {
   const [snapshot, send] = useMachine(bogartMachine);
   const { currentAnim, direction } = snapshot.context;
+  const isIdle = snapshot.matches("idle");
 
   // Frame-rate state stays in React (ticking it through the machine would
   // mean a 6Hz event per Bogart and defeat the point). `frame` and `posX`
@@ -110,15 +111,26 @@ export function Bogart({ isQuerying, isTyping, containerWidth }: BogartProps) {
   const animFinishedRef = useRef(false);
 
   // ── Prop → event bridge ──────────────────────────────────
-  // `snapshot.value` is part of the deps so transitions re-fire this effect
-  // and we can re-send TYPING when state changes mid-typing — that preserves
-  // the old behavior where landing in `idle` while still typing would reset
-  // the 30s idle-sleep timer.
+  // Typing is driven by keystroke pulses instead of machine snapshots. Sending
+  // TYPING from a snapshot.value effect can self-trigger because idle handles
+  // TYPING by re-entering itself to reset its timer.
   useEffect(() => {
-    if (isTyping) send({ type: "TYPING" });
+    if (typingPulse > 0) send({ type: "TYPING" });
+  }, [typingPulse, send]);
+
+  useEffect(() => {
     if (isQuerying) send({ type: "QUERY_START" });
     else send({ type: "QUERY_STOP" });
-  }, [isTyping, isQuerying, snapshot.value, send]);
+  }, [isQuerying, send]);
+
+  // Match the pre-XState behavior: typing while already idle only resets the
+  // sleep timer. It should not replay `sit`, restart frames, or disturb random
+  // idle actions already in progress.
+  useEffect(() => {
+    if (!isIdle) return;
+    const timer = setTimeout(() => send({ type: "IDLE_TIMEOUT" }), IDLE_SLEEP_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [isIdle, typingPulse, send]);
 
   // Reset per-anim render state whenever the machine picks a new clip.
   useEffect(() => {
