@@ -127,6 +127,22 @@ AskUserQuestion EnterPlanMode ExitPlanMode` (same list as `DISALLOWED_TOOLS` in
   headers to learn _today_ whether base-URL forwards the OAuth token. This decides how
   urgently we need Phase 2. Scratch code in `tmp/`.
 
+**✅ Results (2026-05-23, `tmp/cli-runtime-spike/recon.ts`):**
+
+- base-URL pass-through **forwards the OAuth subscription token** (`Authorization: Bearer
+sk-ant-oat01-…`, no `x-api-key`).
+- Anthropic billed it against the **subscription** — response carried
+  `anthropic-ratelimit-unified-5h/-7d` buckets (the Max plan windows), not API rate limits;
+  `overage-status: rejected` (subscription-only org).
+- **SSE streamed through the tee intact** (`message_start → content_block_delta → message_stop`).
+- The request advertised `user-agent: claude-cli/… sdk-ts, agent-sdk/…` + `oauth-2025-04-20`
+  and **still billed as subscription** ⇒ the "SDK outside subscription" enforcement is **not
+  active yet**; the risk is a future client/server change (untestable until enforced).
+
+**Implication:** Phase 1 can be built and validated on **base-URL today**; MITM (Phase 2)
+is the durability hedge, not a blocker. (Recon used `claude -p` — re-confirm auth/billing
+with the real TUI in Phase 1.)
+
 ### Phase 1 — `ClaudeCliRuntime` core (interception-agnostic)
 
 New `packages/agent-host/src/providers/cli/session.ts` implementing `AgentRuntimeSession`.
