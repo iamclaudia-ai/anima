@@ -966,6 +966,38 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("does not recycle when active model differs only by context variant", async () => {
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    // CLI runtime reports the bare model; request carries the [1m] variant.
+    listSpy.mockResolvedValueOnce([
+      {
+        id: "ctx-session",
+        cwd: "/repo/project",
+        model: "claude-opus-4-7",
+        isActive: true,
+        isProcessRunning: true,
+        createdAt: new Date().toISOString(),
+        healthy: true,
+        stale: false,
+        lastActivity: new Date().toISOString(),
+      },
+    ]);
+
+    await ext.handleMethod("session.send_prompt", {
+      sessionId: "ctx-session",
+      cwd: "/repo/project",
+      content: "ping",
+      model: "claude-opus-4-7[1m]",
+      streaming: true,
+    });
+
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    await ext.stop();
+  });
+
   it("delegates interrupt/close/permission/tool_result methods", async () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());

@@ -7,6 +7,7 @@ import { formatMemoryContext, type MemoryContextResult } from "../memory-context
 import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
 import { resolvePersistentSessionForCwd } from "../persistent-sessions";
 import { getRuntime } from "../runtime";
+import { sameModel } from "../model-id";
 import {
   buildElapsedTimeReminder,
   buildSessionStartReminder,
@@ -295,7 +296,7 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
     activeSession &&
     activeSession.isProcessRunning &&
     activeSession.model &&
-    activeSession.model !== state.resolvedModel
+    !sameModel(activeSession.model, state.resolvedModel)
   ) {
     log.warn("Detected model drift; recycling session runtime", {
       sessionId: shortId(state.sessionId),

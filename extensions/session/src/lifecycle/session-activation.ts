@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { getWorkspaceActiveSession } from "../session-store";
 import type { AgentHostSessionInfo } from "../session-types";
 import { getRuntime } from "../runtime";
+import { sameModel } from "../model-id";
 
 const log = createLogger("SessionExt:Activation", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -33,7 +34,7 @@ async function recycleForModelDrift(sessionId: string, desiredModel: string): Pr
     activeSession &&
     activeSession.isProcessRunning &&
     activeSession.model &&
-    activeSession.model !== desiredModel
+    !sameModel(activeSession.model, desiredModel)
   ) {
     log.warn("Detected model drift during switch; recycling session runtime", {
       sessionId: shortId(sessionId),
