@@ -1021,7 +1021,7 @@ Enable the hooks extension in `~/.anima/anima.json`:
 ### Hook Ideas
 
 - **Cost tracker** — accumulate API usage from `session.message_stop` payloads, display running total
-- **Build status** — run `tsc --noEmit` after changes, show pass/fail
+- **Build status** — run `tsgo --noEmit` after changes, show pass/fail
 - **Test runner** — run relevant tests after file changes
 - **Session timer** — track time spent per session
 

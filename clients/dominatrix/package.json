@@ -7,7 +7,7 @@
   "scripts": {
     "build": "bun run bundle.ts",
     "clean": "rm -rf dist build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "pack": "bun run build && cd dist && zip -r ../dominatrix.zip ."
   },
   "dependencies": {

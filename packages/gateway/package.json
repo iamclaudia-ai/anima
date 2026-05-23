@@ -9,7 +9,7 @@
     "start": "bun run src/start.ts",
     "build": "bun build src/start.ts --outdir dist --target bun",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p ../../tsconfig.json"
+    "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@anima/shared": "workspace:*",

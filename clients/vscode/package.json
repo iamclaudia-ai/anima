@@ -19,11 +19,11 @@
   "main": "./dist/extension.js",
   "scripts": {
     "vscode:prepublish": "npm run build",
-    "build": "tsc -p ./ && bun run build-webview.ts",
+    "build": "tsgo -p ./ && bun run build-webview.ts",
     "build:webview": "bun run build-webview.ts",
-    "compile": "tsc -p ./",
-    "typecheck": "tsc -p ./ --noEmit",
-    "watch": "tsc -watch -p ./",
+    "compile": "tsgo -p ./",
+    "typecheck": "tsgo -p ./ --noEmit",
+    "watch": "tsgo --watch -p ./",
     "package": "vsce package",
     "lint": "oxlint src"
   },

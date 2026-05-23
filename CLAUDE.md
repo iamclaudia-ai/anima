@@ -70,7 +70,7 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 - **TTS**: Cartesia Sonic 3.0 (real-time streaming) + ElevenLabs v3 (pre-generated content via text-to-dialogue API)
 - **Network**: Tailscale for secure remote access
 - **Formatting/Linting**: oxfmt + oxlint
-- **Type checking**: tsc (canonical) + tsgo (fast pre-commit)
+- **Type checking**: tsgo (`@typescript/native-preview`)
 
 ## Monorepo Structure
 
@@ -224,14 +224,14 @@ bun run test:smoke       # Quick smoke test (health + method.list)
 bun run test:e2e         # Full E2E with model call
 
 # Type check
-bun run typecheck        # Canonical (tsc)
-bun run typecheck:fast   # Fast (tsgo, used in pre-commit)
+bun run typecheck        # tsgo (TypeScript native preview)
+bun run typecheck:fast   # tsgo against the monorepo-wide tsconfig.tsgo.json
 ```
 
 ### Git Hooks (Husky)
 
-- **Pre-commit**: Fast typecheck (`tsgo`) + lint-staged (`oxfmt` + `oxlint` on staged files)
-- **Pre-push**: Canonical typecheck (`tsc`) + unit tests
+- **Pre-commit**: Typecheck (`tsgo`) + lint-staged (`oxfmt` + `oxlint` on staged files)
+- **Pre-push**: Typecheck (`tsgo`) + unit tests
 
 ## Code Style
 

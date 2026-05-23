@@ -7,9 +7,7 @@ Last updated: 2026-02-20
 This repo is Bun-first across packages, extensions, and most clients.
 
 - Package manager/runtime: `bun`
-- TypeScript checking:
-  - Fast local check: `tsgo` (TypeScript native preview)
-  - Canonical check: `tsc`
+- TypeScript checking: `tsgo` (TypeScript native preview)
 - Linting: `oxlint`
 - Formatting: `oxfmt`
 - Git hooks: `husky`

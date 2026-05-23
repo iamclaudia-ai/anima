@@ -18,7 +18,7 @@
     "build": "bun run bundle.ts",
     "clean": "rm -rf dist *.vsix",
     "package": "bun run build && bunx @vscode/vsce package --skip-license --no-dependencies --out anima-bridge.vsix",
-    "typecheck": "tsc --noEmit -p ./"
+    "typecheck": "tsgo --noEmit -p ./"
   },
   "dependencies": {
     "ws": "^8.18.0"

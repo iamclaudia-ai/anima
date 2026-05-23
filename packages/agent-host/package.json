@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit -p ../../tsconfig.json"
+    "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@anima/shared": "workspace:*",
