@@ -252,6 +252,22 @@ export class AnthropicTeeProxy {
     const ctx: StreamContext = { isAgentTurn: isAgentRequest(parsed) };
     if (parsed && this.opts.onRequestBody) this.opts.onRequestBody(parsed, ctx);
 
+    // Strip the Anima `[1m]` variant from the model on the wire: the CLI keeps it
+    // for its own 1M context accounting (meter + compaction threshold), but
+    // api.anthropic.com rejects it (404). The 1M window is carried by the beta
+    // header injected above. `parsed` is left untouched so capture shows what the
+    // CLI actually sent.
+    let forwardBody: ArrayBuffer | string | undefined = body;
+    if (parsed && typeof parsed === "object") {
+      const m = (parsed as { model?: unknown }).model;
+      if (typeof m === "string" && /\[[^\]]*\]\s*$/.test(m)) {
+        forwardBody = JSON.stringify({
+          ...(parsed as Record<string, unknown>),
+          model: m.replace(/\[[^\]]*\]\s*$/, "").trim(),
+        });
+      }
+    }
+
     const model =
       parsed && typeof parsed === "object" ? (parsed as { model?: unknown }).model : undefined;
     log.info("→ request", {
@@ -281,7 +297,7 @@ export class AnthropicTeeProxy {
       upstream = await fetch(ANTHROPIC_API + url.pathname + url.search, {
         method: req.method,
         headers,
-        body,
+        body: forwardBody,
       });
     } catch (err) {
       log.warn("upstream fetch failed", { error: String(err) });

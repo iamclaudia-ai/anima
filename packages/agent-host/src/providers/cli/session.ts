@@ -100,7 +100,14 @@ export class ClaudeCliSession extends EventEmitter {
   private proxyPort = 0;
 
   private readonly cwd: string;
+  /** Bare model id (suffix stripped) — used only for getInfo() reporting. */
   private readonly model: string;
+  /**
+   * Model id passed to the CLI's `--model`. Keeps the `[1m]` variant so the TUI's
+   * context meter and auto-compaction threshold use the 1M window; the proxy
+   * rewrites it to the bare id on the wire so the API never sees `[1m]`.
+   */
+  private readonly cliModel: string;
   /** True when the configured model carried the `[1m]` 1M-context variant. */
   private readonly wants1m: boolean;
   private readonly systemPrompt?: string;
@@ -129,6 +136,7 @@ export class ClaudeCliSession extends EventEmitter {
     const rawModel = options.model || config.model || "claude-opus-4-6";
     this.wants1m = /\[1m\]/i.test(rawModel);
     this.model = sanitizeModel(rawModel);
+    this.cliModel = rawModel;
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.isResume = isResume;
   }
@@ -165,7 +173,7 @@ export class ClaudeCliSession extends EventEmitter {
     const args = this.isResume ? ["--resume", this.id] : ["--session-id", this.id];
     args.push(
       "--model",
-      this.model,
+      this.cliModel,
       "--dangerously-skip-permissions",
       "--disallowedTools",
       DISALLOWED_TOOLS,
