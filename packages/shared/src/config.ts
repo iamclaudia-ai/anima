@@ -119,6 +119,8 @@ export interface AgentHostConfig {
     cliPath?: string;
     basePort?: number;
     interception?: "base-url" | "mitm";
+    /** Append full request/response JSON to ~/.anima/logs/cli-proxy-capture.jsonl. */
+    capture?: boolean;
   };
 }
 

@@ -12,6 +12,7 @@
  */
 
 import { createLogger } from "@anima/shared";
+import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { StreamEvent } from "../../provider-types";
@@ -19,6 +20,14 @@ import type { StreamEvent } from "../../provider-types";
 const log = createLogger("CliProxy", join(homedir(), ".anima", "logs", "agent-host.log"));
 
 const ANTHROPIC_API = "https://api.anthropic.com";
+
+/**
+ * Full request + response capture sink — one JSON line per request, written only
+ * when the `capture` option is on. Lets us classify agent vs auxiliary calls
+ * (title-gen, suggestion, topic, quota) by FACT instead of heuristic: grep the
+ * generated text, then read that line's request to see what marks it.
+ */
+const CAPTURE_FILE = join(homedir(), ".anima", "logs", "cli-proxy-capture.jsonl");
 
 /** Per-stream context derived from the originating request. */
 export interface StreamContext {
@@ -37,21 +46,92 @@ export interface TeeProxyOptions {
   onEvent: (event: StreamEvent, ctx: StreamContext) => void;
   /** Called with each parsed JSON request body (for tool_result extraction). */
   onRequestBody?: (body: unknown, ctx: StreamContext) => void;
+  /** When true, append full request + response JSON to CAPTURE_FILE. */
+  capture?: boolean;
 }
 
 /**
- * Distinguish a real agent turn from Claude Code's auxiliary calls. The agent
- * loop always sends the full toolset and a large system prompt; title-gen, the
- * `max_tokens:1` quota probe, and topic detection send neither.
+ * Concatenate the text of the final user message — used to sniff internal
+ * maintenance calls that masquerade as agent turns (see isCompactionRequest).
+ */
+function lastUserText(body: unknown): string {
+  if (!body || typeof body !== "object") return "";
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages) || messages.length === 0) return "";
+  const last = messages[messages.length - 1] as { role?: string; content?: unknown };
+  if (last?.role !== "user") return "";
+  if (typeof last.content === "string") return last.content;
+  if (!Array.isArray(last.content)) return "";
+  return (last.content as Array<Record<string, unknown>>)
+    .map((b) => (b && typeof b === "object" ? String(b.text ?? "") : ""))
+    .join(" ");
+}
+
+/**
+ * Detect Claude Code's auto-compaction call. It reuses the full agent toolset
+ * and system prompt — so it looks identical to a real turn by tools/system
+ * alone — but appends a summary instruction as the final user content block and
+ * streams an `<analysis>`/`<summary>` blob. Confirmed by capture: it is the only
+ * 32-tool request carrying this instruction. Its output must stay OUT of chat.
+ */
+function isCompactionRequest(body: unknown): boolean {
+  return /create a detailed summary of the conversation/i.test(lastUserText(body));
+}
+
+/**
+ * Distinguish a real agent turn from Claude Code's internal calls. Two facts,
+ * both verified against the proxy capture:
+ *   1. Real turns always carry the Claude Code toolset; auxiliary calls
+ *      (title-gen, the `max_tokens:1` quota probe, topic/count_tokens) send no
+ *      tools.
+ *   2. Auto-compaction DOES carry the toolset, so tools alone is insufficient —
+ *      it is excluded by its summary-instruction signature.
  */
 function isAgentRequest(body: unknown): boolean {
   if (!body || typeof body !== "object") return false;
-  const b = body as { tools?: unknown; system?: unknown };
-  if (Array.isArray(b.tools) && b.tools.length > 0) return true;
-  const sys = b.system;
-  const sysLen =
-    typeof sys === "string" ? sys.length : Array.isArray(sys) ? JSON.stringify(sys).length : 0;
-  return sysLen > 5000;
+  const b = body as { tools?: unknown };
+  if (!Array.isArray(b.tools) || b.tools.length === 0) return false;
+  if (isCompactionRequest(body)) return false;
+  return true;
+}
+
+/**
+ * Summarize auth-bearing headers WITHOUT leaking the secret — so the request log
+ * tells us whether the CLI is authenticating (and how) without writing tokens to
+ * disk. This is the key diagnostic for the base-URL-vs-OAuth question: if both
+ * `authorization` and `x-api-key` are `false`, the CLI is sending the request
+ * unauthenticated (api.anthropic.com will answer 401).
+ */
+function authSummary(h: Headers): Record<string, string | boolean> {
+  const authz = h.get("authorization");
+  const apiKey = h.get("x-api-key");
+  const beta = h.get("anthropic-beta");
+  return {
+    authorization: authz ? `${authz.split(" ")[0] || "?"}(len=${authz.length})` : false,
+    xApiKey: apiKey ? `present(len=${apiKey.length})` : false,
+    anthropicBeta: beta ?? false,
+  };
+}
+
+/** Dump all headers for capture, masking only the secret-bearing ones. */
+function dumpHeaders(h: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of h) {
+    const lk = k.toLowerCase();
+    out[k] =
+      lk === "authorization" || lk === "x-api-key" || lk === "cookie"
+        ? `${v.slice(0, 8)}…(len=${v.length})`
+        : v;
+  }
+  return out;
+}
+
+function tryJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export class AnthropicTeeProxy {
@@ -93,6 +173,16 @@ export class AnthropicTeeProxy {
     this.server = null;
   }
 
+  /** Append a full request/response record to the capture file (best-effort). */
+  private capture(record: Record<string, unknown>): void {
+    if (!this.opts.capture) return;
+    try {
+      appendFileSync(CAPTURE_FILE, JSON.stringify(record) + "\n");
+    } catch {
+      // capture is best-effort debug aid — never let it break the proxy
+    }
+  }
+
   private async handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const headers = new Headers(req.headers);
@@ -113,6 +203,28 @@ export class AnthropicTeeProxy {
     const ctx: StreamContext = { isAgentTurn: isAgentRequest(parsed) };
     if (parsed && this.opts.onRequestBody) this.opts.onRequestBody(parsed, ctx);
 
+    const model =
+      parsed && typeof parsed === "object" ? (parsed as { model?: unknown }).model : undefined;
+    log.info("→ request", {
+      method: req.method,
+      path: url.pathname,
+      agentTurn: ctx.isAgentTurn,
+      model: typeof model === "string" ? model : undefined,
+      auth: authSummary(headers),
+    });
+
+    // Capture metadata carried into all response branches (one line per request).
+    const reqMeta: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      port: this._port,
+      method: req.method,
+      path: url.pathname + url.search,
+      isAgentTurn: ctx.isAgentTurn,
+      model: typeof model === "string" ? model : undefined,
+      reqHeaders: dumpHeaders(headers),
+      request: parsed ?? (body ? "(non-JSON body)" : null),
+    };
+
     let upstream: Response;
     try {
       upstream = await fetch(ANTHROPIC_API + url.pathname + url.search, {
@@ -122,6 +234,7 @@ export class AnthropicTeeProxy {
       });
     } catch (err) {
       log.warn("upstream fetch failed", { error: String(err) });
+      this.capture({ ...reqMeta, error: String(err) });
       return new Response("proxy upstream error", { status: 502 });
     }
 
@@ -130,23 +243,54 @@ export class AnthropicTeeProxy {
     outHeaders.delete("content-length");
 
     const ct = upstream.headers.get("content-type") || "";
+    log.info("← upstream", { status: upstream.status, ct: ct.split(";")[0] || "(none)" });
+
+    // Non-OK responses are short and crucial for diagnosis (401/403 auth, 400
+    // bad model, 429 quota). Read the body, log a snippet, and pass it through.
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      log.warn("← upstream error body", { status: upstream.status, body: errText.slice(0, 800) });
+      this.capture({ ...reqMeta, status: upstream.status, ct, responseBody: tryJson(errText) });
+      return new Response(errText, { status: upstream.status, headers: outHeaders });
+    }
+
     if (ct.includes("text/event-stream") && upstream.body) {
+      log.info("← SSE stream start", { agentTurn: ctx.isAgentTurn });
       const [logStream, passStream] = upstream.body.tee();
-      void this.consume(logStream, ctx);
+      void this.consume(logStream, ctx, { ...reqMeta, status: upstream.status, ct });
       return new Response(passStream, { status: upstream.status, headers: outHeaders });
     }
 
-    return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
+    // Non-SSE OK responses (e.g. count_tokens) — read for capture, then forward.
+    const text = await upstream.text();
+    this.capture({ ...reqMeta, status: upstream.status, ct, responseBody: tryJson(text) });
+    return new Response(text, { status: upstream.status, headers: outHeaders });
   }
 
-  private async consume(stream: ReadableStream<Uint8Array>, ctx: StreamContext): Promise<void> {
+  private async consume(
+    stream: ReadableStream<Uint8Array>,
+    ctx: StreamContext,
+    capMeta: Record<string, unknown>,
+  ): Promise<void> {
     const reader = stream.getReader();
     const dec = new TextDecoder();
     let buf = "";
+    // Streaming-vs-buffered instrumentation: if firstDeltaMs ≪ totalMs (deltas
+    // spread over many reads), the stream is genuinely incremental. If they
+    // cluster at the end, something upstream is buffering the whole response.
+    const t0 = performance.now();
+    let firstDeltaMs = -1;
+    let deltas = 0;
+    let reads = 0;
+    // Full-capture accumulators (only populated when capture is on).
+    const cap = this.opts.capture === true;
+    const events: unknown[] = [];
+    let assembled = "";
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        reads++;
         buf += dec.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
@@ -155,7 +299,17 @@ export class AnthropicTeeProxy {
           const data = line.slice(5).trim();
           if (!data || data === "[DONE]") continue;
           try {
-            this.opts.onEvent(JSON.parse(data) as StreamEvent, ctx);
+            const ev = JSON.parse(data) as StreamEvent;
+            if ((ev as { type?: string }).type === "content_block_delta") {
+              deltas++;
+              if (firstDeltaMs < 0) firstDeltaMs = Math.round(performance.now() - t0);
+            }
+            if (cap) {
+              events.push(ev);
+              const d = (ev as { delta?: { type?: string; text?: string } }).delta;
+              if (d?.type === "text_delta" && d.text) assembled += d.text;
+            }
+            this.opts.onEvent(ev, ctx);
           } catch {
             // partial / non-JSON data line — ignore
           }
@@ -164,5 +318,14 @@ export class AnthropicTeeProxy {
     } catch (err) {
       log.warn("SSE consume error", { error: String(err) });
     }
+    if (ctx.isAgentTurn) {
+      log.info("← SSE complete", {
+        deltas,
+        reads,
+        firstDeltaMs,
+        totalMs: Math.round(performance.now() - t0),
+      });
+    }
+    this.capture({ ...capMeta, responseText: assembled, responseEvents: events });
   }
 }

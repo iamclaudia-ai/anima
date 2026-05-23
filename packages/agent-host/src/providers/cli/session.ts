@@ -40,6 +40,8 @@ export interface ClaudeCliProviderConfig {
   interception?: "base-url" | "mitm";
   /** Fallback model when the session options omit one. */
   model?: string;
+  /** Append full request/response JSON to the proxy capture file (debugging). */
+  capture?: boolean;
 }
 
 const DEFAULT_BASE_PORT = 9000;
@@ -71,6 +73,16 @@ function promptToText(content: string | unknown[]): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Strip an Anima model-variant suffix like "[1m]" before passing `--model` to
+ * the CLI. Anthropic rejects "claude-opus-4-7[1m]" as a model name (404
+ * not_found); the 1M context window rides on the `context-1m-2025-08-07` beta
+ * header the CLI sends automatically, so the bare model id is what we want.
+ */
+function sanitizeModel(model: string): string {
+  return model.replace(/\[[^\]]*\]\s*$/, "").trim();
 }
 
 /** Deterministic port from session id so resume reuses the same proxy. */
@@ -112,7 +124,7 @@ export class ClaudeCliSession extends EventEmitter {
     this.id = id;
     this.tmuxName = `anima-cli-${id}`;
     this.cwd = options.cwd;
-    this.model = options.model || config.model || "claude-opus-4-6";
+    this.model = sanitizeModel(options.model || config.model || "claude-opus-4-6");
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.isResume = isResume;
   }
@@ -124,6 +136,7 @@ export class ClaudeCliSession extends EventEmitter {
       port: derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id),
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
       onRequestBody: (b, ctx) => this.handleRequestBody(b, ctx),
+      capture: this.config.capture,
     });
     this.proxyPort = this.proxy.start();
 
@@ -191,10 +204,20 @@ export class ClaudeCliSession extends EventEmitter {
   async prompt(content: string | unknown[]): Promise<void> {
     if (!this._isStarted) throw new Error("Session not started");
     const text = promptToText(content);
-    if (!text.trim()) return;
+    log.info("prompt received", {
+      id: this.id.slice(0, 8),
+      chars: text.length,
+      contentType:
+        typeof content === "string" ? "string" : Array.isArray(content) ? "array" : typeof content,
+    });
+    if (!text.trim()) {
+      log.warn("prompt resolved to empty text — nothing sent to TUI", { id: this.id.slice(0, 8) });
+      return;
+    }
     this.lastActivityTime = Date.now();
     this._turnActive = true;
     await sendText(this.tmuxName, text);
+    log.info("prompt pasted to tmux", { id: this.id.slice(0, 8), tmux: this.tmuxName });
   }
 
   interrupt(): void {
