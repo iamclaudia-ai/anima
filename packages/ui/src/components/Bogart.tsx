@@ -50,12 +50,6 @@ const BOGART_CONTAINER_STATIC: CSSProperties = {
   transition: "left 0.05s linear",
 };
 
-/**
- * Bogart sprite sheet URLs, exported so consumers (e.g. the bogart
- * scratchpad page) can reference them without re-importing the binary.
- */
-export const BOGART_SPRITE_URLS = [sprite1Url, sprite2Url, sprite3Url] as const;
-
 const SHEETS = [
   { src: sprite1Url, baselines: [301, 301, 305, 307, 310, 315] },
   { src: sprite2Url, baselines: [302, 305, 316, 313, 312, 313] },
