@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 
 bun run typecheck || exit 1
-bunx lint-staged
+bunx lint-staged --quiet
