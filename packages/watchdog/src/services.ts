@@ -57,7 +57,7 @@ async function captureLoginShellEnv(): Promise<Record<string, string>> {
 }
 
 // Captured once at startup — all services inherit this full environment.
-const LOGIN_ENV: Record<string, string> = await captureLoginShellEnv();
+export const LOGIN_ENV: Record<string, string> = await captureLoginShellEnv();
 log(
   "INFO",
   `Login shell env captured: ${Object.keys(LOGIN_ENV).length} variables (OPENAI_API_KEY=${LOGIN_ENV.OPENAI_API_KEY ? "set" : "missing"}, PATH entries=${LOGIN_ENV.PATH?.split(":").length ?? 0})`,

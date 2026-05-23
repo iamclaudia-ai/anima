@@ -28,6 +28,7 @@ import {
 } from "./services";
 import { listLogFiles, tailLogFile } from "./logs";
 import { getStatus } from "./status";
+import { ensureClaudeUpToDate } from "./claude-update";
 import dashboard from "./dashboard/index.html";
 
 // ── HTTP Server ──────────────────────────────────────────
@@ -99,6 +100,10 @@ console.log(`
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
+
+// Keep the Claude CLI current before services boot — the agent-host's CLI
+// runtime spawns whatever `claude` resolves to at session time.
+await ensureClaudeUpToDate();
 
 // Start services — spawn as direct child processes
 for (const [_id, service] of Object.entries(services)) {
