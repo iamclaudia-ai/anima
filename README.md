@@ -123,8 +123,7 @@ anima/
 ```bash
 bun run dev              # Start gateway (serves everything)
 bun test                 # Run tests
-bun run typecheck        # Type check (canonical)
-bun run typecheck:fast   # Fast type check via tsgo (used in pre-commit)
+bun run typecheck        # Type check (tsgo)
 ```
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for the full guide including git hooks, testing strategy, and workspace conventions.

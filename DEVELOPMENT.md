@@ -40,14 +40,6 @@ bun run build
 
 ### Typecheck
 
-Fast (pre-commit oriented):
-
-```bash
-bun run typecheck:fast
-```
-
-Canonical (authoritative):
-
 ```bash
 bun run typecheck
 ```
@@ -127,7 +119,7 @@ bun run test:smoke-all
 
 Runs:
 
-1. `bun run typecheck:fast`
+1. `bun run typecheck`
 2. `lint-staged`
 
 `lint-staged` tasks:

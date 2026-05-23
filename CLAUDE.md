@@ -225,7 +225,6 @@ bun run test:e2e         # Full E2E with model call
 
 # Type check
 bun run typecheck        # tsgo (TypeScript native preview)
-bun run typecheck:fast   # tsgo against the monorepo-wide tsconfig.tsgo.json
 ```
 
 ### Git Hooks (Husky)
