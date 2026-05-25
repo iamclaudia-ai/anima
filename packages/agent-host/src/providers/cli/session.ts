@@ -27,7 +27,16 @@ import type {
   StreamEvent,
 } from "../../provider-types";
 import { AnthropicTeeProxy, type StreamContext } from "./proxy";
-import { capturePane, hasSession, killSession, newSession, sendKey, sendText } from "./tmux";
+import {
+  capturePane,
+  claudeProcessAlive,
+  hasSession,
+  killSession,
+  newSession,
+  runInPane,
+  sendKey,
+  sendText,
+} from "./tmux";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -116,6 +125,8 @@ export class ClaudeCliSession extends EventEmitter {
   private _isStarted = false;
   private _isClosed = false;
   private _turnActive = false;
+  /** True once claude has been launched at least once — recovery uses --resume. */
+  private _launched = false;
 
   // Turn tracking — the latest non-terminal/terminal stop reason on the agent stream.
   private lastStopReason = "";
@@ -143,7 +154,18 @@ export class ClaudeCliSession extends EventEmitter {
 
   async start(): Promise<void> {
     if (this._isStarted) throw new Error("Session already started");
+    const reused = await this.ensureRunning();
+    this._isStarted = true;
+    this._isClosed = false;
+    this.lastActivityTime = Date.now();
+    this.emit("ready", { sessionId: this.id });
+    this.emit("process_started");
+    log.info("Started", { id: this.id.slice(0, 8), port: this.proxyPort, reuse: reused });
+  }
 
+  /** Lazily (re)start the tee proxy on this session's deterministic port. */
+  private ensureProxy(): void {
+    if (this.proxy) return;
     this.proxy = new AnthropicTeeProxy({
       port: derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id),
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
@@ -152,25 +174,45 @@ export class ClaudeCliSession extends EventEmitter {
       context1m: this.wants1m,
     });
     this.proxyPort = this.proxy.start();
-
-    const reuse = this.isResume && hasSession(this.tmuxName);
-    if (!reuse) {
-      killSession(this.tmuxName);
-      this.spawn();
-      await this.waitForReady();
-    }
-
-    this._isStarted = true;
-    this._isClosed = false;
-    this.lastActivityTime = Date.now();
-    this.emit("ready", { sessionId: this.id });
-    this.emit("process_started");
-    log.info("Started", { id: this.id.slice(0, 8), port: this.proxyPort, reuse });
   }
 
-  private spawn(): void {
+  /**
+   * Make the runtime live: proxy up, tmux pane up, and the `claude` process
+   * actually running. Recovers whatever is missing and returns true only when a
+   * fully-healthy session was reused untouched.
+   *
+   * - pane + claude alive → reuse as-is.
+   * - pane alive, claude dead → relaunch in-pane (keeps any attached client).
+   * - no pane → spawn a fresh detached session.
+   *
+   * Throws if claude still isn't running after a (re)launch so the caller can
+   * surface the failure instead of silently pasting into a dead pane.
+   */
+  private async ensureRunning(): Promise<boolean> {
+    this.ensureProxy();
+
+    if (hasSession(this.tmuxName) && claudeProcessAlive(this.id)) return true;
+
+    if (hasSession(this.tmuxName)) {
+      // Pane survived but claude exited (crash, or a manually re-created shell).
+      this.launchInPane();
+    } else {
+      killSession(this.tmuxName); // clear any half-dead record
+      this.spawn();
+    }
+    await this.waitForReady();
+
+    if (!claudeProcessAlive(this.id)) {
+      throw new Error(`Claude CLI failed to start in tmux session ${this.tmuxName}`);
+    }
+    this._isClosed = false;
+    return false;
+  }
+
+  /** Build the claude argv + env. `resume` picks --resume vs --session-id. */
+  private claudeCommand(resume: boolean): { command: string[]; env: Record<string, string> } {
     const claudeBin = findClaude(this.config.cliPath);
-    const args = this.isResume ? ["--resume", this.id] : ["--session-id", this.id];
+    const args = resume ? ["--resume", this.id] : ["--session-id", this.id];
     args.push(
       "--model",
       this.cliModel,
@@ -181,9 +223,7 @@ export class ClaudeCliSession extends EventEmitter {
     if (this.systemPrompt && this.systemPrompt.trim()) {
       args.push("--append-system-prompt", this.systemPrompt.trim());
     }
-    newSession({
-      name: this.tmuxName,
-      cwd: this.cwd,
+    return {
       command: [claudeBin, ...args],
       // Force the subscription OAuth path: clear any API-key vars and point the
       // CLI at our proxy.
@@ -192,7 +232,21 @@ export class ClaudeCliSession extends EventEmitter {
         ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_BASE_URL: `http://localhost:${this.proxyPort}`,
       },
-    });
+    };
+  }
+
+  private spawn(): void {
+    // First launch of a freshly-created session creates it (--session-id); every
+    // later (re)launch resumes the now-existing session.
+    const { command, env } = this.claudeCommand(this.isResume || this._launched);
+    newSession({ name: this.tmuxName, cwd: this.cwd, command, env });
+    this._launched = true;
+  }
+
+  private launchInPane(): void {
+    const { command, env } = this.claudeCommand(true);
+    runInPane(this.tmuxName, command, env);
+    this._launched = true;
   }
 
   /** Poll the pane until the TUI input box renders (or content stabilizes). */
@@ -215,7 +269,6 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   async prompt(content: string | unknown[]): Promise<void> {
-    if (!this._isStarted) throw new Error("Session not started");
     const text = promptToText(content);
     log.info("prompt received", {
       id: this.id.slice(0, 8),
@@ -226,6 +279,17 @@ export class ClaudeCliSession extends EventEmitter {
     if (!text.trim()) {
       log.warn("prompt resolved to empty text — nothing sent to TUI", { id: this.id.slice(0, 8) });
       return;
+    }
+    // Durability: verify (and recover) proxy + tmux + claude before every send,
+    // so an idle-reaped, crashed, or hand-recreated session heals automatically
+    // instead of pasting into a dead or shell-only pane.
+    const reused = await this.ensureRunning();
+    this._isStarted = true;
+    if (!reused) {
+      log.info("prompt recovered dead runtime before send", {
+        id: this.id.slice(0, 8),
+        tmux: this.tmuxName,
+      });
     }
     this.lastActivityTime = Date.now();
     this._turnActive = true;
@@ -269,7 +333,7 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   get isProcessRunning(): boolean {
-    return this.proxy !== null && hasSession(this.tmuxName);
+    return this.proxy !== null && hasSession(this.tmuxName) && claudeProcessAlive(this.id);
   }
 
   getInfo(): AgentRuntimeSessionInfo {
