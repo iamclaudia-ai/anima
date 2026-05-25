@@ -14,6 +14,12 @@
 import { createLogger } from "@anima/shared";
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import {
+  createServer as netServer,
+  connect as netConnect,
+  type Server,
+  type Socket,
+} from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { StreamEvent } from "../../provider-types";
@@ -62,10 +68,22 @@ export interface TeeProxyOptions {
    * broken `[1m]` preflight 404) while keeping the 1M context window.
    */
   context1m?: boolean;
+  /**
+   * Transport. "base-url" (default) serves plain HTTP and the CLI targets it via
+   * ANTHROPIC_BASE_URL. "mitm" runs an HTTPS_PROXY-style CONNECT proxy that
+   * TLS-terminates api.anthropic.com (needs `tls`) and blind-tunnels every other
+   * host — no ANTHROPIC_BASE_URL required.
+   */
+  interception?: "base-url" | "mitm";
+  /** Leaf key+cert (PEM) for the inner TLS server. Required for "mitm". */
+  tls?: { key: string; cert: string };
 }
 
 /** Anthropic beta flag that enables the 1M-token context window. */
 const CONTEXT_1M_BETA = "context-1m-2025-08-07";
+
+/** The one host we decrypt; everything else is blind-tunneled untouched. */
+const MITM_HOST = "api.anthropic.com";
 
 /**
  * Concatenate the text of the final user message — used to sniff internal
@@ -162,6 +180,10 @@ function tryJson(text: string): unknown {
 
 export class AnthropicTeeProxy {
   private server: ReturnType<typeof Bun.serve> | null = null;
+  /** Inner TLS origin server (mitm mode) — same handle() as base-url mode. */
+  private innerServer: ReturnType<typeof Bun.serve> | null = null;
+  /** Outer CONNECT proxy (mitm mode). */
+  private connectServer: Server | null = null;
   private _port = 0;
 
   constructor(private readonly opts: TeeProxyOptions) {}
@@ -170,8 +192,18 @@ export class AnthropicTeeProxy {
     return this._port;
   }
 
-  /** Start listening; returns the actual bound port. */
-  start(): number {
+  /** Start listening; resolves to the actual bound port the CLI should target. */
+  async start(): Promise<number> {
+    if (this.opts.interception === "mitm") {
+      this._port = await this.startMitm();
+      return this._port;
+    }
+    this._port = this.startBaseUrl();
+    return this._port;
+  }
+
+  /** base-url transport: a plain-HTTP origin the CLI hits via ANTHROPIC_BASE_URL. */
+  private startBaseUrl(): number {
     let port = this.opts.port;
     for (let attempt = 0; attempt < 50; attempt++) {
       try {
@@ -180,7 +212,6 @@ export class AnthropicTeeProxy {
           idleTimeout: 0, // never time out long-lived SSE streams
           fetch: (req) => this.handle(req),
         });
-        this._port = port;
         return port;
       } catch (err) {
         const s = String(err);
@@ -194,9 +225,80 @@ export class AnthropicTeeProxy {
     throw new Error("CliProxy: no available port");
   }
 
+  /**
+   * mitm transport: an inner Bun.serve TLS origin (reusing handle()) plus an
+   * outer CONNECT proxy. Bun can't drive a TLS handshake on a hijacked socket
+   * (the Node `emit("connection")` trick fails), so we pipe the CONNECT'd socket
+   * into the inner TLS listener, which terminates TLS natively. Returns the outer
+   * port (what goes in HTTPS_PROXY).
+   */
+  private async startMitm(): Promise<number> {
+    if (!this.opts.tls) throw new Error("CliProxy: mitm interception requires tls key+cert");
+    this.innerServer = Bun.serve({
+      port: 0, // ephemeral; the CLI never targets it directly
+      tls: this.opts.tls,
+      idleTimeout: 0,
+      fetch: (req) => this.handle(req),
+    });
+    const innerPort = this.innerServer.port;
+    if (innerPort == null) throw new Error("CliProxy: inner TLS server has no port");
+    return this.listenConnect(innerPort);
+  }
+
+  /** Bind the outer CONNECT proxy, probing upward from opts.port on EADDRINUSE. */
+  private listenConnect(innerPort: number): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const base = this.opts.port;
+      const tryListen = (port: number): void => {
+        const srv = netServer((socket) => this.onConnect(socket, innerPort));
+        srv.once("error", (err: NodeJS.ErrnoException) => {
+          if (err.code === "EADDRINUSE" && port < base + 50) tryListen(port + 1);
+          else reject(err);
+        });
+        srv.listen(port, "127.0.0.1", () => {
+          this.connectServer = srv;
+          resolve(port);
+        });
+      };
+      tryListen(base);
+    });
+  }
+
+  /**
+   * Handle one CONNECT tunnel: api.anthropic.com is piped into the inner TLS
+   * listener (decrypt + tee); any other host is blind-tunneled to its real
+   * origin. The CLI waits for our 200 before sending TLS bytes, so the single
+   * CONNECT chunk never carries trailing payload.
+   */
+  private onConnect(socket: Socket, innerPort: number): void {
+    socket.once("data", (chunk: Buffer) => {
+      const line = chunk.toString("utf8").split("\r\n")[0];
+      const m = /^CONNECT\s+([^:]+):(\d+)/i.exec(line);
+      if (!m) {
+        socket.end();
+        return;
+      }
+      const host = m[1];
+      const port = Number(m[2]);
+      const mitm = host === MITM_HOST;
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      const up = netConnect(mitm ? innerPort : port, mitm ? "127.0.0.1" : host, () => {
+        socket.pipe(up);
+        up.pipe(socket);
+      });
+      up.on("error", () => socket.destroy());
+      socket.on("error", () => up.destroy());
+    });
+    socket.on("error", () => {});
+  }
+
   stop(): void {
     this.server?.stop(true);
+    this.innerServer?.stop(true);
+    this.connectServer?.close();
     this.server = null;
+    this.innerServer = null;
+    this.connectServer = null;
   }
 
   /** Append a full request/response record to the capture file (best-effort). */

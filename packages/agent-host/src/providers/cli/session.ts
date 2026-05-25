@@ -39,6 +39,7 @@ import {
   submit,
 } from "./tmux";
 import { copyImageToClipboard } from "./image-clipboard";
+import { ensureMitmCerts } from "./mitm-certs";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -138,6 +139,10 @@ export class ClaudeCliSession extends EventEmitter {
   private readonly wants1m: boolean;
   private readonly systemPrompt?: string;
   private readonly isResume: boolean;
+  /** Transport: "base-url" (ANTHROPIC_BASE_URL) or "mitm" (HTTPS_PROXY + CA). */
+  private readonly interception: "base-url" | "mitm";
+  /** CA path for NODE_EXTRA_CA_CERTS — set when interception is "mitm". */
+  private caPath = "";
 
   private _isStarted = false;
   private _isClosed = false;
@@ -167,6 +172,7 @@ export class ClaudeCliSession extends EventEmitter {
     this.cliModel = rawModel;
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.isResume = isResume;
+    this.interception = config.interception === "mitm" ? "mitm" : "base-url";
   }
 
   async start(): Promise<void> {
@@ -181,16 +187,24 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /** Lazily (re)start the tee proxy on this session's deterministic port. */
-  private ensureProxy(): void {
+  private async ensureProxy(): Promise<void> {
     if (this.proxy) return;
+    let tls: { key: string; cert: string } | undefined;
+    if (this.interception === "mitm") {
+      const certs = ensureMitmCerts();
+      tls = { key: certs.key, cert: certs.cert };
+      this.caPath = certs.caPath;
+    }
     this.proxy = new AnthropicTeeProxy({
       port: derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id),
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
       onRequestBody: (b, ctx) => this.handleRequestBody(b, ctx),
       capture: this.config.capture,
       context1m: this.wants1m,
+      interception: this.interception,
+      tls,
     });
-    this.proxyPort = this.proxy.start();
+    this.proxyPort = await this.proxy.start();
   }
 
   /**
@@ -206,7 +220,7 @@ export class ClaudeCliSession extends EventEmitter {
    * surface the failure instead of silently pasting into a dead pane.
    */
   private async ensureRunning(): Promise<boolean> {
-    this.ensureProxy();
+    await this.ensureProxy();
 
     if (hasSession(this.tmuxName) && claudeProcessAlive(this.id)) return true;
 
@@ -240,16 +254,24 @@ export class ClaudeCliSession extends EventEmitter {
     if (this.systemPrompt && this.systemPrompt.trim()) {
       args.push("--append-system-prompt", this.systemPrompt.trim());
     }
-    return {
-      command: [claudeBin, ...args],
-      // Force the subscription OAuth path: clear any API-key vars and point the
-      // CLI at our proxy.
-      env: {
-        ANTHROPIC_API_KEY: "",
-        ANTHROPIC_AUTH_TOKEN: "",
-        ANTHROPIC_BASE_URL: `http://localhost:${this.proxyPort}`,
-      },
+    // Force the subscription OAuth path: clear any API-key vars. Then route the
+    // CLI at our proxy per transport — base-url points ANTHROPIC_BASE_URL at the
+    // origin; mitm sets HTTPS_PROXY + a trusted CA and leaves the base URL unset
+    // (so it talks to the real api.anthropic.com, which we transparently MITM).
+    const env: Record<string, string> = {
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
     };
+    if (this.interception === "mitm") {
+      const proxyUrl = `http://127.0.0.1:${this.proxyPort}`;
+      env.HTTPS_PROXY = proxyUrl;
+      env.HTTP_PROXY = proxyUrl;
+      env.NODE_EXTRA_CA_CERTS = this.caPath;
+      env.ANTHROPIC_BASE_URL = ""; // clear any inherited base url
+    } else {
+      env.ANTHROPIC_BASE_URL = `http://localhost:${this.proxyPort}`;
+    }
+    return { command: [claudeBin, ...args], env };
   }
 
   private spawn(): void {
