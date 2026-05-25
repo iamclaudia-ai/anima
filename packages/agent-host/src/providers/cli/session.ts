@@ -33,10 +33,12 @@ import {
   hasSession,
   killSession,
   newSession,
+  pasteText,
   runInPane,
   sendKey,
-  sendText,
+  submit,
 } from "./tmux";
+import { copyImageToClipboard } from "./image-clipboard";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -58,6 +60,8 @@ const DISALLOWED_TOOLS = "AskUserQuestion,EnterPlanMode,ExitPlanMode";
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence", "max_tokens"]);
 const INIT_TIMEOUT_MS = 12_000;
 const STALE_MS = 5 * 60 * 1000;
+/** Settle time after each Ctrl-V so the TUI reads the clipboard + renders `[Image #N]`. */
+const IMAGE_INGEST_MS = 700;
 
 function findClaude(configPath?: string): string {
   if (configPath && existsSync(configPath)) return configPath;
@@ -70,18 +74,31 @@ function findClaude(configPath?: string): string {
   return Bun.which("claude") ?? "claude";
 }
 
-function promptToText(content: string | unknown[]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((b) => {
-      if (!b || typeof b !== "object") return "";
-      const r = b as Record<string, unknown>;
-      if (r.type === "text") return String(r.text ?? "");
-      if (r.type === "image") return "[image attachment]";
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
+interface ParsedPrompt {
+  text: string;
+  images: Array<{ data: string; mediaType: string }>;
+}
+
+/** Split inbound content into submit text and base64 image attachments. */
+function parsePromptContent(content: string | unknown[]): ParsedPrompt {
+  if (typeof content === "string") return { text: content, images: [] };
+  const images: ParsedPrompt["images"] = [];
+  const textParts: string[] = [];
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    const r = b as Record<string, unknown>;
+    if (r.type === "text") {
+      textParts.push(String(r.text ?? ""));
+    } else if (r.type === "image") {
+      const src = (r.source ?? {}) as Record<string, unknown>;
+      const data = src.data;
+      if (typeof data === "string" && data) {
+        const mediaType = typeof src.media_type === "string" ? src.media_type : "image/png";
+        images.push({ data, mediaType });
+      }
+    }
+  }
+  return { text: textParts.filter(Boolean).join("\n"), images };
 }
 
 /**
@@ -269,15 +286,18 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   async prompt(content: string | unknown[]): Promise<void> {
-    const text = promptToText(content);
+    const { text, images } = parsePromptContent(content);
     log.info("prompt received", {
       id: this.id.slice(0, 8),
       chars: text.length,
+      images: images.length,
       contentType:
         typeof content === "string" ? "string" : Array.isArray(content) ? "array" : typeof content,
     });
-    if (!text.trim()) {
-      log.warn("prompt resolved to empty text — nothing sent to TUI", { id: this.id.slice(0, 8) });
+    if (!text.trim() && images.length === 0) {
+      log.warn("prompt resolved to empty content — nothing sent to TUI", {
+        id: this.id.slice(0, 8),
+      });
       return;
     }
     // Durability: verify (and recover) proxy + tmux + claude before every send,
@@ -293,8 +313,35 @@ export class ClaudeCliSession extends EventEmitter {
     }
     this.lastActivityTime = Date.now();
     this._turnActive = true;
-    await sendText(this.tmuxName, text);
-    log.info("prompt pasted to tmux", { id: this.id.slice(0, 8), tmux: this.tmuxName });
+
+    // Attach images first: load each onto the macOS clipboard and Ctrl-V it into
+    // the input (claude reads the pasteboard on Ctrl-V), giving the TUI time to
+    // ingest and render the `[Image #N]` placeholder before the next paste.
+    let pasted = 0;
+    for (const img of images) {
+      if (copyImageToClipboard(img.data, img.mediaType)) {
+        sendKey(this.tmuxName, "C-v");
+        await new Promise((r) => setTimeout(r, IMAGE_INGEST_MS));
+        pasted++;
+      } else {
+        log.warn("image clipboard paste failed — skipping attachment", {
+          id: this.id.slice(0, 8),
+          mediaType: img.mediaType,
+        });
+      }
+    }
+
+    // Then the text (no submit), then submit the whole turn once.
+    if (text.trim()) {
+      pasteText(this.tmuxName, text);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    submit(this.tmuxName);
+    log.info("prompt submitted to tmux", {
+      id: this.id.slice(0, 8),
+      tmux: this.tmuxName,
+      images: pasted,
+    });
   }
 
   interrupt(): void {

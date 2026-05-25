@@ -106,15 +106,25 @@ export function sendKey(name: string, key: string): void {
 }
 
 /**
- * Send a (possibly multi-line) prompt to the TUI: load it as a tmux buffer and
- * bracketed-paste it (preserves newlines, unlike `send-keys -l`), then submit
- * with Enter after a short settle delay.
+ * Bracketed-paste (possibly multi-line) text into the TUI input WITHOUT
+ * submitting — loads it as a tmux buffer and pastes it (preserves newlines,
+ * unlike `send-keys -l`). Use {@link submit} to send it.
  */
-export async function sendText(name: string, text: string): Promise<void> {
+export function pasteText(name: string, text: string): void {
   tmux(["set-buffer", "--", text]);
   tmux(["paste-buffer", "-t", name, "-d", "-p"]);
-  await new Promise((r) => setTimeout(r, 150));
+}
+
+/** Submit the TUI's current input line (Enter). */
+export function submit(name: string): void {
   tmux(["send-keys", "-t", name, "Enter"]);
+}
+
+/** Paste text and submit it as one turn, after a short settle delay. */
+export async function sendText(name: string, text: string): Promise<void> {
+  pasteText(name, text);
+  await new Promise((r) => setTimeout(r, 150));
+  submit(name);
 }
 
 export function killSession(name: string): void {
