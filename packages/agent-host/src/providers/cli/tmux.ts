@@ -130,3 +130,33 @@ export async function sendText(name: string, text: string): Promise<void> {
 export function killSession(name: string): void {
   if (hasSession(name)) tmux(["kill-session", "-t", name]);
 }
+
+export interface TmuxSessionInfo {
+  name: string;
+  /** Last activity time, unix seconds. */
+  activitySec: number;
+  /** True when one or more clients are attached. */
+  attached: boolean;
+}
+
+/** Snapshot of every tmux session on this host (empty array if tmux is dead). */
+export function listTmuxSessions(): TmuxSessionInfo[] {
+  const out = tmux([
+    "list-sessions",
+    "-F",
+    "#{session_name}\t#{session_activity}\t#{session_attached}",
+  ]);
+  if (!out.trim()) return [];
+  return out
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [name, activity, attached] = line.split("\t");
+      return {
+        name: name ?? "",
+        activitySec: Number(activity) || 0,
+        attached: Number(attached) > 0,
+      };
+    })
+    .filter((s) => s.name);
+}

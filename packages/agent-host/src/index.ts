@@ -7,12 +7,13 @@
  * idle session reap).
  */
 
-import { createLogger } from "@anima/shared";
+import { createLogger, loadConfig } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { createAgentHostServer } from "./server";
+import { killSession, listTmuxSessions } from "./providers/cli/tmux";
 
 const log = createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -25,8 +26,19 @@ function parseMs(value: string | undefined, fallbackMs: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-const IDLE_REAP_INTERVAL_MS = parseMs(process.env.ANIMA_AGENT_IDLE_REAP_INTERVAL_MS, 60000);
-const IDLE_STALE_MS = parseMs(process.env.ANIMA_AGENT_IDLE_STALE_MS, 600000);
+const animaConfig = loadConfig();
+const agentHostConfig = animaConfig.agentHost;
+
+// anima.json wins; env vars override (handy for one-off runs); defaults last.
+const IDLE_STALE_MS = parseMs(
+  process.env.ANIMA_AGENT_IDLE_STALE_MS,
+  agentHostConfig.idleStaleMs ?? 7_200_000,
+);
+const IDLE_REAP_INTERVAL_MS = parseMs(
+  process.env.ANIMA_AGENT_IDLE_REAP_INTERVAL_MS,
+  agentHostConfig.reapIntervalMs ?? 60_000,
+);
+const REAP_TMUX_ORPHANS = agentHostConfig.reapTmuxOrphans !== false;
 
 function forceClearGatewayLocks(): void {
   if (!FORCE_STARTUP) return;
@@ -67,24 +79,51 @@ forceClearGatewayLocks();
 
 const ctx = await createAgentHostServer({ port: PORT });
 
+/**
+ * Reap orphan `anima-session-*` tmux panes from the tmux-wrap PreToolUse hook.
+ * Keeps any pane with an attached client (human is in it) and any pane whose
+ * tmux activity timestamp is within the idle threshold. The corresponding
+ * `anima-cli-*` panes are owned by the agent-host session reaper, not this one.
+ */
+function reapOrphanTmuxPanes(staleMs: number): number {
+  const cutoffSec = (Date.now() - staleMs) / 1000;
+  let killed = 0;
+  for (const s of listTmuxSessions()) {
+    if (!s.name.startsWith("anima-session-")) continue;
+    if (s.attached) continue;
+    if (s.activitySec >= cutoffSec) continue;
+    killSession(s.name);
+    log.info("Reaped orphan tmux pane", {
+      name: s.name,
+      idleSec: Math.floor(Date.now() / 1000 - s.activitySec),
+    });
+    killed++;
+  }
+  return killed;
+}
+
 let idleReapRunning = false;
 const idleReapTimer = setInterval(async () => {
   if (idleReapRunning) return;
-  if (!ctx.sessionHost.reapIdleRunningSessions) return;
   idleReapRunning = true;
   try {
-    const closedIds = await ctx.sessionHost.reapIdleRunningSessions(IDLE_STALE_MS);
-    if (closedIds.length > 0) {
-      for (const [, client] of ctx.clients) {
-        for (const sessionId of closedIds) {
-          client.subscribedSessions.delete(sessionId);
+    if (ctx.sessionHost.reapIdleRunningSessions) {
+      const closedIds = await ctx.sessionHost.reapIdleRunningSessions(IDLE_STALE_MS);
+      if (closedIds.length > 0) {
+        for (const [, client] of ctx.clients) {
+          for (const sessionId of closedIds) {
+            client.subscribedSessions.delete(sessionId);
+          }
         }
+        log.info("Auto-closed idle SDK sessions", {
+          idleMs: IDLE_STALE_MS,
+          count: closedIds.length,
+          sessions: closedIds.map((id) => id.slice(0, 8)),
+        });
       }
-      log.info("Auto-closed idle SDK sessions", {
-        idleMs: IDLE_STALE_MS,
-        count: closedIds.length,
-        sessions: closedIds.map((id) => id.slice(0, 8)),
-      });
+    }
+    if (REAP_TMUX_ORPHANS) {
+      reapOrphanTmuxPanes(IDLE_STALE_MS);
     }
   } catch (error) {
     log.warn("Idle session reaper failed", { error: String(error) });

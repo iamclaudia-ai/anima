@@ -122,6 +122,15 @@ export interface AgentHostConfig {
     /** Append full request/response JSON to ~/.anima/logs/cli-proxy-capture.jsonl. */
     capture?: boolean;
   };
+  /** Idle-reaper: close sessions whose last activity is older than this (ms). */
+  idleStaleMs?: number;
+  /** How often the idle reaper runs (ms). */
+  reapIntervalMs?: number;
+  /**
+   * Also reap orphan `anima-session-*` tmux panes created by the tmux-wrap
+   * PreToolUse hook. Kept only when attached or idle below `idleStaleMs`.
+   */
+  reapTmuxOrphans?: boolean;
 }
 
 export interface FederationPeer {
@@ -175,6 +184,9 @@ const DEFAULT_CONFIG: AnimaConfig = {
   agentHost: {
     url: "ws://localhost:30087/ws",
     port: 30087,
+    idleStaleMs: 7_200_000, // 2 hours
+    reapIntervalMs: 60_000, // 1 minute
+    reapTmuxOrphans: true,
   },
   federation: {
     enabled: false,
