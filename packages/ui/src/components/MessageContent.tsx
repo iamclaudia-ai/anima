@@ -154,18 +154,14 @@ export const MessageContent = memo(function MessageContent({
           }`}
         >
           <div
-            className={`flex items-center gap-1.5 text-sm font-medium ${thinkingConfig.colors.text}`}
+            className={`flex min-w-0 items-center gap-1.5 text-sm font-medium ${thinkingConfig.colors.text}`}
           >
-            {isLoading ? (
-              <Loader2 className={`size-3 animate-spin ${thinkingConfig.colors.iconColor}`} />
-            ) : (
-              thinkingConfig.icon && (
-                <span className={`shrink-0 ${thinkingConfig.colors.iconColor}`}>
-                  {thinkingConfig.icon}
-                </span>
-              )
-            )}
-            <span>{label}</span>
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center ${thinkingConfig.colors.iconColor}`}
+            >
+              {isLoading ? <Loader2 className="size-3 animate-spin" /> : thinkingConfig.icon}
+            </span>
+            <span className="min-w-0 truncate tracking-tight">{label}</span>
           </div>
         </button>
         {isExpanded && hasContent && (
