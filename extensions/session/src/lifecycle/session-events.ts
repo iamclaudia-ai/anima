@@ -3,6 +3,7 @@ import { toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
 import { getWorkspace } from "../workspace";
 import { collectGitStatus } from "../git-status";
+import { cancelPendingGitStatus, noteToolResult, noteToolUseStart } from "./git-status-debouncer";
 import { createLogger, shortId } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -78,7 +79,21 @@ export function wireSessionEvents(): () => void {
       if (delta?.type === "text_delta" && delta.text) {
         rt.sessionActors.appendResponseText(sessionId, delta.text);
       }
+    } else if (payload.type === "content_block_start") {
+      const block = (payload as { content_block?: { type?: string; id?: string; name?: string } })
+        .content_block;
+      if (block?.type === "tool_use" && block.id && block.name) {
+        noteToolUseStart(sessionId, block.id, block.name);
+      }
+    } else if (payload.type === "request_tool_results") {
+      const results = (payload as { tool_results?: Array<{ tool_use_id?: string }> }).tool_results;
+      if (results) {
+        for (const r of results) {
+          if (r.tool_use_id) noteToolResult(sessionId, r.tool_use_id);
+        }
+      }
     } else if (payload.type === "turn_stop") {
+      cancelPendingGitStatus(sessionId);
       updateSessionRuntime(sessionId, "completed", {
         lastAssistantMessageAt: new Date().toISOString(),
       });

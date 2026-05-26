@@ -17,6 +17,7 @@ import {
 import { sendSessionNotification } from "./lifecycle/subagent-events";
 import { listSessions, getHistory, getMemoryContext } from "./lifecycle/session-query";
 import { emitGitStatus } from "./lifecycle/session-events";
+import { dropGitStatusDebounce } from "./lifecycle/git-status-debouncer";
 import { switchSession, resetSession } from "./lifecycle/session-activation";
 import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
 import type { AgentHostSessionInfo } from "./session-types";
@@ -268,6 +269,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       await rt.bridge.closeSession(params.sessionId as string);
       rt.sessionActors.clearSession(params.sessionId as string);
       rt.registry.archiveSession(params.sessionId as string);
+      dropGitStatusDebounce(params.sessionId as string);
       log.info("Session closed", { sessionId: shortId(params.sessionId as string) });
       return { ok: true };
     },
