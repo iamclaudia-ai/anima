@@ -132,6 +132,17 @@ linctl graphql -j -q '<query>' --variables '<json>'
 
 `issueDelete` trashes (soft-deletes / archives) — it won't appear on the active board but lingers under `includeArchived:true` until Linear purges it.
 
+### Closing as duplicate
+
+```bash
+lin dupe BEE-19635 BEE-19285                                   # mark BEE-19635 as duplicate of BEE-19285
+lin dupe BEE-19635 BEE-19285 -b "shipped in PR #23756"          # same + post a comment in one shot
+```
+
+Order matters under the hood: Linear refuses to move an issue into the **Duplicate** workflow state unless the duplicate-of relation already exists (API rejects with `"missing duplicate relation"`). `lin dupe` does relation-then-state-then-optional-comment in the right order. The optional `-b` is recommended when the _why_ isn't obvious from the title — it's the human/AI reasoning the wrapper deliberately doesn't synthesize.
+
+If you ever need to do it by hand (different relation type, batched mutation, etc.) — note that `IssueRelationType` is a GraphQL enum, so the value goes in bare without quotes: `type: duplicate`.
+
 ## Extending it
 
 This tool is built to grow. When a Linear task feels clunky, add a command or flag to `~/dotfiles/scripts/lin.ts` (no build step — `#!/usr/bin/env bun` shebang, edit and run). Default values for beehiiv work live in `~/Projects/beehiiv/CLAUDE.md` (team WEB, assignee michael.carter, current project).

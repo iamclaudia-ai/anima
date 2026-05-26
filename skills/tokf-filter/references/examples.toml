@@ -61,11 +61,11 @@ output = "{1}: {2} → {3}"
 
 # skip: drop lines matching any regex. Applied after [[replace]].
 skip = [
-  "^\\s*$",               # blank lines
-  "^\\s*Downloading ",    # download progress
+  "^\\s*$", # blank lines
+  "^\\s*Downloading ", # download progress
   "^\\s*Downloaded ",
   "^\\s*Locking ",
-  "^\\[=+>\\s*\\]",       # progress bars
+  "^\\[=+>\\s*\\]", # progress bars
 ]
 
 # keep: retain ONLY lines matching any regex. Inverse of skip.
