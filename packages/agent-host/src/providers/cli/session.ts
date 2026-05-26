@@ -321,23 +321,27 @@ export class ClaudeCliSession extends EventEmitter {
     this._launched = true;
   }
 
-  /** Poll the pane until the TUI input box renders (or content stabilizes). */
+  /**
+   * Does this pane capture show a rendered Claude TUI? Catches the input
+   * prompt (`│ >`), the bottom-bar shortcuts hint, and the startup banner.
+   * An empty / whitespace-only pane returns false even if "stable" — the
+   * TUI hasn't painted yet, so pasting into it would land in a void.
+   */
+  private static tuiRendered(pane: string): boolean {
+    return /shortcuts|│\s*>|Welcome to Claude/i.test(pane);
+  }
+
+  /** Poll the pane until the TUI input box renders. */
   private async waitForReady(): Promise<void> {
     const deadline = Date.now() + INIT_TIMEOUT_MS;
-    let last = "";
-    let stable = 0;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 250));
-      const pane = capturePane(this.tmuxName);
-      if (/shortcuts|│\s*>|Welcome to Claude/i.test(pane)) return;
-      if (pane && pane === last) {
-        if (++stable >= 3) return;
-      } else {
-        stable = 0;
-        last = pane;
-      }
+      if (ClaudeCliSession.tuiRendered(capturePane(this.tmuxName))) return;
     }
-    log.warn("waitForReady timed out", { id: this.id.slice(0, 8) });
+    log.warn("waitForReady timed out — no TUI markers in pane", {
+      id: this.id.slice(0, 8),
+      paneTail: this.paneTail(6),
+    });
   }
 
   async prompt(content: string | unknown[]): Promise<void> {
@@ -499,10 +503,11 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Cold-start TUI readiness: keep sampling `capture-pane` until the content
-   * is unchanged across `PANE_IDLE_STABLE_SAMPLES` consecutive captures.
-   * Used only when we have no SSE history to trust — once a turn-bearing
-   * event arrives, `_turnStateKnown` flips and we skip this path entirely.
+   * Cold-start TUI readiness: wait for the pane to (a) actually contain
+   * rendered TUI markers (`│ >` / shortcuts / banner) and (b) be stable
+   * across `PANE_IDLE_STABLE_SAMPLES` consecutive captures. The marker
+   * requirement is what we were missing — an empty pane is "stable" but
+   * very much not ready: pasting lands in a void before the TUI paints.
    */
   private async waitForPaneIdle(deadline: number): Promise<boolean> {
     let last = "";
@@ -510,6 +515,11 @@ export class ClaudeCliSession extends EventEmitter {
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, PANE_IDLE_SAMPLE_MS));
       const pane = capturePane(this.tmuxName);
+      if (!ClaudeCliSession.tuiRendered(pane)) {
+        stable = 0;
+        last = pane;
+        continue;
+      }
       if (pane === last) {
         if (++stable >= PANE_IDLE_STABLE_SAMPLES) return true;
       } else {
