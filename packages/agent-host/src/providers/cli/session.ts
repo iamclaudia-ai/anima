@@ -69,6 +69,14 @@ const PASTE_SETTLE_MS = 200;
 const ECHO_TIMEOUT_MS = 500;
 /** Probe slice we look for in the pane to confirm the paste landed. */
 const ECHO_PROBE_LEN = 40;
+/** Max wait for an in-flight turn to clear before we paste a new prompt. */
+const PROMPT_READY_TIMEOUT_MS = 60_000;
+/** Sample interval for cold-start pane-idle detection. */
+const PANE_IDLE_SAMPLE_MS = 250;
+/** Consecutive unchanged captures that count as "TUI idle". */
+const PANE_IDLE_STABLE_SAMPLES = 3;
+/** Cap on the cold-start idle wait. */
+const PANE_IDLE_TIMEOUT_MS = 10_000;
 
 /** First non-empty trimmed line of the paste, capped — distinctive enough to grep. */
 function echoProbe(text: string): string {
@@ -159,6 +167,13 @@ export class ClaudeCliSession extends EventEmitter {
   private _isStarted = false;
   private _isClosed = false;
   private _turnActive = false;
+  /**
+   * True once we've observed at least one proxy SSE event since (re)start.
+   * Until then, `_turnActive` is just a default — the *actual* TUI could be
+   * mid-turn from before we attached. Cold start uses pane-idle detection to
+   * bootstrap before trusting `_turnActive`.
+   */
+  private _turnStateKnown = false;
   /** True once claude has been launched at least once — recovery uses --resume. */
   private _launched = false;
 
@@ -192,6 +207,9 @@ export class ClaudeCliSession extends EventEmitter {
     const reused = await this.ensureRunning();
     this._isStarted = true;
     this._isClosed = false;
+    // Fresh instance — no SSE history, so we can't trust `_turnActive` until
+    // either a proxy event arrives or pane-idle detection bootstraps us.
+    this._turnStateKnown = false;
     this.lastActivityTime = Date.now();
     this.emit("ready", { sessionId: this.id });
     this.emit("process_started");
@@ -249,6 +267,9 @@ export class ClaudeCliSession extends EventEmitter {
       throw new Error(`Claude CLI failed to start in tmux session ${this.tmuxName}`);
     }
     this._isClosed = false;
+    // We just (re)launched claude; the prior `_turnActive` is stale.
+    this._turnStateKnown = false;
+    this._turnActive = false;
     return false;
   }
 
@@ -352,6 +373,34 @@ export class ClaudeCliSession extends EventEmitter {
       log.info("prompt recovered dead runtime before send", this.stateSnapshot());
     }
     this.lastActivityTime = Date.now();
+
+    // Positive ready signal before pasting: wait for any in-flight turn to
+    // clear (via `_turnActive` from proxy SSE), bootstrapping with pane-idle
+    // detection on cold start when we haven't seen any SSE yet. Never sends
+    // destructive keys to "unstick" the TUI — surface submit_failed instead.
+    const ready = await this.waitForPromptReady(PROMPT_READY_TIMEOUT_MS);
+    if (!ready.ok) {
+      log.warn("TUI not ready for prompt — aborting submit", {
+        ...this.stateSnapshot(),
+        reason: ready.reason,
+      });
+      this.emit("sse", {
+        type: "submit_failed",
+        timestamp: new Date().toISOString(),
+        reason: ready.reason,
+        paneTail: this.paneTail(10),
+        hint:
+          ready.reason === "turn_active"
+            ? "Claude is still working on the previous turn. Wait for it to finish, or interrupt and resend."
+            : "Couldn't confirm the Claude TUI is idle. Send `/restart` if it stays stuck.",
+      } satisfies StreamEvent);
+      this.emit("sse", {
+        type: "turn_stop",
+        timestamp: new Date().toISOString(),
+        stop_reason: "submit_failed",
+      } satisfies StreamEvent);
+      return;
+    }
     this._turnActive = true;
 
     // Attach images first: load each onto the macOS clipboard and Ctrl-V it into
@@ -371,11 +420,13 @@ export class ClaudeCliSession extends EventEmitter {
       }
     }
 
-    // Then the text (no submit), echo-gate it, then submit the whole turn once.
+    // Paste text, verify it echoed in the pane, then submit. No retry-with-Esc:
+    // a missing echo just surfaces submit_failed with paneTail context so the
+    // user can decide (wait / interrupt / /restart) without us blindly
+    // aborting whatever the TUI happens to be doing.
     if (text.trim()) {
-      const landed = await this.pasteWithEchoGate(text);
+      const landed = await this.pasteAndVerifyEcho(text);
       if (!landed) {
-        // Echo gate logged + emitted submit_failed; release the UI spinner.
         this.emit("sse", {
           type: "turn_stop",
           timestamp: new Date().toISOString(),
@@ -414,37 +465,73 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Paste `text` and confirm it appeared in the pane. If the first paste is
-   * silently swallowed (TUI in a /compact confirm modal, stale focus, etc.),
-   * dismiss with Escape and retry once. On final failure, emit a `submit_failed`
-   * SSE so the UI can show a recoverable error instead of looking hung.
+   * Wait until the TUI is ready to accept a paste. Returns a positive-signal
+   * verdict — never sends keystrokes to "unstick" the TUI.
    *
-   * Returns true when the probe was found and the caller should `submit`.
+   * - Hot path (we've observed at least one SSE event from the proxy since
+   *   start/relaunch): just wait for `_turnActive` to clear. Trustworthy
+   *   because the proxy is the source of truth for turn state.
+   * - Cold path (no SSE yet — first prompt after start/resume): bootstrap by
+   *   sampling `capture-pane` until content stabilizes, then re-check
+   *   `_turnActive` (which an in-flight SSE may have flipped during the wait).
+   *
+   * Returns `{ ok: false, reason }` on timeout so the caller can surface a
+   * specific `submit_failed` without blindly aborting in-flight work.
    */
-  private async pasteWithEchoGate(text: string): Promise<boolean> {
+  private async waitForPromptReady(
+    timeoutMs: number,
+  ): Promise<{ ok: true } | { ok: false; reason: "pane_not_idle" | "turn_active" }> {
+    const deadline = Date.now() + timeoutMs;
+
+    if (!this._turnStateKnown) {
+      const idleDeadline = Math.min(deadline, Date.now() + PANE_IDLE_TIMEOUT_MS);
+      if (!(await this.waitForPaneIdle(idleDeadline))) {
+        return { ok: false, reason: "pane_not_idle" };
+      }
+    }
+
+    while (this._turnActive && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (this._turnActive) return { ok: false, reason: "turn_active" };
+
+    return { ok: true };
+  }
+
+  /**
+   * Cold-start TUI readiness: keep sampling `capture-pane` until the content
+   * is unchanged across `PANE_IDLE_STABLE_SAMPLES` consecutive captures.
+   * Used only when we have no SSE history to trust — once a turn-bearing
+   * event arrives, `_turnStateKnown` flips and we skip this path entirely.
+   */
+  private async waitForPaneIdle(deadline: number): Promise<boolean> {
+    let last = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, PANE_IDLE_SAMPLE_MS));
+      const pane = capturePane(this.tmuxName);
+      if (pane === last) {
+        if (++stable >= PANE_IDLE_STABLE_SAMPLES) return true;
+      } else {
+        stable = 0;
+        last = pane;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Paste `text` and confirm it landed in the pane. On miss, surface
+   * `submit_failed` with `paneTail` and return false — no destructive
+   * recovery. The user (or `/restart`) decides next steps.
+   */
+  private async pasteAndVerifyEcho(text: string): Promise<boolean> {
     const probe = echoProbe(text);
     pasteText(this.tmuxName, text);
     await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
     if (await this.waitForEcho(probe, ECHO_TIMEOUT_MS)) return true;
 
-    log.warn("paste echo missing — dismissing modals and retrying once", {
-      ...this.stateSnapshot(),
-      probe,
-      paneTail: this.paneTail(6),
-    });
-    // Escape clears modal prompts (/compact confirm, permission dialogs).
-    // Cost: if a turn was somehow already in flight, it gets interrupted —
-    // acceptable, because the only reason we're here is the user just submitted.
-    sendKey(this.tmuxName, "Escape");
-    await new Promise((r) => setTimeout(r, 250));
-    pasteText(this.tmuxName, text);
-    await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
-    if (await this.waitForEcho(probe, ECHO_TIMEOUT_MS)) {
-      log.info("paste echo recovered after Escape+retry", { id: this.id.slice(0, 8), probe });
-      return true;
-    }
-
-    log.error("paste echo still missing after retry — aborting submit", {
+    log.error("paste echo missing — aborting submit (no blind recovery)", {
       ...this.stateSnapshot(),
       probe,
       paneTail: this.paneTail(10),
@@ -453,7 +540,8 @@ export class ClaudeCliSession extends EventEmitter {
       type: "submit_failed",
       timestamp: new Date().toISOString(),
       reason: "echo_missing",
-      hint: "The Claude TUI didn't echo the prompt — it may be wedged in a modal. Send `/restart` to relaunch.",
+      paneTail: this.paneTail(10),
+      hint: "Paste didn't echo in the TUI. The CLI may be busy or in a modal — try again, or send `/restart` to relaunch.",
     } satisfies StreamEvent);
     return false;
   }
@@ -525,6 +613,7 @@ export class ClaudeCliSession extends EventEmitter {
     this.proxy?.stop();
     this.proxy = null;
     this._isStarted = false;
+    this._turnStateKnown = false;
     this.emit("closed");
     log.info("Released (tmux pane preserved)", {
       id: this.id.slice(0, 8),
@@ -574,6 +663,9 @@ export class ClaudeCliSession extends EventEmitter {
     // never reach the chat — only real agent turns carry the toolset.
     if (!ctx.isAgentTurn) return;
 
+    // Any agent-turn event proves we have a live read on the TUI's turn state;
+    // future prompts can trust `_turnActive` without re-running pane-idle.
+    this._turnStateKnown = true;
     this.lastActivityTime = Date.now();
     const type = event.type;
 
