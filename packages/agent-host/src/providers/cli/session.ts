@@ -322,13 +322,24 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Does this pane capture show a rendered Claude TUI? Catches the input
-   * prompt (`│ >`), the bottom-bar shortcuts hint, and the startup banner.
+   * Does this pane capture show a rendered Claude TUI? Looks for stable
+   * markers that appear in *any* rendered state — fresh launch, resumed
+   * session, mid-turn — so a resumed pane (where the welcome banner has
+   * scrolled off) doesn't get treated as empty.
+   *
+   * - `bypass permissions on` — bottom-bar status text, present once the
+   *   TUI has fully drawn its chrome (every YOLO-mode session, fresh or
+   *   resumed). The reliable marker.
+   * - `⏵⏵` — the bypass-permissions indicator on the same row.
+   * - `│\s*>` — the input box for fresh sessions where the bottom bar
+   *   may be scrolled off in `capture-pane` output.
+   * - `Welcome to Claude` / `Welcome back` — startup banner (fresh launch).
+   *
    * An empty / whitespace-only pane returns false even if "stable" — the
    * TUI hasn't painted yet, so pasting into it would land in a void.
    */
   private static tuiRendered(pane: string): boolean {
-    return /shortcuts|│\s*>|Welcome to Claude/i.test(pane);
+    return /bypass permissions on|⏵⏵|│\s*>|Welcome (to Claude|back)/i.test(pane);
   }
 
   /** Poll the pane until the TUI input box renders. */
