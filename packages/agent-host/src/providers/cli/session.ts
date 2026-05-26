@@ -63,6 +63,18 @@ const INIT_TIMEOUT_MS = 12_000;
 const STALE_MS = 5 * 60 * 1000;
 /** Settle time after each Ctrl-V so the TUI reads the clipboard + renders `[Image #N]`. */
 const IMAGE_INGEST_MS = 700;
+/** Settle delay after a paste before we check the pane echo. */
+const PASTE_SETTLE_MS = 200;
+/** How long to wait for the pasted text to appear in `capture-pane`. */
+const ECHO_TIMEOUT_MS = 500;
+/** Probe slice we look for in the pane to confirm the paste landed. */
+const ECHO_PROBE_LEN = 40;
+
+/** First non-empty trimmed line of the paste, capped — distinctive enough to grep. */
+function echoProbe(text: string): string {
+  const firstLine = text.split("\n").find((l) => l.trim().length > 0) ?? text;
+  return firstLine.trim().slice(0, ECHO_PROBE_LEN);
+}
 
 function findClaude(configPath?: string): string {
   if (configPath && existsSync(configPath)) return configPath;
@@ -310,7 +322,7 @@ export class ClaudeCliSession extends EventEmitter {
   async prompt(content: string | unknown[]): Promise<void> {
     const { text, images } = parsePromptContent(content);
     log.info("prompt received", {
-      id: this.id.slice(0, 8),
+      ...this.stateSnapshot(),
       chars: text.length,
       images: images.length,
       contentType:
@@ -322,16 +334,22 @@ export class ClaudeCliSession extends EventEmitter {
       });
       return;
     }
+
+    // Escape hatch: `/restart` tears the runtime down and relaunches with
+    // --resume, recovering from a wedged TUI (e.g. stuck in /compact confirm,
+    // input swallowed by a modal). Doesn't get pasted to the CLI.
+    if (images.length === 0 && text.trim() === "/restart") {
+      await this.handleRestartCommand();
+      return;
+    }
+
     // Durability: verify (and recover) proxy + tmux + claude before every send,
     // so an idle-reaped, crashed, or hand-recreated session heals automatically
     // instead of pasting into a dead or shell-only pane.
     const reused = await this.ensureRunning();
     this._isStarted = true;
     if (!reused) {
-      log.info("prompt recovered dead runtime before send", {
-        id: this.id.slice(0, 8),
-        tmux: this.tmuxName,
-      });
+      log.info("prompt recovered dead runtime before send", this.stateSnapshot());
     }
     this.lastActivityTime = Date.now();
     this._turnActive = true;
@@ -353,17 +371,122 @@ export class ClaudeCliSession extends EventEmitter {
       }
     }
 
-    // Then the text (no submit), then submit the whole turn once.
+    // Then the text (no submit), echo-gate it, then submit the whole turn once.
     if (text.trim()) {
-      pasteText(this.tmuxName, text);
-      await new Promise((r) => setTimeout(r, 150));
+      const landed = await this.pasteWithEchoGate(text);
+      if (!landed) {
+        // Echo gate logged + emitted submit_failed; release the UI spinner.
+        this.emit("sse", {
+          type: "turn_stop",
+          timestamp: new Date().toISOString(),
+          stop_reason: "submit_failed",
+        } satisfies StreamEvent);
+        this.endTurn();
+        return;
+      }
     }
     submit(this.tmuxName);
     log.info("prompt submitted to tmux", {
-      id: this.id.slice(0, 8),
-      tmux: this.tmuxName,
+      ...this.stateSnapshot(),
       images: pasted,
     });
+  }
+
+  /** Snapshot of runtime state — included in every prompt-path log entry. */
+  private stateSnapshot(): Record<string, unknown> {
+    return {
+      id: this.id.slice(0, 8),
+      tmux: this.tmuxName,
+      tmuxAlive: hasSession(this.tmuxName),
+      claudeAlive: claudeProcessAlive(this.id),
+      started: this._isStarted,
+      closed: this._isClosed,
+      turnActive: this._turnActive,
+      launched: this._launched,
+      proxyPort: this.proxyPort,
+      lastActivityMs: Date.now() - this.lastActivityTime,
+    };
+  }
+
+  /** Last `lines` lines of the pane — handy for "what was on screen when X failed". */
+  private paneTail(lines: number): string {
+    return capturePane(this.tmuxName).split("\n").slice(-lines).join("\n");
+  }
+
+  /**
+   * Paste `text` and confirm it appeared in the pane. If the first paste is
+   * silently swallowed (TUI in a /compact confirm modal, stale focus, etc.),
+   * dismiss with Escape and retry once. On final failure, emit a `submit_failed`
+   * SSE so the UI can show a recoverable error instead of looking hung.
+   *
+   * Returns true when the probe was found and the caller should `submit`.
+   */
+  private async pasteWithEchoGate(text: string): Promise<boolean> {
+    const probe = echoProbe(text);
+    pasteText(this.tmuxName, text);
+    await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
+    if (await this.waitForEcho(probe, ECHO_TIMEOUT_MS)) return true;
+
+    log.warn("paste echo missing — dismissing modals and retrying once", {
+      ...this.stateSnapshot(),
+      probe,
+      paneTail: this.paneTail(6),
+    });
+    // Escape clears modal prompts (/compact confirm, permission dialogs).
+    // Cost: if a turn was somehow already in flight, it gets interrupted —
+    // acceptable, because the only reason we're here is the user just submitted.
+    sendKey(this.tmuxName, "Escape");
+    await new Promise((r) => setTimeout(r, 250));
+    pasteText(this.tmuxName, text);
+    await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
+    if (await this.waitForEcho(probe, ECHO_TIMEOUT_MS)) {
+      log.info("paste echo recovered after Escape+retry", { id: this.id.slice(0, 8), probe });
+      return true;
+    }
+
+    log.error("paste echo still missing after retry — aborting submit", {
+      ...this.stateSnapshot(),
+      probe,
+      paneTail: this.paneTail(10),
+    });
+    this.emit("sse", {
+      type: "submit_failed",
+      timestamp: new Date().toISOString(),
+      reason: "echo_missing",
+      hint: "The Claude TUI didn't echo the prompt — it may be wedged in a modal. Send `/restart` to relaunch.",
+    } satisfies StreamEvent);
+    return false;
+  }
+
+  /** Poll capture-pane for the probe substring up to `timeoutMs`. */
+  private async waitForEcho(probe: string, timeoutMs: number): Promise<boolean> {
+    if (!probe) return true;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (capturePane(this.tmuxName).includes(probe)) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  }
+
+  /** Force-relaunch the CLI in a fresh tmux pane — recovery from a wedged TUI. */
+  private async handleRestartCommand(): Promise<void> {
+    log.info("/restart received — tearing down and relaunching", this.stateSnapshot());
+    killSession(this.tmuxName);
+    // Don't tear down the proxy — it survives across CLI restarts on the same
+    // deterministic port, and the new claude process inherits the same env.
+    this._launched = true; // force --resume on relaunch, not --session-id
+    this._isClosed = false;
+    await this.ensureRunning();
+    this._isStarted = true;
+    this.lastActivityTime = Date.now();
+    log.info("/restart complete", this.stateSnapshot());
+    this.emit("sse", {
+      type: "turn_stop",
+      timestamp: new Date().toISOString(),
+      stop_reason: "restarted",
+    } satisfies StreamEvent);
+    this.endTurn();
   }
 
   interrupt(): void {
