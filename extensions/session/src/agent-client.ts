@@ -40,7 +40,8 @@ export class AgentHostClient extends EventEmitter {
   private pendingRequests = new Map<string, PendingRequest>();
   private lastSeenSeq = new Map<string, number>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectBackoff = 1000;
+  private reconnectBackoff: number;
+  private readonly initialReconnectBackoff: number;
   private isConnecting = false;
   private _isConnected = false;
 
@@ -50,10 +51,12 @@ export class AgentHostClient extends EventEmitter {
   private static readonly REQUEST_TIMEOUT = 30_000;
   private static readonly MAX_RECONNECT_BACKOFF = 10_000;
 
-  constructor(url: string, extensionId = "session") {
+  constructor(url: string, extensionId = "session", initialReconnectBackoff = 1000) {
     super();
     this.url = url;
     this.extensionId = extensionId;
+    this.initialReconnectBackoff = initialReconnectBackoff;
+    this.reconnectBackoff = initialReconnectBackoff;
   }
 
   get isConnected(): boolean {
@@ -78,7 +81,7 @@ export class AgentHostClient extends EventEmitter {
           this.ws = ws;
           this._isConnected = true;
           this.isConnecting = false;
-          this.reconnectBackoff = 1000;
+          this.reconnectBackoff = this.initialReconnectBackoff;
 
           // Send auth with resume sessions
           const resumeSessions = Array.from(this.lastSeenSeq.entries()).map(
@@ -110,8 +113,13 @@ export class AgentHostClient extends EventEmitter {
           this.isConnecting = false;
 
           if (wasConnecting && !wasConnected) {
-            // Socket closed before onopen fired — reject the connection promise
+            // Socket closed before onopen fired — reject the caller's
+            // connect() promise AND kick off the same exponential-backoff
+            // retry path that mid-session disconnects use. Without this,
+            // a startup race where agent-host's WS isn't listening yet
+            // leaves the extension permanently disconnected.
             reject(new Error(`Connection closed before open: ${this.url}`));
+            this.scheduleReconnect();
           } else if (wasConnected) {
             log.warn("Disconnected from agent-host, scheduling reconnect");
             this.scheduleReconnect();
@@ -123,6 +131,7 @@ export class AgentHostClient extends EventEmitter {
           if (this.isConnecting) {
             this.isConnecting = false;
             reject(new Error(`Failed to connect to agent-host at ${this.url}`));
+            this.scheduleReconnect();
           }
         };
       } catch (error) {

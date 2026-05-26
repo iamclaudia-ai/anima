@@ -171,7 +171,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         instance.runtime.registry.recordConnectedSessions(activeSessions);
         log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
-        log.warn("Failed to connect to agent-host, will retry in background", {
+        // AgentHostClient.scheduleReconnect() has been kicked off inside
+        // connect(); the extension will pick up the agent-host once it's
+        // listening. We can't preload the resumable session list here, but
+        // lazy-resume on next prompt covers that.
+        log.warn("Initial agent-host connect failed; reconnecting in background", {
+          url: globalConfig.agentHost.url,
           error: String(error),
         });
       }

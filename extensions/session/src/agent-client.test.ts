@@ -193,4 +193,41 @@ describe("AgentHostClient", () => {
     client.disconnect();
     server.stop();
   });
+
+  it("retries in background when the initial connect fails", async () => {
+    // Reproduces the startup race we hit in production: agent-host's WS isn't
+    // listening yet when the extension boots, so the first connect() rejects.
+    // Without the fix, scheduleReconnect was only wired into the
+    // already-open path, so the extension stayed disconnected forever.
+    const port = await getFreePort();
+    const client = new AgentHostClient(`ws://127.0.0.1:${port}/ws`, "session", 50);
+
+    await expect(client.connect()).rejects.toThrow();
+    expect(client.isConnected).toBe(false);
+
+    // Start the server after the initial failure; the background reconnect
+    // loop should pick it up on the next backoff tick.
+    const server = Bun.serve({
+      port,
+      fetch(req, srv) {
+        const url = new URL(req.url);
+        if (url.pathname === "/ws") {
+          srv.upgrade(req);
+          return undefined;
+        }
+        return new Response("Not Found", { status: 404 });
+      },
+      websocket: {
+        message(_ws, _message) {
+          // auth — no-op
+        },
+      },
+    });
+
+    await waitFor(() => client.isConnected, 5000);
+    expect(client.isConnected).toBe(true);
+
+    client.disconnect();
+    server.stop();
+  });
 });
