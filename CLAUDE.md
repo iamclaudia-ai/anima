@@ -232,6 +232,14 @@ bun run typecheck        # tsgo (TypeScript native preview)
 - **Pre-commit**: Typecheck (`tsgo`) + lint-staged (`oxfmt` + `oxlint` on staged files)
 - **Pre-push**: Typecheck (`tsgo`) + unit tests
 
+### Branch + Merge Workflow
+
+- Every change goes on a branch (`feat/...`, `fix/...`, `docs/...`, etc.) — never commit directly to `main`.
+- When the work is reviewed and validated, **fast-forward merge** into `main`: `git checkout main && git merge --ff-only <branch>`. No merge commits, no squash — keep history linear.
+- If the branch has fallen behind, **rebase onto `main`** before ff-merging so the ff succeeds cleanly.
+- After ff-merge, push `main` and delete the local branch.
+- **When the work resolves a GitHub issue, include `Closes #N` (or `Fixes #N`) in the commit message body** — that auto-closes the issue when `main` is pushed, no manual `gh issue close` needed.
+
 ## Code Style
 
 - **Strict TypeScript** — No `any` (except router component type), explicit types
