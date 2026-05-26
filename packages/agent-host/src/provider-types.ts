@@ -59,6 +59,13 @@ export interface AgentRuntimeSession {
   prompt(content: string | unknown[]): Promise<void> | void;
   interrupt(): void;
   close(): Promise<void>;
+  /**
+   * Optional graceful-shutdown variant. Releases in-process resources but may
+   * preserve out-of-process runtime so a fresh agent-host can reuse it (CLI mode
+   * leaves the tmux pane + claude alive — `--resume` picks back up with no
+   * startup probes). Falls back to `close()` when omitted.
+   */
+  release?(): Promise<void>;
   setPermissionMode(mode: string): void;
   sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
   getInfo(): AgentRuntimeSessionInfo;

@@ -512,6 +512,26 @@ export class ClaudeCliSession extends EventEmitter {
     log.info("Closed", { id: this.id.slice(0, 8) });
   }
 
+  /**
+   * Graceful-shutdown variant: drop our in-process state but DON'T kill the
+   * tmux pane or claude process. The next agent-host's `restorePersistedSessions`
+   * will call `start()` → `ensureRunning()` → reuse=true (no respawn, no
+   * startup probes, no rate-limit risk). The 10-min idle reaper still kills
+   * truly idle CLIs via `close()` so this isn't a resource leak.
+   */
+  async release(): Promise<void> {
+    if (!this._isStarted && !this.proxy) return;
+    this._isClosed = true;
+    this.proxy?.stop();
+    this.proxy = null;
+    this._isStarted = false;
+    this.emit("closed");
+    log.info("Released (tmux pane preserved)", {
+      id: this.id.slice(0, 8),
+      tmux: this.tmuxName,
+    });
+  }
+
   setPermissionMode(_mode: string): void {
     // No-op: the CLI runs with --dangerously-skip-permissions.
   }

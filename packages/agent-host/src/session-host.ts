@@ -326,9 +326,28 @@ export class SessionHost extends EventEmitter {
 
   /**
    * Close all sessions — for graceful shutdown.
+   *
+   * Prefers `session.release()` over `close()` when the provider implements it,
+   * so CLI sessions preserve their tmux pane + claude process across
+   * agent-host restarts (reuse on next startup, no respawn or startup probes).
+   * SDK/Codex providers fall through to `close()` since their runtime lives
+   * in-process and dies with us anyway.
    */
   async closeAll(): Promise<void> {
-    const promises = Array.from(this.sessions.keys()).map((id) => this.close(id));
+    const promises = Array.from(this.sessions.values()).map(async (session) => {
+      const sessionId = session.id;
+      try {
+        if (session.release) await session.release();
+        else await session.close();
+      } catch (error) {
+        log.warn("closeAll: error releasing session", {
+          sessionId: sessionId.slice(0, 8),
+          error: String(error),
+        });
+      }
+      this.sessions.delete(sessionId);
+      this.sessionAgents.delete(sessionId);
+    });
     await Promise.all(promises);
   }
 
