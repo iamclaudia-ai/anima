@@ -63,12 +63,10 @@ const INIT_TIMEOUT_MS = 12_000;
 const STALE_MS = 5 * 60 * 1000;
 /** Settle time after each Ctrl-V so the TUI reads the clipboard + renders `[Image #N]`. */
 const IMAGE_INGEST_MS = 700;
-/** Settle delay after a paste before we check the pane echo. */
+/** Settle delay after a paste before we send Enter to submit. */
 const PASTE_SETTLE_MS = 200;
-/** How long to wait for the pasted text to appear in `capture-pane`. */
-const ECHO_TIMEOUT_MS = 500;
-/** Probe slice we look for in the pane to confirm the paste landed. */
-const ECHO_PROBE_LEN = 40;
+/** Max wait after submit for Claude to start a new turn (proves paste landed). */
+const TURN_START_TIMEOUT_MS = 15_000;
 /** Max wait for an in-flight turn to clear before we paste a new prompt. */
 const PROMPT_READY_TIMEOUT_MS = 60_000;
 /** Sample interval for cold-start pane-idle detection. */
@@ -77,12 +75,6 @@ const PANE_IDLE_SAMPLE_MS = 250;
 const PANE_IDLE_STABLE_SAMPLES = 3;
 /** Cap on the cold-start idle wait. */
 const PANE_IDLE_TIMEOUT_MS = 10_000;
-
-/** First non-empty trimmed line of the paste, capped — distinctive enough to grep. */
-function echoProbe(text: string): string {
-  const firstLine = text.split("\n").find((l) => l.trim().length > 0) ?? text;
-  return firstLine.trim().slice(0, ECHO_PROBE_LEN);
-}
 
 function findClaude(configPath?: string): string {
   if (configPath && existsSync(configPath)) return configPath;
@@ -435,12 +427,15 @@ export class ClaudeCliSession extends EventEmitter {
       }
     }
 
-    // Paste text, verify it echoed in the pane, then submit. No retry-with-Esc:
-    // a missing echo just surfaces submit_failed with paneTail context so the
-    // user can decide (wait / interrupt / /restart) without us blindly
-    // aborting whatever the TUI happens to be doing.
+    // Paste text + submit, then verify Claude actually started a new agent
+    // turn via SSE. The SSE `message_start` is the source-of-truth signal that
+    // the paste landed and was processed — pane-scraping for `[Pasted text #N]`
+    // is unreliable across paste sizes (31KB conversation transcripts render
+    // and consume the placeholder faster than we can poll) and TUI states.
+    // No retry-with-Esc: if Claude doesn't start a turn, we surface
+    // submit_failed cleanly and the caller decides next steps.
     if (text.trim()) {
-      const landed = await this.pasteAndVerifyEcho(text);
+      const landed = await this.pasteSubmitAndConfirmTurnStart(text);
       if (!landed) {
         this.emit("sse", {
           type: "turn_stop",
@@ -450,6 +445,11 @@ export class ClaudeCliSession extends EventEmitter {
         this.endTurn();
         return;
       }
+      log.info("prompt submitted to tmux", {
+        ...this.stateSnapshot(),
+        images: pasted,
+      });
+      return;
     }
     submit(this.tmuxName);
     log.info("prompt submitted to tmux", {
@@ -546,53 +546,55 @@ export class ClaudeCliSession extends EventEmitter {
    * `submit_failed` with `paneTail` and return false — no destructive
    * recovery. The user (or `/restart`) decides next steps.
    */
-  private async pasteAndVerifyEcho(text: string): Promise<boolean> {
-    const probe = echoProbe(text);
+  /**
+   * Paste `text`, submit (Enter), then wait for the proxy to observe an SSE
+   * `message_start` event — proof Claude received the input and began a new
+   * agent turn. This replaces the older pane-scrape echo gate, which was
+   * unreliable for large pastes (Claude consumes the `[Pasted text #N]`
+   * placeholder before our 500ms poll window can see it).
+   *
+   * On timeout, surface `submit_failed` with `paneTail` for diagnostics. No
+   * destructive recovery; the caller decides whether to retry or `/restart`.
+   */
+  private async pasteSubmitAndConfirmTurnStart(text: string): Promise<boolean> {
+    const wait = this.waitForTurnStart(TURN_START_TIMEOUT_MS);
     pasteText(this.tmuxName, text);
     await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
-    if (await this.waitForEcho(probe, ECHO_TIMEOUT_MS)) return true;
+    submit(this.tmuxName);
+    if (await wait) return true;
 
-    log.error("paste echo missing — aborting submit (no blind recovery)", {
+    log.error("no SSE turn-start after submit — aborting (no blind recovery)", {
       ...this.stateSnapshot(),
-      probe,
       paneTail: this.paneTail(10),
     });
     this.emit("sse", {
       type: "submit_failed",
       timestamp: new Date().toISOString(),
-      reason: "echo_missing",
+      reason: "no_turn_start",
       paneTail: this.paneTail(10),
-      hint: "Paste didn't echo in the TUI. The CLI may be busy or in a modal — try again, or send `/restart` to relaunch.",
+      hint: "Claude didn't start a new turn after submit. The CLI may be busy, rate-limited, or stuck — try again, or send `/restart` to relaunch.",
     } satisfies StreamEvent);
     return false;
   }
 
   /**
-   * Poll capture-pane up to `timeoutMs` for evidence the paste landed.
-   *
-   * Acceptable signals (any one is enough):
-   * - The probe substring (small pastes render verbatim in the input).
-   * - `[Pasted text #N` — Claude collapses large pastes into a placeholder
-   *   like `[Pasted text #1 +291 lines]`. Match the open-bracket prefix
-   *   because the trailing line-count varies by paste size.
-   * - `paste again to expand` — Claude's hint when a paste arrives while
-   *   the TUI is busy/mid-turn (paste queued, placeholder not yet drawn).
+   * Wait up to `timeoutMs` for the next `message_start` agent-turn SSE event.
+   * Resolves true on the first such event, false on timeout. Subscribes
+   * BEFORE we paste so we never miss a fast-arriving message_start.
    */
-  private async waitForEcho(probe: string, timeoutMs: number): Promise<boolean> {
-    if (!probe) return true;
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const pane = capturePane(this.tmuxName);
-      if (
-        pane.includes(probe) ||
-        /\[Pasted text #\d+/.test(pane) ||
-        /paste again to expand/i.test(pane)
-      ) {
-        return true;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return false;
+  private waitForTurnStart(timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const onStart = (): void => {
+        clearTimeout(timer);
+        this.off("turn_started", onStart);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.off("turn_started", onStart);
+        resolve(false);
+      }, timeoutMs);
+      this.once("turn_started", onStart);
+    });
   }
 
   /** Force-relaunch the CLI in a fresh tmux pane — recovery from a wedged TUI. */
@@ -710,6 +712,13 @@ export class ClaudeCliSession extends EventEmitter {
     if (type === "message_delta") {
       const sr = (event as { delta?: { stop_reason?: string } }).delta?.stop_reason;
       if (sr) this.lastStopReason = sr;
+    }
+
+    // `message_start` = Claude began processing a new agent turn. This is the
+    // source-of-truth signal that a freshly-submitted prompt landed — the
+    // paste flow waits on it instead of pane-scraping for the placeholder.
+    if (type === "message_start") {
+      this.emit("turn_started");
     }
 
     this.emit("sse", event);
