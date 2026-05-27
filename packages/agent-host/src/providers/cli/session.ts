@@ -567,12 +567,22 @@ export class ClaudeCliSession extends EventEmitter {
     return false;
   }
 
-  /** Poll capture-pane for the probe substring up to `timeoutMs`. */
+  /**
+   * Poll capture-pane up to `timeoutMs` for evidence the paste landed.
+   *
+   * Two acceptable signals:
+   * - The probe substring itself (small pastes render verbatim in the input).
+   * - `[Pasted text #N]` — Claude's TUI collapses large pastes into a
+   *   placeholder, so the literal text never appears in the pane. Missing
+   *   this case is what made every Libby-style spawn (13KB system prompt)
+   *   fail with `echo_missing` even though the paste was perfect.
+   */
   private async waitForEcho(probe: string, timeoutMs: number): Promise<boolean> {
     if (!probe) return true;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (capturePane(this.tmuxName).includes(probe)) return true;
+      const pane = capturePane(this.tmuxName);
+      if (pane.includes(probe) || /\[Pasted text #\d+\]/.test(pane)) return true;
       await new Promise((r) => setTimeout(r, 50));
     }
     return false;
