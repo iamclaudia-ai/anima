@@ -44,6 +44,7 @@ export interface SessionHostLike {
     isError?: boolean,
   ) => boolean;
   list: () => Array<unknown>;
+  count: () => number;
   getSessionRecords: () => SessionRecord[];
   getEventsAfter: (sessionId: string, lastSeq: number) => BufferedEvent[];
   closeAll: () => Promise<void>;
@@ -456,11 +457,13 @@ export async function createAgentHostServer(
       const url = new URL(req.url);
 
       if (url.pathname === "/health") {
-        const sessions = sessionHost.list();
+        // Use count() not list() — list shells out to tmux + ps per session,
+        // and with many idle CLI panes /health blew past the watchdog's 2s
+        // fetch timeout, causing it to SIGKILL agent-host every ~35s.
         return Response.json({
           ok: true,
           uptime: process.uptime(),
-          sessions: sessions.length,
+          sessions: sessionHost.count(),
           clients: clients.size,
         });
       }

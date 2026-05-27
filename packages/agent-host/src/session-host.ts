@@ -292,10 +292,18 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * List all active sessions.
+   * List all active sessions. Calls `getInfo()` on every session, which for
+   * CLI provider sessions shells out to `tmux has-session` + `ps` — O(N
+   * subprocess spawns). Don't call this from hot paths like `/health`; use
+   * `count()` instead.
    */
   list(): AgentRuntimeSessionInfo[] {
     return Array.from(this.sessions.values()).map((s) => s.getInfo());
+  }
+
+  /** Cheap session count — no per-session subprocess work. */
+  count(): number {
+    return this.sessions.size;
   }
 
   /**

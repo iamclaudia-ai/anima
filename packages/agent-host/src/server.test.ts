@@ -149,6 +149,10 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
     return Array.from(this.sessions.values());
   }
 
+  count(): number {
+    return this.sessions.size;
+  }
+
   getSessionRecords() {
     return Array.from(this.sessions.keys()).map((id) => ({
       id,
