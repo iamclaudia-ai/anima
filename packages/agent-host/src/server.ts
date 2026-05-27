@@ -45,6 +45,7 @@ export interface SessionHostLike {
   ) => boolean;
   list: () => Array<unknown>;
   count: () => number;
+  trackedIds?: () => Set<string>;
   getSessionRecords: () => SessionRecord[];
   getEventsAfter: (sessionId: string, lastSeq: number) => BufferedEvent[];
   closeAll: () => Promise<void>;

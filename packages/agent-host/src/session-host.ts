@@ -306,6 +306,11 @@ export class SessionHost extends EventEmitter {
     return this.sessions.size;
   }
 
+  /** Cheap set of currently-tracked session IDs — no per-session subprocess work. */
+  trackedIds(): Set<string> {
+    return new Set(this.sessions.keys());
+  }
+
   /**
    * Get buffered events after a given sequence number (for reconnection replay).
    */

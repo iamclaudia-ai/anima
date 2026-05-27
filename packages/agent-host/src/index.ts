@@ -80,21 +80,32 @@ forceClearGatewayLocks();
 const ctx = await createAgentHostServer({ port: PORT });
 
 /**
- * Reap orphan `anima-session-*` tmux panes from the tmux-wrap PreToolUse hook.
- * Keeps any pane with an attached client (human is in it) and any pane whose
- * tmux activity timestamp is within the idle threshold. The corresponding
- * `anima-cli-*` panes are owned by the agent-host session reaper, not this one.
+ * Reap orphan tmux panes:
+ *  - `anima-session-*` panes from the tmux-wrap PreToolUse hook.
+ *  - `anima-cli-*` panes whose session ID is NOT currently tracked by sessionHost
+ *    (left behind by a prior agent-host process — the in-memory reaper has no
+ *    record of them, so it never closes them).
+ * Keeps any pane with an attached client and any pane whose tmux activity
+ * timestamp is within the idle threshold.
  */
 function reapOrphanTmuxPanes(staleMs: number): number {
   const cutoffSec = (Date.now() - staleMs) / 1000;
+  const tracked = ctx.sessionHost.trackedIds ? ctx.sessionHost.trackedIds() : new Set<string>();
   let killed = 0;
   for (const s of listTmuxSessions()) {
-    if (!s.name.startsWith("anima-session-")) continue;
+    const isSession = s.name.startsWith("anima-session-");
+    const isCli = s.name.startsWith("anima-cli-");
+    if (!isSession && !isCli) continue;
+    if (isCli) {
+      const sessionId = s.name.slice("anima-cli-".length);
+      if (tracked.has(sessionId)) continue;
+    }
     if (s.attached) continue;
     if (s.activitySec >= cutoffSec) continue;
     killSession(s.name);
     log.info("Reaped orphan tmux pane", {
       name: s.name,
+      kind: isCli ? "cli-untracked" : "session-hook",
       idleSec: Math.floor(Date.now() / 1000 - s.activitySec),
     });
     killed++;
