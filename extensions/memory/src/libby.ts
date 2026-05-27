@@ -544,23 +544,24 @@ export class LibbyWorker {
       contextBlock = `\n## Context from Previous Conversations\n\nThese are summaries and files from the conversations immediately before this one in the same session. Use them to resolve ambiguous references like "this", "it", or "what we discussed".\n\n${ctxEntries.join("\n")}\n\n`;
     }
 
-    // Build the prompt — transcript + context (system prompt already sent)
-    // Include conversation ID, episode path so Libby knows exactly where to write
-    const prompt = `${contextBlock}Process this conversation transcript (conversation ID: ${conv.id}).
+    // Write the transcript to disk and reference it by path — pasting 30KB+
+    // through tmux bracketed-paste is unreliable (Claude's TUI silently drops
+    // very large pastes), and Libby has a Read tool anyway. The session's
+    // cwd is ~/libby, so the relative path resolves cleanly.
+    const transcriptPath = join(LIBBY_TRANSCRIPTS_DIR, `${conv.id}.md`);
+    try {
+      await Bun.write(transcriptPath, transcript.text);
+    } catch (err) {
+      throw new Error(
+        `Failed to write transcript file ${transcriptPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const prompt = `${contextBlock}Process the conversation transcript at transcripts/${conv.id}.md (conversation ID: ${conv.id}). Use your Read tool to load it.
 
 Episode file: ~/memory/${episodePath}
 
-FIRST write your reasoning log to ~/.anima/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP:
-
-${transcript.text}`;
-
-    // Save transcript to ~/libby/transcripts/{id}.md for easy cross-reference
-    try {
-      const transcriptPath = join(LIBBY_TRANSCRIPTS_DIR, `${conv.id}.md`);
-      Bun.write(transcriptPath, transcript.text);
-    } catch {
-      // Non-fatal — transcript saving is for debugging convenience
-    }
+FIRST write your reasoning log to ~/.anima/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP.`;
 
     this.log(
       "INFO",
