@@ -391,15 +391,18 @@ export class ClaudeCliSession extends EventEmitter {
         ...this.stateSnapshot(),
         reason: ready.reason,
       });
+      const hint =
+        ready.reason === "turn_active"
+          ? "Claude is still working on the previous turn. Wait for it to finish, or interrupt and resend."
+          : "Couldn't confirm the Claude TUI is idle. Send `/restart` if it stays stuck.";
       this.emit("sse", {
-        type: "submit_failed",
+        type: "runtime_error",
+        subtype: "submit_failed",
         timestamp: new Date().toISOString(),
         reason: ready.reason,
+        message: `Your prompt didn't reach Claude (${ready.reason}). ${hint}`,
         paneTail: this.paneTail(10),
-        hint:
-          ready.reason === "turn_active"
-            ? "Claude is still working on the previous turn. Wait for it to finish, or interrupt and resend."
-            : "Couldn't confirm the Claude TUI is idle. Send `/restart` if it stays stuck.",
+        hint,
       } satisfies StreamEvent);
       this.emit("sse", {
         type: "turn_stop",
@@ -567,12 +570,17 @@ export class ClaudeCliSession extends EventEmitter {
       ...this.stateSnapshot(),
       paneTail: this.paneTail(10),
     });
+    const hint =
+      "Claude didn't start a new turn after submit — the CLI may be on a modal prompt, busy, or stuck. " +
+      `Attach with \`tmux attach -t ${this.tmuxName}\` to check, or send \`/restart\` to relaunch.`;
     this.emit("sse", {
-      type: "submit_failed",
+      type: "runtime_error",
+      subtype: "submit_failed",
       timestamp: new Date().toISOString(),
       reason: "no_turn_start",
+      message: `Your prompt didn't reach Claude (no turn started in ${Math.round(TURN_START_TIMEOUT_MS / 1000)}s). ${hint}`,
       paneTail: this.paneTail(10),
-      hint: "Claude didn't start a new turn after submit. The CLI may be busy, rate-limited, or stuck — try again, or send `/restart` to relaunch.",
+      hint,
     } satisfies StreamEvent);
     return false;
   }

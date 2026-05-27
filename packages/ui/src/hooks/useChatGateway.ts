@@ -727,6 +727,25 @@ export function useChatGateway(
           break;
         }
 
+        case "runtime_error": {
+          stopToolTickSimulation();
+          const subtype = (payload.subtype as string) || "unknown";
+          const message =
+            (payload.message as string) || (payload.hint as string) || `Runtime error (${subtype})`;
+          console.error(`[Runtime] ${subtype}: ${message}`);
+          const errorBlock: ErrorBlock = { type: "error", message };
+          setMessages((draft) => {
+            const lastMsg = draft[draft.length - 1];
+            if (lastMsg?.role === "assistant") {
+              lastMsg.blocks.push(errorBlock);
+            } else {
+              draft.push({ role: "assistant", blocks: [errorBlock], timestamp: Date.now() });
+            }
+          });
+          setIsQuerying(false);
+          break;
+        }
+
         case "api_error": {
           stopToolTickSimulation();
           console.error(`[API Error] ${payload.status}: ${payload.message}`);
