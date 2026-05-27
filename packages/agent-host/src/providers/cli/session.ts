@@ -570,19 +570,26 @@ export class ClaudeCliSession extends EventEmitter {
   /**
    * Poll capture-pane up to `timeoutMs` for evidence the paste landed.
    *
-   * Two acceptable signals:
-   * - The probe substring itself (small pastes render verbatim in the input).
-   * - `[Pasted text #N]` — Claude's TUI collapses large pastes into a
-   *   placeholder, so the literal text never appears in the pane. Missing
-   *   this case is what made every Libby-style spawn (13KB system prompt)
-   *   fail with `echo_missing` even though the paste was perfect.
+   * Acceptable signals (any one is enough):
+   * - The probe substring (small pastes render verbatim in the input).
+   * - `[Pasted text #N` — Claude collapses large pastes into a placeholder
+   *   like `[Pasted text #1 +291 lines]`. Match the open-bracket prefix
+   *   because the trailing line-count varies by paste size.
+   * - `paste again to expand` — Claude's hint when a paste arrives while
+   *   the TUI is busy/mid-turn (paste queued, placeholder not yet drawn).
    */
   private async waitForEcho(probe: string, timeoutMs: number): Promise<boolean> {
     if (!probe) return true;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const pane = capturePane(this.tmuxName);
-      if (pane.includes(probe) || /\[Pasted text #\d+\]/.test(pane)) return true;
+      if (
+        pane.includes(probe) ||
+        /\[Pasted text #\d+/.test(pane) ||
+        /paste again to expand/i.test(pane)
+      ) {
+        return true;
+      }
       await new Promise((r) => setTimeout(r, 50));
     }
     return false;
