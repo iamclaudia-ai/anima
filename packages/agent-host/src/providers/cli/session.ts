@@ -394,7 +394,7 @@ export class ClaudeCliSession extends EventEmitter {
       const hint =
         ready.reason === "turn_active"
           ? "Claude is still working on the previous turn. Wait for it to finish, or interrupt and resend."
-          : "Couldn't confirm the Claude TUI is idle. Send `/restart` if it stays stuck.";
+          : `The CLI may be on a modal prompt (e.g. resume-from-summary). Attach with \`tmux attach -t ${this.tmuxName}\` to dismiss it, then resend.`;
       this.emit("sse", {
         type: "runtime_error",
         subtype: "submit_failed",
