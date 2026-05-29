@@ -75,6 +75,23 @@ const PANE_IDLE_SAMPLE_MS = 250;
 const PANE_IDLE_STABLE_SAMPLES = 3;
 /** Cap on the cold-start idle wait. */
 const PANE_IDLE_TIMEOUT_MS = 10_000;
+/** Max wait for the feedback survey to clear after we answer it. */
+const SURVEY_CLEAR_TIMEOUT_MS = 2_000;
+/** Poll interval while waiting for the survey to clear. */
+const SURVEY_CLEAR_SAMPLE_MS = 150;
+
+/**
+ * Detect the CLI's periodic "How is Claude doing this session?" feedback
+ * survey. Matches the distinctive options row — `1: Bad … 3: Good … 0: Dismiss`
+ * on a single line — rather than the question text alone, so conversation
+ * scrollback that merely *mentions* the survey can't trigger a false positive
+ * (which would leak a stray "3" into the next prompt). `.` never crosses a
+ * newline, so all three markers must share one captured line, exactly as the
+ * TUI renders them.
+ */
+export function isFeedbackSurvey(pane: string): boolean {
+  return /\b1:\s*Bad\b.*\b3:\s*Good\b.*\b0:\s*Dismiss\b/i.test(pane);
+}
 
 function findClaude(configPath?: string): string {
   if (configPath && existsSync(configPath)) return configPath;
@@ -411,6 +428,12 @@ export class ClaudeCliSession extends EventEmitter {
       } satisfies StreamEvent);
       return;
     }
+
+    // Clear (and answer) any feedback survey sitting on the idle input before we
+    // paste — its number keys are captured by the survey widget, not the input
+    // box, so a lingering survey could swallow our first keystroke.
+    await this.answerFeedbackSurveyIfPresent();
+
     this._turnActive = true;
 
     // Attach images first: load each onto the macOS clipboard and Ctrl-V it into
@@ -542,6 +565,30 @@ export class ClaudeCliSession extends EventEmitter {
       }
     }
     return false;
+  }
+
+  /**
+   * The CLI periodically renders a "How is Claude doing this session?" feedback
+   * survey (`1: Bad  2: Fine  3: Good  0: Dismiss`) above the idle input box.
+   * When present, answer "3" (Good) — both to clear it before we paste (its
+   * number keys are captured by the widget, not the input box, so leaving it up
+   * could swallow our first keystroke) and to register genuine interactivity
+   * with Anthropic. This is NOT blind key injection: we only ever press "3" on a
+   * positive on-screen match, and confirm the survey cleared before returning.
+   */
+  private async answerFeedbackSurveyIfPresent(): Promise<void> {
+    if (!isFeedbackSurvey(capturePane(this.tmuxName))) return;
+    log.info("feedback survey detected — answering 3 (Good)", { id: this.id.slice(0, 8) });
+    sendKey(this.tmuxName, "3");
+    const deadline = Date.now() + SURVEY_CLEAR_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, SURVEY_CLEAR_SAMPLE_MS));
+      if (!isFeedbackSurvey(capturePane(this.tmuxName))) return;
+    }
+    log.warn("feedback survey still present after answering 3", {
+      id: this.id.slice(0, 8),
+      paneTail: this.paneTail(6),
+    });
   }
 
   /**
