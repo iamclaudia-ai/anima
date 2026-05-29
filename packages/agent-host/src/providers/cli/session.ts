@@ -40,6 +40,7 @@ import {
 } from "./tmux";
 import { copyImageToClipboard } from "./image-clipboard";
 import { ensureMitmCerts } from "./mitm-certs";
+import { SessionJsonlTail } from "./jsonl-tail";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -176,6 +177,17 @@ export class ClaudeCliSession extends EventEmitter {
   private _isStarted = false;
   private _isClosed = false;
   private _turnActive = false;
+  /** reqId of the in-flight agent request — the target of post-interrupt suppression. */
+  private _activeReqId: string | null = null;
+  /**
+   * reqIds whose remaining SSE we drop. An interrupted request is NOT cancelled
+   * upstream — the TUI stops rendering it but the stream finishes server-side, so
+   * the proxy keeps receiving deltas. Suppressing by reqId (not a global flag)
+   * means a fresh turn opened during the ~30s drain still streams normally.
+   */
+  private readonly _suppressedReqIds = new Set<string>();
+  /** Tails our own JSONL transcript — the only signal for a direct-tmux interrupt. */
+  private readonly tail: SessionJsonlTail;
   /**
    * True once we've observed at least one proxy SSE event since (re)start.
    * Until then, `_turnActive` is just a default — the *actual* TUI could be
@@ -209,6 +221,11 @@ export class ClaudeCliSession extends EventEmitter {
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
     this.isResume = isResume;
     this.interception = config.interception === "mitm" ? "mitm" : "base-url";
+    // A direct-tmux Escape (user typing in an attached pane) never calls
+    // interrupt(); the JSONL marker is the only signal that reaches us. Funnel it
+    // into the same idempotent abort as the web-UI path.
+    this.tail = new SessionJsonlTail(this.cwd, this.id);
+    this.tail.on("interrupt", () => this.abortTurn("jsonl_marker"));
   }
 
   async start(): Promise<void> {
@@ -220,6 +237,7 @@ export class ClaudeCliSession extends EventEmitter {
     // either a proxy event arrives or pane-idle detection bootstraps us.
     this._turnStateKnown = false;
     this.lastActivityTime = Date.now();
+    this.tail.start();
     this.emit("ready", { sessionId: this.id });
     this.emit("process_started");
     log.info("Started", { id: this.id.slice(0, 8), port: this.proxyPort, reuse: reused });
@@ -675,6 +693,31 @@ export class ClaudeCliSession extends EventEmitter {
   interrupt(): void {
     if (!this._isStarted) return;
     sendKey(this.tmuxName, "Escape");
+    this.abortTurn("escape");
+  }
+
+  /**
+   * Abort the in-flight turn — the single funnel for both interrupt paths:
+   * web-UI Escape (via interrupt(), after send-keys) and a direct-tmux Escape
+   * (via the JSONL `[Request interrupted by user…]` marker the tail detects).
+   *
+   * The TUI/SDK does NOT cancel the upstream request on Escape — it stops
+   * rendering and ignores further events, letting the stream finish server-side
+   * (verified: ~33s of deltas kept arriving after the marker). So we record the
+   * in-flight reqId in `_suppressedReqIds` and drop its remaining SSE, otherwise
+   * those trailing deltas would "un-stop" the UI after our turn_stop.
+   *
+   * Idempotent: `endTurn()` clears `_turnActive`, so the second caller (whichever
+   * of the two paths fires later) no-ops — exactly one turn_stop{abort} per turn.
+   */
+  private abortTurn(source: string): void {
+    if (!this._turnActive) return;
+    if (this._activeReqId) this._suppressedReqIds.add(this._activeReqId);
+    log.info("turn aborted — suppressing post-interrupt drain", {
+      id: this.id.slice(0, 8),
+      source,
+      reqId: this._activeReqId,
+    });
     this.emit("sse", {
       type: "turn_stop",
       timestamp: new Date().toISOString(),
@@ -687,6 +730,7 @@ export class ClaudeCliSession extends EventEmitter {
   async close(): Promise<void> {
     if (!this._isStarted && !this.proxy) return;
     this._isClosed = true;
+    this.tail.stop();
     killSession(this.tmuxName);
     this.proxy?.stop();
     this.proxy = null;
@@ -705,6 +749,7 @@ export class ClaudeCliSession extends EventEmitter {
   async release(): Promise<void> {
     if (!this._isStarted && !this.proxy) return;
     this._isClosed = true;
+    this.tail.stop();
     this.proxy?.stop();
     this.proxy = null;
     this._isStarted = false;
@@ -758,10 +803,19 @@ export class ClaudeCliSession extends EventEmitter {
     // never reach the chat — only real agent turns carry the toolset.
     if (!ctx.isAgentTurn) return;
 
+    // Post-interrupt drain: an interrupted request finishes server-side even
+    // though the TUI stopped. Drop its remainder so the UI doesn't un-stop on
+    // trailing deltas; the terminating message_stop retires the reqId.
+    if (this._suppressedReqIds.has(ctx.reqId)) {
+      if (event.type === "message_stop") this._suppressedReqIds.delete(ctx.reqId);
+      return;
+    }
+
     // Any agent-turn event proves we have a live read on the TUI's turn state;
     // future prompts can trust `_turnActive` without re-running pane-idle.
     this._turnStateKnown = true;
     this.lastActivityTime = Date.now();
+    this._activeReqId = ctx.reqId;
     const type = event.type;
 
     if (type === "message_delta") {

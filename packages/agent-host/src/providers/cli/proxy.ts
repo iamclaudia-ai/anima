@@ -60,6 +60,8 @@ export interface StreamContext {
    * quota probe, topic detection — that must be kept out of the chat.
    */
   isAgentTurn: boolean;
+  /** Short per-request id — lets consumers correlate or suppress a single request's stream. */
+  reqId: string;
 }
 
 export interface TeeProxyOptions {
@@ -375,7 +377,10 @@ export class AnthropicTeeProxy {
         // non-JSON body — ignore
       }
     }
-    const ctx: StreamContext = { isAgentTurn: isAgentRequest(parsed) };
+    const ctx: StreamContext = {
+      isAgentTurn: isAgentRequest(parsed),
+      reqId: randomUUID().slice(0, 8),
+    };
     if (parsed && this.opts.onRequestBody) this.opts.onRequestBody(parsed, ctx);
 
     // Strip the Anima `[1m]` variant from the model on the wire: the CLI keeps it
@@ -405,7 +410,7 @@ export class AnthropicTeeProxy {
     });
 
     // Capture metadata carried into all response branches (one line per request).
-    const reqId = randomUUID().slice(0, 8);
+    const reqId = ctx.reqId;
     const reqMeta: Record<string, unknown> = {
       ts: new Date().toISOString(),
       reqId,
