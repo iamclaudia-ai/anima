@@ -226,6 +226,12 @@ export class ClaudeCliSession extends EventEmitter {
     // into the same idempotent abort as the web-UI path.
     this.tail = new SessionJsonlTail(this.cwd, this.id);
     this.tail.on("interrupt", () => this.abortTurn("jsonl_marker"));
+    // A prompt is "received" the instant the CLI records it in the transcript —
+    // as a `type:"user"` entry (fresh prompt) or a `queue-operation/enqueue`
+    // (steer). This is the receipt that confirms a paste landed even when no SSE
+    // `message_start` follows (an in-tool steer injected at a tool boundary).
+    this.tail.on("user_prompt", () => this.emit("prompt_received"));
+    this.tail.on("enqueue", () => this.emit("prompt_received"));
   }
 
   async start(): Promise<void> {
@@ -416,20 +422,17 @@ export class ClaudeCliSession extends EventEmitter {
     }
     this.lastActivityTime = Date.now();
 
-    // Positive ready signal before pasting: wait for any in-flight turn to
-    // clear (via `_turnActive` from proxy SSE), bootstrapping with pane-idle
-    // detection on cold start when we haven't seen any SSE yet. Never sends
-    // destructive keys to "unstick" the TUI — surface submit_failed instead.
+    // Positive ready signal before pasting: only that the TUI has painted its
+    // input box (cold-start bootstrap via pane-idle detection). We do NOT wait
+    // for the turn to clear — a busy pane is fine, the CLI queues the paste as a
+    // steer. Never sends destructive keys to "unstick" the TUI.
     const ready = await this.waitForPromptReady(PROMPT_READY_TIMEOUT_MS);
     if (!ready.ok) {
       log.warn("TUI not ready for prompt — aborting submit", {
         ...this.stateSnapshot(),
         reason: ready.reason,
       });
-      const hint =
-        ready.reason === "turn_active"
-          ? "Claude is still working on the previous turn. Wait for it to finish, or interrupt and resend."
-          : `The CLI may be on a modal prompt (e.g. resume-from-summary). Attach with \`tmux attach -t ${this.tmuxName}\` to dismiss it, then resend.`;
+      const hint = `The CLI's input box hasn't rendered yet (pane not ready). Attach with \`tmux attach -t ${this.tmuxName}\` to check, then resend.`;
       this.emit("sse", {
         type: "runtime_error",
         subtype: "submit_failed",
@@ -471,15 +474,12 @@ export class ClaudeCliSession extends EventEmitter {
       }
     }
 
-    // Paste text + submit, then verify Claude actually started a new agent
-    // turn via SSE. The SSE `message_start` is the source-of-truth signal that
-    // the paste landed and was processed — pane-scraping for `[Pasted text #N]`
-    // is unreliable across paste sizes (31KB conversation transcripts render
-    // and consume the placeholder faster than we can poll) and TUI states.
-    // No retry-with-Esc: if Claude doesn't start a turn, we surface
-    // submit_failed cleanly and the caller decides next steps.
+    // Paste text + submit, then confirm the CLI accepted it — via a fresh turn's
+    // `message_start` OR the JSONL receipt for a steer the CLI queues. We defer
+    // to the CLI: an idle pane yields a new turn, a busy pane queues the text.
+    // No retry-with-Esc — on no receipt we surface submit_failed cleanly.
     if (text.trim()) {
-      const landed = await this.pasteSubmitAndConfirmTurnStart(text);
+      const landed = await this.pasteSubmitAndConfirm(text);
       if (!landed) {
         this.emit("sse", {
           type: "turn_stop",
@@ -524,36 +524,28 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Wait until the TUI is ready to accept a paste. Returns a positive-signal
-   * verdict — never sends keystrokes to "unstick" the TUI.
+   * Confirm the pane can accept a paste — WITHOUT blocking on turn state. We
+   * defer turn handling to the CLI: pasting into an idle pane starts a fresh
+   * turn; pasting into a busy pane is queued by the CLI (a steer). The only
+   * thing we still guard is the one failure the CLI can't recover from — pasting
+   * before the TUI has painted its input box.
    *
-   * - Hot path (we've observed at least one SSE event from the proxy since
-   *   start/relaunch): just wait for `_turnActive` to clear. Trustworthy
-   *   because the proxy is the source of truth for turn state.
-   * - Cold path (no SSE yet — first prompt after start/resume): bootstrap by
-   *   sampling `capture-pane` until content stabilizes, then re-check
-   *   `_turnActive` (which an in-flight SSE may have flipped during the wait).
+   * Cold path only (no SSE seen since start/resume): sample `capture-pane` until
+   * the TUI markers render and stabilize. Hot path: we've seen SSE, so the TUI
+   * is definitely up — return immediately, busy or not.
    *
    * Returns `{ ok: false, reason }` on timeout so the caller can surface a
-   * specific `submit_failed` without blindly aborting in-flight work.
+   * specific `submit_failed`.
    */
   private async waitForPromptReady(
     timeoutMs: number,
-  ): Promise<{ ok: true } | { ok: false; reason: "pane_not_idle" | "turn_active" }> {
-    const deadline = Date.now() + timeoutMs;
-
+  ): Promise<{ ok: true } | { ok: false; reason: "pane_not_idle" }> {
     if (!this._turnStateKnown) {
-      const idleDeadline = Math.min(deadline, Date.now() + PANE_IDLE_TIMEOUT_MS);
+      const idleDeadline = Math.min(Date.now() + timeoutMs, Date.now() + PANE_IDLE_TIMEOUT_MS);
       if (!(await this.waitForPaneIdle(idleDeadline))) {
         return { ok: false, reason: "pane_not_idle" };
       }
     }
-
-    while (this._turnActive && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (this._turnActive) return { ok: false, reason: "turn_active" };
-
     return { ok: true };
   }
 
@@ -610,40 +602,39 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Paste `text` and confirm it landed in the pane. On miss, surface
-   * `submit_failed` with `paneTail` and return false — no destructive
-   * recovery. The user (or `/restart`) decides next steps.
-   */
-  /**
-   * Paste `text`, submit (Enter), then wait for the proxy to observe an SSE
-   * `message_start` event — proof Claude received the input and began a new
-   * agent turn. This replaces the older pane-scrape echo gate, which was
-   * unreliable for large pastes (Claude consumes the `[Pasted text #N]`
-   * placeholder before our 500ms poll window can see it).
+   * Paste `text`, submit (Enter), then confirm the CLI accepted it. The send is
+   * confirmed by EITHER signal, whichever lands first:
+   *   - SSE `message_start` — a fresh agent turn began (idle pane, or a steer the
+   *     CLI promoted to a new turn).
+   *   - JSONL receipt (`prompt_received`) — the CLI recorded the prompt as a
+   *     `user` entry or an `enqueue`. This is the ONLY signal for an in-tool
+   *     steer, which the CLI injects at the next tool boundary with no
+   *     `message_start` of its own.
    *
-   * On timeout, surface `submit_failed` with `paneTail` for diagnostics. No
-   * destructive recovery; the caller decides whether to retry or `/restart`.
+   * We never pane-scrape for `[Pasted text #N]` — large pastes consume the
+   * placeholder before we can poll. On timeout, surface `submit_failed`; no
+   * destructive recovery — the caller (or `/restart`) decides next steps.
    */
-  private async pasteSubmitAndConfirmTurnStart(text: string): Promise<boolean> {
-    const wait = this.waitForTurnStart(TURN_START_TIMEOUT_MS);
+  private async pasteSubmitAndConfirm(text: string): Promise<boolean> {
+    const wait = this.waitForSendConfirm(TURN_START_TIMEOUT_MS);
     pasteText(this.tmuxName, text);
     await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
     submit(this.tmuxName);
     if (await wait) return true;
 
-    log.error("no SSE turn-start after submit — aborting (no blind recovery)", {
+    log.error("no send receipt after submit — aborting (no blind recovery)", {
       ...this.stateSnapshot(),
       paneTail: this.paneTail(10),
     });
     const hint =
-      "Claude didn't start a new turn after submit — the CLI may be on a modal prompt, busy, or stuck. " +
+      "Claude neither started a turn nor recorded the prompt — the CLI may be on a modal prompt, busy, or stuck. " +
       `Attach with \`tmux attach -t ${this.tmuxName}\` to check, or send \`/restart\` to relaunch.`;
     this.emit("sse", {
       type: "runtime_error",
       subtype: "submit_failed",
       timestamp: new Date().toISOString(),
-      reason: "no_turn_start",
-      message: `Your prompt didn't reach Claude (no turn started in ${Math.round(TURN_START_TIMEOUT_MS / 1000)}s). ${hint}`,
+      reason: "no_receipt",
+      message: `Your prompt didn't reach Claude (no receipt in ${Math.round(TURN_START_TIMEOUT_MS / 1000)}s). ${hint}`,
       paneTail: this.paneTail(10),
       hint,
     } satisfies StreamEvent);
@@ -651,22 +642,26 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
-   * Wait up to `timeoutMs` for the next `message_start` agent-turn SSE event.
-   * Resolves true on the first such event, false on timeout. Subscribes
-   * BEFORE we paste so we never miss a fast-arriving message_start.
+   * Resolve true when the CLI confirms the just-submitted prompt — on the first
+   * of `turn_started` (SSE `message_start`) or `prompt_received` (JSONL `user` /
+   * `enqueue`) — or false on timeout. Subscribe BEFORE pasting so a fast receipt
+   * is never missed.
    */
-  private waitForTurnStart(timeoutMs: number): Promise<boolean> {
+  private waitForSendConfirm(timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
-      const onStart = (): void => {
+      const done = (): void => {
         clearTimeout(timer);
-        this.off("turn_started", onStart);
+        this.off("turn_started", done);
+        this.off("prompt_received", done);
         resolve(true);
       };
       const timer = setTimeout(() => {
-        this.off("turn_started", onStart);
+        this.off("turn_started", done);
+        this.off("prompt_received", done);
         resolve(false);
       }, timeoutMs);
-      this.once("turn_started", onStart);
+      this.once("turn_started", done);
+      this.once("prompt_received", done);
     });
   }
 
