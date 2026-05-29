@@ -79,23 +79,45 @@ gh api repos/owner/repo/pulls/<PR>/comments --jq '.[] | {user: .user.login, path
 4. **Read the Linear ticket** — `linctl issue get <KEY>` if the PR mentions one. The ticket often lists the **expected files** for a feature; cross-check that they're all in the diff. Missing files = the PR description is making promises the diff doesn't keep.
 5. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
 6. **Present findings** — Show review findings to Michael for discussion before submitting
-7. **Submit review** — Use `gh comment review` with `--comment` flags (see [Submitting Reviews](#submitting-reviews-recommended-pattern))
-8. **VERIFY the comments landed** — After submission, query the API to confirm inline comments actually attached. **If you see 0 of your comments, the submission silently failed** (see [Verifying a Submission](#verifying-a-submission)).
+7. **Submit review** — For APPROVE/REQUEST_CHANGES use the **split process**: `gh comment review --event COMMENT` for inline comments, then native `gh pr review --approve` for the decision (see [Submitting Reviews](#submitting-reviews-recommended-pattern)). COMMENT-only reviews can stay in one `gh comment` call.
+8. **VERIFY both landed** — Query the API to confirm (a) inline comments attached AND (b) the review decision registered. **0 comments = silent failure; missing APPROVED = the decision didn't take** (see [Verifying a Submission](#verifying-a-submission)).
 9. **Clean up worktree** — Only after the review is live AND verified. Don't tear down on "I think we're done."
 
 ## Submitting Reviews (Recommended Pattern)
 
-### Single command: body + inline comments + decision
+### ✅ Split process for APPROVE / REQUEST_CHANGES (preferred)
+
+**Do NOT use `gh comment review --event APPROVE` to approve.** Observed 2026-05-29 (PRs #24710, #24706): the extension's APPROVE _event_ is flaky — it double-submitted the approval on one PR, and on another the approval never surfaced in the GitHub web UI even though the API reported `APPROVED` (Michael had to approve manually). The inline _comments_ landed fine both times — it's the decision event specifically that misbehaves.
+
+So split the two responsibilities: **`gh comment` for the inline comments** (keeps our line-numbering tweak), **native `gh pr review` for the decision** (renders reliably in the UI, no double-submit).
+
+```bash
+# Step 1 — inline comments as a COMMENT review (gh comment, line-mapped)
+gh comment review <PR> "Inline note(s) below ⬇️ (full review in the approval)" \
+  --comment "path/to/file.rb:42:$(cat /tmp/c1.txt)" \
+  --event COMMENT \
+  -R owner/repo
+
+# Step 2 — the decision + full summary, native CLI
+gh pr review <PR> --approve --body "$(cat /tmp/approve_body.txt)" -R owner/repo
+# (or: --request-changes / --comment)
+```
+
+This yields two clean review entries: one `COMMENTED` (carrying the inline notes) and one `APPROVED` (carrying the summary). Put the rich review body on the **approval** so it reads as the approval rationale.
+
+### Single command: body + inline comments + decision (COMMENT only)
+
+Fine for **COMMENT** reviews (no decision event). Avoid `--event APPROVE`/`REQUEST_CHANGES` here — use the split process above for those.
 
 ```bash
 gh comment review <PR> "Review summary here" \
   --comment "path/to/file.rb:42:Your comment on line 42" \
   --comment "path/to/file.ts:10:15:Comment spanning lines 10-15" \
-  --event APPROVE \
+  --event COMMENT \
   -R owner/repo
 ```
 
-**Events:** `APPROVE`, `REQUEST_CHANGES`, `COMMENT` (default)
+**Events:** `APPROVE`, `REQUEST_CHANGES`, `COMMENT` (default) — but for `APPROVE`/`REQUEST_CHANGES` prefer the split process.
 
 ### Comment Format
 
@@ -134,20 +156,22 @@ gh comment review <PR> "$(cat /tmp/body.txt)" \
 ### Examples
 
 ```bash
-# Approve with comments
-gh comment review 22365 "Solid work! A few minor suggestions." \
+# Approve with comments — SPLIT: inline via gh comment (COMMENT), decision via native CLI
+gh comment review 22365 "Inline notes below ⬇️ (full review in the approval)" \
   --comment "app/models/foo.rb:43:Is pending really a processing state here?" \
   --comment "client/src/utils.ts:28:Tiny copy nit — see suggestion below" \
-  --event APPROVE \
+  --event COMMENT \
   -R beehiiv/swarm
+gh pr review 22365 --approve --body "Solid work! A few minor suggestions inline." -R beehiiv/swarm
 
-# Request changes
-gh comment review 123 "Needs fixes before merge" \
+# Request changes — same split
+gh comment review 123 "Blocker inline ⬇️" \
   --comment "app/services/bar.rb:15:20:This block needs error handling" \
-  --event REQUEST_CHANGES \
+  --event COMMENT \
   -R beehiiv/swarm
+gh pr review 123 --request-changes --body "Needs fixes before merge — see inline." -R beehiiv/swarm
 
-# Comment only (no approval/rejection)
+# Comment only (no decision) — single gh comment call is fine
 gh comment review 123 "Discussion items" \
   --comment "app/models/user.rb:55:Consider eager loading here" \
   --event COMMENT \
@@ -159,17 +183,18 @@ gh comment review 123 "Discussion items" \
 For a single review body or a single inline comment with shell-hostile characters, inline HEREDOC works:
 
 ```bash
-gh comment review <PR> "$(cat <<'EOF'
-Clean implementation! The `useRoles()` pattern is consistent with existing code.
-One minor suggestion — see inline comment.
-EOF
-)" \
+gh comment review <PR> "Inline note below ⬇️ (full review in the approval)" \
   --comment "$(cat <<'EOF'
 client/src/components/Foo.tsx:42:Nit: This `roles?.includes('admin') ?? false` logic is duplicated. Consider extracting to a `useCanManage()` hook.
 EOF
 )" \
-  --event APPROVE \
+  --event COMMENT \
   -R beehiiv/swarm
+gh pr review <PR> --approve --body "$(cat <<'EOF'
+Clean implementation! The `useRoles()` pattern is consistent with existing code.
+One minor suggestion — see inline comment.
+EOF
+)" -R beehiiv/swarm
 ```
 
 The `<<'EOF'` (quoted) form prevents ALL shell interpolation — backticks, parentheses, quotes all pass through verbatim.
@@ -178,15 +203,21 @@ For 2+ long comments, prefer the temp-file pattern above.
 
 ## Verifying a Submission
 
-**Always verify after submitting.** The most common silent failure is a malformed YAML batch that creates a review with 0 attached comments.
+**Always verify after submitting — BOTH the comments and the decision.** The API reporting `APPROVED` is not enough on its own (it disagreed with the web UI on 2026-05-29), so confirm the roll-up `reviewDecision` too, and that there's exactly one decision review (no double-submit) on the current head.
 
 ```bash
-# Did MY inline comments actually attach?
+# 1. Did MY inline comments actually attach?
 gh api repos/<owner>/<repo>/pulls/<PR>/comments \
   --jq '.[] | select(.user.login == "<your-login>") | {path, line, body: .body[:80]}'
+
+# 2. Did the DECISION register? Check the roll-up + the review rows.
+gh pr view <PR> -R <owner>/<repo> --json reviewDecision --jq .reviewDecision   # expect APPROVED
+gh api repos/<owner>/<repo>/pulls/<PR>/reviews \
+  --jq '.[] | select(.user.login == "<your-login>") | "\(.state)\t@\(.commit_id[0:8])"'
+gh pr view <PR> -R <owner>/<repo> --json headRefOid --jq .headRefOid           # APPROVED commit must match
 ```
 
-Expected: one entry per `--comment` you passed. If you see 0, the inline comments didn't attach — diagnose and re-submit using the `--comment` form. **Don't tell Michael the review is done until you've seen your own comments come back from the API.**
+Expected: one entry per `--comment` you passed, `reviewDecision == APPROVED`, and a single `APPROVED` review on the current head SHA. If comments show 0 → re-submit the `--comment` form. If the decision didn't take → re-run `gh pr review --approve`. **Don't tell Michael the review is done until you've seen both the comments AND `APPROVED` come back from the API.**
 
 ## ⚠️ Avoid `gh comment batch` (YAML Form) — Schema is Fragile
 
