@@ -13,7 +13,7 @@
 
 import { createLogger } from "@anima/shared";
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync } from "node:fs";
 import {
   createServer as netServer,
   connect as netConnect,
@@ -42,6 +42,15 @@ const CAPTURE_FILE = join(homedir(), ".anima", "logs", "cli-proxy-capture.jsonl"
  * (correlates back to the CAPTURE_FILE request line) plus the raw event.
  */
 const EVENTS_FILE = join(homedir(), ".anima", "logs", "cli-proxy-events.jsonl");
+
+/**
+ * Hard size cap per capture sink. Capture is a debug aid gated behind the
+ * `capture` option; this guarantees a sink can never grow unbounded even if the
+ * flag is left on — the 3.7GB incident (#50) that prompted this. Past the cap we
+ * stop appending and warn once.
+ */
+const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
+const cappedWarned = new Set<string>();
 
 /** Per-stream context derived from the originating request. */
 export interface StreamContext {
@@ -304,20 +313,35 @@ export class AnthropicTeeProxy {
   /** Append a full request/response record to the capture file (best-effort). */
   private capture(record: Record<string, unknown>): void {
     if (!this.opts.capture) return;
-    try {
-      appendFileSync(CAPTURE_FILE, JSON.stringify(record) + "\n");
-    } catch {
-      // capture is best-effort debug aid — never let it break the proxy
-    }
+    this.appendCapped(CAPTURE_FILE, JSON.stringify(record) + "\n");
   }
 
   /** Append a single SSE event to the events file, one per line (best-effort). */
   private captureEvent(record: Record<string, unknown>): void {
     if (!this.opts.capture) return;
+    this.appendCapped(EVENTS_FILE, JSON.stringify(record) + "\n");
+  }
+
+  /**
+   * Best-effort append to a capture sink with a hard size cap (#50). Once a sink
+   * reaches MAX_CAPTURE_BYTES we stop writing and warn once — capture is a debug
+   * aid and must never fill the disk, even if `capture` is left on.
+   */
+  private appendCapped(file: string, line: string): void {
     try {
-      appendFileSync(EVENTS_FILE, JSON.stringify(record) + "\n");
+      if (existsSync(file) && statSync(file).size >= MAX_CAPTURE_BYTES) {
+        if (!cappedWarned.has(file)) {
+          cappedWarned.add(file);
+          log.warn("capture sink hit size cap — halting writes", {
+            file,
+            capBytes: MAX_CAPTURE_BYTES,
+          });
+        }
+        return;
+      }
+      appendFileSync(file, line);
     } catch {
-      // best-effort debug aid
+      // capture is best-effort debug aid — never let it break the proxy
     }
   }
 
