@@ -50,7 +50,7 @@ deny_reason_for_command() {
     return 0
   fi
 
-  if [[ "$command" == *gh-stack* ]] &&
+  if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])gh-stack([[:space:]]|$) ]] &&
      [[ "$command" =~ \|[[:space:]]*(tail|head)([[:space:]]|$) ]]; then
     printf "%s" "Blocked: don't pipe gh-stack into tail/head. It can hang the wrapper or get killed mid-operation (exit 143), leaving a rebase/push half-done. Re-run plainly; use 'tokf raw last' for the full output."
     return 0
@@ -491,7 +491,7 @@ write_parent_env() {
 run_child() {
   local run_dir="$1"
   local done_token="$2"
-  local command output status_file env_file cwd_file use_tokf rewritten status
+  local command output status_file env_file cwd_file use_tokf rewritten status parent_pid
 
   command="$(cat "$run_dir/command")"
   output="$run_dir/output"
@@ -585,6 +585,22 @@ run_child() {
 
   tmux wait-for -S "$done_token"
 
+  # If the parent wrapper process was killed by a tool timeout, it deliberately
+  # leaves the child command running in this pane. In that detached case, the
+  # child owns final recovery: mark the pane reusable and remove the run dir
+  # after writing status/output. When the parent is still alive, it handles
+  # status collection and cleanup.
+  parent_pid="$(cat "$run_dir/parent_pid" 2>/dev/null || true)"
+  if [ -n "${TMUX_PANE:-}" ]; then
+    tmux set-option -p -t "$TMUX_PANE" @tmux-wrap-owned 1 >/dev/null 2>&1 || true
+    tmux set-option -p -t "$TMUX_PANE" @tmux-wrap-state idle >/dev/null 2>&1 || true
+    tmux select-pane -t "$TMUX_PANE" -T "tmux-wrap-idle" >/dev/null 2>&1 || true
+    tmux wait-for -S "$IDLE_TOKEN" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$parent_pid" ] && ! kill -0 "$parent_pid" 2>/dev/null; then
+    rm -rf "$run_dir" 2>/dev/null || true
+  fi
+
   exec "${SHELL:-/bin/bash}" -l
 }
 
@@ -593,18 +609,20 @@ cleanup_parent() {
   [ -n "${tail_pid:-}" ] && kill "$tail_pid" 2>/dev/null
 
   # If we are dying before the child reported done (interrupt / Bash-tool
-  # timeout), the command is still running detached in its pane. Kill it and
-  # return the pane to the idle pool so it does not leak or run away.
+  # timeout), leave the command running in its pane. Killing here can corrupt
+  # long-running mutating commands mid-push/rebase/migration. The child marks
+  # the pane idle and removes the run dir after it finishes.
   if [ "${completed:-0}" != "1" ] && [ -n "${pane_id:-}" ]; then
-    tmux respawn-pane -k -t "$pane_id" >/dev/null 2>&1 || true
-    tmux set-option -p -t "$pane_id" @tmux-wrap-state idle >/dev/null 2>&1 || true
-    tmux select-pane -t "$pane_id" -T "tmux-wrap-idle" >/dev/null 2>&1 || true
-    tmux wait-for -S "$IDLE_TOKEN" >/dev/null 2>&1 || true
+    printf "tmux-wrap: parent exited before command completed; command left running in pane %s\n" "$pane_id" >&2
+    printf "tmux-wrap: attach with: tmux attach -t %s\n" "$SESSION_NAME" >&2
   fi
 
   # The run dir holds the serialized parent environment (env.sh can contain
-  # secrets). Always remove it; the child read everything it needs up front.
-  [ -n "${run_dir:-}" ] && rm -rf "$run_dir" 2>/dev/null
+  # secrets). Remove it after normal completion; if the parent died early, the
+  # child still needs the dir for output/status and removes it when done.
+  if [ "${completed:-0}" = "1" ]; then
+    [ -n "${run_dir:-}" ] && rm -rf "$run_dir" 2>/dev/null
+  fi
 
   return 0
 }
@@ -671,6 +689,7 @@ run_parent() {
 
   printf "%s" "$command" >"$run_dir/command"
   printf "%s" "$PWD" >"$run_dir/cwd"
+  printf "%s" "$$" >"$run_dir/parent_pid"
   printf "%s" "$use_tokf" >"$run_dir/use_tokf"
   : >"$run_dir/output"
   write_parent_env "$run_dir/env.sh"
