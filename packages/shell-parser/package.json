@@ -1,0 +1,22 @@
+{
+  "name": "@anima/shell-parser",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "anima-shell-policy": "./src/cli.ts"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "policy": "bun run src/cli.ts policy",
+    "test": "bun test src",
+    "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "tree-sitter-bash": "0.25.1",
+    "web-tree-sitter": "0.26.9"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}

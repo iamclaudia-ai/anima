@@ -9,6 +9,8 @@ SCRIPT_PATH="${BASH_SOURCE[0]}"
 if [[ "$SCRIPT_PATH" != /* ]]; then
   SCRIPT_PATH="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)/$(basename -- "$SCRIPT_PATH")"
 fi
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+SHELL_POLICY_HELPER="${TMUX_WRAP_SHELL_POLICY_HELPER:-${SCRIPT_DIR}/../packages/shell-parser/src/cli.ts}"
 SESSION_KEY="$(printf "%s" "$SESSION_NAME" | tr -c '[:alnum:]_.-' '_')"
 LOCK_DIR="${BASE_DIR%/}/tmux-wrap.${SESSION_KEY}.lock"
 IDLE_TOKEN="tmux-wrap-idle-${SESSION_KEY}"
@@ -41,9 +43,28 @@ die() {
   exit 1
 }
 
+policy_json_for_command() {
+  local command="$1"
+
+  [ "${TMUX_WRAP_NO_AST_POLICY:-}" = "1" ] && return 1
+  command -v bun >/dev/null 2>&1 || return 1
+  [ -f "$SHELL_POLICY_HELPER" ] || return 1
+
+  printf "%s" "$command" | bun run "$SHELL_POLICY_HELPER" policy 2>/dev/null
+}
+
 deny_reason_for_command() {
   local command="$1"
   local command_positions="${command//$'\n'/;}"
+  local policy_json
+
+  if policy_json="$(policy_json_for_command "$command")"; then
+    if jq -e '.ok == true and (.denyReason | type == "string")' >/dev/null 2>&1 <<<"$policy_json"; then
+      jq -r '.denyReason' <<<"$policy_json"
+      return 0
+    fi
+    jq -e '.ok == true and .denyReason == null' >/dev/null 2>&1 <<<"$policy_json" && return 1
+  fi
 
   if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*n[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]] ||
      [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*n[[:alpha:]]*r[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]]; then
@@ -85,6 +106,12 @@ should_passthrough_command() {
 
 should_skip_tokf_command() {
   local command="$1"
+  local policy_json
+
+  if policy_json="$(policy_json_for_command "$command")"; then
+    jq -e '.ok == true and .skipTokf == true' >/dev/null 2>&1 <<<"$policy_json" && return 0
+    jq -e '.ok == true and .skipTokf == false' >/dev/null 2>&1 <<<"$policy_json" && return 1
+  fi
 
   # tokf's built-in gh filters own their own --json projection and output
   # template. If the caller supplied an explicit gh JSON/jq projection, running
