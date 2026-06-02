@@ -43,6 +43,7 @@ die() {
 
 deny_reason_for_command() {
   local command="$1"
+  local command_positions="${command//$'\n'/;}"
 
   if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*n[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]] ||
      [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*n[[:alpha:]]*r[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]]; then
@@ -50,7 +51,7 @@ deny_reason_for_command() {
     return 0
   fi
 
-  if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])gh-stack([[:space:]]|$) ]] &&
+  if [[ "$command_positions" =~ (^|[;\|\&\(\`]|\$\()[[:space:]]*gh-stack([[:space:]]|$) ]] &&
      [[ "$command" =~ \|[[:space:]]*(tail|head)([[:space:]]|$) ]]; then
     printf "%s" "Blocked: don't pipe gh-stack into tail/head. It can hang the wrapper or get killed mid-operation (exit 143), leaving a rebase/push half-done. Re-run plainly; use 'tokf raw last' for the full output."
     return 0
