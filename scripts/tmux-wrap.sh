@@ -108,6 +108,11 @@ should_skip_tokf_command() {
   local command="$1"
   local policy_json
 
+  # tokf rewrite can corrupt shell offsets when a command contains embedded
+  # newlines, especially multi-line quoted strings such as commit messages.
+  # Run these raw; tmux remains the full-fidelity transcript.
+  [[ "$command" == *$'\n'* ]] && return 0
+
   if policy_json="$(policy_json_for_command "$command")"; then
     jq -e '.ok == true and .skipTokf == true' >/dev/null 2>&1 <<<"$policy_json" && return 0
     jq -e '.ok == true and .skipTokf == false' >/dev/null 2>&1 <<<"$policy_json" && return 1
