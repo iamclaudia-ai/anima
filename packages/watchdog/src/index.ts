@@ -17,7 +17,7 @@
  *   curl -X POST localhost:30085/restart/gateway        # Restart gateway
  */
 
-import { WATCHDOG_PORT, STARTED_AT, HEALTH_CHECK_INTERVAL } from "./constants";
+import { WATCHDOG_PORT, STARTED_AT, HEALTH_CHECK_INTERVAL, getGatewayToken } from "./constants";
 import { log } from "./logger";
 import {
   services,
@@ -30,23 +30,55 @@ import { listLogFiles, tailLogFile } from "./logs";
 import { getStatus } from "./status";
 import { ensureClaudeUpToDate } from "./claude-update";
 import dashboard from "./dashboard/index.html";
+import { timingSafeEqual } from "node:crypto";
 
 // ── HTTP Server ──────────────────────────────────────────
 
+function extractBearerToken(authHeader: string | null): string | null {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7).trim();
+  return token.length > 0 ? token : null;
+}
+
+function validateToken(provided: string | null, expected: string | null): boolean {
+  if (!provided || !expected || provided.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(provided, "utf8"), Buffer.from(expected, "utf8"));
+}
+
+function authenticateRequest(req: Request): boolean {
+  const expected = getGatewayToken();
+  if (!expected) return false;
+  const url = new URL(req.url);
+  const headerToken = extractBearerToken(req.headers.get("Authorization"));
+  if (validateToken(headerToken, expected)) return true;
+  return validateToken(url.searchParams.get("token"), expected);
+}
+
+function unauthorized(): Response {
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
+}
+
 const server = Bun.serve({
   port: WATCHDOG_PORT,
+  hostname: "127.0.0.1",
   routes: {
     // JSON status
-    "/status": async () => Response.json(await getStatus()),
+    "/status": async (req) =>
+      authenticateRequest(req) ? Response.json(await getStatus()) : unauthorized(),
 
     // Server info for client-side uptime/port
-    "/api/info": () => Response.json({ startedAt: STARTED_AT, port: WATCHDOG_PORT }),
+    "/api/info": (req) =>
+      authenticateRequest(req)
+        ? Response.json({ startedAt: STARTED_AT, port: WATCHDOG_PORT })
+        : unauthorized(),
 
     // List log files
-    "/api/logs": () => Response.json({ files: listLogFiles() }),
+    "/api/logs": (req) =>
+      authenticateRequest(req) ? Response.json({ files: listLogFiles() }) : unauthorized(),
 
     // Tail a log file: /api/logs/:filename
     "/api/logs/*": (req) => {
+      if (!authenticateRequest(req)) return unauthorized();
       const url = new URL(req.url);
       const fileName = decodeURIComponent(url.pathname.slice("/api/logs/".length));
       const maxLines = parseInt(url.searchParams.get("lines") || "200", 10);
@@ -65,6 +97,7 @@ const server = Bun.serve({
 
     // Restart service: POST /restart/:id
     "/restart/*": async (req) => {
+      if (!authenticateRequest(req)) return unauthorized();
       if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
       const url = new URL(req.url);
       const serviceId = url.pathname.split("/restart/")[1];

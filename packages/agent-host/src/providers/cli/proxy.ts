@@ -250,6 +250,7 @@ export class AnthropicTeeProxy {
       try {
         this.server = Bun.serve({
           port,
+          hostname: "127.0.0.1",
           idleTimeout: 0, // never time out long-lived SSE streams
           fetch: (req) => this.handle(req),
         });
@@ -277,6 +278,7 @@ export class AnthropicTeeProxy {
     if (!this.opts.tls) throw new Error("CliProxy: mitm interception requires tls key+cert");
     this.innerServer = Bun.serve({
       port: 0, // ephemeral; the CLI never targets it directly
+      hostname: "127.0.0.1",
       tls: this.opts.tls,
       idleTimeout: 0,
       fetch: (req) => this.handle(req),

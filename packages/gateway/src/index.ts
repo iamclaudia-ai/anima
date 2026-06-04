@@ -53,6 +53,30 @@ import indexHtml from "./web/index.html" with { type: "file" };
 import serviceWorker from "./web/service-worker.js" with { type: "file" };
 import manifestData from "./web/manifest.json";
 
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "script-src 'self' 'unsafe-inline'",
+  "connect-src 'self' ws: wss:",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "report-uri /api/csp-report",
+  "report-to anima-csp",
+].join("; ");
+
+function withDocumentSecurityHeaders(response: globalThis.Response): globalThis.Response {
+  response.headers.set("Content-Security-Policy-Report-Only", CSP_REPORT_ONLY);
+  response.headers.set("Reporting-Endpoints", 'anima-csp="/api/csp-report"');
+  response.headers.set("Referrer-Policy", "same-origin");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  return response;
+}
+
 // Load configuration (anima.json or env var fallback)
 const config = loadConfig();
 const PORT = config.gateway.port;
@@ -899,7 +923,14 @@ const server = Bun.serve<ClientState>({
   },
   routes: {
     // Health check endpoint
-    "/health": () => {
+    "/health": (req: globalThis.Request) => {
+      const auth = authenticateRequest(req);
+      if (!auth.ok) {
+        return new globalThis.Response(JSON.stringify({ error: auth.message }), {
+          status: auth.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       return new globalThis.Response(
         JSON.stringify({
           status: "ok",
@@ -912,6 +943,19 @@ const server = Bun.serve<ClientState>({
         }),
         { headers: { "Content-Type": "application/json" } },
       );
+    },
+
+    "/api/csp-report": async (req: globalThis.Request) => {
+      if (req.method !== "POST") {
+        return new globalThis.Response("Method not allowed", { status: 405 });
+      }
+      try {
+        const body = await req.text();
+        log.warn("CSP report", { body: body.slice(0, 4000) });
+      } catch (error) {
+        log.warn("Failed to read CSP report", { error: String(error) });
+      }
+      return new globalThis.Response(null, { status: 204 });
     },
 
     // Client error beacon — receives crash reports from the web UI
@@ -1170,9 +1214,11 @@ const server = Bun.serve<ClientState>({
         }
         return new globalThis.Response("Not found", { status: 404 });
       }
-      return new globalThis.Response(Bun.file(indexHtml as unknown as string), {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      });
+      return withDocumentSecurityHeaders(
+        new globalThis.Response(Bun.file(indexHtml as unknown as string), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }),
+      );
     },
   },
   websocket: {

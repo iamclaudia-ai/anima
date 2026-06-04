@@ -84,6 +84,39 @@ class WsClient {
   }
 }
 
+const TEST_TOKEN = "anima_sk_test0000000000000000000000000000";
+
+function agentHostWsUrl(port: number): string {
+  return `ws://127.0.0.1:${port}/ws?token=${TEST_TOKEN}`;
+}
+
+async function expectWsRejected(url: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ws.close();
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error("WebSocket rejection timed out")));
+    }, 1000);
+
+    ws.addEventListener("open", () => {
+      finish(() => reject(new Error("WebSocket unexpectedly opened")));
+    });
+    ws.addEventListener("error", () => {
+      finish(resolve);
+    });
+    ws.addEventListener("close", () => {
+      finish(resolve);
+    });
+  });
+}
+
 class FakeSessionHost extends EventEmitter implements SessionHostLike {
   private sessions = new Map<string, { id: string }>();
   private bufferedEvents = new Map<string, BufferedEvent[]>();
@@ -181,7 +214,7 @@ describe("agent-host server", () => {
   let port: number;
   let serverCtx: Awaited<ReturnType<typeof createAgentHostServer>> | null = null;
   const fakeConfig: AnimaConfig = {
-    gateway: { port: 0, host: "127.0.0.1" },
+    gateway: { port: 0, host: "127.0.0.1", token: TEST_TOKEN },
     session: {
       model: "claude-opus-4-6",
       thinking: false,
@@ -240,7 +273,7 @@ describe("agent-host server", () => {
       stateSaveIntervalMs: null,
     });
 
-    const client = new WsClient(`ws://127.0.0.1:${port}/ws`);
+    const client = new WsClient(agentHostWsUrl(port));
     await client.waitOpen();
     client.send({
       type: "auth",
@@ -255,6 +288,36 @@ describe("agent-host server", () => {
       (msg) => msg.type === "session.event" && msg.sessionId === "s1" && msg.seq === 4,
     );
 
+    client.close();
+  });
+
+  it("requires the gateway token for health checks and websocket upgrades", async () => {
+    if (serverCtx) {
+      await serverCtx.stop();
+    }
+    const fakeHost = new FakeSessionHost();
+
+    serverCtx = await createAgentHostServer({
+      port: await getFreePort(),
+      sessionHost: fakeHost,
+      loadConfig: () => fakeConfig,
+      loadState: () => ({ updatedAt: new Date().toISOString(), sessions: [] }),
+      saveState: () => {},
+      stateSaveIntervalMs: null,
+    });
+
+    const unauthHealth = await fetch(`http://127.0.0.1:${serverCtx.port}/health`);
+    expect(unauthHealth.status).toBe(401);
+
+    const authHealth = await fetch(`http://127.0.0.1:${serverCtx.port}/health`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(authHealth.status).toBe(200);
+
+    await expectWsRejected(`ws://127.0.0.1:${serverCtx.port}/ws`);
+
+    const client = new WsClient(agentHostWsUrl(serverCtx.port));
+    await client.waitOpen();
     client.close();
   });
 
@@ -274,8 +337,8 @@ describe("agent-host server", () => {
       stateSaveIntervalMs: null,
     });
 
-    const clientA = new WsClient(`ws://127.0.0.1:${serverCtx.port}/ws`);
-    const clientB = new WsClient(`ws://127.0.0.1:${serverCtx.port}/ws`);
+    const clientA = new WsClient(agentHostWsUrl(serverCtx.port));
+    const clientB = new WsClient(agentHostWsUrl(serverCtx.port));
     await clientA.waitOpen();
     await clientB.waitOpen();
 
@@ -396,7 +459,7 @@ describe("agent-host server", () => {
       stateSaveIntervalMs: null,
     });
 
-    const client = new WsClient(`ws://127.0.0.1:${serverCtx.port}/ws`);
+    const client = new WsClient(agentHostWsUrl(serverCtx.port));
     await client.waitOpen();
     client.send({ type: "auth", extensionId: "session" });
 

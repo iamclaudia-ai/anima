@@ -9,6 +9,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { extractBearerToken, loadConfig, validateToken } from "@anima/shared";
 
 export class WebhookServer {
   private server: any;
@@ -17,6 +18,7 @@ export class WebhookServer {
   private log: any;
   private port: number;
   private automationSessionId: string | null;
+  private authToken: string | null;
 
   constructor(ctx: any, db: Database, log: any, port: number = 30088) {
     this.ctx = ctx;
@@ -24,6 +26,7 @@ export class WebhookServer {
     this.log = log;
     this.port = port;
     this.automationSessionId = process.env.ANIMA_SCHEDULER_SESSION_ID || null;
+    this.authToken = loadConfig().gateway.token ?? null;
   }
 
   async start() {
@@ -31,6 +34,7 @@ export class WebhookServer {
 
     this.server = Bun.serve({
       port: this.port,
+      hostname: "127.0.0.1",
       fetch: (req) => this.handleRequest(req),
     });
 
@@ -67,6 +71,13 @@ export class WebhookServer {
 
     if (method === "OPTIONS") {
       return new Response(null, { status: 200, headers: corsHeaders });
+    }
+
+    if (!this.isAuthorized(req, url)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
 
     try {
@@ -110,6 +121,13 @@ export class WebhookServer {
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
+  }
+
+  private isAuthorized(req: Request, url: URL): boolean {
+    if (!this.authToken) return false;
+    const bearer = extractBearerToken(req.headers.get("authorization"));
+    const queryToken = url.searchParams.get("token");
+    return validateToken(bearer, this.authToken) || validateToken(queryToken, this.authToken);
   }
 
   private async handleHealth(): Promise<Response> {

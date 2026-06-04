@@ -34,6 +34,12 @@ interface SessionExtensionRuntime {
   unsubscribers: Array<() => void>;
 }
 
+function withAuthToken(url: string, token: string | undefined): string {
+  if (!token) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+}
+
 // ── Extension factory ────────────────────────────────────────
 
 export function createSessionExtension(config: Record<string, unknown> = {}): AnimaExtension {
@@ -66,7 +72,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
   };
 
   // ── Runtime objects (initialized before start, ctx bound in start) ──
-  const agentClient = new AgentHostClient(globalConfig.agentHost.url);
+  const agentClient = new AgentHostClient(
+    withAuthToken(globalConfig.agentHost.url, globalConfig.gateway.token),
+  );
   const bridge = new SessionAgentBridge(agentClient);
   const registry = new SessionRegistry();
   const methodHandlers = createSessionMethodHandlers();

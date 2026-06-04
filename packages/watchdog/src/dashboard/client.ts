@@ -58,12 +58,47 @@ let serverStartedAt = 0;
 let serverPort = 0;
 
 const MAX_LINES = 2000;
+const TOKEN_STORAGE_KEY = "anima_watchdog_token";
+
+function getToken(): string {
+  const params = new URLSearchParams(window.location.search);
+  const queryToken = params.get("token")?.trim();
+  if (queryToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, queryToken);
+    params.delete("token");
+    const nextUrl =
+      window.location.pathname +
+      (params.toString() ? `?${params.toString()}` : "") +
+      window.location.hash;
+    window.history.replaceState(null, "", nextUrl);
+    return queryToken;
+  }
+
+  const stored = localStorage.getItem(TOKEN_STORAGE_KEY)?.trim();
+  if (stored) return stored;
+
+  const prompted = window.prompt("Enter your Anima gateway token")?.trim() ?? "";
+  if (prompted) localStorage.setItem(TOKEN_STORAGE_KEY, prompted);
+  return prompted;
+}
+
+async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    throw new Error("Unauthorized");
+  }
+  return res;
+}
 
 // ── Init: Fetch server info ──────────────────────────────
 
 async function init(): Promise<void> {
   try {
-    const res = await fetch("/api/info");
+    const res = await authFetch("/api/info");
     const info: ServerInfo = await res.json();
     serverStartedAt = info.startedAt;
     serverPort = info.port;
@@ -113,7 +148,7 @@ function updateUptime(): void {
 
 async function loadLogFiles(): Promise<void> {
   try {
-    const res = await fetch("/api/logs");
+    const res = await authFetch("/api/logs");
     const data = await res.json();
     const select = $("logFile") as HTMLSelectElement | null;
     if (!select) return;
@@ -164,7 +199,7 @@ async function tailLog(): Promise<void> {
   if (!currentFile || paused || tailPending) return;
   tailPending = true;
   try {
-    const res = await fetch(
+    const res = await authFetch(
       `/api/logs/${encodeURIComponent(currentFile)}?lines=200&offset=${offset}`,
     );
     const data = await res.json();
@@ -216,7 +251,7 @@ function renderLines(): void {
 async function restartService(id: string): Promise<void> {
   if (!confirm(`Restart ${id}?`)) return;
   try {
-    const res = await fetch(`/restart/${id}`, { method: "POST" });
+    const res = await authFetch(`/restart/${id}`, { method: "POST" });
     const data = await res.json();
     alert(data.message);
   } catch (e) {
@@ -226,7 +261,7 @@ async function restartService(id: string): Promise<void> {
 
 async function refreshStatus(): Promise<void> {
   try {
-    const res = await fetch("/status");
+    const res = await authFetch("/status");
     const data: Record<string, ServiceStatus> = await res.json();
     const container = $("serviceCards");
     if (!container) return;

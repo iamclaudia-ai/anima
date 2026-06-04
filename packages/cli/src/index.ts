@@ -11,7 +11,7 @@
  */
 
 import { createGatewayClient, loadConfig, generateToken, writeConfigToken } from "@anima/shared";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { skillCommand } from "./commands/skill/index.js";
 
@@ -567,6 +567,7 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
   console.log("  anima <namespace> <action> --examples      Show usage examples");
   console.log("  anima <namespace> --help                   List namespace methods");
   console.log("  anima methods [namespace]                  List all available methods");
+  console.log("  anima doctor                               Run local hardening checks");
   console.log("  (global) --host <host[:port]>                Override gateway host for this call");
   console.log("  (global) --gateway-url <ws(s)://.../ws>      Override full gateway URL");
 
@@ -783,6 +784,233 @@ async function promptCompat(args: string[]): Promise<void> {
 
 const WATCHDOG_URL = process.env.ANIMA_WATCHDOG_URL || "http://localhost:30085";
 
+function getAuthHeaders(): Record<string, string> {
+  try {
+    const token = loadConfig().gateway?.token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
+type DoctorLevel = "pass" | "warn" | "fail";
+
+interface DoctorCheck {
+  level: DoctorLevel;
+  name: string;
+  detail?: string;
+}
+
+function modeString(mode: number): string {
+  return `0${(mode & 0o777).toString(8)}`;
+}
+
+function readTextIfExists(path: string): string | null {
+  try {
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function runCapture(command: string[]): string {
+  const result = Bun.spawnSync(command, { stdout: "pipe", stderr: "pipe" });
+  return new TextDecoder().decode(result.stdout);
+}
+
+function addPermissionCheck(checks: DoctorCheck[], path: string, required: boolean): void {
+  try {
+    if (!existsSync(path)) {
+      checks.push({
+        level: required ? "fail" : "warn",
+        name: `${path} exists`,
+        detail: "not found",
+      });
+      return;
+    }
+    const stat = statSync(path);
+    const mode = stat.mode & 0o777;
+    checks.push({
+      level: (mode & 0o077) === 0 ? "pass" : "fail",
+      name: `${path} owner-only permissions`,
+      detail: modeString(mode),
+    });
+  } catch (error) {
+    checks.push({ level: "fail", name: `${path} permissions`, detail: String(error) });
+  }
+}
+
+function addListenerCheck(
+  checks: DoctorCheck[],
+  lsofOutput: string,
+  port: number,
+  name: string,
+): void {
+  const lines = lsofOutput
+    .split("\n")
+    .filter((line) => line.includes(`:${port} `) || line.includes(`:${port} (LISTEN)`));
+  const hasLoopback = lines.some((line) => line.includes(`TCP 127.0.0.1:${port} (LISTEN)`));
+  const hasWildcard = lines.some((line) =>
+    /\sTCP\s+(?:\*|0\.0\.0\.0|\[?::\]?):\d+\s+\(LISTEN\)/.test(line),
+  );
+
+  if (hasLoopback && !hasWildcard) {
+    checks.push({ level: "pass", name: `${name} listens on 127.0.0.1:${port}` });
+  } else if (hasWildcard) {
+    checks.push({
+      level: "fail",
+      name: `${name} loopback bind`,
+      detail: lines.join(" | "),
+    });
+  } else {
+    checks.push({ level: "warn", name: `${name} listener`, detail: `port ${port} not listening` });
+  }
+}
+
+async function addHttpStatusCheck(
+  checks: DoctorCheck[],
+  name: string,
+  url: string,
+  expectedStatus: number,
+  headers?: Record<string, string>,
+): Promise<void> {
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(2500),
+    });
+    checks.push({
+      level: res.status === expectedStatus ? "pass" : "fail",
+      name,
+      detail: `HTTP ${res.status}, expected ${expectedStatus}`,
+    });
+  } catch (error) {
+    checks.push({ level: "fail", name, detail: String(error) });
+  }
+}
+
+function printDoctorChecks(checks: DoctorCheck[]): void {
+  for (const check of checks) {
+    const label = check.level === "pass" ? "PASS" : check.level === "warn" ? "WARN" : "FAIL";
+    const detail = check.detail ? ` - ${check.detail}` : "";
+    console.log(`${label.padEnd(4)} ${check.name}${detail}`);
+  }
+}
+
+async function doctorCommand(_args: string[]): Promise<void> {
+  const checks: DoctorCheck[] = [];
+  const homeDir = process.env.HOME || "";
+  const authHeaders = getAuthHeaders();
+  const hasToken = Boolean(authHeaders.Authorization);
+  const config = (() => {
+    try {
+      return loadConfig();
+    } catch {
+      return null;
+    }
+  })();
+  const gatewayPort = config?.gateway.port ?? 30086;
+  const agentHostPort = config?.agentHost.port ?? 30087;
+  const watchdogPort = (() => {
+    try {
+      return Number(new URL(WATCHDOG_URL).port || "80");
+    } catch {
+      return 30085;
+    }
+  })();
+
+  checks.push({
+    level: hasToken ? "pass" : "fail",
+    name: "gateway token configured",
+  });
+
+  if (homeDir) {
+    addPermissionCheck(checks, resolve(homeDir, ".anima"), true);
+    addPermissionCheck(checks, resolve(homeDir, ".anima", "anima.json"), true);
+    addPermissionCheck(checks, resolve(homeDir, ".anima", "watchdog.json"), true);
+    addPermissionCheck(checks, resolve(homeDir, ".anima", "bin", "watchdog"), false);
+    addPermissionCheck(checks, resolve(homeDir, ".config", "code-server", "config.yaml"), false);
+  }
+  addPermissionCheck(checks, resolve(process.cwd(), ".env"), false);
+
+  const lsofOutput = runCapture(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"]);
+  addListenerCheck(checks, lsofOutput, watchdogPort, "watchdog");
+  addListenerCheck(checks, lsofOutput, gatewayPort, "gateway");
+  addListenerCheck(checks, lsofOutput, agentHostPort, "agent-host");
+  addListenerCheck(checks, lsofOutput, 30088, "code-server");
+
+  const caddyfile = readTextIfExists("/opt/homebrew/etc/Caddyfile");
+  if (caddyfile) {
+    const animaCaddyPattern = new RegExp(
+      `anima\\.kiliman\\.dev\\s*\\{[\\s\\S]*?reverse_proxy\\s+127\\.0\\.0\\.1:${gatewayPort}[\\s\\S]*?\\}`,
+    );
+    const watchdogCaddyPattern = new RegExp(
+      `watchdog\\.kiliman\\.dev\\s*\\{[\\s\\S]*?reverse_proxy\\s+127\\.0\\.0\\.1:${watchdogPort}[\\s\\S]*?\\}`,
+    );
+    checks.push({
+      level: animaCaddyPattern.test(caddyfile) ? "pass" : "fail",
+      name: `Caddy anima.kiliman.dev proxies to 127.0.0.1:${gatewayPort}`,
+    });
+    checks.push({
+      level: watchdogCaddyPattern.test(caddyfile) ? "pass" : "fail",
+      name: `Caddy watchdog.kiliman.dev proxies to 127.0.0.1:${watchdogPort}`,
+    });
+  } else {
+    checks.push({
+      level: "warn",
+      name: "/opt/homebrew/etc/Caddyfile readable",
+      detail: "not found or unreadable",
+    });
+  }
+
+  await addHttpStatusCheck(
+    checks,
+    "watchdog rejects unauthenticated status",
+    `${WATCHDOG_URL}/status`,
+    401,
+  );
+  await addHttpStatusCheck(
+    checks,
+    "watchdog accepts authenticated status",
+    `${WATCHDOG_URL}/status`,
+    200,
+    authHeaders,
+  );
+  await addHttpStatusCheck(
+    checks,
+    "agent-host rejects unauthenticated health",
+    `http://127.0.0.1:${agentHostPort}/health`,
+    401,
+  );
+  await addHttpStatusCheck(
+    checks,
+    "agent-host accepts authenticated health",
+    `http://127.0.0.1:${agentHostPort}/health`,
+    200,
+    authHeaders,
+  );
+  await addHttpStatusCheck(
+    checks,
+    "gateway rejects unauthenticated health",
+    `http://127.0.0.1:${gatewayPort}/health`,
+    401,
+  );
+  await addHttpStatusCheck(
+    checks,
+    "gateway accepts authenticated health",
+    `http://127.0.0.1:${gatewayPort}/health`,
+    200,
+    authHeaders,
+  );
+
+  const failCount = checks.filter((check) => check.level === "fail").length;
+  const warnCount = checks.filter((check) => check.level === "warn").length;
+  printDoctorChecks(checks);
+  console.log(`\n${failCount} failed, ${warnCount} warning(s)`);
+  if (failCount > 0) process.exit(1);
+}
+
 const WATCHDOG_METHODS: MethodCatalogEntry[] = [
   {
     method: "watchdog.status",
@@ -932,7 +1160,10 @@ async function watchdogCommand(args: string[]): Promise<void> {
 
   if (sub === "status") {
     try {
-      const res = await fetch(`${WATCHDOG_URL}/status`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${WATCHDOG_URL}/status`, {
+        signal: AbortSignal.timeout(3000),
+        headers: getAuthHeaders(),
+      });
       const data = (await res.json()) as Record<
         string,
         {
@@ -985,6 +1216,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
       const res = await fetch(`${WATCHDOG_URL}/restart/${service}${suffix}`, {
         method: "POST",
         signal: AbortSignal.timeout(10000),
+        headers: getAuthHeaders(),
       });
       const data = (await res.json()) as { ok: boolean; message: string };
       console.log(data.ok ? `✓ ${data.message}` : `✗ ${data.message}`);
@@ -1001,7 +1233,10 @@ async function watchdogCommand(args: string[]): Promise<void> {
     if (!file) {
       // List log files
       try {
-        const res = await fetch(`${WATCHDOG_URL}/api/logs`, { signal: AbortSignal.timeout(3000) });
+        const res = await fetch(`${WATCHDOG_URL}/api/logs`, {
+          signal: AbortSignal.timeout(3000),
+          headers: getAuthHeaders(),
+        });
         const data = (await res.json()) as {
           files: { name: string; size: number; modified: string }[];
         };
@@ -1023,7 +1258,7 @@ async function watchdogCommand(args: string[]): Promise<void> {
     try {
       const res = await fetch(
         `${WATCHDOG_URL}/api/logs/${encodeURIComponent(file)}?lines=${lineCount}`,
-        { signal: AbortSignal.timeout(5000) },
+        { signal: AbortSignal.timeout(5000), headers: getAuthHeaders() },
       );
       const data = (await res.json()) as { lines?: string[]; error?: string; fileSize?: number };
       if (data.error) {
@@ -1429,6 +1664,11 @@ async function main(): Promise<void> {
 
   if (args[0] === "watchdog") {
     await watchdogCommand(args.slice(1));
+    return;
+  }
+
+  if (args[0] === "doctor" || args[0] === "audit") {
+    await doctorCommand(args.slice(1));
     return;
   }
 

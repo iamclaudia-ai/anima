@@ -1,4 +1,4 @@
-import { createLogger, loadConfig } from "@anima/shared";
+import { createLogger, extractBearerToken, loadConfig, validateToken } from "@anima/shared";
 import type {
   AnimaConfig,
   AgentHostClientMessage as ClientMessage,
@@ -54,6 +54,7 @@ export interface SessionHostLike {
 
 export interface AgentHostServerOptions {
   port?: number;
+  hostname?: string;
   sessionHost?: SessionHostLike;
   loadConfig?: typeof loadConfig;
   loadState?: () => PersistedState;
@@ -82,6 +83,7 @@ export async function createAgentHostServer(
   options: AgentHostServerOptions = {},
 ): Promise<AgentHostServerContext> {
   const port = options.port ?? 30087;
+  const hostname = options.hostname ?? "127.0.0.1";
   const log =
     options.logger ??
     createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
@@ -92,6 +94,7 @@ export async function createAgentHostServer(
 
   // Load config for session defaults
   const config = loadConfigFn();
+  const expectedToken = config.gateway.token;
   const sessionExtConfig = (config.extensions?.session?.config || {}) as Record<string, unknown>;
   const configuredImageProcessing = sessionExtConfig.imageProcessing;
   const configuredSkills = sessionExtConfig.skills;
@@ -212,6 +215,15 @@ export async function createAgentHostServer(
   });
 
   // ── Message Handler ────────────────────────────────────────
+  function authenticateRequest(req: Request): boolean {
+    if (!expectedToken) return false;
+    const url = new URL(req.url);
+    const headerToken = extractBearerToken(req.headers.get("Authorization"));
+    if (headerToken && validateToken(headerToken, expectedToken)) return true;
+    const queryToken = url.searchParams.get("token");
+    return Boolean(queryToken && validateToken(queryToken, expectedToken));
+  }
+
   async function handleMessage(ws: unknown, raw: string): Promise<void> {
     let msg: ClientMessage;
     try {
@@ -454,10 +466,14 @@ export async function createAgentHostServer(
   // ── Bun Server ─────────────────────────────────────────────
   const server = Bun.serve({
     port,
+    hostname,
     fetch(req, server) {
       const url = new URL(req.url);
 
       if (url.pathname === "/health") {
+        if (!authenticateRequest(req)) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
         // Use count() not list() — list shells out to tmux + ps per session,
         // and with many idle CLI panes /health blew past the watchdog's 2s
         // fetch timeout, causing it to SIGKILL agent-host every ~35s.
@@ -470,6 +486,12 @@ export async function createAgentHostServer(
       }
 
       if (url.pathname === "/ws") {
+        if (!authenticateRequest(req)) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         const success = server.upgrade(req);
         if (!success) {
           return new Response("WebSocket upgrade failed", { status: 400 });
