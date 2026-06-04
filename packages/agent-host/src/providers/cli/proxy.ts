@@ -74,11 +74,18 @@ export interface TeeProxyOptions {
   /** When true, append full request + response JSON to CAPTURE_FILE. */
   capture?: boolean;
   /**
-   * When true, inject the 1M-context beta into every forwarded request's
-   * `anthropic-beta` header. Lets us pass the bare model id (avoiding the CLI's
-   * broken `[1m]` preflight 404) while keeping the 1M context window.
+   * Base model id (suffix-stripped, e.g. `claude-opus-4-8`) the session selected
+   * the 1M-context variant for. When set, the proxy injects the 1M-context beta
+   * into a forwarded request's `anthropic-beta` header ONLY when that request's
+   * own model is this model — letting us pass the bare model id (avoiding the
+   * CLI's broken `[1m]` preflight 404) while keeping the 1M window.
+   *
+   * The 1M beta is an Opus-tier feature: blindly injecting it onto subagent /
+   * auxiliary calls that run on a different model (e.g. the Haiku Task subagent)
+   * makes the API 400 "long context beta not yet available for this
+   * subscription" (#60). Gating on the per-request model is what prevents that.
    */
-  context1m?: boolean;
+  context1mModel?: string;
   /**
    * Transport. "base-url" (default) serves plain HTTP and the CLI targets it via
    * ANTHROPIC_BASE_URL. "mitm" runs an HTTPS_PROXY-style CONNECT proxy that
@@ -92,6 +99,29 @@ export interface TeeProxyOptions {
 
 /** Anthropic beta flag that enables the 1M-token context window. */
 const CONTEXT_1M_BETA = "context-1m-2025-08-07";
+
+/** Strip a trailing `[...]` model-variant suffix (e.g. `[1m]`) for comparison. */
+function stripVariant(model: string): string {
+  return model.replace(/\[[^\]]*\]\s*$/, "").trim();
+}
+
+/**
+ * Decide whether a forwarded request should carry the 1M-context beta. True only
+ * when the session selected a 1M model (`context1mModel` set) AND this request's
+ * own model is that same model. Subagent / auxiliary calls on a different model
+ * (Haiku Task subagent, etc.) return false — they must not carry an Opus-tier
+ * beta the subscription won't honor for them (#60). Model-less requests (HEAD
+ * probes, count_tokens without a model) also return false: there's nothing to
+ * apply the 1M window to.
+ */
+export function shouldInjectContext1m(
+  requestModel: unknown,
+  context1mModel: string | undefined,
+): boolean {
+  if (!context1mModel) return false;
+  if (typeof requestModel !== "string" || !requestModel) return false;
+  return stripVariant(requestModel) === stripVariant(context1mModel);
+}
 
 /** The one host we decrypt; everything else is blind-tunneled untouched. */
 const MITM_HOST = "api.anthropic.com";
@@ -353,19 +383,6 @@ export class AnthropicTeeProxy {
     headers.delete("host");
     headers.set("accept-encoding", "identity");
 
-    // Keep the 1M context window without sending the CLI's broken `[1m]` model
-    // id: merge the beta flag into whatever `anthropic-beta` list is present.
-    if (this.opts.context1m) {
-      const betas = new Set(
-        (headers.get("anthropic-beta") ?? "")
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-      betas.add(CONTEXT_1M_BETA);
-      headers.set("anthropic-beta", [...betas].join(","));
-    }
-
     const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
     const body = hasBody ? await req.arrayBuffer() : undefined;
 
@@ -377,6 +394,24 @@ export class AnthropicTeeProxy {
         // non-JSON body — ignore
       }
     }
+
+    // Keep the 1M context window without sending the CLI's broken `[1m]` model
+    // id: merge the beta flag into whatever `anthropic-beta` list is present —
+    // but ONLY for this session's 1M model. Injecting it onto a subagent's Haiku
+    // request (a different model) 400s "long context beta not available" (#60).
+    const reqModel =
+      parsed && typeof parsed === "object" ? (parsed as { model?: unknown }).model : undefined;
+    if (shouldInjectContext1m(reqModel, this.opts.context1mModel)) {
+      const betas = new Set(
+        (headers.get("anthropic-beta") ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      betas.add(CONTEXT_1M_BETA);
+      headers.set("anthropic-beta", [...betas].join(","));
+    }
+
     const ctx: StreamContext = {
       isAgentTurn: isAgentRequest(parsed),
       reqId: randomUUID().slice(0, 8),
@@ -389,23 +424,18 @@ export class AnthropicTeeProxy {
     // header injected above. `parsed` is left untouched so capture shows what the
     // CLI actually sent.
     let forwardBody: ArrayBuffer | string | undefined = body;
-    if (parsed && typeof parsed === "object") {
-      const m = (parsed as { model?: unknown }).model;
-      if (typeof m === "string" && /\[[^\]]*\]\s*$/.test(m)) {
-        forwardBody = JSON.stringify({
-          ...(parsed as Record<string, unknown>),
-          model: m.replace(/\[[^\]]*\]\s*$/, "").trim(),
-        });
-      }
+    if (typeof reqModel === "string" && /\[[^\]]*\]\s*$/.test(reqModel)) {
+      forwardBody = JSON.stringify({
+        ...(parsed as Record<string, unknown>),
+        model: stripVariant(reqModel),
+      });
     }
 
-    const model =
-      parsed && typeof parsed === "object" ? (parsed as { model?: unknown }).model : undefined;
     log.info("→ request", {
       method: req.method,
       path: url.pathname,
       agentTurn: ctx.isAgentTurn,
-      model: typeof model === "string" ? model : undefined,
+      model: typeof reqModel === "string" ? reqModel : undefined,
       auth: authSummary(headers),
     });
 
@@ -418,7 +448,7 @@ export class AnthropicTeeProxy {
       method: req.method,
       path: url.pathname + url.search,
       isAgentTurn: ctx.isAgentTurn,
-      model: typeof model === "string" ? model : undefined,
+      model: typeof reqModel === "string" ? reqModel : undefined,
       reqHeaders: dumpHeaders(headers),
       request: parsed ?? (body ? "(non-JSON body)" : null),
     };

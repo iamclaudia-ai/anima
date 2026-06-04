@@ -263,7 +263,10 @@ export class ClaudeCliSession extends EventEmitter {
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
       onRequestBody: (b, ctx) => this.handleRequestBody(b, ctx),
       capture: this.config.capture,
-      context1m: this.wants1m,
+      // Gate 1M-beta injection on this session's model: only requests on this
+      // exact model get it. Subagent calls on other models (e.g. Haiku) must not
+      // carry the Opus-tier 1M beta or the API 400s (#60). undefined = never.
+      context1mModel: this.wants1m ? this.model : undefined,
       interception: this.interception,
       tls,
     });
