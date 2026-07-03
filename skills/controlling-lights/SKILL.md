@@ -165,7 +165,7 @@ Manage tasks: `anima scheduler list_tasks`, `anima scheduler fire_now --taskId <
 
 Playlists and `.state` files live in **`~/.anima/skills/controlling-lights/playlists/`** (see the PATH GOTCHA above — always pass the absolute path):
 
-- `july-4th.json` — 10 scenes: 4th of July / USA 250th birthday (flags, RWB, gnome, America truck, fireworks)
+- `july-4th.json` — 11 scenes: 4th of July / USA 250th birthday (flags, RWB, gnome, America truck, two fireworks finales)
 - `may.json` — 12 scenes: Mother's Day, Cinco de Mayo, spring
 - `easter.json` — Easter DIY scenes
 - `st-patricks-day.json` — 13 St. Patrick's Day DIY scenes
