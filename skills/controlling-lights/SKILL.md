@@ -106,20 +106,25 @@ The optional `[device]` parameter does partial name matching:
 
 ## Auto-Play (DIY Scene Rotation)
 
-The Govee app's auto-play feature isn't exposed via the API, so we built our own. Playlist files live in `playlists/` as JSON. Relative paths resolve under SKILL_DIR; absolute paths are used as-is.
+The Govee app's auto-play feature isn't exposed via the API, so we built our own. Playlist files are JSON.
+
+> **⚠️ PATH GOTCHA — always use absolute `~/.anima/...` paths.**
+> Playlists and their `.state` files live in **`~/.anima/skills/controlling-lights/playlists/`** (this is where the script actually writes state). But when you run `anima skill run`, `SKILL_DIR` is injected as `~/.claude/skills/controlling-lights` — a symlink into the anima **repo**, which has no `playlists/` dir. So **relative paths resolve to the repo and silently fail** with "Playlist not found". Always pass the full absolute path (below) — for both interactive runs and scheduled tasks.
 
 ```bash
+PL=~/.anima/skills/controlling-lights/playlists
+
 # Advance to next scene in playlist
-anima skill run controlling-lights auto-play playlists/st-patricks-day.json
+anima skill run controlling-lights auto-play $PL/st-patricks-day.json
 
 # Check current state
-anima skill run controlling-lights auto-play playlists/st-patricks-day.json --status
+anima skill run controlling-lights auto-play $PL/st-patricks-day.json --status
 
 # Reset to beginning
-anima skill run controlling-lights auto-play playlists/st-patricks-day.json --reset
+anima skill run controlling-lights auto-play $PL/st-patricks-day.json --reset
 
 # List all scenes in playlist
-anima skill run controlling-lights auto-play playlists/st-patricks-day.json --list
+anima skill run controlling-lights auto-play $PL/st-patricks-day.json --list
 ```
 
 ### Playlist JSON Format
@@ -140,24 +145,39 @@ Scene values come from the Govee API's `/device/diy-scenes` endpoint.
 
 ### Scheduling Auto-Play
 
-Use the Anima scheduler to call auto-play every 5 minutes between 7pm–5am:
+Register a cron task with the Anima scheduler to rotate every 5 minutes, 7pm–5am. Use the **absolute** playlist path and copy the shape of the existing month/holiday tasks (`missedPolicy: skip`, `concurrency: skip_if_running`, `timeoutMs: 15000`, `target: ~/.bun/bin/anima`):
 
+```bash
+anima scheduler add_task \
+  --name "July 4th Auto-Play" \
+  --description "Rotates curtain lights through 4th of July / USA 250th DIY scenes every 5 min, 7pm–5am" \
+  --type cron \
+  --cronExpr "*/5 19-23,0-4 * * *" \
+  --action '{"type":"exec","target":"/Users/michael/.bun/bin/anima","payload":{"args":["skill","run","controlling-lights","auto-play","/Users/michael/.anima/skills/controlling-lights/playlists/july-4th.json"],"timeoutMs":15000}}' \
+  --missedPolicy skip \
+  --concurrency skip_if_running \
+  --tags '["lights","holiday"]'
 ```
-Schedule a cron task: */5 19-23,0-4 * * *
-Command: anima skill run controlling-lights auto-play playlists/st-patricks-day.json
-```
+
+Manage tasks: `anima scheduler list_tasks`, `anima scheduler fire_now --taskId <id>`, `anima scheduler update_task --taskId <id> --enabled false`, `anima scheduler cancel_task --taskId <id>`. **Disable the previous holiday's task** (`--enabled false`) when the season changes so playlists don't overlap.
 
 ### Available Playlists
 
-Playlists and state are stored under SKILL_DIR (`~/.claude/skills/controlling-lights`). The `auto-play` script resolves relative paths automatically.
+Playlists and `.state` files live in **`~/.anima/skills/controlling-lights/playlists/`** (see the PATH GOTCHA above — always pass the absolute path):
 
-- `playlists/st-patricks-day.json` — 13 St. Patrick's Day DIY scenes
+- `july-4th.json` — 10 scenes: 4th of July / USA 250th birthday (flags, RWB, gnome, America truck, fireworks)
+- `may.json` — 12 scenes: Mother's Day, Cinco de Mayo, spring
+- `easter.json` — Easter DIY scenes
+- `st-patricks-day.json` — 13 St. Patrick's Day DIY scenes
+
+**Note:** All playlists target `curtain` — the **DreamView T1 has no DIY scenes** (`diy-scenes dreamview` returns none), so DIY rotation is curtain-only.
 
 ### Creating New Playlists
 
-1. Run `anima skill run controlling-lights govee diy-scenes [device]` to list all DIY scenes with their values
-2. Create a JSON file in `playlists/` with the scenes you want
-3. Test with `anima skill run controlling-lights auto-play playlists/your-playlist.json`
+1. Run `anima skill run controlling-lights govee diy-scenes curtain` to list all DIY scenes with their values
+2. Create a JSON file in `~/.anima/skills/controlling-lights/playlists/` (match the format above; `device: "curtain"`, `interval: 300`)
+3. Test with the absolute path: `anima skill run controlling-lights auto-play ~/.anima/skills/controlling-lights/playlists/your-playlist.json --list` then run it once to fire the first scene live
+4. Schedule it with `anima scheduler add_task` (recipe above)
 
 ## Notes
 
