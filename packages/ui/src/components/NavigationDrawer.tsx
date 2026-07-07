@@ -609,8 +609,6 @@ export function NavigationDrawer({
         <div className="flex flex-col gap-0.5 border-b border-gray-200 p-2">
           <TopAction icon={Plus} label="New workspace" onClick={onNewWorkspace} />
           <TopAction icon={Search} label="Search" onClick={() => setSearchOpen(true)} />
-          <TopAction icon={Puzzle} label="Plugins" disabled />
-          <TopAction icon={Zap} label="Automations" disabled />
         </div>
 
         {/* Scrollable workspaces */}
