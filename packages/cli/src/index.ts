@@ -948,6 +948,8 @@ async function doctorCommand(_args: string[]): Promise<void> {
     const watchdogCaddyPattern = new RegExp(
       `watchdog\\.kiliman\\.dev\\s*\\{[\\s\\S]*?reverse_proxy\\s+127\\.0\\.0\\.1:${watchdogPort}[\\s\\S]*?\\}`,
     );
+    const webhooksCaddyPattern =
+      /webhooks\.kiliman\.dev\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:30089[\s\S]*?\}/;
     checks.push({
       level: animaCaddyPattern.test(caddyfile) ? "pass" : "fail",
       name: `Caddy anima.kiliman.dev proxies to 127.0.0.1:${gatewayPort}`,
@@ -955,6 +957,10 @@ async function doctorCommand(_args: string[]): Promise<void> {
     checks.push({
       level: watchdogCaddyPattern.test(caddyfile) ? "pass" : "fail",
       name: `Caddy watchdog.kiliman.dev proxies to 127.0.0.1:${watchdogPort}`,
+    });
+    checks.push({
+      level: webhooksCaddyPattern.test(caddyfile) ? "pass" : "fail",
+      name: "Caddy webhooks.kiliman.dev proxies to 127.0.0.1:30089",
     });
   } else {
     checks.push({

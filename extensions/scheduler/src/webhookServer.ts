@@ -20,7 +20,7 @@ export class WebhookServer {
   private automationSessionId: string | null;
   private authToken: string | null;
 
-  constructor(ctx: any, db: Database, log: any, port: number = 30088) {
+  constructor(ctx: any, db: Database, log: any, port: number = 30089) {
     this.ctx = ctx;
     this.db = db;
     this.log = log;
