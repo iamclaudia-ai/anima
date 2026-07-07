@@ -35,10 +35,19 @@ describe("shell policy", () => {
   });
 
   it("denies grep-style rg compact replace flag misuse", async () => {
-    const result = await policy("rg -rn 'Clear filters' client/src --glob '*.tsx'");
-    expect(result.denyReason).toContain("rg -rn");
+    const lineNumberResult = await policy("rg -rn 'Clear filters' client/src --glob '*.tsx'");
+    expect(lineNumberResult.denyReason).toContain("rg -rn");
+
+    const filesResult = await policy("rg -rl 'Clear filters' client/src --glob '*.tsx'");
+    expect(filesResult.denyReason).toContain("rg -rl");
 
     await expect(policy("rg -n 'Clear filters' client/src --glob '*.tsx'")).resolves.toMatchObject({
+      ok: true,
+      denyReason: null,
+      skipTokf: true,
+    });
+
+    await expect(policy("rg -l 'Clear filters' client/src --glob '*.tsx'")).resolves.toMatchObject({
       ok: true,
       denyReason: null,
       skipTokf: true,

@@ -4,16 +4,16 @@ const GH_STACK_TAIL_DENY =
   "Blocked: don't pipe gh-stack into tail/head. It can hang the wrapper or get killed mid-operation (exit 143), leaving a rebase/push half-done. Re-run plainly; use 'tokf raw last' for the full output.";
 
 const RG_REPLACE_DENY =
-  "Blocked: don't use grep-style 'rg -rn'. In ripgrep, -r means --replace, so '-rn' replaces each match with 'n' and corrupts source-looking output. Use 'rg -n' instead; ripgrep searches recursively by default.";
+  "Blocked: don't use grep-style compact ripgrep flags like 'rg -rn' or 'rg -rl'. In ripgrep, -r means --replace, so '-rn' replaces matches with 'n' and '-rl' replaces matches with 'l', corrupting source-looking output. Use 'rg -n' for line numbers or 'rg -l' for filenames; ripgrep searches recursively by default.";
 
 const TMUX_KILL_SERVER_DENY =
   "Blocked: tmux kill-server would terminate the tmux-wrap session and may kill the agent CLI itself. Tell Michael tmux is broken and ask him to restart or repair the tmux wrapper/session instead.";
 
-function hasCompactRgReplaceNumberFlag(argv: string[]): boolean {
+function hasCompactRgReplaceFlagMisuse(argv: string[]): boolean {
   return argv.some((arg) => {
     if (!arg.startsWith("-") || arg.startsWith("--")) return false;
     const flags = arg.slice(1);
-    return flags.includes("r") && flags.includes("n");
+    return flags.includes("r") && (flags.includes("n") || flags.includes("l"));
   });
 }
 
@@ -63,7 +63,7 @@ export function evaluatePolicy(parse: ParseResult): PolicyResult {
   }
 
   for (const command of parse.commands) {
-    if (command.name === "rg" && hasCompactRgReplaceNumberFlag(command.argv.slice(1))) {
+    if (command.name === "rg" && hasCompactRgReplaceFlagMisuse(command.argv.slice(1))) {
       return { ok: true, denyReason: RG_REPLACE_DENY, skipTokf: false, warnings: [] };
     }
 

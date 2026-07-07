@@ -66,9 +66,9 @@ deny_reason_for_command() {
     jq -e '.ok == true and .denyReason == null' >/dev/null 2>&1 <<<"$policy_json" && return 1
   fi
 
-  if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*n[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]] ||
-     [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*n[[:alpha:]]*r[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]]; then
-    printf "%s" "Blocked: don't use grep-style 'rg -rn'. In ripgrep, -r means --replace, so '-rn' replaces each match with 'n' and corrupts source-looking output. Use 'rg -n' instead; ripgrep searches recursively by default."
+  if [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*[nl][[:alpha:]]*([[:space:]\;\&\|\)]|$) ]] ||
+     [[ "$command" =~ (^|[[:space:]\;\&\|\(\)])rg([[:space:]]+[^[:space:]\;\&\|\(\)]+)*[[:space:]]+-[[:alpha:]]*[nl][[:alpha:]]*r[[:alpha:]]*([[:space:]\;\&\|\)]|$) ]]; then
+    printf "%s" "Blocked: don't use grep-style compact ripgrep flags like 'rg -rn' or 'rg -rl'. In ripgrep, -r means --replace, so '-rn' replaces matches with 'n' and '-rl' replaces matches with 'l', corrupting source-looking output. Use 'rg -n' for line numbers or 'rg -l' for filenames; ripgrep searches recursively by default."
     return 0
   fi
 
