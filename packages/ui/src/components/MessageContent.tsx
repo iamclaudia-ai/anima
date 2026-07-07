@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, type AnchorHTMLAttributes } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -72,9 +72,25 @@ function PreBlock({ children, ...props }: any) {
   );
 }
 
+function MarkdownLink({ href, children, ...rest }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  // External links open in a new tab so they don't replace the chat (#25, #42).
+  // Anchors (#section), mailto:, tel:, and relative paths stay in-tab.
+  const isExternal = href?.startsWith("http://") || href?.startsWith("https://");
+  return (
+    <a
+      {...rest}
+      href={href}
+      {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {children}
+    </a>
+  );
+}
+
 const markdownComponents = {
   code: CodeBlock,
   pre: PreBlock,
+  a: MarkdownLink,
 };
 
 export const MessageContent = memo(function MessageContent({
