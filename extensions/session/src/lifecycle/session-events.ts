@@ -4,7 +4,7 @@ import { getRuntime } from "../runtime";
 import { getWorkspace } from "../workspace";
 import { collectGitStatus } from "../git-status";
 import { cancelPendingGitStatus, noteToolResult, noteToolUseStart } from "./git-status-debouncer";
-import { createLogger, shortId } from "@anima/shared";
+import { createLogger, shortId, truncatePreservingSurrogates } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -49,7 +49,10 @@ export async function emitGitStatus(sessionId: string): Promise<void> {
     log.error("emitGitStatus failed", {
       sessionId: shortId(sessionId),
       error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack?.slice(0, 800) : undefined,
+      stack:
+        err instanceof Error && err.stack
+          ? truncatePreservingSurrogates(err.stack, 800)
+          : undefined,
     });
   }
 }

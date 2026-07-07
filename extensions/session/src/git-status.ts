@@ -8,7 +8,7 @@
  * return a partial result rather than throw.
  */
 
-import { createLogger } from "@anima/shared";
+import { createLogger, truncatePreservingSurrogates } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -193,15 +193,15 @@ async function getPullRequest(
     ok,
     timedOut,
     stdoutLen: stdout.length,
-    stdoutPreview: stdout.slice(0, 200),
-    stderr: stderr.slice(0, 500),
+    stdoutPreview: truncatePreservingSurrogates(stdout, 200),
+    stderr: truncatePreservingSurrogates(stderr, 500),
   });
   if (!ok || timedOut) {
     log.warn("gh pr list failed — preserving prior cached PR", {
       cwd,
       branch,
       timedOut,
-      stderr: stderr.slice(0, 500),
+      stderr: truncatePreservingSurrogates(stderr, 500),
     });
     return undefined; // unknown — keep prior cache
   }

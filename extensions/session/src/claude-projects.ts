@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { truncatePreservingSurrogates } from "@anima/shared";
 import {
   closeSync,
   existsSync,
@@ -97,7 +98,7 @@ function extractFirstPrompt(filepath: string): string | undefined {
         if (msg.type !== "user") continue;
 
         const content = msg.message?.content;
-        if (typeof content === "string") return content.slice(0, 200);
+        if (typeof content === "string") return truncatePreservingSurrogates(content, 200);
         if (Array.isArray(content)) {
           // Per-message inner scan with a multi-condition predicate — there's
           // no shared key to hoist into a Map across the outer line loop.
@@ -108,7 +109,7 @@ function extractFirstPrompt(filepath: string): string | undefined {
               block.text &&
               !block.text.startsWith("<local-command-caveat>"),
           );
-          if (textBlock?.text) return textBlock.text.slice(0, 200);
+          if (textBlock?.text) return truncatePreservingSurrogates(textBlock.text, 200);
         }
       } catch {
         // skip truncated/invalid lines

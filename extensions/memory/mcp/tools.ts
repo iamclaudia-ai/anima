@@ -13,7 +13,11 @@
  * relationships, projects, core identity, personas).
  */
 
-import type { ExtensionMcpToolDefinition, ExtensionMcpToolResult } from "@anima/shared";
+import {
+  truncatePreservingSurrogates,
+  type ExtensionMcpToolDefinition,
+  type ExtensionMcpToolResult,
+} from "@anima/shared";
 
 import { getSectionRegistry } from "./sections.js";
 import {
@@ -237,7 +241,9 @@ async function handleRecall(
   const memories = ftsResults.map((r) => ({
     filepath: r.sourceType === "document" ? r.sourceId : `conversation #${r.sourceId}`,
     category: r.category,
-    content: r.content.slice(0, 500) + (r.content.length > 500 ? "..." : ""),
+    // Surrogate-safe: recall content is emoji-heavy and flows back into API
+    // request bodies via MCP tool results (#34).
+    content: truncatePreservingSurrogates(r.content, 500),
     score: Math.abs(r.rank),
     sourceType: r.sourceType,
     timestamp: r.timestamp,

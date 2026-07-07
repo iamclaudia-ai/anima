@@ -24,6 +24,7 @@ import type {
   HealthItem,
   LoggerLike,
 } from "@anima/shared";
+import { truncatePreservingSurrogates } from "@anima/shared";
 import { createStandardExtension } from "@anima/extension-host";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -708,8 +709,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           return {
             ...preview,
             dryRun: true,
-            transcript:
-              transcript.text.slice(0, 2000) + (transcript.text.length > 2000 ? "\n..." : ""),
+            transcript: truncatePreservingSurrogates(transcript.text, 2000, "\n..."),
           };
         }
 

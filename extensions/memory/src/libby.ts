@@ -26,7 +26,7 @@ import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionContext } from "@anima/shared";
+import { truncatePreservingSurrogates, type ExtensionContext } from "@anima/shared";
 import {
   getNextQueued,
   getQueuedCount,
@@ -878,7 +878,7 @@ async function commitMemoryChanges(
       : [];
 
     // Commit with summary
-    const commitMsg = `libby(${conversationId}): ${summary.slice(0, 100)}`;
+    const commitMsg = `libby(${conversationId}): ${truncatePreservingSurrogates(summary, 100)}`;
     const commitResult = await runCommand(["git", "commit", "-m", commitMsg], MEMORY_ROOT);
     if (commitResult.exitCode !== 0) {
       throw new Error(
