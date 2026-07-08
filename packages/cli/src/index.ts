@@ -784,6 +784,15 @@ async function promptCompat(args: string[]): Promise<void> {
 
 const WATCHDOG_URL = process.env.ANIMA_WATCHDOG_URL || "http://localhost:30085";
 
+/** Derive the gateway's HTTP /health URL from the (ws) gateway URL. */
+function gatewayHealthUrl(): string {
+  // ws:// → http://, wss:// → https://
+  const url = new URL(gatewayUrl.replace(/^ws/, "http"));
+  url.pathname = "/health";
+  url.search = "";
+  return url.toString();
+}
+
 function getAuthHeaders(): Record<string, string> {
   try {
     const token = loadConfig().gateway?.token;
@@ -1024,6 +1033,12 @@ const WATCHDOG_METHODS: MethodCatalogEntry[] = [
     description: "Show watchdog and service health status",
   },
   {
+    method: "watchdog.health_check",
+    source: "gateway",
+    description:
+      "Full system health — gateway /health aggregate (extensions, locks, client beacon). Pass --json for the raw payload.",
+  },
+  {
     method: "watchdog.restart",
     source: "gateway",
     description: "Restart a managed service (gateway or runtime)",
@@ -1153,6 +1168,9 @@ async function watchdogCommand(args: string[]): Promise<void> {
   if (!sub || sub === "--help") {
     console.log("\nwatchdog commands:\n");
     console.log("  anima watchdog status                  Show service health");
+    console.log(
+      "  anima watchdog health_check [--json]   Full system health (gateway + all extensions + locks)",
+    );
     console.log("  anima watchdog restart <service> [--force]  Restart gateway or runtime");
     console.log(
       "  anima watchdog reload                  Reload the watchdog itself via launchd (picks up new env vars)",
@@ -1205,6 +1223,61 @@ async function watchdogCommand(args: string[]): Promise<void> {
     } catch {
       console.error("Error: Could not connect to watchdog at", WATCHDOG_URL);
       console.error("Is the watchdog running? Start with: bun run watchdog");
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === "health_check" || sub === "health") {
+    const asJson = args.includes("--json");
+    try {
+      const res = await fetch(gatewayHealthUrl(), {
+        signal: AbortSignal.timeout(5000),
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) {
+        console.error(`Error: gateway /health returned ${res.status}`);
+        process.exit(1);
+      }
+      const data = (await res.json()) as {
+        status: string;
+        clients: number;
+        extensions: Record<string, { ok: boolean; error?: string }>;
+        extensionLocks?: { extensionId: string; stale: boolean }[];
+        client?: { healthy: boolean; recentErrors?: number };
+      };
+      if (asJson) {
+        console.log(JSON.stringify(data, null, 2));
+        return;
+      }
+      const okDot = "\x1b[32m●\x1b[0m";
+      const badDot = "\x1b[31m●\x1b[0m";
+      const gatewayOk = data.status === "ok";
+      console.log();
+      console.log(
+        `  Gateway: ${gatewayOk ? `${okDot} ok` : `${badDot} ${data.status}`}  clients: ${data.clients}`,
+      );
+      console.log();
+      const extensions = Object.entries(data.extensions ?? {});
+      for (const [id, ext] of extensions) {
+        console.log(
+          ext.ok ? `  ${okDot} ${id}` : `  ${badDot} ${id} — ${ext.error ?? "unhealthy"}`,
+        );
+      }
+      const staleLocks = (data.extensionLocks ?? []).filter((l) => l.stale);
+      if (staleLocks.length > 0) {
+        console.log(`\n  ⚠ stale locks: ${staleLocks.map((l) => l.extensionId).join(", ")}`);
+      }
+      if (data.client) {
+        console.log(
+          `\n  Web client beacon: ${data.client.healthy ? `${okDot} healthy` : `${badDot} unhealthy`}  recent errors: ${data.client.recentErrors ?? 0}`,
+        );
+      }
+      console.log();
+      if (!gatewayOk || extensions.some(([, ext]) => !ext.ok)) process.exit(1);
+    } catch {
+      console.error("Error: Could not reach gateway /health at", gatewayHealthUrl());
+      console.error("Is the gateway running? Check: anima watchdog status");
       process.exit(1);
     }
     return;

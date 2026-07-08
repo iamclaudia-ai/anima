@@ -69,8 +69,14 @@ anima gateway list_methods
 ### Watchdog
 
 ```bash
-# Check service status
+# Check service status (watchdog's view: gateway + agent-host processes)
 anima watchdog status
+
+# Full system health — gateway /health aggregate: every extension's ok/error,
+# stale process locks, web client beacon. Token handled automatically.
+# NEVER curl http://localhost:30086/health — this is the command for that.
+anima watchdog health_check
+anima watchdog health_check --json   # raw payload
 
 # Restart a service
 anima watchdog restart --service gateway
@@ -80,6 +86,8 @@ anima watchdog restart --service runtime
 anima watchdog logs
 anima watchdog log_tail --file gateway --lines 50
 ```
+
+**Mental model:** watchdog is the bare-minimum runtime (must always work; supervises everything else); gateway loads extensions and tracks their health. So `watchdog status` = "are the services up?", `watchdog health_check` = "is the whole system healthy, extension by extension?"
 
 ### Session
 
