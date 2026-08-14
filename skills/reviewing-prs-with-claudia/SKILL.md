@@ -40,7 +40,24 @@ git fetch origin "$REVIEW_BRANCH"
 WORKTREE_PATH="$HOME/Projects/beehiiv/swarm.worktrees/$REVIEW_BRANCH"
 git worktree add "$WORKTREE_PATH" "origin/$REVIEW_BRANCH"
 
+# 2b. Seed CodeGraph so the worktree has a real index (worth ~20s — you're
+#     reviewing cold and need more than the diff gives you). A fresh `init`
+#     would cold-build ~32k files/minutes; instead snapshot main's index and
+#     `sync` only the branch delta (~7s of index work). See "CodeGraph in the
+#     worktree" below for why this is safe and needs no daemon cleanup.
+if [ -f "$HOME/Projects/beehiiv/swarm/.codegraph/codegraph.db" ]; then
+  mkdir -p "$WORKTREE_PATH/.codegraph"
+  # .backup (not cp) = consistent snapshot despite main's live WAL writer
+  sqlite3 "$HOME/Projects/beehiiv/swarm/.codegraph/codegraph.db" \
+    ".backup '$WORKTREE_PATH/.codegraph/codegraph.db'"
+  ( cd "$WORKTREE_PATH" && codegraph sync )   # incremental: reindexes only the diff
+fi
+
 # 3. Review with full file access
+#    - Query the index: `cd $WORKTREE_PATH && codegraph explore "<symbols>"`
+#      (CLI is one-shot — no lingering daemon). Prefer this over the MCP
+#      codegraph_explore with projectPath, which can spin up a persistent
+#      watcher bound to the worktree.
 #    - Read files: Read tool with $WORKTREE_PATH/path/to/file.rb
 #    - Search code: Grep/Glob in $WORKTREE_PATH
 #    - Check related files the diff doesn't show
@@ -48,8 +65,35 @@ git worktree add "$WORKTREE_PATH" "origin/$REVIEW_BRANCH"
 # 4. Submit review using gh comment (see below)
 
 # 5. CLEAN UP — only after the review is live AND verified (see step 8 in Review Process)
+#    Plain `worktree remove` is enough: the seed uses one-shot CLI commands
+#    (sync/explore/query), so nothing persistent is watching the worktree —
+#    deleting it just drops its private .codegraph too. No daemon to stop.
 git worktree remove "$WORKTREE_PATH" --force
 ```
+
+### CodeGraph in the worktree — why the seed is safe
+
+The seed gives cold PR reviews a full symbol/call-graph index instead of falling
+back to grep+Read. It's safe because it never touches main's index or its daemon:
+
+- **The DB is root-agnostic.** Paths are stored _relative_ to the project root
+  (no absolute prefix), so main's snapshot works verbatim in the worktree once
+  `sync` reconciles the working tree against it — branch-accurate regardless of
+  how far main has drifted.
+- **Copy, never symlink.** A symlink would point the worktree at main's _running
+  daemon_ (whose watch-root and file reads are anchored to the main checkout) →
+  you'd silently get main's source back, and this branch's new files wouldn't
+  exist in the index. Two watchers on one single-writer WAL DB also risk
+  corruption. The `.backup` copy sidesteps all of it — private DB, no shared
+  writer.
+- **No daemon to clean up.** `init`/`sync`/`query`/`explore` CLI commands are
+  one-shot (they exit; no `daemon.pid` left behind). The only persistent daemon
+  is the MCP `serve` process, and it stays bound to _main_ (`--path .`), never
+  the worktree. So `git worktree remove --force` is a complete cleanup.
+  (Exception: if you query the worktree through the _MCP_ tool with
+  `projectPath: <worktree>`, that can start a persistent watcher — run
+  `codegraph uninit -f "$WORKTREE_PATH"` before removing the worktree in that
+  case. Using the `codegraph` CLI inside the worktree avoids it entirely.)
 
 ### Pre-Review: Check Existing Review State
 
