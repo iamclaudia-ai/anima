@@ -4,6 +4,15 @@
 > **Created**: 2026-03-20
 > **Authors**: Michael & Claudia
 
+> **Scope note (2026-07-29):** the G2G described here is **transcript relay** — a peer is a
+> _data source_, reached through explicit `federation.*` methods. Driving a workspace that
+> lives on another machine from a single UI is a **sibling capability on the same transport**,
+> not a later phase of this plan — it needs the two items listed under Non-Goals below (live
+> sessions, cross-gateway streaming). Tracked separately in
+> [#64](https://github.com/iamclaudia-ai/anima/issues/64), which proposes opaque frame
+> relaying rather than typed `federation.*` methods. The architectural claim in "Connection
+> model" (a peer gateway is just another WebSocket client) holds for both.
+
 ## Overview
 
 Anima runs on multiple machines — Anima Sedes (always-on server) and Vesuvius (Michael's MacBook). Today, each instance has its own memory database and no awareness of the other. This plan describes how to unify memory across instances so Claudia is the same Claudia everywhere.
