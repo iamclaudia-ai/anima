@@ -54,7 +54,7 @@ Phases 0 and 1 are **shipped and live**; Phase 2 is **half shipped** (refs done,
 | **1b — DB-first list (#66)**      | ✅ shipped | 247-session workspace: 154ms → 0.7ms                               |
 | **1c — `set_title` + rename UI**  | ⬜ next    | the last piece of Phase 1                                          |
 | **1d — copy tmux command button** | ⬜ next    | small, high value                                                  |
-| **2a — refs + chips (#61)**       | ✅ shipped | 60% of beehiiv sessions carry a chip                               |
+| **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
 | **2b — FTS search (#2)**          | ⬜ next    | biggest remaining win                                              |
 | **3 — live status (#67, #31)**    | ⬜         |                                                                    |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
@@ -65,15 +65,20 @@ Also fixed along the way, outside the original plan:
 - **CLI proxy port instability** — a restarting agent-host could bind a different port than a surviving `claude` process was launched against, producing `API Error: Connection refused`. Resolution is now _live CLI env → persisted registry (`~/.anima/cli-proxy-ports.json`) → derivation_, the port hash moved to FNV-1a (the old char-sum used 718 of 1000 slots with 50.1% collisions), and the base port moved 9000 → 31000 (the old range had 12 foreign listeners). See #39.
 - **`scripts/audit-transcript-index.ts`** — classifies every transcript on disk as indexed / no-content / MISSING.
 
+- **Live CLI sessions were destroyed when the registry was lost (2026-08-15).** `API Error: Connection refused` came back, and #39's port logic was not at fault — it never ran. `state.ts` resolved `~/.anima/agent-host/sessions.json` at _import_ time from the real `HOME` and `server.test.ts` isolated nothing, so **`bun test` truncated the live session registry to zero**. Agent-host then restarted with an empty registry, rebound no proxy for any `claude` still running (the CLI reads `ANTHROPIC_BASE_URL` once and can never be re-pointed), and the orphan reaper read "untracked" as "abandoned" and killed two panes. Three fixes in `07e2838`: state paths resolve per call and honour `ANIMA_DATA_DIR`, with a `bunfig.toml` preload pointing every test run at a temp dir before any module loads; startup **adopts** live `anima-cli-*` panes the registry doesn't know about, which rebinds each proxy on the port its CLI already targets; and the reaper spares any pane whose `claude` process is alive. The standing lesson: **the registry is a cache, the process table is ground truth** — same discipline the session DB already follows.
+
 ### Where to pick up
 
 **`session.set_title` + inline rename** finishes Phase 1 and is small: the `sessions.title` column exists, `deriveSessionTitle()` is already the fallback, and the reconciler is careful never to overwrite a stored title (it carries `firstPrompt` forward when a title isn't re-derived). Needs the method, a Zod schema, and an edit affordance on the nav row.
 
-**Then FTS search (#2).** Design is settled in Phase 2 below — index into `memory_search_fts` as a third `source_type`, expose via memory, call from `session.search`. `session_refs` is already populated and indexed, so ref filters come nearly free.
+**Then FTS search (#2).** Design is settled in Phase 2 below — index into `memory_search_fts` as a third `source_type`, expose via memory, call from `session.search`. `session_refs` is now populated from whole conversations and indexed, so ref filters come nearly free. Worth a fresh session: it spans two extensions and a new index, and `session-ref-sync.ts` already proves the read path against `memory_transcript_entries` that search will reuse.
 
 ### Known follow-ups worth remembering
 
-- **Refs come from the first prompt only.** That's 60% coverage because PR/ticket ids are usually named up front, but refs mentioned mid-conversation (`WEB-5592` in message 40) are missed. Full coverage lands with 2b, since `memory_transcript_entries` already holds the whole prose corpus.
+- ~~**Refs come from the first prompt only.**~~ **Done 2026-08-15**, ahead of 2b. `session-ref-sync.ts` reads `memory_transcript_entries` incrementally — a per-session watermark keeps a steady-state reconcile at a handful of rows, and a per-pass session cap keeps a never-scanned workspace (swarm had 381 waiting) off the nav's critical path. `session.backfill_refs({ days, rescan, dryRun })` covered the existing corpus: **58 → 809 refs across 88 sessions**, windowed on `memory_transcript_entries.timestamp` rather than `last_activity` (which the first reconcile stamped with "now" on all 5,103 rows it archived — a 30-day cut on it returns sessions from March).
+
+  Two things worth carrying forward. **Refs accumulate and are never withdrawn** on an incremental pass, because the messages that produced them sit behind the watermark; `--rescan true` re-reads whole conversations and replaces, which is what to run after changing ref config. And **`[Image #N]` was the dominant false positive** once extraction read whole conversations — 204 hits in 30 days, second only to genuine `PR #N` — because it's Claude Code's own paste placeholder. Now excluded. The remaining known noise is low-numbered `#N` in numbered lists and review tables (`Nicholai #10`, `| #11 |`); harmless at 3 visible chips per row, and not separable from real anima issues like #61 without per-repo digit rules.
+
 - **Archived sessions are hidden but recoverable.** 5,102 rows were archived on first reconcile (transcripts Claude Code deleted). The rows keep title + refs, and `~/.claude/projects-backup` keeps the transcripts — so teaching `get_history` to fall back to the backup would make them openable again. Verified at the time: 0 sessions with a live transcript were archived.
 - **Libby's own sessions (4,175) are excluded from memory ingest** by a self-summarization guard. Reasonable for summarization, but it also makes them unsearchable — worth deciding separately before 2b.
 
