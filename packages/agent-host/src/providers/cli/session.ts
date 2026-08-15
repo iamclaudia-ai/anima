@@ -94,6 +94,54 @@ export function isFeedbackSurvey(pane: string): boolean {
   return /\b1:\s*Bad\b.*\b3:\s*Good\b.*\b0:\s*Dismiss\b/i.test(pane);
 }
 
+interface EmittedToolResult {
+  tool_use_id: unknown;
+  content: unknown;
+  is_error: unknown;
+}
+
+/**
+ * Collect `tool_result` blocks from the trailing user messages of a CLI
+ * continuation request.
+ *
+ * The CLI never streams tool results — it sends them back in the *next*
+ * request's message array, so this reconstructs the event the UI needs to stop
+ * a tool call's spinner. Anthropic's API requires tool results to immediately
+ * follow the assistant message that requested them, so the run of user
+ * messages at the tail is exactly the current batch; the first non-user
+ * message ends it and keeps the scan off the rest of the conversation.
+ *
+ * Scanning that whole run — rather than only `messages.at(-1)` — is what makes
+ * this robust: the CLI appends extra user messages after the results (a
+ * trailing `<system-reminder>` is the common one), which displaced the results
+ * from the last slot and stranded the spinner forever. Non-array content
+ * (a plain string message) is skipped rather than treated as the end of the
+ * run, for the same reason.
+ */
+export function collectTrailingToolResults(messages: unknown[]): EmittedToolResult[] {
+  const collected: EmittedToolResult[] = [];
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: string; content?: unknown } | null;
+    if (message?.role !== "user") break;
+    if (!Array.isArray(message.content)) continue;
+
+    // Walk the message's own blocks in reverse too, so a single flat reverse
+    // at the end restores the original request order.
+    for (let j = message.content.length - 1; j >= 0; j--) {
+      const block = message.content[j] as Record<string, unknown> | null;
+      if (block?.type !== "tool_result") continue;
+      collected.push({
+        tool_use_id: block.tool_use_id,
+        content: block.content,
+        is_error: block.is_error,
+      });
+    }
+  }
+
+  return collected.reverse();
+}
+
 function findClaude(configPath?: string): string {
   if (configPath && existsSync(configPath)) return configPath;
   const candidates = [
@@ -186,6 +234,13 @@ export class ClaudeCliSession extends EventEmitter {
    * means a fresh turn opened during the ~30s drain still streams normally.
    */
   private readonly _suppressedReqIds = new Set<string>();
+
+  /**
+   * `tool_use_id`s already surfaced as `request_tool_results` this turn, so a
+   * retried request body can't replay them. Cleared in `endTurn()` — ids are
+   * unique per turn, so the set stays bounded by the current turn's tool count.
+   */
+  private readonly _emittedToolResultIds = new Set<string>();
   /** Tails our own JSONL transcript — the only signal for a direct-tmux interrupt. */
   private readonly tail: SessionJsonlTail;
   /**
@@ -790,6 +845,7 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   private endTurn(): void {
+    this._emittedToolResultIds.clear();
     if (this._turnActive) {
       this._turnActive = false;
       this.emit("process_ended");
@@ -846,20 +902,24 @@ export class ClaudeCliSession extends EventEmitter {
     if (!body || typeof body !== "object") return;
     const messages = (body as { messages?: unknown }).messages;
     if (!Array.isArray(messages) || messages.length === 0) return;
-    const last = messages[messages.length - 1] as { role?: string; content?: unknown };
-    if (last?.role !== "user" || !Array.isArray(last.content)) return;
-    const toolResults = (last.content as Array<Record<string, unknown>>).filter(
-      (c) => c.type === "tool_result",
-    );
-    if (toolResults.length === 0) return;
+
+    // Drop results we already surfaced. The trailing-run scan below is
+    // self-limiting across turns (an assistant message ends the run), but the
+    // CLI re-sends an identical body when it retries a request — without this,
+    // a 429 would replay every tool result in the current batch.
+    const fresh = collectTrailingToolResults(messages).filter((result) => {
+      const id = result.tool_use_id;
+      if (typeof id !== "string") return true;
+      if (this._emittedToolResultIds.has(id)) return false;
+      this._emittedToolResultIds.add(id);
+      return true;
+    });
+    if (fresh.length === 0) return;
+
     this.emit("sse", {
       type: "request_tool_results",
       timestamp: new Date().toISOString(),
-      tool_results: toolResults.map((c) => ({
-        tool_use_id: c.tool_use_id,
-        content: c.content,
-        is_error: c.is_error,
-      })),
+      tool_results: fresh,
     } satisfies StreamEvent);
   }
 }
