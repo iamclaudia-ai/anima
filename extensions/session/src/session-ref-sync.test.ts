@@ -42,23 +42,22 @@ function createTranscriptTable(db: Database): void {
   `);
 }
 
-function addEntry(sessionId: string, role: "user" | "assistant", content: string): void {
+function addEntry(
+  sessionId: string,
+  role: "user" | "assistant",
+  content: string,
+  timestamp = new Date().toISOString(),
+): void {
   entryId++;
   getSessionDb()
     .query(
       `INSERT INTO memory_transcript_entries (session_id, source_file, role, content, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(
-      sessionId,
-      `${sessionId}.jsonl`,
-      role,
-      content,
-      `2026-08-15T00:00:${String(entryId % 60).padStart(2, "0")}Z`,
-    );
+    .run(sessionId, `${sessionId}.jsonl`, role, content, timestamp);
 }
 
-function addSession(sessionId: string, lastActivity = new Date().toISOString()): void {
+function addSession(sessionId: string, createdAt?: string): void {
   upsertSession({
     id: sessionId,
     workspaceId,
@@ -67,8 +66,15 @@ function addSession(sessionId: string, lastActivity = new Date().toISOString()):
     agent: "claude",
     purpose: "chat",
     runtimeStatus: "idle",
-    lastActivity,
+    lastActivity: createdAt ?? new Date().toISOString(),
   });
+  // `upsertSession` always stamps `created_at` with now; backdating it is how a
+  // test represents a session that isn't new.
+  if (createdAt) {
+    getSessionDb()
+      .query("UPDATE sessions SET created_at = ? WHERE provider_session_id = ?")
+      .run(createdAt, sessionId);
+  }
 }
 
 const keysOf = (sessionId: string): string[] =>
@@ -225,14 +231,21 @@ describe("backfillSessionRefs", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  test("covers sessions inside the window and skips older ones", () => {
+  test("windows on when the conversation happened, not on last_activity", () => {
     const recent = new Date(Date.now() - 3 * 86_400_000).toISOString();
     const old = new Date(Date.now() - 90 * 86_400_000).toISOString();
 
     addSession("recent", recent);
-    addEntry("recent", "assistant", "shipped in #321");
+    addEntry("recent", "assistant", "shipped in #321", recent);
+
+    // Archived rows carry a `last_activity` of whenever they were archived, so
+    // an old conversation can look brand new by that column. Its messages are
+    // what date it.
     addSession("old", old);
-    addEntry("old", "assistant", "shipped in #999");
+    addEntry("old", "assistant", "shipped in #999", old);
+    getSessionDb()
+      .query("UPDATE sessions SET last_activity = ? WHERE provider_session_id = 'old'")
+      .run(new Date().toISOString());
 
     const result = backfillSessionRefs(() => config, { days: 30 });
 

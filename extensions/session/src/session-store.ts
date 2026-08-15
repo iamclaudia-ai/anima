@@ -464,20 +464,39 @@ export interface SessionForRefSync {
 }
 
 /**
- * Sessions active since `sinceIso`, with everything ref extraction needs.
+ * Sessions with conversation activity since `sinceIso`, with everything ref
+ * extraction needs.
  *
- * Includes archived rows on purpose: their transcripts are gone from disk but
- * `memory_transcript_entries` still has the prose, and their refs are exactly
- * what makes them findable again.
+ * Recency comes from the transcript corpus, not `last_activity`. That column
+ * is unreliable for this: the first reconcile stamped it with "now" on all
+ * 5,103 rows it archived, so a 30-day cut on it sweeps in sessions from
+ * March. The timestamp on a message is what actually says when a conversation
+ * happened. Sessions with no ingested messages fall back to `created_at`, so
+ * one created moments ago still gets its opening prompt read.
+ *
+ * Archived rows are included on purpose: their transcripts are gone from disk
+ * but the corpus still has the prose, and their refs are exactly what makes
+ * them findable again.
  */
-export function listSessionsForRefSync(sinceIso: string): SessionForRefSync[] {
+export function listSessionsForRefSync(
+  sinceIso: string,
+  options: { corpusAvailable: boolean },
+): SessionForRefSync[] {
+  // Without memory's table the EXISTS clause can't be planned at all, so fall
+  // back to creation date — title-only extraction, which is where refs started.
+  const recencyClause = options.corpusAvailable
+    ? `(s.created_at >= ?1
+        OR EXISTS (SELECT 1 FROM memory_transcript_entries e
+                    WHERE e.session_id = s.provider_session_id AND e.timestamp >= ?1))`
+    : `s.created_at >= ?1`;
+
   const rows = getDb()
     .query(
       `SELECT s.provider_session_id AS session_id, s.title AS title,
               s.metadata_json AS metadata_json, w.cwd AS cwd
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
-        WHERE s.purpose = 'chat' AND s.last_activity >= ?
+        WHERE s.purpose = 'chat' AND ${recencyClause}
         ORDER BY s.last_activity DESC`,
     )
     .all(sinceIso) as Array<{

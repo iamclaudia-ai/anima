@@ -354,7 +354,7 @@ export function backfillSessionRefs(
   // time component compares inconsistently between them. A bare date is
   // unambiguous against both, at the cost of including the whole cutoff day.
   const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  const sessions = listSessionsForRefSync(since);
+  const sessions = listSessionsForRefSync(since, { corpusAvailable: hasTranscriptCorpus() });
 
   const byWorkspace = new Map<string, RefSyncInput[]>();
   for (const session of sessions) {
