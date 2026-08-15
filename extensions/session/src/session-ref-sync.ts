@@ -58,7 +58,21 @@ const log = createLogger("SessionExt:RefSync", join(homedir(), ".anima", "logs",
  * whatever is left stays behind the watermark and is picked up by the next
  * sweep. Backfill passes `drain` to loop instead.
  */
-const MAX_ENTRIES_PER_PASS = 500;
+const MAX_ENTRIES_PER_SESSION = 300;
+
+/**
+ * Sessions read per pass.
+ *
+ * Reconcile runs synchronously on the nav's list call, and a workspace that
+ * has never been scanned can have hundreds of sessions waiting — the swarm
+ * checkout had 381 the first time this ran. Without a cap that whole backlog
+ * lands on one nav open. Capped, the sweep drains it over the following few
+ * minutes and no single interaction pays for it.
+ *
+ * Sessions are taken in the caller's order, which is last-activity descending,
+ * so the rows actually on screen catch up first.
+ */
+const MAX_SESSIONS_PER_PASS = 20;
 
 /** SQLite's default parameter ceiling is 999 — chunk `IN (...)` well under it. */
 const ID_CHUNK = 400;
@@ -264,12 +278,20 @@ export function syncSessionRefs(
   const pending = hasTranscriptCorpus()
     ? findSessionsWithNewEntries([...byId.keys()], options.rescan ?? false)
     : new Map<string, number>();
-  for (const [sessionId, watermark] of pending) {
+  // Caller order (last-activity descending) rather than the aggregate's, so a
+  // capped pass spends its budget on the sessions nearest the top of the nav.
+  const queue = sessions
+    .map((session) => session.sessionId)
+    .filter((sessionId) => pending.has(sessionId));
+  const budget = options.drain ? queue.length : Math.min(queue.length, MAX_SESSIONS_PER_PASS);
+
+  for (const sessionId of queue.slice(0, budget)) {
+    const watermark = pending.get(sessionId) ?? 0;
     let cursor = options.rescan ? 0 : watermark;
     let found: SessionRef[] = [];
 
     for (;;) {
-      const batch = readEntriesAfter(sessionId, cursor, MAX_ENTRIES_PER_PASS);
+      const batch = readEntriesAfter(sessionId, cursor, MAX_ENTRIES_PER_SESSION);
       if (batch.texts.length === 0 && batch.lastEntryId === cursor) break;
       result.scanned += batch.texts.length;
       found = mergeRefs(found, extractRefsFromTexts(batch.texts, config));

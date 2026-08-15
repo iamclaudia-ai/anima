@@ -200,6 +200,33 @@ describe("syncSessionRefs", () => {
     expect(keysOf("s6")).toEqual(["WEB-9"]);
   });
 
+  test("a non-draining pass caps how many sessions it catches up, newest first", () => {
+    // A workspace scanned for the first time can have hundreds waiting; the
+    // nav's list call must not pay for all of them at once.
+    const ids = Array.from({ length: 30 }, (_, i) => `cap${i}`);
+    for (const id of ids) {
+      addSession(id);
+      addEntry(id, "user", `working on WEB-${id.slice(3)}`);
+    }
+
+    const pass = syncSessionRefs(
+      ids.map((sessionId) => ({ sessionId })),
+      config,
+    );
+
+    expect(pass.updated).toBe(20);
+    expect(keysOf("cap0")).toEqual(["WEB-0"]);
+    expect(keysOf("cap29")).toEqual([]);
+
+    // The rest arrive on the next sweep.
+    const rest = syncSessionRefs(
+      ids.map((sessionId) => ({ sessionId })),
+      config,
+    );
+    expect(rest.updated).toBe(10);
+    expect(keysOf("cap29")).toEqual(["WEB-29"]);
+  });
+
   test("rescan clears a session whose refs were all false positives", () => {
     addSession("s8");
     setSessionRefs("s8", [{ type: "github", key: "beehiiv/swarm#9", label: "#9" }]);
