@@ -59,7 +59,7 @@ what would close the CLI turn-reporting gap noted below.
 | **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
 | **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
 | **3b — "are you done?" (#31)**    | ✅ shipped | in-page banner on `completed`+`open` after 15m; snooze + resolve   |
-| **3c — split list + re-sort**     | ✅ shipped | flat ACTIVE pane above the tree; shared store with the banner      |
+| **3c — ACTIVE queue + re-sort**   | ✅ shipped | persistent queue above the tree; resolved returns to its folder    |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
 | **5 — web terminal (#70)**        | ⬜         |                                                                    |
 
@@ -240,6 +240,23 @@ With that query in place, 3c's remaining work is:
 - Re-sort on recency using the event's `at`, which the in-tree list still wants too.
 
 Two cautions. **The active pane must be bounded** — a cap plus "N more", or a busy morning pushes the tree off-screen. And **rows sorted by recency jump while you read them**; the tree should stay stable even when the active pane reorders.
+
+**As built — and it is a queue, not an attention list.** The first version showed "what's happening right now": in flight, or finished within a day. Michael's read of it in use corrected that. ACTIVE holds **every unresolved session**, however old and whatever it's doing, until he says it's done. A pane that quietly forgets items is worse than a long one; resolving is how it gets shorter.
+
+That change turned on a distinction the plan hadn't drawn. `resolved` was hidden from the workspace tree, so clearing the queue would have emptied every folder — the opposite of "marking a session done moves it back into the tree". The three dispositions now form a progression, each hiding a session from one more place than the last:
+
+|            | ACTIVE queue | workspace tree | search |
+| ---------- | :----------: | :------------: | :----: |
+| `open`     |      ✅      |       ✅       |   ✅   |
+| `resolved` |      —       |       ✅       |   ✅   |
+| `archived` |      —       |       —        |   ✅   |
+
+**`resolved` is the common case and must stay cheap**, which is exactly why it can't hide anything: bulk-resolving is the intended way to keep the queue short, and it has to be safe enough to run over hundreds of rows without thinking. (238 resolved at five days on first run, leaving 135.)
+
+Two rules that follow, both learned from using it:
+
+- **The tab's own session is always in the queue**, whatever its disposition, and is exempt from snooze-hiding. Reopening old work from search is a normal way to start, and a row you're looking at that offers no way to act on itself is just a gap.
+- **The banner needs its own window** now that the queue has no age bound: 15 minutes to 24 hours. Interrupting about last week's work is worse than staying quiet.
 
 Sequencing note: 3b and 3c want the same thing from opposite directions — 3b asks "tell me when to come back", 3c asks "show me where things stand". The `completed + open` predicate is the shared primitive. Build that once and both fall out of it.
 
