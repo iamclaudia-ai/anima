@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { salvageTruncatedUserText } from "./claude-projects";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import * as os from "node:os";
+import { tmpdir } from "node:os";
+import { discoverSessions, salvageTruncatedUserText } from "./claude-projects";
 
 describe("salvageTruncatedUserText", () => {
   // Real case: a transcript whose first user line is 372KB (large paste), so a
@@ -51,5 +55,64 @@ describe("salvageTruncatedUserText", () => {
   test("returns null when there is no text field to salvage", () => {
     expect(salvageTruncatedUserText('{"type":"user","message":{"content":[{"type":"im')).toBeNull();
     expect(salvageTruncatedUserText("")).toBeNull();
+  });
+});
+
+describe("discoverSessions needsTitle", () => {
+  // Reading each transcript's head is the expensive part of discovery — on a
+  // 247-session workspace it's the difference between 154ms and 0.7ms. The
+  // reconciler relies on being able to skip it for unchanged sessions.
+  const home = join(tmpdir(), `anima-discover-${Date.now()}`);
+  const cwd = "/tmp/anima-discover-fixture";
+  const projectDir = join(home, ".claude", "projects", cwd.replace(/[/.]/g, "-"));
+
+  // `resolveProjectDir` reads os.homedir(), which ignores a reassigned
+  // process.env.HOME once the process is running.
+  const homedirSpy = spyOn(os, "homedir").mockReturnValue(home);
+
+  mkdirSync(projectDir, { recursive: true });
+  for (const id of ["one", "two"]) {
+    writeFileSync(
+      join(projectDir, `${id}.jsonl`),
+      `${JSON.stringify({ type: "user", message: { role: "user", content: `prompt ${id}` } })}\n`,
+    );
+  }
+
+  afterAll(() => {
+    homedirSpy.mockRestore();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("extracts every title by default", () => {
+    const sessions = discoverSessions(cwd);
+    expect(sessions).toHaveLength(2);
+    expect(sessions.every((s) => s.firstPrompt?.startsWith("prompt "))).toBe(true);
+  });
+
+  test("skips extraction when the predicate declines, still listing the session", () => {
+    const sessions = discoverSessions(cwd, { needsTitle: () => false });
+    expect(sessions).toHaveLength(2);
+    // firstPrompt undefined signals "unchanged" — the caller keeps the stored
+    // title rather than overwriting it with nothing.
+    expect(sessions.every((s) => s.firstPrompt === undefined)).toBe(true);
+  });
+
+  test("extracts only for sessions the predicate selects", () => {
+    const sessions = discoverSessions(cwd, { needsTitle: (id) => id === "two" });
+    const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+    expect(byId.get("two")?.firstPrompt).toBe("prompt two");
+    expect(byId.get("one")?.firstPrompt).toBeUndefined();
+  });
+
+  test("passes the session id and modified time to the predicate", () => {
+    const seen: Array<[string, string]> = [];
+    discoverSessions(cwd, {
+      needsTitle: (id, modified) => {
+        seen.push([id, modified]);
+        return false;
+      },
+    });
+    expect(seen).toHaveLength(2);
+    for (const [, modified] of seen) expect(Number.isFinite(Date.parse(modified))).toBe(true);
   });
 });

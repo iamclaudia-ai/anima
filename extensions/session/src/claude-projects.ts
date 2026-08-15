@@ -198,7 +198,22 @@ function extractFirstPrompt(filepath: string, indexed?: string): string | undefi
   return undefined;
 }
 
-export function discoverSessions(cwd: string): SessionIndexEntry[] {
+export interface DiscoverOptions {
+  /**
+   * Decide whether a session's title needs (re-)extraction.
+   *
+   * Deriving a title opens and reads the head of a transcript, so a periodic
+   * sweep that titles every session re-reads the whole workspace each pass.
+   * The reconciler passes a predicate that returns false for sessions it has
+   * already titled and whose mtime hasn't moved, reducing a sweep to a single
+   * `readdir` plus one `stat` per file. Entries skipped this way come back with
+   * `firstPrompt` undefined — callers must preserve the stored title rather
+   * than overwrite it with nothing.
+   */
+  needsTitle?: (sessionId: string, modified: string) => boolean;
+}
+
+export function discoverSessions(cwd: string, options?: DiscoverOptions): SessionIndexEntry[] {
   const projectDir = resolveProjectDir(cwd);
   if (!projectDir) return [];
 
@@ -218,12 +233,14 @@ export function discoverSessions(cwd: string): SessionIndexEntry[] {
     }
 
     const indexed = indexMap.get(sessionId);
+    const modified = indexed?.modified || stats.mtime.toISOString();
+    const wantTitle = options?.needsTitle ? options.needsTitle(sessionId, modified) : true;
     sessions.push({
       sessionId,
       created: indexed?.created || stats.birthtime.toISOString(),
-      modified: indexed?.modified || stats.mtime.toISOString(),
+      modified,
       messageCount: indexed?.messageCount,
-      firstPrompt: extractFirstPrompt(filepath, indexed?.firstPrompt),
+      firstPrompt: wantTitle ? extractFirstPrompt(filepath, indexed?.firstPrompt) : undefined,
       gitBranch: indexed?.gitBranch,
     });
   }

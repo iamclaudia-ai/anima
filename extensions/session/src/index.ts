@@ -18,6 +18,7 @@ import type { SessionSubagent } from "./lifecycle/subagent-workflow";
 import { closeDb } from "./workspace";
 import { closeSessionDb } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
+import { startReconciler } from "./session-reconciler";
 import { wireSubagentEvents } from "./lifecycle/subagent-events";
 import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodHandlers } from "./session-dispatch";
@@ -171,6 +172,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     async start(instance): Promise<void> {
       instance.runtime.unsubscribers.push(wireSubagentEvents());
       instance.runtime.unsubscribers.push(wireSessionEvents());
+      // Keeps the sessions table current off the request path, and is the only
+      // thing that notices sessions created outside Anima (the raw CLI).
+      instance.runtime.unsubscribers.push(startReconciler());
 
       try {
         await instance.runtime.bridge.connect();

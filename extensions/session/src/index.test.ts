@@ -4,6 +4,7 @@ import { clearConfigCache } from "@anima/shared";
 import { createSessionExtension } from "./index";
 import { AgentHostClient } from "./agent-client";
 import { getStoredSession, upsertSession } from "./session-store";
+import { discoverSessions, resolveProjectDir } from "./claude-projects";
 import * as workspace from "./workspace";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +15,20 @@ mkdirSync(testHome, { recursive: true });
 process.env.HOME = testHome;
 
 const sessionId = "session-test-123";
+
+/**
+ * Narrow a `session.list_sessions` result to a case's own fixture sessions.
+ *
+ * `list_sessions` reads from SQLite rather than scanning the filesystem, and
+ * the table outlives an individual case in this file — so a bare length
+ * assertion also counts sessions other cases created. Filtering keeps each
+ * assertion about its own fixtures while preserving returned order, so recency
+ * sorting is still verifiable.
+ */
+function onlyFixtures<T extends { sessionId: string }>(sessions: T[], ids: string[]): T[] {
+  const wanted = new Set(ids);
+  return sessions.filter((session) => wanted.has(session.sessionId));
+}
 
 function createTestContext(overrides: Partial<ExtensionContext> = {}): ExtensionContext {
   return {
@@ -1233,11 +1248,15 @@ describe("session extension", () => {
         sessions: Array<{ sessionId: string; firstPrompt?: string; gitBranch?: string }>;
       };
 
-      expect(result.sessions).toHaveLength(2);
-      expect(result.sessions[0]?.sessionId).toBe("new-session");
-      expect(result.sessions[0]?.gitBranch).toBe("main");
-      expect(result.sessions[0]?.firstPrompt).toBe("newer prompt");
-      expect(result.sessions[1]?.sessionId).toBe("old-session");
+      // list_sessions reads from SQLite, which persists across cases in this
+      // file, so scope the assertion to this fixture's sessions. Ordering
+      // between them still proves the recency sort.
+      const fixtures = onlyFixtures(result.sessions, ["new-session", "old-session"]);
+      expect(fixtures).toHaveLength(2);
+      expect(fixtures[0]?.sessionId).toBe("new-session");
+      expect(fixtures[0]?.gitBranch).toBe("main");
+      expect(fixtures[0]?.firstPrompt).toBe("newer prompt");
+      expect(fixtures[1]?.sessionId).toBe("old-session");
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
       await ext.stop();
@@ -1277,9 +1296,9 @@ describe("session extension", () => {
       const result = (await ext.handleMethod("session.list_sessions", { cwd })) as {
         sessions: Array<{ sessionId: string; firstPrompt?: string }>;
       };
-      expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]?.sessionId).toBe("fallback-session");
-      expect(result.sessions[0]?.firstPrompt).toBe("prompt from text block");
+      const fixtures = onlyFixtures(result.sessions, ["fallback-session"]);
+      expect(fixtures).toHaveLength(1);
+      expect(fixtures[0]?.firstPrompt).toBe("prompt from text block");
     } finally {
       rmSync(fallbackDir, { recursive: true, force: true });
       rmSync(badDir, { recursive: true, force: true });
@@ -1388,10 +1407,13 @@ describe("session extension", () => {
       mkdirSync(badDir, { recursive: true });
       writeFileSync(join(badDir, "sessions-index.json"), "{ broken json");
 
-      const result = (await ext.handleMethod("session.list_sessions", { cwd })) as {
-        sessions: Array<{ sessionId: string }>;
-      };
-      expect(result.sessions).toEqual([]);
+      // Asserted at the discovery layer rather than through
+      // `session.list_sessions`: this suite mocks `getOrCreateWorkspace` to a
+      // single fixed workspace, so every cwd shares one row set once reads come
+      // from SQLite, and an emptiness assertion there would only be measuring
+      // the mock. Discovery is where "no matching originalPath" is decided.
+      expect(resolveProjectDir(cwd)).toBeNull();
+      expect(discoverSessions(cwd)).toEqual([]);
     } finally {
       rmSync(badDir, { recursive: true, force: true });
       await ext.stop();
@@ -1424,9 +1446,9 @@ describe("session extension", () => {
       const result = (await ext.handleMethod("session.list_sessions", { cwd })) as {
         sessions: Array<{ sessionId: string; firstPrompt?: string }>;
       };
-      expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]?.sessionId).toBe("broken-first-prompt");
-      expect(result.sessions[0]?.firstPrompt).toBeUndefined();
+      const fixtures = onlyFixtures(result.sessions, ["broken-first-prompt"]);
+      expect(fixtures).toHaveLength(1);
+      expect(fixtures[0]?.firstPrompt).toBeUndefined();
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
       await ext.stop();
