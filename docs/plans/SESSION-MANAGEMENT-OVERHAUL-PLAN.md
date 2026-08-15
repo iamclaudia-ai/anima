@@ -58,8 +58,8 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 | **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
 | **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
 | **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
-| **3b — notification (#31)**       | ⬜ next    | the piece with a trust cost; dedupe by sessionId first             |
-| **3c — nav filter row**           | ⬜         | server-side filter exists (`includeDispositions`); no UI yet       |
+| **3b — "are you done?" (#31)**    | ⬜ next    | trigger retargeted to `completed`+`open`; not blocked by Phase 4   |
+| **3c — split list + re-sort**     | ⬜         | active pane above the tree; two real gaps in the live patch        |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
 | **5 — web terminal (#70)**        | ⬜         |                                                                    |
 
@@ -78,9 +78,9 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**Phase 3b — the `awaiting_input` notification (#31)** is next, and it's the piece with a trust cost. Get the dedupe by sessionId right before making it prettier: a duplicate notification for one session is worse than no notification. Everything it needs now exists — `awaiting_input` is a real runtime state and `session.status_changed` already reaches every tab.
+**Phase 3b — "are you done?" (#31)** is next. Read that section before starting: the trigger moved from `awaiting_input` to `completed` + `disposition = open`, which is what the real complaint turns out to be and which fires today.
 
-**Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser. Until that lands the two states are reachable only by hand — which is worth knowing before wiring a notification to a transition nothing emits yet.
+**Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser — so until that lands the two states are reachable only by hand. This is why 3b's trigger changed rather than 3b waiting.
 
 What 3a established, and what a fresh session should know:
 
@@ -155,15 +155,72 @@ The reconciler, and the read-path inversion.
 
 1. ~~Schema: two axes.~~ **Done** — migration 024.
 2. ~~Emit `session.status_changed` and `session.list_changed`; nav subscribes.~~ **Done.**
-3. Notification on `awaiting_input` in a backgrounded tab, tagged by sessionId so it dedupes and click-focuses (closes #31). **Blocked on nothing technically, but see the note above: no code writes `awaiting_input` until Phase 4's detector lands.**
-4. ~~`session.set_status` + chip/context-menu; `resolved`/`archived` hidden by default.~~ **Done.** The nav filter row is still missing — `listWorkspaceSessions` takes `includeDispositions`, but no UI passes it, so hidden work is currently reachable only through search.
+3. ~~`session.set_status` + chip/context-menu; `resolved`/`archived` hidden by default.~~ **Done.** The nav filter row is still missing — `listWorkspaceSessions` takes `includeDispositions`, but no UI passes it, so hidden work is currently reachable only through search.
+4. Notification — **retargeted, see Phase 3b below.** The original framing (notify on `awaiting_input`) was the wrong trigger, and following it would have blocked #31 behind Phase 4 for no reason.
 
 **Ships:** every tab agrees; nothing gets silently abandoned.
+
+### Phase 3b — "Are you done?" (#31, expanded)
+
+**The trigger was wrong.** This plan assumed the notification worth having fires on `awaiting_input` — a session blocked on a modal prompt. But the case that actually costs Michael time is the opposite one: _"I ask for a PR review, get pulled into something else, and forget to come back."_ Nothing is blocked; the work is **finished and unacknowledged**, and the only thing missing is anyone noticing.
+
+That trigger is `completed`, which fires today. #31 is not blocked by Phase 4 and never was.
+
+**The attention set is already derivable — no new state.** A session that is `runtime_status = completed` and `disposition = open` is one that finished and nobody has acknowledged. That single predicate is the whole feature:
+
+| need                     | mechanism                                 |
+| ------------------------ | ----------------------------------------- |
+| "you're done"            | `completed` + `open`                      |
+| "how long has it waited" | `now − updated_at`                        |
+| "remind me later"        | `disposition = snoozed` (already exists)  |
+| "ok, we're done here"    | `disposition = resolved` (already exists) |
+
+The escalation is that predicate plus elapsed time: past ~15 minutes, a banner that has to be dismissed deliberately rather than a toast that can be missed. Snooze re-arms it.
+
+**This reverses a decision made on 2026-08-15.** The nav shows no dot for `completed` on the reasoning that resting states are noise — most rows are at rest, and a column of grey dots costs the eye something for nothing. The PR-review case is the counterexample: **completed-and-unacknowledged is the single most important row in the list.** Revised rule — `completed` + `open` gets a distinct "ready for you" mark; `completed` + anything else gets nothing. The principle survives, the boundary moves.
+
+**Working should read as motion.** The static pulsing dot doesn't say "busy" strongly enough at a glance; a spinner does.
+
+**Cross-tab dedupe is a real problem, not a detail.** Michael runs several tabs, and they are not even the same origin — `localhost:30086` and `anima.kiliman.dev` are both open in practice. Naive code fires one notification per tab. The Notification API's `tag` collapses duplicates **per origin**, so it solves the two-tabs-on-one-host case and not the cross-origin one. The gateway already has `exclusive` subscriptions (last subscriber wins, `exclusiveSubscribers` in `index.ts`), which is a server-side leader election and does cover it. Decide this before making the notification pretty — a duplicate notification per session is worse than none.
+
+**Seeing is not acknowledging.** Opening a session should clear its escalation timer — "I've looked at it" — but must not set `resolved`. Automatic status changes that hide a session are the thing that erodes trust in the list, and the whole point of the banner is that Michael says when the work is done.
+
+### Phase 3c — The nav is the wrong shape for "what's happening now"
+
+Confirmed live on 2026-08-15: status reaches every tab, on every origin. But the tree hides it.
+
+**What already works.** Each tab loads the first page of _every_ workspace at bootstrap, so a collapsed workspace's rows are in the tab's state and are patched by incoming events. They just aren't rendered — `NavigationDrawer.tsx:774` renders sessions only while `expanded`. Making a collapsed workspace's activity visible is therefore a pure UI change with no new data plumbing.
+
+**Two genuine gaps in what shipped:**
+
+- **Rows don't re-sort on a status change.** The patch updates `runtimeStatus`/`disposition` but not `modified`, so a session that just came alive stays where it was until a refetch. The `status_changed` payload already carries `at`; use it, and re-sort the workspace descending.
+- **A status event for a session outside the loaded first page is dropped.** The handler deliberately returns the previous state for sessions it doesn't hold, to avoid re-rendering the nav for other workspaces' traffic. But if swarm's active session is the 7th most recent, a tab showing swarm's top 5 never learns about it. Fix: when a status arrives for a known workspace but an unknown session, refetch that workspace — debounced, since this fires at least twice per turn.
+
+**Auto-expanding the workspace is the 5-minute version, not the answer.** Expanding on _every_ status change would thrash: two or more events per turn, across every workspace, permanently unfolding the whole tree. If we do it now, expand only on transitions _into_ an attention state (`running`, `awaiting_*`, `failed`, `stalled`, and `completed`-while-`open`) and never auto-collapse.
+
+**The real fix is the split list, which makes auto-expand unnecessary.** Michael's shape:
+
+```
+┌─ ACTIVE ─────────────────────────────┐
+│ ● current session (URL)   always top │  ← per-tab, not global
+│ ● swarm · fix the reaper      2m     │  ← workspace is a label, not a parent
+│ ✓ anima · PR review done     14m     │  ← completed + open = needs you
+├─ WORKSPACES ─────────────────────────┤
+│ ▸ anima                              │  ← the tree, for browsing
+│ ▸ swarm                              │
+└──────────────────────────────────────┘
+```
+
+Active sessions are flat and sorted by recency with the workspace as part of the line, because when something is happening the workspace is context, not hierarchy. The tree stays for _finding_ things. Marking a session done drops it out of the top pane and back into its folder — which is exactly what `disposition` already models, and gives `resolved` a visible, satisfying consequence.
+
+Two cautions. **The active pane must be bounded** — a cap plus "N more", or a busy morning pushes the tree off-screen. And **rows sorted by recency jump while you read them**; the tree should stay stable even when the active pane reorders.
+
+Sequencing note: 3b and 3c want the same thing from opposite directions — 3b asks "tell me when to come back", 3c asks "show me where things stand". The `completed + open` predicate is the shared primitive. Build that once and both fall out of it.
 
 ### Phase 4 — Modal prompts (#69)
 
 1. Prompt detector next to the existing feedback-survey detector — parse `capture-pane` for the modal, extract question + numbered options.
-2. Surface as an actionable block in chat; answering sends the key via `send-keys`. Session sits in `awaiting_approval` meanwhile (Phase 3 gives us the state and the notification for free).
+2. Surface as an actionable block in chat; answering sends the key via `send-keys`. Session sits in `awaiting_approval` meanwhile — Phase 3 already built the state, the dot, and the event, so **this phase is the only thing that will ever write those two states.** It inherits 3b's notification path for free by moving into an attention state.
 3. ~~Root-cause the bypass leak: absolute hook path, `allow` default in `emit_hook_output`.~~ **Confirmed, and it was neither of those.** `dcg` has a `warn` tier that emits `permissionDecision: "ask"`, and an `ask` from a PreToolUse hook overrides `--dangerously-skip-permissions` — the flag only skips Claude Code's own checks, not a hook's explicit decision. `tmux-wrap.sh` is not implicated. Detector anchors captured from a live prompt: `Hook PreToolUse:Bash requires confirmation for this command:`, `Do you want to proceed?` above a numbered `1. Yes` / `2. No`, footer `Esc to cancel · Tab to amend · ctrl+e to explain`. Full detail in #69.
 
 **Ships:** no more `tmux attach` to unstick a session.
@@ -187,4 +244,6 @@ The reconciler, and the read-path inversion.
 
 - ~~**Transcript FTS scope**~~ **Settled by the corpus, 2026-08-15.** The question was moot: tool output was never stored, so there was nothing to choose. What is indexed is every user message plus assistant prose — 115k of the 270k entries. The other 148k are the ingest's `[Used tools: Bash]` placeholder, which carries no searchable text and would have been 55% of the index.
 - **Reconcile cadence** — fs watch is ideal but `~/.claude/projects/` churns constantly mid-turn. Likely: watch with debounce, plus a slow interval sweep as a floor.
-- **Auto-resolve** — should merged-PR detection auto-mark `resolved`, or only suggest it? Plan says suggest; automatic status changes that hide a session are the kind of thing that erodes trust in the list.
+- **Auto-resolve** — should merged-PR detection auto-mark `resolved`, or only suggest it? Plan says suggest; automatic status changes that hide a session are the kind of thing that erodes trust in the list. 3b's "seeing is not acknowledging" rule is the same principle at a smaller scale.
+- **Notification leader across origins** — `tag` dedupes per origin; `localhost` and `anima.kiliman.dev` are two. Gateway `exclusive` subscriptions would elect one tab, but "last subscriber wins" means the most recently opened tab owns it, which may not be the focused one. Decide in 3b.
+- **Where the escalation banner lives** — one banner listing every unacknowledged session, or one per session? One, almost certainly: three separate banners for three finished reviews is the same failure as three notifications.
