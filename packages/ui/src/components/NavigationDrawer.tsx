@@ -371,10 +371,10 @@ function ActiveRow({
       >
         <RuntimeStatusDot status={row.runtimeStatus} disposition={row.disposition} />
         <span className="min-w-0 flex-1">
+          {/* Same shape as a tree row — title, then the chip line. The only
+              thing a queue row adds is the workspace it belongs to, since it
+              no longer sits underneath one. */}
           <span className="block truncate">{activeRowName(row)}</span>
-          <span className="block truncate text-xs text-gray-400">
-            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
-          </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
             {/* The session you have open stays in the queue whatever its
                 status, so the chip is the only thing that shows a resolve
@@ -383,15 +383,12 @@ function ActiveRow({
             <DispositionChip disposition={row.disposition} />
             <SessionRefChips refs={row.refs} />
           </span>
+          <span className="mt-0.5 block truncate text-xs text-gray-400">
+            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+          </span>
         </span>
       </button>
-      <span className="absolute right-2 top-1.5 hidden items-center gap-0.5 group-hover:flex">
-        {/* Any row can be marked done, not just finished ones. This is a work
-            queue — "I'm done with this" is a statement about you, not about
-            what the agent happens to be doing this second. */}
-        {onAcknowledge && row.disposition !== "resolved" && (
-          <RowAction icon={Check} label="Mark done" onClick={() => onAcknowledge(row.sessionId)} />
-        )}
+      <span className="absolute right-2 top-1.5 hidden group-hover:flex">
         <SessionActions
           sessionId={row.sessionId}
           disposition={row.disposition}
@@ -399,6 +396,14 @@ function ActiveRow({
           onSetDisposition={
             onSetDisposition
               ? (disposition) => onSetDisposition(row.sessionId, disposition)
+              : undefined
+          }
+          // Any row can be marked done, not just finished ones. This is a work
+          // queue — "I'm done with this" is a statement about Michael, not
+          // about what the agent happens to be doing this second.
+          onAcknowledge={
+            onAcknowledge && row.disposition !== "resolved"
+              ? () => onAcknowledge(row.sessionId)
               : undefined
           }
         />
@@ -616,7 +621,7 @@ function SessionRow({
           {formatTimeAgo(session.modified || session.created || "")}
         </span>
       </a>
-      <span className="absolute right-2 top-1.5 hidden items-center gap-0.5 group-hover:flex">
+      <span className="absolute right-2 top-1.5 hidden group-hover:flex">
         <SessionActions
           sessionId={session.sessionId}
           disposition={session.disposition}
@@ -648,11 +653,14 @@ function SessionActions({
   disposition,
   onRename,
   onSetDisposition,
+  onAcknowledge,
 }: {
   sessionId: string;
   disposition?: SessionDisposition;
   onRename?: () => void;
   onSetDisposition?: (disposition: SessionDisposition) => void;
+  /** Present on queue rows: the one-click version of "status → resolved". */
+  onAcknowledge?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -661,74 +669,85 @@ function SessionActions({
   const handleCopyAttach = async () => {
     await copyText(tmuxAttachCommand(sessionId));
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    window.setTimeout(() => {
+      setCopied(false);
+      setMenuOpen(false);
+    }, 900);
   };
 
-  const hasMenu = Boolean(onRename || onSetDisposition);
-
   return (
-    <>
+    <span className="relative" ref={menuRef}>
       <RowAction
-        icon={copied ? Check : Terminal}
-        label={copied ? "Copied" : "Copy tmux attach command"}
-        onClick={handleCopyAttach}
+        icon={MoreHorizontal}
+        label="Session actions"
+        onClick={() => setMenuOpen((open) => !open)}
       />
-      {hasMenu && (
-        <span className="relative" ref={menuRef}>
-          <RowAction
-            icon={MoreHorizontal}
-            label="Session actions"
-            onClick={() => setMenuOpen((open) => !open)}
-          />
-          {menuOpen && (
-            <span className="absolute right-0 top-6 z-30 flex w-44 flex-col rounded-md border border-gray-200 bg-white py-1 shadow-lg">
-              {onRename && (
-                <>
+      {menuOpen && (
+        <span className="absolute right-0 top-6 z-30 flex w-44 flex-col rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+          {onAcknowledge && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onAcknowledge();
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+            >
+              <Check className="size-3" />
+              Mark done
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCopyAttach}
+            className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+          >
+            {copied ? <Check className="size-3" /> : <Terminal className="size-3" />}
+            {copied ? "Copied" : "Copy tmux command"}
+          </button>
+          {onRename && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onRename();
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+            >
+              <Pencil className="size-3" />
+              Rename
+            </button>
+          )}
+          {onSetDisposition && (
+            <>
+              <span className="my-1 border-t border-gray-100" />
+              <span className="px-3 pb-1 text-[10px] uppercase tracking-wide text-gray-400">
+                Status
+              </span>
+              {DISPOSITION_MENU.map((option) => {
+                const current = (disposition ?? "open") === option;
+                return (
                   <button
+                    key={option}
                     type="button"
                     onClick={() => {
                       setMenuOpen(false);
-                      onRename();
+                      if (!current) onSetDisposition(option);
                     }}
-                    className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+                    className={`flex items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
+                      current ? "font-medium text-gray-900" : "text-gray-600"
+                    }`}
                   >
-                    <Pencil className="size-3" />
-                    Rename
+                    {DISPOSITION_MENU_LABELS[option]}
+                    {current && <Check className="size-3" />}
                   </button>
-                  <span className="my-1 border-t border-gray-100" />
-                </>
-              )}
-              {onSetDisposition && (
-                <>
-                  <span className="px-3 pb-1 text-[10px] uppercase tracking-wide text-gray-400">
-                    Status
-                  </span>
-                  {DISPOSITION_MENU.map((option) => {
-                    const current = (disposition ?? "open") === option;
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          if (!current) onSetDisposition(option);
-                        }}
-                        className={`flex items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
-                          current ? "font-medium text-gray-900" : "text-gray-600"
-                        }`}
-                      >
-                        {DISPOSITION_MENU_LABELS[option]}
-                        {current && <Check className="size-3" />}
-                      </button>
-                    );
-                  })}
-                </>
-              )}
-            </span>
+                );
+              })}
+            </>
           )}
         </span>
       )}
-    </>
+    </span>
   );
 }
 

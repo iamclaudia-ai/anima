@@ -58,6 +58,7 @@ export function NavPanel() {
     runtimeStatus: s.runtimeStatus,
     disposition: s.disposition,
     waitingSince: s.waitingSince,
+    refs: s.refs,
   }));
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
