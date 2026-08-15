@@ -67,11 +67,19 @@ The reconciler, and the read-path inversion.
 1. Ref extraction during reconcile: `#N`, `owner/repo#N`, and Linear-style `PREFIX-123`. Store in a `session_refs` side table (multi-valued, indexed) rather than JSON metadata — it needs to be a join target and a filter.
 2. **Linear prefixes are config, not code.** `BEE`, `WEB`, `ENT` are Michael's teams, not universal — a bare `/[A-Z]+-\d+/` would happily match `UTF-8`, `SHA-256`, `ISO-8601`, and half the enum constants in a stack trace. So `anima.json` carries the allowed prefix list and extraction matches only those. Same treatment for the default GitHub repo, so a bare `#412` resolves to the right project.
 3. **Refs render as chips under the session title** — GitHub mark for PRs, Linear mark for tickets — so the list answers "which session was the #412 work?" at a glance, without opening anything. This is the primary payoff of extraction; search is the secondary one.
-4. `session_search_fts` (FTS5, porter unicode61) over transcript content, populated by the reconciler.
-5. `session.search({ query, workspaceId?, disposition?, ref?, limit?, offset? })` — bm25 + recency ranking, exact ref matches ranked first, `snippet()` for context.
-6. `SearchModal` calls it (debounced), renders snippets + ref chips, searches all workspaces by default.
+4. **Do not build a second transcript parser.** `memory_transcript_entries` already holds parsed user/assistant messages for every session, in the same `anima.db`, updated incrementally by offset within seconds of a message landing. Ref extraction and the search index both read from it. Verified: 269,968 entries / 2,411 sessions, ~98MB of content, newest entry 3 seconds old, and entries are **never pruned** on archive (the only deletes are crash-rollback and explicit re-import) — so it outlives the JSONL, which Claude Code deletes after 30 days.
+5. **Index into `memory_search_fts`, not a new table.** That FTS5 table was explicitly built as a "unified index across all memory sources" with a `source_type` column, but currently only carries `document` and `summary` rows. Transcripts become a third source type. Search then belongs to memory (`memory.search_transcripts`), with `session.search` calling it via `ctx.call` — the same pattern already used for `memory.get_session_context` — rather than reaching into another extension's tables.
+6. **Backfill the archive.** `~/.claude/projects-backup` holds 8,694 top-level sessions (4GB, every session since the first). Memory has 2,411 — **6,402 sessions of history are unindexed**, because ingest only ever watched the live directory. A one-time pass of the backup through the _existing_ ingest path completes the corpus. Dedupe by `session_id`: a session present in both directories must not be ingested twice.
+7. `session.search({ query, workspaceId?, disposition?, ref?, limit?, offset? })` — bm25 + recency ranking, exact ref matches ranked first, `snippet()` for context.
+8. `SearchModal` calls it (debounced), renders snippets + ref chips, searches all workspaces by default.
 
 **Ships:** refs visible on every session row; no more hand-written SQL to find a PR session.
+
+**Known limits of this corpus** (accept deliberately, surface in the UI):
+
+- **No tool inputs or outputs.** Assistant tool calls are stored as `[Used tools: Bash]` with a `tool_names` column. Searching for a file path or command output that appeared only in tool results will not match. This answers the plan's open question by construction — and is arguably right: 98MB of prose instead of many GB of tool noise. Refs live in prompts and prose, which _are_ indexed.
+- **Libby's own sessions are excluded** from ingest (self-summarization loop guard), so `~/Projects/libby` work isn't searchable.
+- **Some indexed sessions no longer exist on disk.** 2,411 sessions are in memory vs 362 JSONL files live. Search results must handle "transcript gone" — link to the summary rather than a dead session route, or resolve against the backup.
 
 ### Phase 3 — Live status (#67, #31)
 
