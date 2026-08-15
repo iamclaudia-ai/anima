@@ -52,6 +52,14 @@ export interface SessionListInfo {
   created: string;
   modified: string;
   messageCount?: number;
+  /**
+   * An explicit name the user gave this session.
+   *
+   * Separate from `firstPrompt` rather than replacing it: the derived title
+   * stays available as the placeholder when renaming, and clearing a rename
+   * falls straight back to it with nothing to recompute.
+   */
+  title?: string;
   firstPrompt?: string;
   gitBranch?: string;
   /** PR / ticket chips rendered under the title in the nav. */
@@ -397,6 +405,29 @@ export function getWorkspaceActiveSession(workspaceId: string): string | null {
 }
 
 /**
+ * Set (or clear) a session's user-given name.
+ *
+ * `null` clears it, which is a real operation rather than an oversight: the
+ * derived title is always recoverable from `metadata.firstPrompt`, so clearing
+ * a rename should hand the row straight back to it rather than leaving an
+ * empty string behind. The reconciler never touches this column — it writes
+ * `metadata.firstPrompt` — so a rename survives every sweep.
+ *
+ * Returns false when no such session exists, so the method can 404 rather than
+ * silently succeed.
+ */
+export function setSessionTitle(sessionId: string, title: string | null): boolean {
+  const trimmed = title?.trim();
+  const result = getDb()
+    .query(
+      `UPDATE sessions SET title = ?, updated_at = datetime('now')
+       WHERE provider_session_id = ?`,
+    )
+    .run(trimmed ? trimmed : null, sessionId);
+  return result.changes > 0;
+}
+
+/**
  * Replace a session's refs.
  *
  * Full replace rather than merge: refs are derived from the transcript, so a
@@ -458,7 +489,7 @@ export function getRefsForSessions(sessionIds: string[]): Map<string, StoredSess
 export interface SessionForRefSync {
   sessionId: string;
   cwd: string;
-  /** Stored title, falling back to the derived first prompt. */
+  /** Derived first prompt, falling back to a stored title. */
   titleText?: string;
   refs: StoredSessionRef[];
 }
@@ -515,7 +546,9 @@ export function listSessionsForRefSync(
     return {
       sessionId: row.session_id,
       cwd: row.cwd,
-      titleText: row.title ?? firstPrompt,
+      // Derived prompt first: it's the session's actual opening text, so it
+      // carries refs. A user rename is a label and usually doesn't.
+      titleText: firstPrompt ?? row.title ?? undefined,
       refs: refsBySession.get(row.session_id) ?? [],
     };
   });
@@ -556,10 +589,9 @@ export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
       modified: stored.lastActivity,
       messageCount:
         typeof metadata.messageCount === "number" ? (metadata.messageCount as number) : undefined,
+      title: stored.title || undefined,
       firstPrompt:
-        typeof metadata.firstPrompt === "string"
-          ? (metadata.firstPrompt as string)
-          : stored.title || undefined,
+        typeof metadata.firstPrompt === "string" ? (metadata.firstPrompt as string) : undefined,
       gitBranch:
         typeof metadata.gitBranch === "string" ? (metadata.gitBranch as string) : undefined,
     };

@@ -190,6 +190,20 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "serial" },
   },
   {
+    name: "session.set_title",
+    description:
+      "Name a session explicitly. The reconciler never overwrites this — pass null to clear it and fall back to the derived title.",
+    inputSchema: z.object({
+      sessionId: z.string().describe("Session UUID"),
+      title: z
+        .string()
+        .max(200)
+        .nullable()
+        .describe("New name, or null to clear the rename and use the derived title"),
+    }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
+  },
+  {
     name: "session.backfill_refs",
     description:
       "Re-extract PR/ticket refs for recent sessions from their full transcripts (migration tool; the reconciler keeps up incrementally after this)",

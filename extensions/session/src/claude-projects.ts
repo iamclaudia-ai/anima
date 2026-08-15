@@ -16,6 +16,8 @@ export interface SessionIndexEntry {
   created?: string;
   modified?: string;
   messageCount?: number;
+  /** Explicit user rename, when there is one. Outranks `firstPrompt` for display. */
+  title?: string;
   firstPrompt?: string;
   gitBranch?: string;
   /**

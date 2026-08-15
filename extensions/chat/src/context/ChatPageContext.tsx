@@ -107,6 +107,7 @@ export interface ChatPageContextValue {
    * workspace would mis-route clicks across workspaces.
    */
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
+  onRenameSession: (session: SessionInfo, title: string | null) => Promise<void>;
   /** Create a new session in `workspace` (defaults to the active one). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -365,6 +366,34 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [callGateway, setSessionsForWorkspace],
   );
 
+  const onRenameSession = useCallback(
+    async (session: SessionInfo, title: string | null) => {
+      const previous = session.title;
+      // Optimistic: the row is being looked at, and a rename that lags behind
+      // the keystroke reads as a failed edit. The session lives in exactly one
+      // workspace bucket, so patch wherever it's found.
+      const patch = (next: string | undefined) =>
+        setSessionsByWorkspace((prev) => {
+          const updated: Record<string, SessionInfo[]> = {};
+          for (const [workspaceId, sessions] of Object.entries(prev)) {
+            updated[workspaceId] = sessions.map((s) =>
+              s.sessionId === session.sessionId ? { ...s, title: next } : s,
+            );
+          }
+          return updated;
+        });
+
+      patch(title ?? undefined);
+      try {
+        await callGateway("session.set_title", { sessionId: session.sessionId, title });
+      } catch (error) {
+        console.error("Failed to rename session", error);
+        patch(previous);
+      }
+    },
+    [callGateway],
+  );
+
   const onPinWorkspace = useCallback(
     async (workspace: WorkspaceInfo, pinned: boolean) => {
       // Optimistic flip so the dot + sort order update immediately;
@@ -554,6 +583,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       isCreatingWorkspace,
       onWorkspaceSelect,
       onSessionSelect,
+      onRenameSession,
       onNewSession,
       onNewWorkspace,
       onCloseCreateWorkspaceModal,
@@ -575,6 +605,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       isCreatingWorkspace,
       onWorkspaceSelect,
       onSessionSelect,
+      onRenameSession,
       onNewSession,
       onNewWorkspace,
       onCloseCreateWorkspaceModal,

@@ -23,6 +23,7 @@ export function NavPanel() {
     isCreatingWorkspace,
     onWorkspaceSelect,
     onSessionSelect,
+    onRenameSession,
     onNewSession,
     onNewWorkspace,
     onCloseCreateWorkspaceModal,
@@ -66,6 +67,7 @@ export function NavPanel() {
         isConnected={isConnected}
         onWorkspaceSelect={onWorkspaceSelect}
         onSessionSelect={onSessionSelect}
+        onRenameSession={onRenameSession}
         onNewSession={onNewSession}
         onNewWorkspace={onNewWorkspace}
         onLoadMoreSessions={onLoadMoreSessions}

@@ -25,6 +25,7 @@ import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
 import { resolveRefsConfig } from "./session-reconciler";
+import { setSessionTitle } from "./session-store";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -209,6 +210,15 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
 
 export function createSessionWriteHandlers(): Record<string, SessionMethodHandler> {
   return {
+    "session.set_title": async (params) => {
+      const sessionId = params.sessionId as string;
+      const title = params.title as string | null;
+      if (!setSessionTitle(sessionId, title)) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      log.info("Session renamed", { sessionId: sessionId.slice(0, 8), cleared: !title?.trim() });
+      return { sessionId, title: title?.trim() || null };
+    },
     "session.backfill_refs": async (params) =>
       backfillSessionRefs(resolveRefsConfig, {
         days: params.days as number | undefined,

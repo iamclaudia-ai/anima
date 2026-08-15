@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import {
   closeSessionDb,
+  setSessionTitle,
   getStoredSession,
   listSubagentSessions,
   listWorkspaceSessions,
@@ -32,6 +33,58 @@ describe("session store", () => {
       process.env.HOME = originalHome;
     }
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("keeps a user rename separate from the derived title", () => {
+    upsertSession({
+      id: "ses_rename",
+      workspaceId: "ws_rename",
+      providerSessionId: "ses_rename",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat",
+      runtimeStatus: "idle",
+      metadata: { firstPrompt: "morning babe, let's look at the nav" },
+      lastActivity: new Date().toISOString(),
+    });
+
+    const before = listWorkspaceSessions("ws_rename")[0];
+    expect(before?.title).toBeUndefined();
+    expect(before?.firstPrompt).toBe("morning babe, let's look at the nav");
+
+    expect(setSessionTitle("ses_rename", "  Nav overhaul  ")).toBe(true);
+
+    const after = listWorkspaceSessions("ws_rename")[0];
+    // Trimmed, and the derived title survives underneath as the fallback the
+    // rename UI shows as a placeholder.
+    expect(after?.title).toBe("Nav overhaul");
+    expect(after?.firstPrompt).toBe("morning babe, let's look at the nav");
+  });
+
+  it("clears a rename back to the derived title", () => {
+    upsertSession({
+      id: "ses_clear",
+      workspaceId: "ws_clear",
+      providerSessionId: "ses_clear",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat",
+      runtimeStatus: "idle",
+      metadata: { firstPrompt: "fix the reaper" },
+      lastActivity: new Date().toISOString(),
+    });
+
+    setSessionTitle("ses_clear", "Reaper fix");
+    // Whitespace-only is a clear, not a rename to spaces.
+    setSessionTitle("ses_clear", "   ");
+
+    const row = listWorkspaceSessions("ws_clear")[0];
+    expect(row?.title).toBeUndefined();
+    expect(row?.firstPrompt).toBe("fix the reaper");
+  });
+
+  it("reports an unknown session rather than silently succeeding", () => {
+    expect(setSessionTitle("ses_does_not_exist", "nope")).toBe(false);
   });
 
   it("persists chat sessions and subagent child sessions", () => {

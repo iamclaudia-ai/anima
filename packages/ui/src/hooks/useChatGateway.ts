@@ -47,6 +47,8 @@ export interface SessionInfo {
   created?: string;
   modified?: string;
   messageCount?: number;
+  /** Explicit user rename. Outranks `firstPrompt` everywhere a name is shown. */
+  title?: string;
   firstPrompt?: string;
   gitBranch?: string;
   /** PR / ticket references extracted from the session, shown as chips. */

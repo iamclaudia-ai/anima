@@ -29,6 +29,8 @@ import {
   Puzzle,
   RefreshCw,
   Search,
+  Check,
+  Terminal,
   Ticket,
   GitPullRequest,
   Settings as SettingsIcon,
@@ -66,6 +68,11 @@ interface NavigationDrawerProps {
   isConnected: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
+  /**
+   * Rename a session, or clear the rename with `null`. Optional: without it
+   * the pencil affordance simply doesn't render.
+   */
+  onRenameSession?: (session: SessionInfo, title: string | null) => Promise<void> | void;
   /** Create a session in the given workspace (defaults to active when omitted). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -100,10 +107,20 @@ function formatTimeAgo(dateStr: string): string {
 /** Cap on chips per row, so one busy session can't swamp the list. */
 const MAX_VISIBLE_REFS = 3;
 
-function formatSessionName(s: SessionInfo): string {
+/** The derived name — what a session is called before anyone renames it. */
+function derivedSessionName(s: SessionInfo): string {
   if (s.firstPrompt) return s.firstPrompt;
   if (s.gitBranch) return s.gitBranch;
   return s.sessionId.slice(0, 8);
+}
+
+function formatSessionName(s: SessionInfo): string {
+  return s.title?.trim() || derivedSessionName(s);
+}
+
+/** The command that attaches a terminal to a session's CLI pane. */
+function tmuxAttachCommand(sessionId: string): string {
+  return `tmux attach -t anima-cli-${sessionId}`;
 }
 
 // ── Click-outside hook ──────────────────────────────────────────
@@ -161,12 +178,18 @@ function SessionRow({
   isActive,
   href,
   onSelect,
+  onRename,
 }: {
   session: SessionInfo;
   isActive: boolean;
   href: string;
   onSelect: () => void;
+  /** Omitted when the host hasn't wired renaming — the affordance hides. */
+  onRename?: (session: SessionInfo, title: string | null) => Promise<void> | void;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   // Real <a> so right-click / cmd-click / middle-click open in a new tab.
   // Plain left-click is intercepted and routed through the SPA navigator.
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -175,27 +198,177 @@ function SessionRow({
     onSelect();
   };
 
+  const handleCopyAttach = async () => {
+    await copyText(tmuxAttachCommand(session.sessionId));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  if (renaming && onRename) {
+    return (
+      <div className="flex w-full items-center py-1.5 pl-9 pr-3">
+        <SessionTitleInput
+          initial={session.title ?? ""}
+          placeholder={derivedSessionName(session)}
+          onCancel={() => setRenaming(false)}
+          onCommit={async (value) => {
+            setRenaming(false);
+            await onRename(session, value);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <a
-      href={href}
-      onClick={handleClick}
-      // Full-width highlight (no rounded corners, no left margin) — the
-      // text gets the indent via pl-9 instead, so the active session reads
-      // as a flat row across the entire sidebar.
-      className={`flex w-full items-start justify-between gap-2 py-1.5 pl-9 pr-3 text-left text-sm transition-colors ${
-        isActive
-          ? "bg-gray-100 text-gray-900"
-          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-      }`}
+    // The actions are siblings of the anchor, not children of it: a <button>
+    // inside an <a> is invalid HTML, and it also poisons the row's accessible
+    // name — a screen reader announced the session as "Copy tmux attach
+    // command". Overlaying them keeps the whole row clickable underneath.
+    <div className="group relative">
+      <a
+        href={href}
+        onClick={handleClick}
+        // Full-width highlight (no rounded corners, no left margin) — the
+        // text gets the indent via pl-9 instead, so the active session reads
+        // as a flat row across the entire sidebar.
+        className={`flex w-full items-start justify-between gap-2 py-1.5 pl-9 pr-3 text-left text-sm transition-colors ${
+          isActive
+            ? "bg-gray-100 text-gray-900"
+            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+        }`}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{formatSessionName(session)}</span>
+          <SessionRefChips refs={session.refs} />
+        </span>
+        {/* Hidden on hover so the actions can take its place — the row is
+            dense already, and the time is the less useful of the two once
+            you've reached for the mouse. */}
+        <span className="flex-shrink-0 pt-0.5 text-xs text-gray-400 group-hover:invisible">
+          {formatTimeAgo(session.modified || session.created || "")}
+        </span>
+      </a>
+      <span className="absolute right-2 top-1.5 hidden items-center gap-0.5 group-hover:flex">
+        <RowAction
+          icon={copied ? Check : Terminal}
+          label={copied ? "Copied" : "Copy tmux attach command"}
+          onClick={handleCopyAttach}
+        />
+        {onRename && (
+          <RowAction icon={Pencil} label="Rename session" onClick={() => setRenaming(true)} />
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** Small icon button living inside the session row's anchor. */
+function RowAction({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: typeof Pencil;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
     >
-      <span className="min-w-0 flex-1">
-        <span className="block truncate">{formatSessionName(session)}</span>
-        <SessionRefChips refs={session.refs} />
-      </span>
-      <span className="flex-shrink-0 pt-0.5 text-xs text-gray-400">
-        {formatTimeAgo(session.modified || session.created || "")}
-      </span>
-    </a>
+      <Icon className="size-3.5" />
+    </button>
+  );
+}
+
+/**
+ * Clipboard write with a fallback.
+ *
+ * `navigator.clipboard` is unavailable outside a secure context, and Anima is
+ * reached over plain HTTP on the Tailscale address — so the modern API alone
+ * would silently do nothing on exactly the devices this button is for.
+ */
+async function copyText(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the legacy path.
+  }
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(field);
+  }
+}
+
+/**
+ * Inline rename field.
+ *
+ * Enter commits, Escape cancels, blur commits — an accidental click elsewhere
+ * shouldn't throw away typing. Submitting an empty value clears the rename,
+ * which is why the placeholder shows the derived title: it's a preview of
+ * exactly what you get back.
+ */
+function SessionTitleInput({
+  initial,
+  placeholder,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  placeholder: string;
+  onCommit: (title: string | null) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const committed = useRef(false);
+
+  const commit = (): void => {
+    if (committed.current) return;
+    committed.current = true;
+    const trimmed = value.trim();
+    if (trimmed === initial.trim()) {
+      onCancel();
+      return;
+    }
+    onCommit(trimmed ? trimmed : null);
+  };
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      placeholder={placeholder}
+      maxLength={200}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          committed.current = true;
+          onCancel();
+        }
+      }}
+      className="w-full rounded border border-gray-300 bg-white px-1.5 py-0.5 text-sm text-gray-900 outline-none focus:border-gray-500"
+    />
   );
 }
 
@@ -281,6 +454,7 @@ function WorkspaceItem({
   defaultExpanded,
   onWorkspaceSelect,
   onSessionSelect,
+  onRenameSession,
   onNewSession,
   onLoadMore,
   onMenuAction,
@@ -294,6 +468,7 @@ function WorkspaceItem({
   defaultExpanded: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
+  onRenameSession?: (session: SessionInfo, title: string | null) => Promise<void> | void;
   onNewSession: (workspace: WorkspaceInfo) => void;
   onLoadMore?: (workspaceId: string) => Promise<void> | void;
   onMenuAction?: (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => void;
@@ -451,6 +626,7 @@ function WorkspaceItem({
                 isActive={isActive && activeSessionId === session.sessionId}
                 href={`/chat/${workspace.id}/${session.sessionId}`}
                 onSelect={() => onSessionSelect(session, workspace)}
+                onRename={onRenameSession}
               />
             ))
           )}
@@ -672,6 +848,7 @@ export function NavigationDrawer({
   activeSessionId,
   onWorkspaceSelect,
   onSessionSelect,
+  onRenameSession,
   onNewSession,
   onNewWorkspace,
   onLoadMoreSessions,
@@ -707,6 +884,7 @@ export function NavigationDrawer({
                 defaultExpanded={activeWorkspace?.id === workspace.id}
                 onWorkspaceSelect={onWorkspaceSelect}
                 onSessionSelect={onSessionSelect}
+                onRenameSession={onRenameSession}
                 onNewSession={onNewSession}
                 onLoadMore={onLoadMoreSessions}
                 onMenuAction={onWorkspaceMenuAction}
