@@ -1,0 +1,177 @@
+/**
+ * Live session status — the write-and-announce funnel.
+ *
+ * Phase 3's whole point is that nothing about the session list was live: every
+ * tab held its own snapshot, taken when it loaded. Two events fix that, and
+ * both originate here rather than in the reconciler. The reconciler derives
+ * state from the filesystem on the read path; status changes arrive from
+ * agent-host in real time, so the event has to be emitted where the state
+ * actually moves.
+ *
+ * Two events, deliberately different shapes:
+ *
+ *   `session.status_changed` — one session moved. Carries enough for a tab to
+ *     patch the row in place, with no refetch. High frequency, so it only
+ *     fires on an actual transition.
+ *
+ *   `session.list_changed` — the membership of a workspace's list changed
+ *     (created, archived, hidden by disposition). Carries no rows: the tab
+ *     refetches, because working out an insert position client-side means
+ *     duplicating the server's ordering rules in two places.
+ *
+ * Both are emitted unrouted — no `connectionId`, no tags. That's the point.
+ * The per-session stream events are scoped to the connection that asked for
+ * them; these go to every tab that subscribed, which is what makes the tabs
+ * agree.
+ */
+
+import { createLogger, shortId } from "@anima/shared";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { getRuntime } from "./runtime";
+import { getWorkspace } from "./workspace";
+import {
+  getStoredSession,
+  setSessionDisposition,
+  touchSession,
+  updateSessionRuntime,
+  type RuntimeStatus,
+  type SessionDisposition,
+} from "./session-store";
+
+const log = createLogger("SessionExt:Status", join(homedir(), ".anima", "logs", "session.log"));
+
+export const SESSION_STATUS_CHANGED = "session.status_changed";
+export const SESSION_LIST_CHANGED = "session.list_changed";
+
+/** Why a workspace's list needs refetching — surfaced for debugging, not logic. */
+export type ListChangeReason =
+  | "session_created"
+  | "session_closed"
+  | "disposition_changed"
+  | "reconciled";
+
+export interface SessionStatusChangedPayload {
+  sessionId: string;
+  workspaceId: string | null;
+  cwd: string | null;
+  runtimeStatus: RuntimeStatus;
+  /** Absent on a disposition-only change. */
+  previousRuntimeStatus?: RuntimeStatus;
+  disposition: SessionDisposition;
+  previousDisposition?: SessionDisposition;
+  /** ISO — lets a receiving tab drop an event it has already superseded. */
+  at: string;
+}
+
+/**
+ * Emit `session.status_changed` for a session, reading its current state.
+ *
+ * Returns false when the session has no row, which happens legitimately: the
+ * lifecycle can see events for a session the reconciler hasn't upserted yet.
+ * That's a missed event on a row nothing is rendering, not an error.
+ */
+export function emitStatusChanged(
+  sessionId: string,
+  transition?: {
+    previousRuntimeStatus?: RuntimeStatus;
+    previousDisposition?: SessionDisposition;
+  },
+): boolean {
+  const stored = getStoredSession(sessionId);
+  if (!stored) return false;
+
+  const workspace = stored.workspaceId ? getWorkspace(stored.workspaceId) : null;
+  const payload: SessionStatusChangedPayload = {
+    sessionId,
+    workspaceId: stored.workspaceId ?? null,
+    cwd: workspace?.cwd ?? null,
+    runtimeStatus: stored.runtimeStatus,
+    previousRuntimeStatus: transition?.previousRuntimeStatus,
+    disposition: stored.disposition,
+    previousDisposition: transition?.previousDisposition,
+    at: new Date().toISOString(),
+  };
+
+  safeEmit(SESSION_STATUS_CHANGED, payload);
+  return true;
+}
+
+/** Emit `session.list_changed` for one workspace. */
+export function emitListChanged(workspaceId: string, reason: ListChangeReason): void {
+  const workspace = getWorkspace(workspaceId);
+  safeEmit(SESSION_LIST_CHANGED, {
+    workspaceId,
+    cwd: workspace?.cwd ?? null,
+    reason,
+    at: new Date().toISOString(),
+  });
+}
+
+/**
+ * Move a session's runtime status and announce it if it actually moved.
+ *
+ * The single funnel for the machine axis: callers on the lifecycle path use
+ * this instead of `touchSession` / `updateSessionRuntime` directly, so there's
+ * one place where "wrote the DB" and "told the tabs" can't drift apart.
+ *
+ * `touch: true` bumps `last_activity` as well, which is what the streaming
+ * path wants; a status correction that isn't activity (a stall sweep, say)
+ * passes false.
+ */
+export function applyRuntimeStatus(
+  sessionId: string,
+  runtimeStatus: RuntimeStatus,
+  options?: { metadataPatch?: Record<string, unknown>; touch?: boolean },
+): boolean {
+  const transition = options?.metadataPatch
+    ? updateSessionRuntime(sessionId, runtimeStatus, options.metadataPatch)
+    : options?.touch === false
+      ? updateSessionRuntime(sessionId, runtimeStatus)
+      : touchSession(sessionId, runtimeStatus);
+
+  if (!transition) return false;
+  emitStatusChanged(sessionId, { previousRuntimeStatus: transition.from });
+  return true;
+}
+
+/**
+ * Move a session's disposition and announce it.
+ *
+ * A disposition change can also change list membership — `resolved` and
+ * `archived` are hidden by default — so this emits both events. The list event
+ * is the one that removes the row; the status event is what updates a tab
+ * already showing it under a filter that still includes it.
+ */
+export function applyDisposition(sessionId: string, disposition: SessionDisposition): boolean {
+  const transition = setSessionDisposition(sessionId, disposition);
+  if (!transition) return false;
+
+  const stored = getStoredSession(sessionId);
+  emitStatusChanged(sessionId, { previousDisposition: transition.from });
+  if (stored?.workspaceId) emitListChanged(stored.workspaceId, "disposition_changed");
+  log.info("Disposition changed", {
+    sessionId: shortId(sessionId),
+    from: transition.from,
+    to: transition.to,
+  });
+  return true;
+}
+
+/**
+ * Emit without letting a bus failure take down the caller.
+ *
+ * These events are advisory — a tab that misses one is stale until its next
+ * refetch, which is exactly where it was before Phase 3. Throwing out of the
+ * lifecycle path to deliver one would be a strictly worse trade.
+ */
+function safeEmit(event: string, payload: unknown): void {
+  try {
+    getRuntime().ctx.emit(event, payload);
+  } catch (err) {
+    log.warn("Failed to emit status event", {
+      event,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}

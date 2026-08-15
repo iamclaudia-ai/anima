@@ -219,6 +219,18 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
+    name: "session.set_status",
+    description:
+      "Set where a session's work stands. This is the human axis — separate from runtime status, which the agent owns. 'resolved' and 'archived' hide the session from the default list.",
+    inputSchema: z.object({
+      sessionId: z.string().describe("Session UUID"),
+      disposition: z
+        .enum(["open", "needs_review", "blocked", "snoozed", "resolved", "archived"])
+        .describe("Where the work stands"),
+    }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
+  },
+  {
     name: "session.backfill_refs",
     description:
       "Re-extract PR/ticket refs for recent sessions from their full transcripts (migration tool; the reconciler keeps up incrementally after this)",

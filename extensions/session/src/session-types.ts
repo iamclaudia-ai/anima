@@ -52,10 +52,19 @@ export function mergeTags(primary: string[] | null, current: string[] | null): s
   return Array.from(merged);
 }
 
-/** Map agent-host session event type to a RuntimeStatus. */
+/**
+ * Map an agent-host session event type to a RuntimeStatus.
+ *
+ * `turn_stop` is deliberately absent. Its own handler writes `completed`
+ * along with the turn's metadata, so mapping it here too meant every turn end
+ * wrote `idle` and then overwrote it with `completed` a few lines later. That
+ * was merely wasteful while the write was silent; now that a status write
+ * announces itself on the bus, it would be two events per turn describing one
+ * transition.
+ */
 export function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
   if (type === "process_started") return "running";
-  if (type === "process_ended" || type === "turn_stop") return "idle";
+  if (type === "process_ended") return "idle";
   return null;
 }
 

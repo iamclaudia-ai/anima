@@ -166,7 +166,14 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         return await handler(params, instance.ctx);
       },
     })),
-    events: ["stream.*", "session.subagent.*"],
+    events: [
+      "stream.*",
+      "session.subagent.*",
+      // Broadcast, not connection-scoped: these are what make every open tab
+      // agree about the session list rather than holding its own snapshot.
+      "session.status_changed",
+      "session.list_changed",
+    ],
     sourceRoutes: [],
 
     async start(instance): Promise<void> {

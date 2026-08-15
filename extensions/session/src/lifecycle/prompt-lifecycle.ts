@@ -2,6 +2,7 @@ import { createLogger, PERSISTENT_SESSION_ID, shortId, withTimeout } from "@anim
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { updateSessionRuntime, type RuntimeStatus } from "../session-store";
+import { emitListChanged } from "../session-status-events";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
 import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
@@ -318,6 +319,9 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       metadata: { lastUserMessageAt: state.userMessageAtIso },
     });
     rt.registry.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
+    // A row that didn't exist a moment ago is a list-membership change, and
+    // the tab that caused it isn't the only one that should see it.
+    emitListChanged(state.workspaceResult.workspace.id, "session_created");
     return;
   }
 

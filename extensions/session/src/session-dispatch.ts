@@ -25,7 +25,8 @@ import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
 import { resolveRefsConfig } from "./session-reconciler";
-import { setSessionTitle } from "./session-store";
+import { getStoredSession, setSessionTitle, type SessionDisposition } from "./session-store";
+import { applyDisposition } from "./session-status-events";
 import { searchSessions } from "./session-search";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
@@ -226,6 +227,18 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       }
       log.info("Session renamed", { sessionId: sessionId.slice(0, 8), cleared: !title?.trim() });
       return { sessionId, title: title?.trim() || null };
+    },
+    "session.set_status": async (params) => {
+      const sessionId = params.sessionId as string;
+      const disposition = params.disposition as SessionDisposition;
+      if (!getStoredSession(sessionId)) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      // A no-op returns cleanly rather than throwing: setting a session to the
+      // disposition it already has is a successful outcome, and two tabs
+      // racing on the same menu item shouldn't produce an error in one.
+      const changed = applyDisposition(sessionId, disposition);
+      return { sessionId, disposition, changed };
     },
     "session.backfill_refs": async (params) =>
       backfillSessionRefs(resolveRefsConfig, {

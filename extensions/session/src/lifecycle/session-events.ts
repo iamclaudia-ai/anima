@@ -1,4 +1,5 @@
 import { getStoredSession, touchSession, updateSessionRuntime } from "../session-store";
+import { applyRuntimeStatus } from "../session-status-events";
 import { toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
 import { getWorkspace } from "../workspace";
@@ -72,7 +73,10 @@ export function wireSessionEvents(): () => void {
     const runtimeStatus =
       typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
     if (runtimeStatus) {
-      touchSession(sessionId, runtimeStatus);
+      // Writes and announces in one step, and only when the status actually
+      // moved — this runs per streamed event, so an unconditional emit would
+      // put a bus message behind every token.
+      applyRuntimeStatus(sessionId, runtimeStatus);
     } else {
       touchSession(sessionId);
     }
@@ -97,8 +101,8 @@ export function wireSessionEvents(): () => void {
       }
     } else if (payload.type === "turn_stop") {
       cancelPendingGitStatus(sessionId);
-      updateSessionRuntime(sessionId, "completed", {
-        lastAssistantMessageAt: new Date().toISOString(),
+      applyRuntimeStatus(sessionId, "completed", {
+        metadataPatch: { lastAssistantMessageAt: new Date().toISOString() },
       });
       rt.sessionActors.completeTurn(
         sessionId,
@@ -106,6 +110,10 @@ export function wireSessionEvents(): () => void {
       );
       void emitGitStatus(sessionId);
     } else if (payload.type === "process_died") {
+      // A died process is exactly the "silently abandoned" case the nav is
+      // meant to surface — it never reaches turn_stop, so without this the row
+      // sits on `running` forever.
+      applyRuntimeStatus(sessionId, "failed");
       rt.sessionActors.failTurn(
         sessionId,
         new Error(`Session process died: ${(payload as { reason?: string }).reason || "unknown"}`),

@@ -26,6 +26,15 @@ export interface SessionIndexEntry {
    * discovery alone doesn't carry them.
    */
   refs?: Array<{ type: string; key: string; label: string; url?: string }>;
+  /**
+   * The two status axes, carried on the list so a tab renders the right state
+   * on first paint rather than waiting for the first live event.
+   *
+   * Both come from the database, like `refs` — filesystem discovery has no
+   * idea what the agent is doing or where the human thinks the work stands.
+   */
+  runtimeStatus?: string;
+  disposition?: string;
 }
 
 /**
