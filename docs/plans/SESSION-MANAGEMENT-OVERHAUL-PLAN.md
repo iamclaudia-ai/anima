@@ -64,12 +64,14 @@ The reconciler, and the read-path inversion.
 
 ### Phase 2 — Refs + real search (#61, #2)
 
-1. Ref extraction during reconcile: `#N`, `owner/repo#N`, `ABC-123`. Store in a `session_refs` side table (multi-valued, indexed) rather than JSON metadata — it needs to be a join target and a filter.
-2. `session_search_fts` (FTS5, porter unicode61) over transcript content, populated by the reconciler.
-3. `session.search({ query, workspaceId?, disposition?, ref?, limit?, offset? })` — bm25 + recency ranking, exact ref matches ranked first, `snippet()` for context.
-4. `SearchModal` calls it (debounced), renders snippets + ref chips, searches all workspaces by default.
+1. Ref extraction during reconcile: `#N`, `owner/repo#N`, and Linear-style `PREFIX-123`. Store in a `session_refs` side table (multi-valued, indexed) rather than JSON metadata — it needs to be a join target and a filter.
+2. **Linear prefixes are config, not code.** `BEE`, `WEB`, `ENT` are Michael's teams, not universal — a bare `/[A-Z]+-\d+/` would happily match `UTF-8`, `SHA-256`, `ISO-8601`, and half the enum constants in a stack trace. So `anima.json` carries the allowed prefix list and extraction matches only those. Same treatment for the default GitHub repo, so a bare `#412` resolves to the right project.
+3. **Refs render as chips under the session title** — GitHub mark for PRs, Linear mark for tickets — so the list answers "which session was the #412 work?" at a glance, without opening anything. This is the primary payoff of extraction; search is the secondary one.
+4. `session_search_fts` (FTS5, porter unicode61) over transcript content, populated by the reconciler.
+5. `session.search({ query, workspaceId?, disposition?, ref?, limit?, offset? })` — bm25 + recency ranking, exact ref matches ranked first, `snippet()` for context.
+6. `SearchModal` calls it (debounced), renders snippets + ref chips, searches all workspaces by default.
 
-**Ships:** no more hand-written SQL to find a PR session. Refs as chips in the nav.
+**Ships:** refs visible on every session row; no more hand-written SQL to find a PR session.
 
 ### Phase 3 — Live status (#67, #31)
 
@@ -92,11 +94,14 @@ The reconciler, and the read-path inversion.
 
 `terminal` extension: PTY over the existing gateway WS, ghostty-web as renderer, panel beside `editor.viewer`, plus one-click attach to `anima-cli-<session>`. Deliberately last — Phase 4 removes the main reason to reach for it, which makes this a convenience rather than a workaround.
 
+**Ship the 5-minute version first, though:** a "copy tmux command" button on the session row that puts `tmux attach -t anima-cli-<normalized-id>` on the clipboard. The session-id normalization (`tmux-wrap.sh:242-248`) is the annoying part to type from memory, and it's already derivable in the nav. That lands in Phase 1 alongside the session row work — no new extension, no WASM, and it covers the shell-is-right-there case entirely.
+
 ## Decisions taken
 
 - **DB is a derived cache, not a new source of truth.** JSONL remains durable; the whole index is rebuildable. Low migration risk, no data-loss surface.
 - **Two status axes, not one.** `runtime_status` today conflates "what the agent is doing" with "where the work stands"; that's why it's unusable in the nav. Splitting them is what makes `resolved` meaningful.
-- **Refs in a side table, not `metadata_json`.** They're multi-valued and need to be searchable and joinable.
+- **Refs in a side table, not `metadata_json`.** They're multi-valued and need to be searchable and joinable — and they're rendered per-row as chips, so the read has to be cheap.
+- **Ref patterns come from config.** Hardcoding Linear prefixes would either miss teams or produce false positives on every `UTF-8` in a transcript. `anima.json` owns the list.
 - **Terminal rides the gateway WS, not a separate `ghostty.kiliman.dev`.** One auth surface, one Tailscale boundary, no publicly-reachable shell endpoint. ghostty-web's own docs warn against remote exposure precisely because it launches a real shell.
 - **Modal prompts get fixed at the UI layer regardless of root cause.** Even with the hook config corrected, future modals (trust dialog, re-auth, update prompt) would hang invisibly. Detection is the durable fix.
 
