@@ -227,14 +227,20 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   {
     name: "session.list_attention",
     description:
-      "Sessions wanting attention across every workspace — in flight, or finished and unacknowledged. Not paginated per workspace: membership is the status itself. Snoozed sessions are omitted until their timer passes.",
-    inputSchema: z.object({}),
+      "The work queue: every unresolved session across every workspace, newest first. Not paginated per workspace — membership is the disposition, so nothing can be lost to a page boundary. Snoozed sessions are omitted until their timer passes; the session named by currentSessionId is always included whatever its state.",
+    inputSchema: z.object({
+      currentSessionId: z
+        .string()
+        .optional()
+        .describe("Always include this session, even if resolved — the tab's open session"),
+      limit: z.number().int().positive().max(500).optional().default(200),
+    }),
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.resolve_stale",
     description:
-      "Mark finished-but-unacknowledged sessions older than N days as resolved. Scoped to completed+open only — idle sessions are ordinary history and resolving them would empty the nav. Reversible with set_status.",
+      "Clear the ACTIVE queue: mark every unresolved session with no activity in N days as resolved. Safe because resolved sessions stay in the workspace tree — they leave the queue, not the sidebar. Reversible with set_status.",
     inputSchema: z.object({
       olderThanDays: z
         .number()

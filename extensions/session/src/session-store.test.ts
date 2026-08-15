@@ -189,7 +189,11 @@ describe("session store", () => {
       expect(getStoredSession("ses_keeps")?.disposition).toBe("needs_review");
     });
 
-    it("hides resolved and archived from the default list, and shows them on request", () => {
+    // Marking something done must not delete it from the sidebar. `resolved`
+    // drops out of the ACTIVE queue and stays in its workspace folder; only
+    // `archived` leaves the tree. Without that split, clearing the queue would
+    // quietly empty every folder.
+    it("keeps resolved sessions in the tree and hides only archived", () => {
       seed("ses_open");
       seed("ses_resolved");
       seed("ses_archived");
@@ -198,7 +202,7 @@ describe("session store", () => {
 
       const visible = listWorkspaceSessions("ws_status").map((s) => s.sessionId);
       expect(visible).toContain("ses_open");
-      expect(visible).not.toContain("ses_resolved");
+      expect(visible).toContain("ses_resolved");
       expect(visible).not.toContain("ses_archived");
 
       const resolvedOnly = listWorkspaceSessions("ws_status", {
@@ -215,7 +219,10 @@ describe("session store", () => {
     describe("attention list", () => {
       const NOW = "2026-08-15T12:00:00.000Z";
 
-      it("includes in-flight work and finished-but-unacknowledged work", () => {
+      // The queue is "everything unresolved", not "everything busy". An idle
+      // session with work still open belongs in it — that's the point of a
+      // queue, and resolving is how it gets shorter.
+      it("holds every unresolved session, whatever it is doing", () => {
         seed("ses_running");
         seed("ses_done_open");
         seed("ses_done_resolved");
@@ -227,11 +234,41 @@ describe("session store", () => {
 
         const ids = listAttentionSessions({ now: NOW }).map((s) => s.sessionId);
         expect(ids).toContain("ses_running");
-        // The case the original plan missed: finished, and nobody has looked.
         expect(ids).toContain("ses_done_open");
+        expect(ids).toContain("ses_idle");
         expect(ids).not.toContain("ses_done_resolved");
-        // Idle isn't attention — it's a session that simply isn't doing anything.
-        expect(ids).not.toContain("ses_idle");
+      });
+
+      // Reopening old work from search is a normal way to start, and a row you
+      // are looking at that offers no way to act on itself is just a gap.
+      it("always includes the session the tab has open, even resolved", () => {
+        seed("ses_reopened");
+        touchSession("ses_reopened", "completed");
+        setSessionDisposition("ses_reopened", "resolved");
+
+        expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).not.toContain(
+          "ses_reopened",
+        );
+        const withCurrent = listAttentionSessions({
+          now: NOW,
+          includeSessionId: "ses_reopened",
+        }).map((s) => s.sessionId);
+        expect(withCurrent).toContain("ses_reopened");
+      });
+
+      it("keeps a snoozed session visible when it is the open one", () => {
+        seed("ses_snoozed_current");
+        touchSession("ses_snoozed_current", "completed");
+        setSessionSnooze("ses_snoozed_current", "2026-08-15T23:00:00.000Z");
+
+        expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).not.toContain(
+          "ses_snoozed_current",
+        );
+        expect(
+          listAttentionSessions({ now: NOW, includeSessionId: "ses_snoozed_current" }).map(
+            (s) => s.sessionId,
+          ),
+        ).toContain("ses_snoozed_current");
       });
 
       it("hides a snoozed session until its timer passes", () => {

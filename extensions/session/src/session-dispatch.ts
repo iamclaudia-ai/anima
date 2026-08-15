@@ -187,7 +187,12 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     "session.list_commands": async (params) =>
       listCommands({ cwd: params.cwd as string | undefined }),
     "session.list_files": async (params) => listFiles({ cwd: params.cwd as string }),
-    "session.list_attention": async () => ({ sessions: listAttentionSessions() }),
+    "session.list_attention": async (params) => ({
+      sessions: listAttentionSessions({
+        includeSessionId: params.currentSessionId as string | undefined,
+        limit: params.limit as number | undefined,
+      }),
+    }),
     "session.health_check": async () => healthCheckDetailed(),
     "session.rotate_persistent_sessions": async () => {
       const rt = getRuntime();

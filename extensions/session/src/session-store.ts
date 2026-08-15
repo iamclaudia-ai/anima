@@ -63,8 +63,24 @@ const DISPOSITIONS: readonly SessionDisposition[] = [
   "archived",
 ];
 
-/** Dispositions the nav hides unless the user asks to see them. */
-export const HIDDEN_DISPOSITIONS: readonly SessionDisposition[] = ["resolved", "archived"];
+/**
+ * Dispositions the workspace tree hides.
+ *
+ * Only `archived` — deliberately **not** `resolved`. The three dispositions
+ * that matter form a progression, and each hides a session from one more
+ * place than the last:
+ *
+ * - `open` — in the work queue. Shows in the ACTIVE pane *and* the tree.
+ * - `resolved` — done. Drops out of the queue and back into its workspace
+ *   folder, where it stays browsable. This is the common case, and hiding it
+ *   from the tree as well would mean "mark done" quietly deleted your history.
+ * - `archived` — gone from the sidebar entirely; findable only by search.
+ *
+ * That distinction is what makes it safe to resolve thousands of old sessions
+ * to clear the queue: it declutters the thing that needs decluttering and
+ * touches nothing else.
+ */
+export const HIDDEN_DISPOSITIONS: readonly SessionDisposition[] = ["archived"];
 
 export function isRuntimeStatus(value: unknown): value is RuntimeStatus {
   return typeof value === "string" && (RUNTIME_STATUSES as readonly string[]).includes(value);
@@ -925,19 +941,26 @@ export interface AttentionSession {
 export function listAttentionSessions(options?: {
   now?: string;
   /**
-   * Ignore work that finished longer ago than this.
+   * Always include this session, whatever its disposition.
    *
-   * Without a bound the list is "everything anyone ever left unresolved",
-   * which on first run put months-old rows in a banner about coming back
-   * *now*. Past a day it isn't a forgotten errand, it's history — and the nav
-   * dot still marks it either way.
+   * The session a tab has open belongs in the queue even when it's resolved:
+   * reopening old work from search is a normal way to start, and the pane is
+   * where its status can be changed back. A row you're actively looking at
+   * that offers no way to act on itself is just a gap.
    */
-  maxAgeHours?: number;
+  includeSessionId?: string;
+  /**
+   * Ceiling on rows, newest first.
+   *
+   * The queue is "everything still open", which is unbounded by construction
+   * and is only small because resolving keeps it small. This is the guard for
+   * a database that hasn't been tidied yet — better a capped list than five
+   * thousand rows over the wire.
+   */
+  limit?: number;
 }): AttentionSession[] {
   const nowIso = options?.now ?? new Date().toISOString();
-  const maxAgeHours = options?.maxAgeHours ?? 24;
-  const cutoffIso = new Date(Date.parse(nowIso) - maxAgeHours * 3_600_000).toISOString();
-  const inFlight = IN_FLIGHT_STATUSES.map(() => "?").join(",");
+  const limit = options?.limit ?? 200;
   const rows = getDb()
     .query(
       `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
@@ -947,12 +970,12 @@ export function listAttentionSessions(options?: {
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE s.purpose = 'chat'
           AND s.status = 'active'
-          AND s.disposition NOT IN ('resolved','archived')
-          AND (s.runtime_status IN (${inFlight})
-               OR (s.runtime_status = 'completed' AND s.disposition IN ('open','snoozed')))
-        ORDER BY s.last_activity DESC`,
+          AND (s.disposition IN ('open','needs_review','blocked','snoozed')
+               OR s.provider_session_id = ?1)
+        ORDER BY s.last_activity DESC
+        LIMIT ?2`,
     )
-    .all(...IN_FLIGHT_STATUSES) as Array<{
+    .all(options?.includeSessionId ?? "", limit) as Array<{
     session_id: string;
     title: string | null;
     metadata_json: string | null;
@@ -968,9 +991,12 @@ export function listAttentionSessions(options?: {
   for (const row of rows) {
     const metadata = parseMetadata(row.metadata_json);
     const snoozedUntil = typeof metadata?.snoozedUntil === "string" ? metadata.snoozedUntil : null;
+    const isCurrent = row.session_id === options?.includeSessionId;
     // A live snooze hides the row entirely rather than flagging it — a muted
-    // item still in the list is just a quieter version of the nagging.
-    if (snoozedUntil && snoozedUntil > nowIso) continue;
+    // item still in the list is just a quieter version of the nagging. The
+    // session you're looking at is exempt: hiding the row for the thing on
+    // screen would leave no way to change its status.
+    if (!isCurrent && snoozedUntil && snoozedUntil > nowIso) continue;
 
     const runtimeStatus: RuntimeStatus = isRuntimeStatus(row.runtime_status)
       ? row.runtime_status
@@ -979,9 +1005,10 @@ export function listAttentionSessions(options?: {
       typeof metadata?.lastAssistantMessageAt === "string"
         ? metadata.lastAssistantMessageAt
         : row.last_activity;
-    // Only finished work ages out. Something still in flight belongs here
-    // however long it has been running — that's the stalled case, not history.
-    if (runtimeStatus === "completed" && waitingSince < cutoffIso) continue;
+    // No age cutoff. An earlier version aged rows out after a day, which was
+    // right for a banner and wrong for a queue: a queue that quietly forgets
+    // items is worse than one that's long, and resolving is the intended way
+    // to shorten it. The banner applies its own window on top of this.
 
     result.push({
       sessionId: row.session_id,
@@ -1009,13 +1036,18 @@ export function listAttentionSessions(options?: {
  * or joins on.
  */
 /**
- * Bulk-acknowledge the backlog: finished work nobody ever marked done.
+ * Bulk-resolve the backlog — the queue's bootstrap.
  *
- * Scoped to `completed` + `open` on purpose, and **not** to every old session.
- * Most rows in the database are `idle` — ordinary, browsable history — and
- * `resolved` is hidden from the nav, so a sweep over all of them would empty
- * every workspace folder. This clears the rows that would otherwise keep a
- * blue "ready for you" mark forever, and nothing else.
+ * The ACTIVE pane holds every unresolved session, which on a database that has
+ * never been tidied means thousands of rows going back months. Resolving them
+ * is the intended way to shorten that list, and it is safe precisely because
+ * `resolved` no longer hides a session from the workspace tree: the row leaves
+ * the queue and stays exactly where it was for browsing.
+ *
+ * An earlier version restricted this to `completed` rows, back when resolving
+ * *did* hide a session — a sweep would have emptied every folder. That
+ * constraint is gone with the tree/queue split, so this now covers any
+ * unresolved session with no activity in the window.
  *
  * Reversible: `session.set_status` puts any of them back to `open`.
  */
@@ -1037,8 +1069,7 @@ export function resolveStaleCompleted(options: {
          FROM sessions
         WHERE purpose = 'chat'
           AND status = 'active'
-          AND runtime_status = 'completed'
-          AND disposition = 'open'
+          AND disposition IN ('open','needs_review','blocked','snoozed')
           AND last_activity < ?
         ORDER BY last_activity DESC`,
     )

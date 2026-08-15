@@ -45,6 +45,15 @@ export interface AttentionSession {
 /** How long a finished session waits before it stops being polite about it. */
 export const ESCALATE_AFTER_MS = 15 * 60_000;
 
+/**
+ * And how long before it gives up asking.
+ *
+ * The queue keeps unresolved work forever, by design — but a banner about
+ * coming back *now* has no business citing something from last week. Past this
+ * the row stays in the pane and stops interrupting.
+ */
+export const ESCALATE_UNTIL_MS = 24 * 3_600_000;
+
 /** Slow enough to be invisible, fast enough that "fifteen minutes" means it. */
 const POLL_INTERVAL_MS = 60_000;
 
@@ -63,6 +72,8 @@ let client: GatewayClient | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let stopListening: (() => void) | null = null;
+/** The session the tab is looking at — always included, whatever its state. */
+let currentSessionId: string | undefined;
 
 function getSnapshot(): AttentionSession[] {
   return snapshot;
@@ -96,7 +107,9 @@ function fetchNow(): void {
   const c = client;
   if (!c) return;
   void c
-    .call<{ sessions?: AttentionSession[] }>("session.list_attention")
+    .call<{ sessions?: AttentionSession[] }>("session.list_attention", {
+      ...(currentSessionId ? { currentSessionId } : {}),
+    })
     .then((result) => publish(result?.sessions ?? EMPTY))
     .catch(() => {
       // Keep the previous list. A failed poll should not silently empty a
@@ -167,7 +180,14 @@ export function waitedMs(session: AttentionSession, now: number): number {
   return Number.isFinite(at) ? now - at : 0;
 }
 
-export function useAttentionSessions(): UseAttentionSessionsReturn {
+export function useAttentionSessions(options?: {
+  /**
+   * The session this tab has open. Included in the queue whatever its
+   * disposition, so reopening resolved work from search still gives you a row
+   * to act on.
+   */
+  currentSessionId?: string;
+}): UseAttentionSessionsReturn {
   const ctx = useGatewayClientContext();
   const gatewayClient = ctx?.client ?? null;
   const isConnected = ctx?.isConnected ?? false;
@@ -179,6 +199,16 @@ export function useAttentionSessions(): UseAttentionSessionsReturn {
     if (!gatewayClient || !isConnected) return;
     start(gatewayClient);
   }, [gatewayClient, isConnected]);
+
+  // Navigating changes which session must be force-included, so the query
+  // itself changes. Only the consumer that knows the route sets this; the
+  // other passes nothing and leaves it alone.
+  useEffect(() => {
+    if (options?.currentSessionId === undefined) return;
+    if (options.currentSessionId === currentSessionId) return;
+    currentSessionId = options.currentSessionId;
+    fetchNow();
+  }, [options?.currentSessionId]);
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
@@ -197,9 +227,11 @@ export function useAttentionSessions(): UseAttentionSessionsReturn {
     fetchNow();
   }, []);
 
-  const overdue = sessions.filter(
-    (s) => isAwaitingAcknowledgement(s) && waitedMs(s, now) >= ESCALATE_AFTER_MS,
-  );
+  const overdue = sessions.filter((s) => {
+    if (!isAwaitingAcknowledgement(s)) return false;
+    const waited = waitedMs(s, now);
+    return waited >= ESCALATE_AFTER_MS && waited <= ESCALATE_UNTIL_MS;
+  });
 
   return { sessions, overdue, now, refresh, acknowledge, snooze };
 }
