@@ -19,6 +19,7 @@ import {
   applyRuntimeStatus,
   emitListChanged,
   emitStatusChanged,
+  reconcileInFlightStatuses,
   SESSION_LIST_CHANGED,
   SESSION_STATUS_CHANGED,
   type SessionStatusChangedPayload,
@@ -55,14 +56,21 @@ describe("session status events", () => {
 
     const workspace = createWorkspace({ name: "status", cwd: join(tmpHome, "proj") });
     workspaceId = workspace.id;
-    upsertSession({
-      id: "ses_status",
-      workspaceId,
-      providerSessionId: "ses_status",
-      model: "claude-opus-5",
-      agent: "claude",
-      purpose: "chat",
-    });
+    // Both fixtures are seeded here, not inside the tests that use them.
+    // `bunfig.toml` points the whole run at one `ANIMA_DATA_DIR`, so the
+    // database outlives each test — but `upsertSession` resets runtime_status
+    // to idle, which makes re-seeding the isolation. A session left `running`
+    // by an earlier test would otherwise be counted by the startup reconcile.
+    for (const id of ["ses_status", "ses_alive"]) {
+      upsertSession({
+        id,
+        workspaceId,
+        providerSessionId: id,
+        model: "claude-opus-5",
+        agent: "claude",
+        purpose: "chat",
+      });
+    }
   });
 
   afterEach(() => {
@@ -138,6 +146,36 @@ describe("session status events", () => {
     expect(emitStatusChanged("ses_nope")).toBe(false);
     expect(applyRuntimeStatus("ses_nope", "running")).toBe(false);
     expect(emitted).toHaveLength(0);
+  });
+
+  // The live database had four sessions permanently marked `running` before
+  // this existed — each one a turn that died with the extension.
+  describe("startup reconcile", () => {
+    it("stalls in-flight rows with no live process, and spares the ones that have one", () => {
+      applyRuntimeStatus("ses_status", "running");
+      applyRuntimeStatus("ses_alive", "running");
+      emitted = [];
+
+      expect(reconcileInFlightStatuses(new Set(["ses_alive"]))).toBe(1);
+      expect(getStoredSession("ses_status")?.runtimeStatus).toBe("stalled");
+      expect(getStoredSession("ses_alive")?.runtimeStatus).toBe("running");
+
+      // The correction is a real transition, so the tabs hear about it.
+      expect(emittedOfType(SESSION_STATUS_CHANGED)).toHaveLength(1);
+      expect(lastStatus()).toMatchObject({ sessionId: "ses_status", runtimeStatus: "stalled" });
+    });
+
+    it("leaves resting states alone", () => {
+      applyRuntimeStatus("ses_status", "completed");
+      expect(reconcileInFlightStatuses(new Set())).toBe(0);
+      expect(getStoredSession("ses_status")?.runtimeStatus).toBe("completed");
+    });
+
+    it("clears the awaiting states too — they also claim a live process", () => {
+      applyRuntimeStatus("ses_status", "awaiting_approval");
+      expect(reconcileInFlightStatuses(new Set())).toBe(1);
+      expect(getStoredSession("ses_status")?.runtimeStatus).toBe("stalled");
+    });
   });
 
   it("survives a bus that throws", () => {

@@ -26,6 +26,7 @@ import { getRuntime, initRuntime, resetRuntime } from "./runtime";
 import { SessionActorRegistry } from "./session-actor-registry";
 import { SessionAgentBridge } from "./session-agent-bridge";
 import { SessionRegistry } from "./session-registry";
+import { reconcileInFlightStatuses } from "./session-status-events";
 
 const log = createLogger("SessionExt", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -188,6 +189,12 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         const activeSessions =
           (await instance.runtime.bridge.listSessions()) as AgentHostSessionInfo[];
         instance.runtime.registry.recordConnectedSessions(activeSessions);
+        // Rows claiming to be mid-turn are claims about a process that exists
+        // now. Nothing writes the closing transition when we die mid-turn, so
+        // without this a restart leaves them green forever.
+        reconcileInFlightStatuses(
+          new Set(activeSessions.filter((s) => s.isProcessRunning).map((s) => s.id)),
+        );
         log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
         // AgentHostClient.scheduleReconnect() has been kicked off inside

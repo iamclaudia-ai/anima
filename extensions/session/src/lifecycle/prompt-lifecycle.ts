@@ -2,7 +2,7 @@ import { createLogger, PERSISTENT_SESSION_ID, shortId, withTimeout } from "@anim
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { updateSessionRuntime, type RuntimeStatus } from "../session-store";
-import { emitListChanged } from "../session-status-events";
+import { applyRuntimeStatus, emitListChanged } from "../session-status-events";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
 import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
@@ -481,8 +481,22 @@ export async function runPromptLifecycle(
   await prepareRuntimeStage(state);
   await bootstrapSessionStage(state);
   attachRequestContextStage(state, request);
-  if (state.streaming) {
-    return await dispatchStreamingPromptStage(state);
+  // A turn is now in flight, and that's what `running` has to mean for the nav
+  // to be useful. Waiting for agent-host's `process_started` doesn't work: it
+  // only fires when a process is actually spawned, so every turn on an already
+  // running session went straight from idle to completed and the row never
+  // showed as working at all — verified live before this line existed.
+  applyRuntimeStatus(state.sessionId, "running");
+  try {
+    if (state.streaming) {
+      return await dispatchStreamingPromptStage(state);
+    }
+    return await dispatchNonStreamingPromptStage(state);
+  } catch (err) {
+    // A dispatch that throws never reaches `turn_stop`, so without this the
+    // row stays `running` forever — the exact silent abandonment the status
+    // axis exists to make visible.
+    applyRuntimeStatus(state.sessionId, "failed");
+    throw err;
   }
-  return await dispatchNonStreamingPromptStage(state);
 }

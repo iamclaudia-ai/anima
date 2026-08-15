@@ -77,11 +77,13 @@ export class SessionRegistry {
     for (const session of sessions) {
       if (!session.cwd) continue;
       const workspaceResult = getOrCreateWorkspace(session.cwd);
-      const runtimeStatus: RuntimeStatus = session.isProcessRunning
-        ? session.stale
-          ? "stalled"
-          : "running"
-        : "idle";
+      // A live process is not a turn in flight. `isProcessRunning` is true for
+      // every attached CLI pane, so mapping it to `running` marked six live
+      // sessions permanently busy — and a dot that is always green trains you
+      // to ignore the one that matters. `running` is written by the prompt
+      // lifecycle, which is the only place that knows a turn actually started.
+      const runtimeStatus: RuntimeStatus =
+        session.isProcessRunning && session.stale ? "stalled" : "idle";
 
       upsertSession({
         id: session.id,

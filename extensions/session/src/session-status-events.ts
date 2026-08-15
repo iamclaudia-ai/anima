@@ -31,6 +31,7 @@ import { homedir } from "node:os";
 import { getRuntime } from "./runtime";
 import { getWorkspace } from "./workspace";
 import {
+  getSessionDb,
   getStoredSession,
   setSessionDisposition,
   touchSession,
@@ -156,6 +157,47 @@ export function applyDisposition(sessionId: string, disposition: SessionDisposit
     to: transition.to,
   });
   return true;
+}
+
+/**
+ * Reconcile in-flight runtime statuses against the process table at startup.
+ *
+ * `running` and the two `awaiting_*` states are claims about a process that
+ * exists right now. Nothing writes the closing transition when the extension
+ * dies mid-turn — a restart, a crash, a `watchdog reload` — so those rows keep
+ * their claim forever. Before this existed the live database had four sessions
+ * permanently marked `running`, and a dot that is always green is worse than
+ * no dot at all: it trains you to ignore the one that matters.
+ *
+ * The discipline is the one the CLI registry learned the hard way: the
+ * database is a cache, the process table is ground truth. Anything claiming to
+ * be in flight without a live process is marked `stalled` — deliberately not
+ * `idle`, because "we don't know how this turn ended" is a different and more
+ * interesting fact than "nothing is happening".
+ *
+ * Returns the number of rows corrected.
+ */
+export function reconcileInFlightStatuses(liveSessionIds: ReadonlySet<string>): number {
+  const rows = getSessionDb()
+    .query(
+      `SELECT provider_session_id FROM sessions
+        WHERE status = 'active' AND runtime_status IN ('running','awaiting_input','awaiting_approval')`,
+    )
+    .all() as Array<{ provider_session_id: string }>;
+
+  let corrected = 0;
+  for (const row of rows) {
+    if (liveSessionIds.has(row.provider_session_id)) continue;
+    if (applyRuntimeStatus(row.provider_session_id, "stalled", { touch: false })) corrected++;
+  }
+
+  if (corrected > 0) {
+    log.info("Cleared stale in-flight statuses at startup", {
+      corrected,
+      checked: rows.length,
+    });
+  }
+  return corrected;
 }
 
 /**

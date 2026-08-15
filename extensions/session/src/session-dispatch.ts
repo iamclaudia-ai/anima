@@ -26,7 +26,7 @@ import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
 import { resolveRefsConfig } from "./session-reconciler";
 import { getStoredSession, setSessionTitle, type SessionDisposition } from "./session-store";
-import { applyDisposition } from "./session-status-events";
+import { applyDisposition, emitListChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
@@ -275,6 +275,10 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         },
       });
       rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
+      // The other tabs have no idea this row appeared. `send_prompt` emits the
+      // same event for a session created implicitly by a first prompt; this is
+      // the explicit path, and it's the one the New Session button takes.
+      emitListChanged(workspaceResult.workspace.id, "session_created");
       log.info("Session draft created", { sessionId: shortId(sessionId), cwd });
       return { sessionId };
     },
