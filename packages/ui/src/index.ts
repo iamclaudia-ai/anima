@@ -59,6 +59,7 @@ export type {
   WorkspaceInfo,
   SessionInfo,
   SessionSearchHit,
+  SessionSearchResult,
   SubagentInfo,
   GitStatusInfo,
 } from "./hooks/useChatGateway";

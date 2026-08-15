@@ -61,6 +61,11 @@ export interface SearchResult {
   hits: SearchHit[];
   /** Hits dropped because no registered workspace claims the session. */
   unroutable: number;
+  /**
+   * No message contained every term, so these are any-term matches. The UI
+   * says so — silently widening a search is how you end up distrusting it.
+   */
+  relaxed: boolean;
 }
 
 interface TranscriptHit {
@@ -88,7 +93,7 @@ export interface SearchOptions {
  * search. Each run of word characters becomes a quoted term, and a trailing
  * partial word gets a `*` so results narrow as you type.
  */
-export function toMatchQuery(raw: string): string | null {
+export function toMatchQuery(raw: string, join: "AND" | "OR" = "AND"): string | null {
   const tokens = raw.match(/[\p{L}\p{N}_]+/gu);
   if (!tokens || tokens.length === 0) return null;
 
@@ -98,7 +103,12 @@ export function toMatchQuery(raw: string): string | null {
       const quoted = `"${token}"`;
       return endsMidWord && i === tokens.length - 1 ? `${quoted}*` : quoted;
     })
-    .join(" AND ");
+    .join(` ${join} `);
+}
+
+/** More than one word to combine — the only case a relaxed retry can differ. */
+function isMultiTerm(raw: string): boolean {
+  return (raw.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0) > 1;
 }
 
 /**
@@ -106,7 +116,9 @@ export function toMatchQuery(raw: string): string | null {
  *
  * Slash-command turns are stored with their `<command-message>` /
  * `<command-name>` envelopes intact — `deriveSessionTitle` strips these for the
- * nav, and a snippet showing raw markup looks like a bug. Pasted terminal
+ * nav, and a snippet showing raw markup looks like a bug. The closing bracket
+ * is optional because an excerpt is cut to a character budget and often ends
+ * mid-tag. Pasted terminal
  * output brings ANSI colour codes along with it, which render as literal
  * `[1;33m` in the browser. The `«»` match markers are preserved; they're what
  * the UI highlights on.
@@ -114,7 +126,7 @@ export function toMatchQuery(raw: string): string | null {
 export function cleanSnippet(snippet: string): string {
   return (
     snippet
-      .replace(/<\/?(command-[a-z]+|system-reminder|local-command-[a-z]+)>/g, " ")
+      .replace(/<\/?(command-[a-z]+|system-reminder|local-command-[a-z]+)>?/g, " ")
       // oxlint-disable-next-line no-control-regex -- an escape sequence is what this matches
       .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
       .replace(/\s+/g, " ")
@@ -144,25 +156,40 @@ export async function searchSessions(
 ): Promise<SearchResult> {
   const limit = options.limit ?? 20;
   const match = toMatchQuery(options.query);
-  if (!match) return { query: options.query, hits: [], unroutable: 0 };
+  const empty: SearchResult = { query: options.query, hits: [], unroutable: 0, relaxed: false };
+  if (!match) return empty;
 
   // A ref filter is an allow-list of session ids rather than a post-filter: a
   // session that mentions #61 once may not rank in the top matches for the text
   // query at all, and it's exactly the row being looked for.
   const sessionIds = options.ref ? findSessionsByRef(options.ref) : undefined;
-  if (sessionIds && sessionIds.length === 0) {
-    return { query: options.query, hits: [], unroutable: 0 };
+  if (sessionIds && sessionIds.length === 0) return empty;
+
+  const ask = async (matchQuery: string): Promise<TranscriptHit[]> => {
+    const response = (await call("memory.search_transcripts", {
+      query: matchQuery,
+      limit: limit * OVERFETCH,
+      cwd: options.cwd,
+      sessionIds,
+    })) as { results?: TranscriptHit[] } | null;
+    return response?.results ?? [];
+  };
+
+  // Terms are combined per *message*, which is what makes a snippet meaningful
+  // — and also why "watermark reconcile" can find nothing when the two words
+  // were said a hundred messages apart. Rather than dead-end, fall back to
+  // any-term ranking and tell the caller it happened.
+  let results = await ask(match);
+  let relaxed = false;
+  if (results.length === 0 && isMultiTerm(options.query)) {
+    const loose = toMatchQuery(options.query, "OR");
+    if (loose) {
+      results = await ask(loose);
+      relaxed = results.length > 0;
+    }
   }
 
-  const response = (await call("memory.search_transcripts", {
-    query: match,
-    limit: limit * OVERFETCH,
-    cwd: options.cwd,
-    sessionIds,
-  })) as { results?: TranscriptHit[] } | null;
-
-  const results = response?.results ?? [];
-  if (results.length === 0) return { query: options.query, hits: [], unroutable: 0 };
+  if (results.length === 0) return empty;
 
   const rows = getSessionsForSearch(results.map((hit) => hit.sessionId));
 
@@ -194,8 +221,9 @@ export async function searchSessions(
     match,
     hits: hits.length,
     unroutable,
+    relaxed,
     ref: options.ref,
   });
 
-  return { query: options.query, hits, unroutable };
+  return { query: options.query, hits, unroutable, relaxed };
 }

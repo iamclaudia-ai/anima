@@ -76,6 +76,13 @@ export interface SessionSearchHit {
   refs?: SessionRefInfo[];
 }
 
+/** A search response: ranked hits, plus whether the terms had to be loosened. */
+export interface SessionSearchResult {
+  hits: SessionSearchHit[];
+  /** True when no message held every term, so these are any-term matches. */
+  relaxed: boolean;
+}
+
 export interface GitStatusInfo {
   branch: string | null;
   ahead: number;

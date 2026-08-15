@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from "react";
 import { navigate, useGatewayClient, useRouter, WorkspaceProvider } from "@anima/ui";
-import type { WorkspaceInfo, SessionInfo, SessionSearchHit } from "@anima/ui";
+import type { WorkspaceInfo, SessionInfo, SessionSearchResult } from "@anima/ui";
 import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
@@ -109,7 +109,7 @@ export interface ChatPageContextValue {
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onRenameSession: (session: SessionInfo, title: string | null) => Promise<void>;
   /** Full-text search across every message in every workspace. */
-  onSearchSessions: (query: string) => Promise<SessionSearchHit[]>;
+  onSearchSessions: (query: string) => Promise<SessionSearchResult>;
   /** Create a new session in `workspace` (defaults to the active one). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -397,11 +397,12 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   );
 
   const onSearchSessions = useCallback(
-    async (query: string): Promise<SessionSearchHit[]> => {
-      const result = (await callGateway("session.search", { query, limit: 20 })) as {
-        hits?: SessionSearchHit[];
-      } | null;
-      return result?.hits ?? [];
+    async (query: string): Promise<SessionSearchResult> => {
+      const result = (await callGateway("session.search", {
+        query,
+        limit: 20,
+      })) as Partial<SessionSearchResult> | null;
+      return { hits: result?.hits ?? [], relaxed: result?.relaxed ?? false };
     },
     [callGateway],
   );

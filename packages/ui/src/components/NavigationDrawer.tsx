@@ -44,6 +44,7 @@ import type {
   SessionInfo,
   SessionRefInfo,
   SessionSearchHit,
+  SessionSearchResult,
 } from "../hooks/useChatGateway";
 
 // ── Props ───────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ interface NavigationDrawerProps {
    * Optional: without it the search box stays the local title filter it always
    * was, which is what the VS Code sidebar mounts.
    */
-  onSearchSessions?: (query: string) => Promise<SessionSearchHit[]>;
+  onSearchSessions?: (query: string) => Promise<SessionSearchResult>;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -781,12 +782,12 @@ function SearchModal({
 }: {
   workspaces: WorkspaceInfo[];
   sessionsByWorkspace: Record<string, SessionInfo[]>;
-  onSearch?: (query: string) => Promise<SessionSearchHit[]>;
+  onSearch?: (query: string) => Promise<SessionSearchResult>;
   onClose: () => void;
   onSelect: (workspace: WorkspaceInfo, session: SessionInfo) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<SessionSearchHit[] | null>(null);
+  const [result, setResult] = useState<SessionSearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -800,7 +801,7 @@ function SearchModal({
   // from overwriting the results of a later, faster one.
   useEffect(() => {
     if (!onSearch || !query.trim()) {
-      setHits(null);
+      setResult(null);
       setSearching(false);
       return;
     }
@@ -809,15 +810,15 @@ function SearchModal({
     setSearching(true);
     const timer = setTimeout(() => {
       onSearch(query)
-        .then((results) => {
+        .then((next) => {
           if (!live) return;
-          setHits(results);
+          setResult(next);
           setCursor(0);
         })
         .catch((error: unknown) => {
           if (!live) return;
           console.error("Search failed", error);
-          setHits([]);
+          setResult({ hits: [], relaxed: false });
         })
         .finally(() => {
           if (live) setSearching(false);
@@ -871,6 +872,7 @@ function SearchModal({
       onClose();
       return;
     }
+    const hits = result?.hits;
     if (!searchMode || !hits?.length) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -922,7 +924,7 @@ function SearchModal({
           </div>
 
           {searchMode ? (
-            <SearchResults hits={hits} searching={searching} cursor={cursor} onOpen={openHit} />
+            <SearchResults result={result} searching={searching} cursor={cursor} onOpen={openHit} />
           ) : recent.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
           ) : (
@@ -952,16 +954,17 @@ function SearchModal({
 }
 
 function SearchResults({
-  hits,
+  result,
   searching,
   cursor,
   onOpen,
 }: {
-  hits: SessionSearchHit[] | null;
+  result: SessionSearchResult | null;
   searching: boolean;
   cursor: number;
   onOpen: (hit: SessionSearchHit) => void;
 }) {
+  const hits = result?.hits ?? null;
   if (hits === null) {
     return (
       <div className="px-3 py-2 text-sm text-gray-400">{searching ? "" : "Type to search"}</div>
@@ -983,6 +986,11 @@ function SearchResults({
 
   return (
     <>
+      {result?.relaxed && (
+        <div className="px-3 pb-1 text-xs text-gray-400">
+          No message contained every word — showing sessions matching any of them.
+        </div>
+      )}
       {hits.map((hit, i) => (
         <button
           key={hit.sessionId}

@@ -28,6 +28,10 @@ describe("toMatchQuery", () => {
   it("keeps non-latin queries intact", () => {
     expect(toMatchQuery("привет мир")).toBe('"привет" AND "мир"*');
   });
+
+  it("can combine terms with OR for the relaxed retry", () => {
+    expect(toMatchQuery("watermark reconcile ", "OR")).toBe('"watermark" OR "reconcile"');
+  });
 });
 
 describe("hitTitle", () => {
@@ -64,6 +68,12 @@ describe("cleanSnippet", () => {
         "<command-message>guiding-«meditation»</command-message> <command-name>/x</command-name>",
       ),
     ).toBe("guiding-«meditation» /x");
+  });
+
+  it("strips a tag the excerpt was truncated in the middle of", () => {
+    expect(cleanSnippet("guiding-«meditation» /guiding-meditation <command-args…")).toBe(
+      "guiding-«meditation» /guiding-meditation …",
+    );
   });
 
   it("strips ANSI colour codes that came in with pasted terminal output", () => {
@@ -205,6 +215,50 @@ describe("searchSessions", () => {
 
     expect(result.hits).toEqual([]);
     expect(called).toBe(false);
+  });
+
+  it("retries with any-term matching when no message holds every word", async () => {
+    const ws = createWorkspace({ name: "anima", cwd: "/w/relaxed" });
+    seedSession("ses_loose", ws.id, "watermarks");
+
+    const asked: string[] = [];
+    const result = await searchSessions(
+      async (_method, params) => {
+        asked.push(params.query as string);
+        // The AND pass finds nothing; the OR pass does.
+        return { results: asked.length === 1 ? [] : [hit("ses_loose", -7)] };
+      },
+      { query: "watermark reconcile" },
+    );
+
+    expect(asked).toEqual(['"watermark" AND "reconcile"*', '"watermark" OR "reconcile"*']);
+    expect(result.hits).toHaveLength(1);
+    expect(result.relaxed).toBe(true);
+  });
+
+  it("does not relax a single-word query, which has nothing to loosen", async () => {
+    const asked: string[] = [];
+    const result = await searchSessions(
+      async (_method, params) => {
+        asked.push(params.query as string);
+        return { results: [] };
+      },
+      { query: "watermark" },
+    );
+
+    expect(asked).toHaveLength(1);
+    expect(result.relaxed).toBe(false);
+  });
+
+  it("reports relaxed=false when the exact query already matched", async () => {
+    const ws = createWorkspace({ name: "anima", cwd: "/w/exact" });
+    seedSession("ses_exact", ws.id, "proxy port");
+
+    const result = await searchSessions(async () => ({ results: [hit("ses_exact", -9)] }), {
+      query: "proxy port drift",
+    });
+
+    expect(result.relaxed).toBe(false);
   });
 
   it("honours the limit after unroutable hits are dropped", async () => {
