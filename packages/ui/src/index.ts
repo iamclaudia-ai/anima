@@ -51,6 +51,8 @@ export type { ExtensionWebContribution, LauncherColor, PanelContribution, Route 
 // Hooks
 export { useChatGateway } from "./hooks/useChatGateway";
 export { useGatewayClient } from "./hooks/useGatewayClient";
+export { useAttentionSessions } from "./hooks/useAttentionSessions";
+export type { AttentionSession, UseAttentionSessionsReturn } from "./hooks/useAttentionSessions";
 export { useIsMobile } from "./hooks/useIsMobile";
 export { useVoiceEnabled } from "./hooks/useVoiceEnabled";
 export type {
@@ -86,6 +88,7 @@ export type { PanelRegistration, PanelRegistry } from "./components/LayoutManage
 export { rememberPanelWidth, getRememberedPanelWidth } from "./components/panel-widths";
 export { ErrorBoundary } from "./components/ErrorBoundary";
 export { GlobalNotifications } from "./components/GlobalNotifications";
+export { AttentionBanner } from "./components/AttentionBanner";
 export { LoginGate, logout } from "./components/LoginGate";
 export { NavigationDrawer } from "./components/NavigationDrawer";
 export type { WorkspaceMenuAction, SettingsMenuAction } from "./components/NavigationDrawer";

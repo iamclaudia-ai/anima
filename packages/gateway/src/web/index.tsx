@@ -22,6 +22,7 @@ import {
   ExtensionConfigProvider,
   GatewayClientProvider,
   GlobalNotifications,
+  AttentionBanner,
   HeaderSlotsProvider,
   LoginGate,
 } from "@anima/ui";
@@ -223,6 +224,9 @@ async function bootstrap(): Promise<void> {
         <GatewayClientProvider>
           <ExtensionConfigProvider configs={extensionConfigs}>
             <GlobalNotifications>
+              {/* Outside the Router on purpose — it has to reach every route,
+                  including the one you are not looking at. */}
+              <AttentionBanner />
               <HeaderSlotsProvider>
                 <Router routes={allRoutes} layouts={allLayouts} panelRegistry={panelRegistry} />
               </HeaderSlotsProvider>

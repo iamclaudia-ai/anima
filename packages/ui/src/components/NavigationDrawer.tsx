@@ -151,21 +151,41 @@ function tmuxAttachCommand(sessionId: string): string {
 /**
  * How each runtime status reads in the nav.
  *
- * `idle` and `completed` are deliberately absent. They're the resting states —
- * most rows are in one of them most of the time, and a column of grey dots
- * carries no information while costing the eye something on every scan. A dot
- * appears when there is something to say.
+ * `idle` is absent, and `completed` is conditional. The original rule was that
+ * both resting states show nothing — most rows are at rest, and a column of
+ * grey dots costs the eye something on every scan while saying nothing.
+ *
+ * That was right in general and wrong for the one row that matters most.
+ * A session that finished and hasn't been acknowledged is exactly the "I asked
+ * for a PR review and forgot to come back" case, so it gets a mark; a session
+ * that finished and *was* acknowledged goes quiet again. The principle held,
+ * the boundary moved — see `runtimePresentation`.
  */
 const RUNTIME_PRESENTATION: Partial<
   Record<SessionRuntimeStatus, { dotClass: string; label: string; pulse?: boolean }>
 > = {
-  running: { dotClass: "bg-emerald-500", label: "Working", pulse: true },
+  // Motion, not a colour change: a spinner reads as "busy" at a glance in a
+  // way a static dot doesn't, however brightly it pulses.
+  running: { dotClass: "spinner", label: "Working" },
   awaiting_input: { dotClass: "bg-amber-500", label: "Waiting for you", pulse: true },
   awaiting_approval: { dotClass: "bg-amber-500", label: "Waiting for approval", pulse: true },
   failed: { dotClass: "bg-red-500", label: "Failed" },
   interrupted: { dotClass: "bg-gray-400", label: "Interrupted" },
   stalled: { dotClass: "bg-orange-500", label: "Stalled" },
 };
+
+/** Finished, and nobody has said they've dealt with it. */
+const READY_PRESENTATION = { dotClass: "bg-blue-500", label: "Done — ready for you" };
+
+function runtimePresentation(
+  status?: SessionRuntimeStatus,
+  disposition?: SessionDisposition,
+): { dotClass: string; label: string; pulse?: boolean } | undefined {
+  if (status === "completed") {
+    return (disposition ?? "open") === "open" ? READY_PRESENTATION : undefined;
+  }
+  return status ? RUNTIME_PRESENTATION[status] : undefined;
+}
 
 /**
  * How each disposition reads. `open` has no chip — it's the default, and
@@ -200,9 +220,27 @@ const DISPOSITION_MENU_LABELS: Record<SessionDisposition, string> = {
   archived: "Archived",
 };
 
-function RuntimeStatusDot({ status }: { status?: SessionRuntimeStatus }) {
-  const presentation = status ? RUNTIME_PRESENTATION[status] : undefined;
+function RuntimeStatusDot({
+  status,
+  disposition,
+}: {
+  status?: SessionRuntimeStatus;
+  disposition?: SessionDisposition;
+}) {
+  const presentation = runtimePresentation(status, disposition);
   if (!presentation) return null;
+
+  if (presentation.dotClass === "spinner") {
+    return (
+      <span
+        title={presentation.label}
+        aria-label={presentation.label}
+        role="img"
+        className="mt-1 inline-block size-2.5 flex-shrink-0 animate-spin rounded-full border-[1.5px] border-emerald-500 border-t-transparent"
+      />
+    );
+  }
+
   return (
     <span
       title={presentation.label}
@@ -351,7 +389,7 @@ function SessionRow({
         }`}
       >
         <span className="flex min-w-0 flex-1 items-start gap-1.5">
-          <RuntimeStatusDot status={session.runtimeStatus} />
+          <RuntimeStatusDot status={session.runtimeStatus} disposition={session.disposition} />
           <span className="min-w-0 flex-1">
             <span className="block truncate">{formatSessionName(session)}</span>
             <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
