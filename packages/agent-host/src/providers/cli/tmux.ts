@@ -49,6 +49,55 @@ export function claudeProcessAlive(id: string): boolean {
   }
 }
 
+/**
+ * Parse the proxy port out of a `ps eww` environment dump.
+ *
+ * `base-url` sessions carry `ANTHROPIC_BASE_URL`; `mitm` sessions carry
+ * `HTTPS_PROXY`. Exported separately from the process lookup so the parsing is
+ * testable without spawning anything.
+ */
+export function parseProxyPortFromEnv(psOutput: string): number | null {
+  const match =
+    /ANTHROPIC_BASE_URL=https?:\/\/[^:\s]+:(\d+)/.exec(psOutput) ??
+    /HTTPS_PROXY=https?:\/\/[^:\s]+:(\d+)/.exec(psOutput);
+  const port = match?.[1] ? Number(match[1]) : NaN;
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+}
+
+/**
+ * The proxy port a still-running `claude` process was launched against.
+ *
+ * The CLI reads `ANTHROPIC_BASE_URL` once at startup, so its target is fixed
+ * for the life of the process. When agent-host restarts underneath a surviving
+ * CLI, re-deriving the port can land somewhere else — the derived port may have
+ * been taken at spawn time (this machine has other services squatting in the
+ * range) and free now, or the reverse. The CLI would then be talking to a port
+ * with nothing behind it, which surfaces as:
+ *
+ *   API Error: Connection refused — a firewall or proxy may be blocking it
+ *
+ * Asking the process itself removes the guesswork.
+ */
+export function readClaudeProxyPort(id: string): number | null {
+  try {
+    const pids = execFileSync("pgrep", ["-f", "--", `--(resume|session-id) ${id}`], {
+      encoding: "utf-8",
+    })
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (pids.length === 0) return null;
+
+    // `ps eww` prints the process environment after the command line.
+    const out = execFileSync("ps", ["eww", "-o", "command=", "-p", pids[0]!], {
+      encoding: "utf-8",
+    });
+    return parseProxyPortFromEnv(out);
+  } catch {
+    return null;
+  }
+}
+
 export interface NewSessionOptions {
   name: string;
   cwd: string;

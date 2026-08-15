@@ -29,6 +29,7 @@ import type {
 import { AnthropicTeeProxy, type StreamContext } from "./proxy";
 import {
   capturePane,
+  readClaudeProxyPort,
   claudeProcessAlive,
   hasSession,
   killSession,
@@ -40,6 +41,7 @@ import {
 } from "./tmux";
 import { copyImageToClipboard } from "./image-clipboard";
 import { ensureMitmCerts } from "./mitm-certs";
+import { recallPort, rememberPort } from "./port-registry";
 import { SessionJsonlTail } from "./jsonl-tail";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
@@ -47,7 +49,7 @@ const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "
 export interface ClaudeCliProviderConfig {
   /** Absolute path to the claude binary (auto-detected if omitted). */
   cliPath?: string;
-  /** Base port for the per-session tee proxy (default 9000). */
+  /** Base port for the per-session tee proxy (default 31000). */
   basePort?: number;
   /** Interception mode — PR 1 supports "base-url" only. */
   interception?: "base-url" | "mitm";
@@ -57,7 +59,16 @@ export interface ClaudeCliProviderConfig {
   capture?: boolean;
 }
 
-const DEFAULT_BASE_PORT = 9000;
+/**
+ * Base of the per-session proxy port range (9000-9999 previously).
+ *
+ * The old range is crowded on a normal dev machine — this one had 12 foreign
+ * listeners in it (OrbStack alone holds 9000-9003, 9100, 9101, 9200, 9440,
+ * 9441, 9900, 9901), and every collision forced the port probe to drift, which
+ * is what strands a CLI across restarts. 31000-31999 measured completely free,
+ * sits beside the gateway's 30086, and is below the OS ephemeral range.
+ */
+const DEFAULT_BASE_PORT = 31000;
 const DISALLOWED_TOOLS = "AskUserQuestion,EnterPlanMode,ExitPlanMode";
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence", "max_tokens"]);
 const INIT_TIMEOUT_MS = 12_000;
@@ -198,9 +209,24 @@ function sanitizeModel(model: string): string {
 }
 
 /** Deterministic port from session id so resume reuses the same proxy. */
+/**
+ * Deterministic per-session proxy port.
+ *
+ * FNV-1a rather than a sum of char codes: summing is order-independent, so
+ * session UUIDs — same alphabet, same length — pile into a narrow central band.
+ * Measured across 355 real session ids, the sum spread them over 718 of the
+ * 1000 available slots with 50.1% sharing a port; FNV-1a uses the full range
+ * and drops that to 33.2% (the residual is just the birthday bound).
+ *
+ * Collisions still have to be handled by the caller — this only makes them
+ * rarer.
+ */
 function derivePort(base: number, id: string): number {
-  let h = 0;
-  for (const ch of id) h += ch.charCodeAt(0);
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
   return base + (h % 1000);
 }
 
@@ -320,8 +346,34 @@ export class ClaudeCliSession extends EventEmitter {
       tls = { key: certs.key, cert: certs.cert };
       this.caPath = certs.caPath;
     }
+    // Which port to offer, in descending order of authority:
+    //
+    //   1. What a live CLI is already targeting — ground truth. It read the URL
+    //      once at startup and cannot be told a new one, so binding anywhere
+    //      else strands it (ConnectionRefused).
+    //   2. What we last bound for this session — covers a CLI that's alive but
+    //      unmatchable, and a pane whose CLI is dead and about to be relaunched.
+    //   3. Derivation — a first-ever launch.
+    const pinnedByCli = readClaudeProxyPort(this.id);
+    const remembered = recallPort(this.id);
+    const derived = derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id);
+    const preferred = pinnedByCli ?? remembered ?? derived;
+
+    if (preferred !== derived) {
+      log.info("Reusing a previously-bound proxy port", {
+        id: this.id.slice(0, 8),
+        port: preferred,
+        source: pinnedByCli ? "running-cli" : "registry",
+        derived,
+      });
+    }
+
     this.proxy = new AnthropicTeeProxy({
-      port: derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id),
+      port: preferred,
+      // Only a *live* CLI pins the port. A remembered port is a preference —
+      // if something else holds it now, probing is better than refusing to
+      // start, because no process is depending on that exact number yet.
+      allowPortProbe: pinnedByCli === null,
       onEvent: (e, ctx) => this.handleProxyEvent(e, ctx),
       onRequestBody: (b, ctx) => this.handleRequestBody(b, ctx),
       capture: this.config.capture,
@@ -333,6 +385,9 @@ export class ClaudeCliSession extends EventEmitter {
       tls,
     });
     this.proxyPort = await this.proxy.start();
+    // Record what we actually bound, so the next restart can offer it back
+    // even if the process lookup comes up empty.
+    rememberPort(this.id, this.proxyPort);
   }
 
   /**

@@ -67,6 +67,14 @@ export interface StreamContext {
 export interface TeeProxyOptions {
   /** Preferred port; the proxy probes upward if it is taken. */
   port: number;
+  /**
+   * Whether the probe may move to another port when `port` is taken.
+   *
+   * False when a running CLI is already pinned to this exact port — it read the
+   * URL once at startup and cannot be told a new one, so binding elsewhere
+   * would leave it talking to nothing. Failing loudly is the better outcome.
+   */
+  allowPortProbe?: boolean;
   /** Called for each parsed SSE event from the model stream. */
   onEvent: (event: StreamEvent, ctx: StreamContext) => void;
   /** Called with each parsed JSON request body (for tool_result extraction). */
@@ -245,7 +253,10 @@ export class AnthropicTeeProxy {
 
   /** base-url transport: a plain-HTTP origin the CLI hits via ANTHROPIC_BASE_URL. */
   private startBaseUrl(): number {
-    let port = this.opts.port;
+    const requested = this.opts.port;
+    const allowProbe = this.opts.allowPortProbe !== false;
+    let port = requested;
+
     for (let attempt = 0; attempt < 50; attempt++) {
       try {
         this.server = Bun.serve({
@@ -254,14 +265,25 @@ export class AnthropicTeeProxy {
           idleTimeout: 0, // never time out long-lived SSE streams
           fetch: (req) => this.handle(req),
         });
+        if (port !== requested) {
+          // Any CLI already launched against `requested` is now stranded, and
+          // its only symptom is a confusing "Connection refused" from the API.
+          log.warn("Proxy port drifted from the requested one", { requested, bound: port });
+        }
         return port;
       } catch (err) {
         const s = String(err);
-        if (s.includes("EADDRINUSE") || s.includes("in use") || s.includes("address already")) {
-          port++;
-          continue;
+        const inUse =
+          s.includes("EADDRINUSE") || s.includes("in use") || s.includes("address already");
+        if (!inUse) throw err;
+        if (!allowProbe) {
+          throw new Error(
+            `CliProxy: port ${requested} is in use and a running CLI is pinned to it. ` +
+              `Something else is holding the port — free it, or restart the CLI session so it ` +
+              `picks up a new one. (Probing to another port would strand the CLI.)`,
+          );
         }
-        throw err;
+        port++;
       }
     }
     throw new Error("CliProxy: no available port");
