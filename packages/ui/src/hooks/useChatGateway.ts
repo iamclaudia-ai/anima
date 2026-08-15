@@ -34,6 +34,14 @@ export interface WorkspaceInfo {
   updatedAt: string;
 }
 
+export interface SessionRefInfo {
+  /** "github" | "linear" — drives which mark the chip shows. */
+  type: string;
+  key: string;
+  label: string;
+  url?: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   created?: string;
@@ -41,6 +49,8 @@ export interface SessionInfo {
   messageCount?: number;
   firstPrompt?: string;
   gitBranch?: string;
+  /** PR / ticket references extracted from the session, shown as chips. */
+  refs?: SessionRefInfo[];
 }
 
 export interface GitStatusInfo {

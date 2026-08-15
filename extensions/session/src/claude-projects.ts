@@ -18,6 +18,12 @@ export interface SessionIndexEntry {
   messageCount?: number;
   firstPrompt?: string;
   gitBranch?: string;
+  /**
+   * PR / ticket references extracted from the session, rendered as chips under
+   * the title. Populated from the database on the list path — filesystem
+   * discovery alone doesn't carry them.
+   */
+  refs?: Array<{ type: string; key: string; label: string; url?: string }>;
 }
 
 /**

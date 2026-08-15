@@ -29,13 +29,15 @@ import {
   Puzzle,
   RefreshCw,
   Search,
+  Ticket,
+  GitPullRequest,
   Settings as SettingsIcon,
   SquarePlus,
   Trash2,
   User,
   Zap,
 } from "lucide-react";
-import type { WorkspaceInfo, SessionInfo } from "../hooks/useChatGateway";
+import type { WorkspaceInfo, SessionInfo, SessionRefInfo } from "../hooks/useChatGateway";
 
 // ── Props ───────────────────────────────────────────────────────
 
@@ -94,6 +96,9 @@ function formatTimeAgo(dateStr: string): string {
   if (diffWeeks < 5) return `${diffWeeks}w`;
   return `${diffMonths}mo`;
 }
+
+/** Cap on chips per row, so one busy session can't swamp the list. */
+const MAX_VISIBLE_REFS = 3;
 
 function formatSessionName(s: SessionInfo): string {
   if (s.firstPrompt) return s.firstPrompt;
@@ -177,17 +182,91 @@ function SessionRow({
       // Full-width highlight (no rounded corners, no left margin) — the
       // text gets the indent via pl-9 instead, so the active session reads
       // as a flat row across the entire sidebar.
-      className={`flex w-full items-center justify-between gap-2 py-1.5 pl-9 pr-3 text-left text-sm transition-colors ${
+      className={`flex w-full items-start justify-between gap-2 py-1.5 pl-9 pr-3 text-left text-sm transition-colors ${
         isActive
           ? "bg-gray-100 text-gray-900"
           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
       }`}
     >
-      <span className="truncate">{formatSessionName(session)}</span>
-      <span className="flex-shrink-0 text-xs text-gray-400">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{formatSessionName(session)}</span>
+        <SessionRefChips refs={session.refs} />
+      </span>
+      <span className="flex-shrink-0 pt-0.5 text-xs text-gray-400">
         {formatTimeAgo(session.modified || session.created || "")}
       </span>
     </a>
+  );
+}
+
+// ── Ref chips ───────────────────────────────────────────────────
+
+/**
+ * PR / ticket chips under a session title.
+ *
+ * The point is glanceability — being able to scan the list for "the #28388
+ * work" without opening anything. Chips are capped so a session that mentions
+ * a dozen tickets can't push the row into a wall of badges.
+ */
+function SessionRefChips({ refs }: { refs?: SessionRefInfo[] }) {
+  if (!refs?.length) return null;
+
+  const shown = refs.slice(0, MAX_VISIBLE_REFS);
+  const overflow = refs.length - shown.length;
+
+  return (
+    <span className="mt-0.5 flex flex-wrap items-center gap-1">
+      {shown.map((ref) => {
+        const isLinear = ref.type === "linear";
+        const chip = (
+          <span
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${
+              isLinear ? "bg-indigo-50 text-indigo-700" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {isLinear ? (
+              <Ticket className="h-2.5 w-2.5" aria-hidden />
+            ) : (
+              <GitPullRequest className="h-2.5 w-2.5" aria-hidden />
+            )}
+            {ref.label}
+          </span>
+        );
+
+        // Chips live inside the session <a>, so a nested anchor is invalid.
+        // Stop propagation instead and navigate manually, keeping the row
+        // click (open session) and the chip click (open PR/ticket) distinct.
+        return ref.url ? (
+          <span
+            key={ref.key}
+            role="link"
+            tabIndex={0}
+            title={ref.url}
+            className="cursor-pointer hover:opacity-80"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(ref.url, "_blank", "noopener,noreferrer");
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(ref.url, "_blank", "noopener,noreferrer");
+            }}
+          >
+            {chip}
+          </span>
+        ) : (
+          <span key={ref.key}>{chip}</span>
+        );
+      })}
+      {overflow > 0 && (
+        <span className="text-[10px] text-gray-400" title={refs.map((r) => r.label).join(", ")}>
+          +{overflow}
+        </span>
+      )}
+    </span>
   );
 }
 

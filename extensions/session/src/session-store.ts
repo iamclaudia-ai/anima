@@ -54,6 +54,15 @@ export interface SessionListInfo {
   messageCount?: number;
   firstPrompt?: string;
   gitBranch?: string;
+  /** PR / ticket chips rendered under the title in the nav. */
+  refs?: StoredSessionRef[];
+}
+
+export interface StoredSessionRef {
+  type: string;
+  key: string;
+  label: string;
+  url?: string;
 }
 
 let db: Database | null = null;
@@ -178,6 +187,26 @@ function ensureSessionTable(currentDb: Database): void {
   currentDb.exec(
     "UPDATE sessions SET provider_session_id = COALESCE(provider_session_id, CAST(id AS TEXT))",
   );
+  // Refs live in their own table rather than inside metadata_json: they're
+  // multi-valued, they're a filter target for search, and the nav reads them
+  // for every visible row — all of which want an index, not a JSON blob.
+  currentDb.exec(`
+    CREATE TABLE IF NOT EXISTS session_refs (
+      session_id  TEXT NOT NULL,
+      ref_type    TEXT NOT NULL,
+      ref_key     TEXT NOT NULL,
+      ref_label   TEXT NOT NULL,
+      ref_url     TEXT,
+      position    INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_id, ref_key)
+    )
+  `);
+  currentDb.exec(`
+    CREATE INDEX IF NOT EXISTS idx_session_refs_key ON session_refs(ref_key);
+    CREATE INDEX IF NOT EXISTS idx_session_refs_session ON session_refs(session_id);
+  `);
+
   currentDb.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_provider_session ON sessions(provider_session_id);
@@ -356,6 +385,78 @@ export function getWorkspaceActiveSession(workspaceId: string): string | null {
   return row?.active_session_id || null;
 }
 
+/**
+ * Replace a session's refs.
+ *
+ * Full replace rather than merge: refs are derived from the transcript, so a
+ * re-extraction is authoritative and a ref that disappeared should not linger.
+ */
+export function setSessionRefs(sessionId: string, refs: StoredSessionRef[]): void {
+  const dbConn = getDb();
+  const write = dbConn.transaction((rows: StoredSessionRef[]) => {
+    dbConn.query("DELETE FROM session_refs WHERE session_id = ?").run(sessionId);
+    const insert = dbConn.query(
+      `INSERT OR REPLACE INTO session_refs
+         (session_id, ref_type, ref_key, ref_label, ref_url, position)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    rows.forEach((ref, index) => {
+      insert.run(sessionId, ref.type, ref.key, ref.label, ref.url ?? null, index);
+    });
+  });
+  write(refs);
+}
+
+/**
+ * Load refs for many sessions at once — the nav renders a whole page of rows,
+ * so this must not become a query per row.
+ */
+export function getRefsForSessions(sessionIds: string[]): Map<string, StoredSessionRef[]> {
+  const bySession = new Map<string, StoredSessionRef[]>();
+  if (sessionIds.length === 0) return bySession;
+
+  const placeholders = sessionIds.map(() => "?").join(",");
+  const rows = getDb()
+    .query(
+      `SELECT session_id, ref_type, ref_key, ref_label, ref_url
+       FROM session_refs
+       WHERE session_id IN (${placeholders})
+       ORDER BY session_id, position`,
+    )
+    .all(...sessionIds) as Array<{
+    session_id: string;
+    ref_type: string;
+    ref_key: string;
+    ref_label: string;
+    ref_url: string | null;
+  }>;
+
+  for (const row of rows) {
+    const list = bySession.get(row.session_id) ?? [];
+    list.push({
+      type: row.ref_type,
+      key: row.ref_key,
+      label: row.ref_label,
+      url: row.ref_url ?? undefined,
+    });
+    bySession.set(row.session_id, list);
+  }
+  return bySession;
+}
+
+/** Sessions referencing a given PR/ticket key, most recently active first. */
+export function findSessionsByRef(refKey: string): string[] {
+  const rows = getDb()
+    .query(
+      `SELECT r.session_id FROM session_refs r
+       JOIN sessions s ON s.provider_session_id = r.session_id
+       WHERE r.ref_key = ?
+       ORDER BY s.last_activity DESC`,
+    )
+    .all(refKey) as Array<{ session_id: string }>;
+  return rows.map((row) => row.session_id);
+}
+
 export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
   const rows = getDb()
     .query(
@@ -365,10 +466,14 @@ export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
     )
     .all(workspaceId) as SessionRow[];
 
+  // One batched lookup for the whole page rather than a query per row.
+  const refsBySession = getRefsForSessions(rows.map((row) => row.provider_session_id));
+
   return rows.map((row) => {
     const stored = toStoredSession(row);
     const metadata = stored.metadata || {};
     return {
+      refs: refsBySession.get(stored.id),
       sessionId: stored.id,
       created: stored.createdAt,
       modified: stored.lastActivity,
