@@ -24,7 +24,7 @@
  * that it reaches you when you are looking at something else.
  */
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Check, Clock, X } from "lucide-react";
 import {
   useAttentionSessions,
@@ -41,13 +41,20 @@ import { matchPath, navigate } from "../router";
  * route. `navigate()` dispatches `popstate`, which is the same signal the
  * Router itself listens to, so this stays in step with client-side navigation.
  */
+function subscribeToLocation(onChange: () => void): () => void {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
+function readPathname(): string {
+  return window.location.pathname;
+}
+
 function useCurrentSessionId(): string | undefined {
-  const [pathname, setPathname] = useState(() => window.location.pathname);
-  useEffect(() => {
-    const onPopState = () => setPathname(window.location.pathname);
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  // `useSyncExternalStore` rather than state-plus-effect: the location is an
+  // external store, and reading it through this hook is what keeps the value
+  // consistent if React renders concurrently.
+  const pathname = useSyncExternalStore(subscribeToLocation, readPathname, readPathname);
   return matchPath("/chat/:workspaceId/:sessionId", pathname)?.sessionId;
 }
 

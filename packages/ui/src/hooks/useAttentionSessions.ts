@@ -95,8 +95,15 @@ export function useAttentionSessions(): UseAttentionSessionsReturn {
     if (!client || !isConnected) return;
 
     refresh();
-    void client.subscribe(["session.status_changed"]).catch(() => undefined);
 
+    // Listens, but deliberately does not subscribe. Gateway subscriptions are
+    // per *connection*, not per component, and the nav already subscribes to
+    // this event — so a subscribe/unsubscribe pair here would silence the nav
+    // the moment this unmounted. Listening is free and tears down cleanly.
+    //
+    // On a route with no nav, nothing subscribes and the poll below is the
+    // only update path. That's fine for what this drives: a banner about work
+    // that has been waiting fifteen minutes does not need sub-second latency.
     const scheduleRefresh = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(refresh, REFETCH_DEBOUNCE_MS);
@@ -112,9 +119,6 @@ export function useAttentionSessions(): UseAttentionSessionsReturn {
       off();
       clearInterval(timer);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      // Deliberately no unsubscribe: the nav subscribes to the same event, and
-      // unsubscribing here would silence it too. The gateway's subscriptions
-      // are per connection, not per component.
     };
   }, [client, isConnected, refresh]);
 
