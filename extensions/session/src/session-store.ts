@@ -906,6 +906,8 @@ export interface AttentionSession {
   waitingSince: string;
   /** Set while snoozed; the session reappears once this passes. */
   snoozedUntil: string | null;
+  /** PR / ticket chips — the queue row should read like the tree row. */
+  refs: StoredSessionRef[];
 }
 
 /**
@@ -1009,6 +1011,7 @@ export function listAttentionSessions(options?: {
     cwd: string;
   }>;
 
+  const refsBySession = getRefsForSessions(rows.map((row) => row.session_id));
   const result: AttentionSession[] = [];
   for (const row of rows) {
     const metadata = parseMetadata(row.metadata_json);
@@ -1044,6 +1047,7 @@ export function listAttentionSessions(options?: {
       lastActivity: row.last_activity,
       waitingSince,
       snoozedUntil,
+      refs: refsBySession.get(row.session_id) ?? [],
     });
   }
   return result;

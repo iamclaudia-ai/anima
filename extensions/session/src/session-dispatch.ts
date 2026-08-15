@@ -257,6 +257,11 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       if (!setSessionTitle(sessionId, title)) {
         throw new Error(`Unknown session: ${sessionId}`);
       }
+      // A rename changes what every view of this session says, and until now
+      // it announced itself to nobody — the tab that did it patched its own
+      // copy and every other tab kept the old name until its next refetch.
+      const renamed = getStoredSession(sessionId);
+      if (renamed?.workspaceId) emitListChanged(renamed.workspaceId, "renamed");
       log.info("Session renamed", { sessionId: sessionId.slice(0, 8), cleared: !title?.trim() });
       return { sessionId, title: title?.trim() || null };
     },

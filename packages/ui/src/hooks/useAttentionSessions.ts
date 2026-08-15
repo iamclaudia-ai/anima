@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { GatewayClient } from "@anima/shared/gateway-client";
 import { useGatewayClientContext } from "../contexts/GatewayClientContext";
-import type { SessionDisposition, SessionRuntimeStatus } from "./useChatGateway";
+import type { SessionDisposition, SessionRefInfo, SessionRuntimeStatus } from "./useChatGateway";
 
 export interface AttentionSession {
   sessionId: string;
@@ -40,6 +40,7 @@ export interface AttentionSession {
   /** What "waiting 20 minutes" is measured from — the turn's end, not a restart. */
   waitingSince: string;
   snoozedUntil: string | null;
+  refs?: SessionRefInfo[];
 }
 
 /** How long a finished session waits before it stops being polite about it. */
@@ -131,7 +132,14 @@ function start(next: GatewayClient): void {
   // this event — so a subscribe/unsubscribe pair here would silence the nav.
   // On a route with no nav the poll below is the only update path, which is
   // fine for a list whose fastest-moving threshold is fifteen minutes.
-  stopListening = next.on("session.status_changed", scheduleFetch);
+  const offStatus = next.on("session.status_changed", scheduleFetch);
+  // Also list changes: a rename alters what a row *says* without altering any
+  // status, and the queue shows titles.
+  const offList = next.on("session.list_changed", scheduleFetch);
+  stopListening = () => {
+    offStatus();
+    offList();
+  };
   if (!pollTimer) pollTimer = setInterval(fetchNow, POLL_INTERVAL_MS);
   fetchNow();
 }

@@ -136,6 +136,8 @@ export interface ActiveSessionRow {
   disposition: SessionDisposition;
   /** What the elapsed label counts from. */
   waitingSince: string;
+  /** PR / ticket chips — a queue row should read like a tree row. */
+  refs?: SessionRefInfo[];
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -256,12 +258,16 @@ function ActivePane({
   now,
   onSelect,
   onAcknowledge,
+  onRenameSession,
+  onSetDisposition,
 }: {
   rows: ActiveSessionRow[];
   activeSessionId: string | null;
   now: number;
   onSelect: (row: ActiveSessionRow) => void;
   onAcknowledge?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string | null) => void;
+  onSetDisposition?: (sessionId: string, disposition: SessionDisposition) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
   if (rows.length === 0) return null;
@@ -275,41 +281,18 @@ function ActivePane({
         Active
       </div>
       <div className="space-y-0.5">
-        {visible.map((row) => {
-          const isActive = row.sessionId === activeSessionId;
-          return (
-            <div key={row.sessionId} className="group relative">
-              <button
-                type="button"
-                onClick={() => onSelect(row)}
-                className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                  isActive
-                    ? "bg-gray-100 text-gray-900"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                }`}
-              >
-                <RuntimeStatusDot status={row.runtimeStatus} disposition={row.disposition} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{activeRowName(row)}</span>
-                  <span className="block truncate text-xs text-gray-400">
-                    {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
-                  </span>
-                </span>
-              </button>
-              {/* Only finished work can be acknowledged — "done" on a session
-                  that is still running would be a lie the next event undoes. */}
-              {onAcknowledge && row.runtimeStatus === "completed" && (
-                <span className="absolute right-2 top-2 hidden group-hover:flex">
-                  <RowAction
-                    icon={Check}
-                    label="Mark done"
-                    onClick={() => onAcknowledge(row.sessionId)}
-                  />
-                </span>
-              )}
-            </div>
-          );
-        })}
+        {visible.map((row) => (
+          <ActiveRow
+            key={row.sessionId}
+            row={row}
+            isActive={row.sessionId === activeSessionId}
+            now={now}
+            onSelect={onSelect}
+            onAcknowledge={onAcknowledge}
+            onRenameSession={onRenameSession}
+            onSetDisposition={onSetDisposition}
+          />
+        ))}
         {hidden > 0 && (
           <button
             type="button"
@@ -329,6 +312,97 @@ function ActivePane({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One queue row.
+ *
+ * Carries everything the tree row does — refs, rename, tmux, status — because
+ * once the queue is where the work lives, having to go find the session in its
+ * folder to rename it is exactly the friction the pane was meant to remove.
+ */
+function ActiveRow({
+  row,
+  isActive,
+  now,
+  onSelect,
+  onAcknowledge,
+  onRenameSession,
+  onSetDisposition,
+}: {
+  row: ActiveSessionRow;
+  isActive: boolean;
+  now: number;
+  onSelect: (row: ActiveSessionRow) => void;
+  onAcknowledge?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string | null) => void;
+  onSetDisposition?: (sessionId: string, disposition: SessionDisposition) => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+
+  if (renaming && onRenameSession) {
+    return (
+      <div className="flex w-full items-center px-2 py-1.5">
+        <SessionTitleInput
+          initial={row.title ?? ""}
+          placeholder={activeRowName(row)}
+          onCancel={() => setRenaming(false)}
+          onCommit={(value) => {
+            setRenaming(false);
+            onRenameSession(row.sessionId, value);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={() => onSelect(row)}
+        className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 pr-16 text-left text-sm transition-colors ${
+          isActive
+            ? "bg-gray-100 text-gray-900"
+            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+        }`}
+      >
+        <RuntimeStatusDot status={row.runtimeStatus} disposition={row.disposition} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{activeRowName(row)}</span>
+          <span className="block truncate text-xs text-gray-400">
+            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+          </span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
+            {/* The session you have open stays in the queue whatever its
+                status, so the chip is the only thing that shows a resolve
+                actually landed. Without it, marking the current session done
+                looks like nothing happened. */}
+            <DispositionChip disposition={row.disposition} />
+            <SessionRefChips refs={row.refs} />
+          </span>
+        </span>
+      </button>
+      <span className="absolute right-2 top-1.5 hidden items-center gap-0.5 group-hover:flex">
+        {/* Any row can be marked done, not just finished ones. This is a work
+            queue — "I'm done with this" is a statement about you, not about
+            what the agent happens to be doing this second. */}
+        {onAcknowledge && row.disposition !== "resolved" && (
+          <RowAction icon={Check} label="Mark done" onClick={() => onAcknowledge(row.sessionId)} />
+        )}
+        <SessionActions
+          sessionId={row.sessionId}
+          disposition={row.disposition}
+          onRename={onRenameSession ? () => setRenaming(true) : undefined}
+          onSetDisposition={
+            onSetDisposition
+              ? (disposition) => onSetDisposition(row.sessionId, disposition)
+              : undefined
+          }
+        />
+      </span>
     </div>
   );
 }
@@ -482,9 +556,6 @@ function SessionRow({
   ) => Promise<void> | void;
 }) {
   const [renaming, setRenaming] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useClickOutside<HTMLSpanElement>(menuOpen, () => setMenuOpen(false));
 
   // Real <a> so right-click / cmd-click / middle-click open in a new tab.
   // Plain left-click is intercepted and routed through the SPA navigator.
@@ -492,12 +563,6 @@ function SessionRow({
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     e.preventDefault();
     onSelect();
-  };
-
-  const handleCopyAttach = async () => {
-    await copyText(tmuxAttachCommand(session.sessionId));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
   };
 
   if (renaming && onRename) {
@@ -552,48 +617,118 @@ function SessionRow({
         </span>
       </a>
       <span className="absolute right-2 top-1.5 hidden items-center gap-0.5 group-hover:flex">
-        <RowAction
-          icon={copied ? Check : Terminal}
-          label={copied ? "Copied" : "Copy tmux attach command"}
-          onClick={handleCopyAttach}
+        <SessionActions
+          sessionId={session.sessionId}
+          disposition={session.disposition}
+          onRename={onRename ? () => setRenaming(true) : undefined}
+          onSetDisposition={
+            onSetDisposition
+              ? (disposition) => void onSetDisposition(session, disposition)
+              : undefined
+          }
         />
-        {onRename && (
-          <RowAction icon={Pencil} label="Rename session" onClick={() => setRenaming(true)} />
-        )}
-        {onSetDisposition && (
-          <span className="relative" ref={menuRef}>
-            <RowAction
-              icon={MoreHorizontal}
-              label="Set status"
-              onClick={() => setMenuOpen((open) => !open)}
-            />
-            {menuOpen && (
-              <span className="absolute right-0 top-6 z-20 flex w-40 flex-col rounded-md border border-gray-200 bg-white py-1 shadow-lg">
-                {DISPOSITION_MENU.map((disposition) => {
-                  const current = (session.disposition ?? "open") === disposition;
-                  return (
-                    <button
-                      key={disposition}
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        if (!current) void onSetDisposition(session, disposition);
-                      }}
-                      className={`flex items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
-                        current ? "font-medium text-gray-900" : "text-gray-600"
-                      }`}
-                    >
-                      {DISPOSITION_MENU_LABELS[disposition]}
-                      {current && <Check className="size-3" />}
-                    </button>
-                  );
-                })}
-              </span>
-            )}
-          </span>
-        )}
       </span>
     </div>
+  );
+}
+
+/**
+ * The per-session action cluster: copy tmux command, rename, set status.
+ *
+ * Shared by the tree row and the ACTIVE queue row rather than written twice.
+ * They're the same session seen from two angles, and an action available in
+ * one place but not the other is the kind of inconsistency you only notice
+ * while hunting for the button that was there a second ago.
+ *
+ * Everything but the tmux copy lives behind the ⋯ menu, because the queue row
+ * carries a workspace label and refs and has no width to spare.
+ */
+function SessionActions({
+  sessionId,
+  disposition,
+  onRename,
+  onSetDisposition,
+}: {
+  sessionId: string;
+  disposition?: SessionDisposition;
+  onRename?: () => void;
+  onSetDisposition?: (disposition: SessionDisposition) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useClickOutside<HTMLSpanElement>(menuOpen, () => setMenuOpen(false));
+
+  const handleCopyAttach = async () => {
+    await copyText(tmuxAttachCommand(sessionId));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  const hasMenu = Boolean(onRename || onSetDisposition);
+
+  return (
+    <>
+      <RowAction
+        icon={copied ? Check : Terminal}
+        label={copied ? "Copied" : "Copy tmux attach command"}
+        onClick={handleCopyAttach}
+      />
+      {hasMenu && (
+        <span className="relative" ref={menuRef}>
+          <RowAction
+            icon={MoreHorizontal}
+            label="Session actions"
+            onClick={() => setMenuOpen((open) => !open)}
+          />
+          {menuOpen && (
+            <span className="absolute right-0 top-6 z-30 flex w-44 flex-col rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+              {onRename && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onRename();
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    <Pencil className="size-3" />
+                    Rename
+                  </button>
+                  <span className="my-1 border-t border-gray-100" />
+                </>
+              )}
+              {onSetDisposition && (
+                <>
+                  <span className="px-3 pb-1 text-[10px] uppercase tracking-wide text-gray-400">
+                    Status
+                  </span>
+                  {DISPOSITION_MENU.map((option) => {
+                    const current = (disposition ?? "open") === option;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          if (!current) onSetDisposition(option);
+                        }}
+                        className={`flex items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
+                          current ? "font-medium text-gray-900" : "text-gray-600"
+                        }`}
+                      >
+                        {DISPOSITION_MENU_LABELS[option]}
+                        {current && <Check className="size-3" />}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </span>
+          )}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -819,10 +954,10 @@ function WorkspaceItem({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useClickOutside<HTMLDivElement>(menuOpen, () => setMenuOpen(false));
 
-  // Auto-expand when this workspace becomes active.
-  useEffect(() => {
-    if (isActive) setExpanded(true);
-  }, [isActive]);
+  // No auto-expand. The ACTIVE queue above already surfaces live work from
+  // every workspace, so opening a folder because its workspace became current
+  // just unfolds the tree behind a list that already answered the question.
+  // Folders stay exactly as the user left them.
 
   const handleLoadMore = async () => {
     if (!onLoadMore || loadingMore) return;
@@ -1410,6 +1545,16 @@ export function NavigationDrawer({
             }
           }}
           onAcknowledge={onAcknowledgeSession}
+          onRenameSession={
+            onRenameSession
+              ? (sessionId, title) => void onRenameSession({ sessionId }, title)
+              : undefined
+          }
+          onSetDisposition={
+            onSetSessionDisposition
+              ? (sessionId, disposition) => void onSetSessionDisposition({ sessionId }, disposition)
+              : undefined
+          }
         />
 
         {/* Scrollable workspaces */}
@@ -1426,7 +1571,7 @@ export function NavigationDrawer({
                 hasMore={hasMoreByWorkspace?.[workspace.id] ?? false}
                 isActive={activeWorkspace?.id === workspace.id}
                 activeSessionId={activeSessionId}
-                defaultExpanded={activeWorkspace?.id === workspace.id}
+                defaultExpanded={false}
                 onWorkspaceSelect={onWorkspaceSelect}
                 onSessionSelect={onSessionSelect}
                 onRenameSession={onRenameSession}
