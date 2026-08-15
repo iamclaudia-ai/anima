@@ -45,8 +45,8 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 
 ## Status — 2026-08-15
 
-**Phases 1, 2, and most of 3 are complete.** What's left of 3 is the
-`awaiting_input` notification (#31) and the nav's filter row.
+**Phases 1, 2, and 3a are complete.** What's left of 3 is the "are you done?"
+notification (#31, retargeted) and the split session list.
 
 |                                   | state      | notes                                                              |
 | --------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -194,11 +194,11 @@ Confirmed live on 2026-08-15: status reaches every tab, on every origin. But the
 **Two genuine gaps in what shipped:**
 
 - **Rows don't re-sort on a status change.** The patch updates `runtimeStatus`/`disposition` but not `modified`, so a session that just came alive stays where it was until a refetch. The `status_changed` payload already carries `at`; use it, and re-sort the workspace descending.
-- **A status event for a session outside the loaded first page is dropped.** The handler deliberately returns the previous state for sessions it doesn't hold, to avoid re-rendering the nav for other workspaces' traffic. But if swarm's active session is the 7th most recent, a tab showing swarm's top 5 never learns about it. Fix: when a status arrives for a known workspace but an unknown session, refetch that workspace — debounced, since this fires at least twice per turn.
+- **A status event for a session outside the loaded first page is dropped.** The handler deliberately returns the previous state for sessions it doesn't hold, to avoid re-rendering the nav for other workspaces' traffic. But if swarm's active session is the 7th most recent, a tab showing swarm's top 5 never learns about it. **Don't patch this in the tree** — `session.list_active` below dissolves it, because a pane whose membership is defined by status can't lose a row to pagination.
 
-**Auto-expanding the workspace is the 5-minute version, not the answer.** Expanding on _every_ status change would thrash: two or more events per turn, across every workspace, permanently unfolding the whole tree. If we do it now, expand only on transitions _into_ an attention state (`running`, `awaiting_*`, `failed`, `stalled`, and `completed`-while-`open`) and never auto-collapse.
+**Do not build auto-expand.** It was the obvious reading of "make the session visible", and it's the wrong one: expanding on every status change means two or more events per turn unfolding every workspace permanently, and a tree that is always fully open is just a list with extra indentation. The split list below is what "make it visible" actually wants, and a half-built auto-expand would fight it — an active session would appear in both panes at once. Skipped deliberately, not forgotten.
 
-**The real fix is the split list, which makes auto-expand unnecessary.** Michael's shape:
+**The split list.** Michael's shape:
 
 ```
 ┌─ ACTIVE ─────────────────────────────┐
@@ -212,6 +212,14 @@ Confirmed live on 2026-08-15: status reaches every tab, on every origin. But the
 ```
 
 Active sessions are flat and sorted by recency with the workspace as part of the line, because when something is happening the workspace is context, not hierarchy. The tree stays for _finding_ things. Marking a session done drops it out of the top pane and back into its folder — which is exactly what `disposition` already models, and gives `resolved` a visible, satisfying consequence.
+
+**The active pane needs its own query, and that is what kills the second gap.** It must not be assembled from `sessionsByWorkspace`, which holds the first five rows of each workspace — that's the pagination that loses a workspace's 7th-most-recent session in the first place. A new `session.list_active` returning every session across every workspace where `runtime_status IN (running, awaiting_input, awaiting_approval, failed, stalled)` **or** (`completed` and `disposition = open`), sorted by `last_activity` descending, is defined by _status_ rather than by page position — so a session becoming active is never invisible, regardless of where it ranks in its workspace. The set is naturally small (it's "what's happening right now"), and `idx_sessions_workspace_disposition` plus `idx_sessions_last_activity` already exist to serve it.
+
+With that query in place, 3c's remaining work is:
+
+- `session.list_active`, refetched on `session.status_changed` (debounced) rather than patched — the membership of this pane _is_ status, so a status event is a membership event.
+- The pane itself, with the URL's session pinned to the top for that tab.
+- Re-sort on recency using the event's `at`, which the in-tree list still wants too.
 
 Two cautions. **The active pane must be bounded** — a cap plus "N more", or a busy morning pushes the tree off-screen. And **rows sorted by recency jump while you read them**; the tree should stay stable even when the active pane reorders.
 
