@@ -43,6 +43,40 @@ Worktree support (the thing Michael actually wants next) multiplies sessions per
 
 JSONL stays the durable transcript. The DB is a **derived cache** — droppable and rebuildable at any time. That constraint keeps the reconciler honest and makes migration risk near zero.
 
+## Status — 2026-08-14
+
+Phases 0 and 1 are **shipped and live**; Phase 2 is **half shipped** (refs done, search not started).
+
+|                                   | state      | notes                                                              |
+| --------------------------------- | ---------- | ------------------------------------------------------------------ |
+| **0 — spinners (#65)**            | ✅ shipped | root cause was a trailing `role: "system"` message, not a user one |
+| **1a — titles (#68)**             | ✅ shipped | 352/352 real transcripts titled, 0 markup leaks                    |
+| **1b — DB-first list (#66)**      | ✅ shipped | 247-session workspace: 154ms → 0.7ms                               |
+| **1c — `set_title` + rename UI**  | ⬜ next    | the last piece of Phase 1                                          |
+| **1d — copy tmux command button** | ⬜ next    | small, high value                                                  |
+| **2a — refs + chips (#61)**       | ✅ shipped | 60% of beehiiv sessions carry a chip                               |
+| **2b — FTS search (#2)**          | ⬜ next    | biggest remaining win                                              |
+| **3 — live status (#67, #31)**    | ⬜         |                                                                    |
+| **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
+| **5 — web terminal (#70)**        | ⬜         |                                                                    |
+
+Also fixed along the way, outside the original plan:
+
+- **CLI proxy port instability** — a restarting agent-host could bind a different port than a surviving `claude` process was launched against, producing `API Error: Connection refused`. Resolution is now _live CLI env → persisted registry (`~/.anima/cli-proxy-ports.json`) → derivation_, the port hash moved to FNV-1a (the old char-sum used 718 of 1000 slots with 50.1% collisions), and the base port moved 9000 → 31000 (the old range had 12 foreign listeners). See #39.
+- **`scripts/audit-transcript-index.ts`** — classifies every transcript on disk as indexed / no-content / MISSING.
+
+### Where to pick up
+
+**`session.set_title` + inline rename** finishes Phase 1 and is small: the `sessions.title` column exists, `deriveSessionTitle()` is already the fallback, and the reconciler is careful never to overwrite a stored title (it carries `firstPrompt` forward when a title isn't re-derived). Needs the method, a Zod schema, and an edit affordance on the nav row.
+
+**Then FTS search (#2).** Design is settled in Phase 2 below — index into `memory_search_fts` as a third `source_type`, expose via memory, call from `session.search`. `session_refs` is already populated and indexed, so ref filters come nearly free.
+
+### Known follow-ups worth remembering
+
+- **Refs come from the first prompt only.** That's 60% coverage because PR/ticket ids are usually named up front, but refs mentioned mid-conversation (`WEB-5592` in message 40) are missed. Full coverage lands with 2b, since `memory_transcript_entries` already holds the whole prose corpus.
+- **Archived sessions are hidden but recoverable.** 5,102 rows were archived on first reconcile (transcripts Claude Code deleted). The rows keep title + refs, and `~/.claude/projects-backup` keeps the transcripts — so teaching `get_history` to fall back to the backup would make them openable again. Verified at the time: 0 sessions with a live transcript were archived.
+- **Libby's own sessions (4,175) are excluded from memory ingest** by a self-summarization guard. Reasonable for summarization, but it also makes them unsearchable — worth deciding separately before 2b.
+
 ## Phases
 
 Ordered so each phase ships something usable on its own.
@@ -99,7 +133,7 @@ The reconciler, and the read-path inversion.
 
 1. Prompt detector next to the existing feedback-survey detector — parse `capture-pane` for the modal, extract question + numbered options.
 2. Surface as an actionable block in chat; answering sends the key via `send-keys`. Session sits in `awaiting_approval` meanwhile (Phase 3 gives us the state and the notification for free).
-3. Separately, root-cause the bypass leak: absolute hook path, `allow` default in `emit_hook_output`, explicit allow on the passthrough branch.
+3. ~~Root-cause the bypass leak: absolute hook path, `allow` default in `emit_hook_output`.~~ **Confirmed, and it was neither of those.** `dcg` has a `warn` tier that emits `permissionDecision: "ask"`, and an `ask` from a PreToolUse hook overrides `--dangerously-skip-permissions` — the flag only skips Claude Code's own checks, not a hook's explicit decision. `tmux-wrap.sh` is not implicated. Detector anchors captured from a live prompt: `Hook PreToolUse:Bash requires confirmation for this command:`, `Do you want to proceed?` above a numbered `1. Yes` / `2. No`, footer `Esc to cancel · Tab to amend · ctrl+e to explain`. Full detail in #69.
 
 **Ships:** no more `tmux attach` to unstick a session.
 
