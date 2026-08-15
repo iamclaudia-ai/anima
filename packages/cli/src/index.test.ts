@@ -50,6 +50,44 @@ describe("cli parsing", () => {
     });
   });
 
+  /**
+   * Without the schema the parser has to guess from the text, and digits become
+   * a number. That's right for `--limit 50` and wrong for a string param whose
+   * value happens to be digits — `session.answer_modal --key 1` failed
+   * validation as "expected string, got number" before the parser could see
+   * that the method asked for a string.
+   */
+  describe("schema-aware coercion", () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: {
+        key: { type: "string" },
+        limit: { type: "number" },
+        note: { type: "string" },
+      },
+    };
+
+    it("keeps a numeric-looking value as text when the param is a string", () => {
+      expect(parseCliParams(["--key", "1"], schema)).toEqual({ key: "1" });
+    });
+
+    it("does not round-trip through Number and lose precision", () => {
+      expect(parseCliParams(["--note", "1.50"], schema)).toEqual({ note: "1.50" });
+    });
+
+    it("still coerces params that are actually numbers", () => {
+      expect(parseCliParams(["--limit", "50"], schema)).toEqual({ limit: 50 });
+    });
+
+    it("guesses as before for params the schema doesn't mention", () => {
+      expect(parseCliParams(["--other", "7"], schema)).toEqual({ other: 7 });
+    });
+
+    it("leaves 'true' alone on a string param", () => {
+      expect(parseCliParams(["--key", "true"], schema)).toEqual({ key: "true" });
+    });
+  });
+
   it("throws on positional args", () => {
     expect(() => parseCliParams(["oops"])).toThrow(
       "Unexpected positional argument: oops. Use --name value.",

@@ -156,7 +156,31 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: unkno
   current[parts[parts.length - 1]] = value;
 }
 
-export function parseCliParams(rawArgs: string[]): Record<string, unknown> {
+/**
+ * True when the method declares this param as a plain string.
+ *
+ * Used to keep {@link coerceValue} from guessing: `--key 1` on a string param
+ * should stay `"1"`. Only top-level keys — a dot-notation path addresses a
+ * free-form object, which has no declared leaf type to consult.
+ */
+function declaresString(key: string, schema?: JsonSchema): boolean {
+  if (!schema || key.includes(".")) return false;
+  const resolved = resolveSchema(schema, schema) ?? schema;
+  const prop = resolved.properties?.[key];
+  if (!prop) return false;
+  return schemaType(prop, schema) === "string";
+}
+
+/**
+ * Parse `--flag value` pairs into a params object.
+ *
+ * `schema` is optional but worth passing: without it the parser has to guess a
+ * type from the text, and anything that looks like a number becomes one. That
+ * is right for `--limit 50` and wrong for every string param whose value
+ * happens to be digits — an option key, a version, a title of "2026" — which
+ * then fails validation as "expected string, got number".
+ */
+export function parseCliParams(rawArgs: string[], schema?: JsonSchema): Record<string, unknown> {
   const params: Record<string, unknown> = {};
 
   for (let i = 0; i < rawArgs.length; i += 1) {
@@ -186,7 +210,9 @@ export function parseCliParams(rawArgs: string[]): Record<string, unknown> {
       i += 1;
     }
 
-    const value = coerceValue(raw);
+    // The raw text stands when the method says it wants a string — no lossy
+    // round-trip through Number ("1.50" would come back as "1.5").
+    const value = declaresString(key, schema) ? raw : coerceValue(raw);
 
     // Support dot notation: --action.type notification → { action: { type: "notification" } }
     if (key.includes(".")) {
@@ -1822,7 +1848,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const params = parseCliParams(paramArgs);
+  const params = parseCliParams(paramArgs, methodDef.inputSchema);
 
   // Auto-inject sessionId from $ANIMA_SESSION_ID if not explicitly provided
   const injectionResult = injectSessionIdFromEnv(params, methodDef, resolvedMethod);
