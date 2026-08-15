@@ -45,7 +45,8 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 
 ## Status — 2026-08-15
 
-**Phases 1 and 2 are complete.** Phase 3 (live status) is next.
+**Phases 1, 2, and most of 3 are complete.** What's left of 3 is the
+`awaiting_input` notification (#31) and the nav's filter row.
 
 |                                   | state      | notes                                                              |
 | --------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -56,7 +57,9 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 | **1d — copy tmux command button** | ✅ shipped | no id normalization needed — CLI panes are `anima-cli-<id>`        |
 | **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
 | **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
-| **3 — live status (#67, #31)**    | ⬜ next    |                                                                    |
+| **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
+| **3b — notification (#31)**       | ⬜ next    | the piece with a trust cost; dedupe by sessionId first             |
+| **3c — nav filter row**           | ⬜         | server-side filter exists (`includeDispositions`); no UI yet       |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
 | **5 — web terminal (#70)**        | ⬜         |                                                                    |
 
@@ -75,14 +78,17 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**Phase 3 — live status (#67, #31)** is next: the two status axes, `session.list_changed` / `session.status_changed` on the bus, the nav subscribing, and the `awaiting_input` notification. It's the last piece of the original "nothing about it is live" complaint — reads are now instant and searchable, but the list is still a per-tab snapshot.
+**Phase 3b — the `awaiting_input` notification (#31)** is next, and it's the piece with a trust cost. Get the dedupe by sessionId right before making it prettier: a duplicate notification for one session is worse than no notification. Everything it needs now exists — `awaiting_input` is a real runtime state and `session.status_changed` already reaches every tab.
 
-Four things Phase 3 should know before it starts:
+**Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser. Until that lands the two states are reachable only by hand — which is worth knowing before wiring a notification to a transition nothing emits yet.
 
-- **`runtime_status` already exists** on `sessions`, with a CHECK constraint listing `idle | running | completed | failed | interrupted | stalled`. Adding `awaiting_input` / `awaiting_approval` means rewriting that constraint, which in SQLite means a table rebuild — migrations 014 and 015 are the worked examples. `disposition` is a new column and needs no rebuild.
-- **The reconciler is the wrong place for status.** It runs on the list call and derives from the filesystem; status changes come from agent-host in real time. The event should originate where the state changes (`session-agent-bridge.ts` / the lifecycle modules), with the DB written on the same path.
-- **`session.search` returns `archived`** per hit but nothing else about disposition yet. Once `disposition` lands, the search schema already has the `disposition` filter the plan called for — wire it through `getSessionsForSearch`.
-- **Notifications are the part with a trust cost.** #31 wants one on `awaiting_input` in a backgrounded tab. Get the dedupe by sessionId right before making it prettier — a duplicate notification for one session is worse than no notification.
+What 3a established, and what a fresh session should know:
+
+- **Two axes, both live.** `runtime_status` (machine) is written by the prompt lifecycle and the event bridge; `disposition` (human) only by `session.set_status`. Disposition deliberately never routes through `upsertSession`, so the reconciler can't reset it — the same protection `set_title` has.
+- **`running` means a turn is in flight, not "a process exists".** Three separate things had that wrong and all three were only visible against the live gateway: `process_started` doesn't fire for a turn on an already-running session, `isProcessRunning` is true for every attached CLI pane, and nothing wrote the closing transition when the extension died mid-turn. `reconcileInFlightStatuses` now checks the claims against the process table at startup and marks orphans `stalled`. **The database is a cache; the process table is ground truth** — the same lesson the CLI registry learned, now applied to status.
+- **Events only fire on transitions.** `applyRuntimeStatus` is the single funnel and returns false when nothing moved. This matters because it runs per streamed event — an unconditional emit would put a bus message behind every token.
+- **`session.list_changed` carries no rows.** Deciding where a new session sorts client-side would mean reimplementing the server's ordering in two places, so the tab refetches — asking for at least as many rows as it currently shows, or a list someone expanded collapses back to five.
+- **Do not renumber migrations.** Migration 024 rebuilt the `sessions` table for the widened CHECK constraint. `ensureSessionTable` mirrors it exactly and logs loudly at open if it finds a pre-024 table.
 
 Search shipped on 2026-08-15 and is in use. What a fresh session should know about it:
 
@@ -147,10 +153,10 @@ The reconciler, and the read-path inversion.
 
 ### Phase 3 — Live status (#67, #31)
 
-1. Schema: keep `runtime_status` for machine state (add `awaiting_input`, `awaiting_approval`); add `disposition` for human state (`open | needs_review | blocked | snoozed | resolved | archived`).
-2. Emit `session.status_changed` and `session.list_changed`; nav subscribes.
-3. Notification on `awaiting_input` in a backgrounded tab, tagged by sessionId so it dedupes and click-focuses (closes #31).
-4. `session.set_status` + chip/context-menu; filter row in the nav; `resolved`/`archived` hidden by default.
+1. ~~Schema: two axes.~~ **Done** — migration 024.
+2. ~~Emit `session.status_changed` and `session.list_changed`; nav subscribes.~~ **Done.**
+3. Notification on `awaiting_input` in a backgrounded tab, tagged by sessionId so it dedupes and click-focuses (closes #31). **Blocked on nothing technically, but see the note above: no code writes `awaiting_input` until Phase 4's detector lands.**
+4. ~~`session.set_status` + chip/context-menu; `resolved`/`archived` hidden by default.~~ **Done.** The nav filter row is still missing — `listWorkspaceSessions` takes `includeDispositions`, but no UI passes it, so hidden work is currently reachable only through search.
 
 **Ships:** every tab agrees; nothing gets silently abandoned.
 
