@@ -105,6 +105,37 @@ interface NavigationDrawerProps {
    * was, which is what the VS Code sidebar mounts.
    */
   onSearchSessions?: (query: string) => Promise<SessionSearchResult>;
+  /**
+   * Sessions for the ACTIVE pane above the tree — in flight, or finished and
+   * unacknowledged. Optional, like everything else here, so the VS Code
+   * sidebar can mount the drawer without the gateway plumbing behind it.
+   */
+  activeSessions?: ActiveSessionRow[];
+  /** Ticking clock for the pane's elapsed labels. */
+  activeNow?: number;
+  /** Mark a pane row done — it drops out of the pane and back into its tree. */
+  onAcknowledgeSession?: (sessionId: string) => void;
+}
+
+/**
+ * One row in the ACTIVE pane.
+ *
+ * Carries its workspace as a *label* rather than sitting under a workspace
+ * parent: when something is happening, the workspace is context, not
+ * hierarchy. That's the whole reason this pane exists — the tree is the wrong
+ * shape for "what is going on right now", and collapsing a folder shouldn't
+ * be able to hide live work.
+ */
+export interface ActiveSessionRow {
+  sessionId: string;
+  workspaceId: string;
+  workspaceName: string;
+  title: string | null;
+  firstPrompt: string | null;
+  runtimeStatus: SessionRuntimeStatus;
+  disposition: SessionDisposition;
+  /** What the elapsed label counts from. */
+  waitingSince: string;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -185,6 +216,121 @@ function runtimePresentation(
     return (disposition ?? "open") === "open" ? READY_PRESENTATION : undefined;
   }
   return status ? RUNTIME_PRESENTATION[status] : undefined;
+}
+
+// ── ACTIVE pane ─────────────────────────────────────────────────
+
+/**
+ * How many rows the pane shows before collapsing the rest behind a count.
+ *
+ * A busy morning must not push the workspace tree off-screen — the pane is
+ * meant to answer "what's happening", not to become the whole sidebar.
+ */
+const MAX_ACTIVE_ROWS = 6;
+
+function activeRowName(row: ActiveSessionRow): string {
+  return row.title?.trim() || row.firstPrompt?.trim() || row.sessionId.slice(0, 8);
+}
+
+function elapsedLabel(since: string, now: number): string {
+  const at = Date.parse(since);
+  if (!Number.isFinite(at)) return "";
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * The flat "what's happening right now" list, above the workspace tree.
+ *
+ * Sorted by recency, except the session this tab is looking at, which is
+ * pinned to the top — the row you're working in shouldn't move out from under
+ * you because something finished elsewhere.
+ */
+function ActivePane({
+  rows,
+  activeSessionId,
+  now,
+  onSelect,
+  onAcknowledge,
+}: {
+  rows: ActiveSessionRow[];
+  activeSessionId: string | null;
+  now: number;
+  onSelect: (row: ActiveSessionRow) => void;
+  onAcknowledge?: (sessionId: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  if (rows.length === 0) return null;
+
+  const visible = showAll ? rows : rows.slice(0, MAX_ACTIVE_ROWS);
+  const hidden = rows.length - visible.length;
+
+  return (
+    <div className="border-b border-gray-200 px-2 pb-2 pt-2">
+      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+        Active
+      </div>
+      <div className="space-y-0.5">
+        {visible.map((row) => {
+          const isActive = row.sessionId === activeSessionId;
+          return (
+            <div key={row.sessionId} className="group relative">
+              <button
+                type="button"
+                onClick={() => onSelect(row)}
+                className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                  isActive
+                    ? "bg-gray-100 text-gray-900"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+              >
+                <RuntimeStatusDot status={row.runtimeStatus} disposition={row.disposition} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{activeRowName(row)}</span>
+                  <span className="block truncate text-xs text-gray-400">
+                    {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+                  </span>
+                </span>
+              </button>
+              {/* Only finished work can be acknowledged — "done" on a session
+                  that is still running would be a lie the next event undoes. */}
+              {onAcknowledge && row.runtimeStatus === "completed" && (
+                <span className="absolute right-2 top-2 hidden group-hover:flex">
+                  <RowAction
+                    icon={Check}
+                    label="Mark done"
+                    onClick={() => onAcknowledge(row.sessionId)}
+                  />
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {hidden > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="w-full px-2 py-1 text-left text-xs text-gray-500 hover:text-gray-700"
+          >
+            {hidden} more
+          </button>
+        )}
+        {showAll && rows.length > MAX_ACTIVE_ROWS && (
+          <button
+            type="button"
+            onClick={() => setShowAll(false)}
+            className="w-full px-2 py-1 text-left text-xs text-gray-500 hover:text-gray-700"
+          >
+            Show less
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -1226,9 +1372,23 @@ export function NavigationDrawer({
   onWorkspaceMenuAction,
   onSettingsMenuAction,
   onSearchSessions,
+  activeSessions,
+  activeNow,
+  onAcknowledgeSession,
 }: NavigationDrawerProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // The session this tab is looking at sorts first, whatever its recency —
+  // the row you are working in shouldn't slide away because something
+  // finished in another workspace. Everything else stays newest-first, which
+  // is the order the server already returned.
+  const activeRows = useMemo(() => {
+    if (!activeSessions?.length) return [];
+    const pinned = activeSessions.filter((row) => row.sessionId === activeSessionId);
+    const rest = activeSessions.filter((row) => row.sessionId !== activeSessionId);
+    return [...pinned, ...rest];
+  }, [activeSessions, activeSessionId]);
 
   return (
     <>
@@ -1238,6 +1398,19 @@ export function NavigationDrawer({
           <TopAction icon={Plus} label="New workspace" onClick={onNewWorkspace} />
           <TopAction icon={Search} label="Search" onClick={() => setSearchOpen(true)} />
         </div>
+
+        <ActivePane
+          rows={activeRows}
+          activeSessionId={activeSessionId}
+          now={activeNow ?? Date.now()}
+          onSelect={(row) => {
+            const workspace = workspaces.find((w) => w.id === row.workspaceId);
+            if (workspace) {
+              onSessionSelect({ sessionId: row.sessionId }, workspace);
+            }
+          }}
+          onAcknowledge={onAcknowledgeSession}
+        />
 
         {/* Scrollable workspaces */}
         <div className="flex-1 overflow-y-auto p-2">

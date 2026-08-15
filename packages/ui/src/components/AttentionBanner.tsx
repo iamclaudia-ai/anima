@@ -73,7 +73,7 @@ function sessionLabel(session: AttentionSession): string {
 }
 
 export function AttentionBanner() {
-  const { overdue, acknowledge, snooze } = useAttentionSessions();
+  const { overdue, now, acknowledge, snooze } = useAttentionSessions();
   const currentSessionId = useCurrentSessionId();
   // Per-tab, and deliberately not persisted: "I've seen it" is a fact about
   // this tab right now, not a durable property of the session.
@@ -95,8 +95,6 @@ export function AttentionBanner() {
     markSeen(session.sessionId);
     navigate(`/chat/${session.workspaceId}/${session.sessionId}`);
   };
-
-  const now = Date.now();
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[9998] flex justify-center px-4 pt-3">

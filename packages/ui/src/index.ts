@@ -91,5 +91,9 @@ export { GlobalNotifications } from "./components/GlobalNotifications";
 export { AttentionBanner } from "./components/AttentionBanner";
 export { LoginGate, logout } from "./components/LoginGate";
 export { NavigationDrawer } from "./components/NavigationDrawer";
-export type { WorkspaceMenuAction, SettingsMenuAction } from "./components/NavigationDrawer";
+export type {
+  WorkspaceMenuAction,
+  SettingsMenuAction,
+  ActiveSessionRow,
+} from "./components/NavigationDrawer";
 export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";

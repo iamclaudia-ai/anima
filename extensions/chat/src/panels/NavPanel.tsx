@@ -6,7 +6,13 @@
  * (or pass through to extension methods) once the backend supports them.
  */
 
-import { NavigationDrawer, CreateWorkspaceModal, logout } from "@anima/ui";
+import {
+  NavigationDrawer,
+  CreateWorkspaceModal,
+  logout,
+  useAttentionSessions,
+  type ActiveSessionRow,
+} from "@anima/ui";
 import type { WorkspaceMenuAction, SettingsMenuAction } from "@anima/ui";
 import type { WorkspaceInfo } from "@anima/ui";
 import { useChatPage } from "../context/ChatPageContext";
@@ -35,6 +41,20 @@ export function NavPanel() {
     onPinWorkspace,
     onRefreshSessions,
   } = useChatPage();
+
+  // The ACTIVE pane's data. Shares one poller with the app-wide banner — two
+  // views of "what needs you" that disagreed would undercut the entire point.
+  const { sessions: attention, now, acknowledge } = useAttentionSessions();
+  const activeSessions: ActiveSessionRow[] = attention.map((s) => ({
+    sessionId: s.sessionId,
+    workspaceId: s.workspaceId,
+    workspaceName: s.workspaceName,
+    title: s.title,
+    firstPrompt: s.firstPrompt,
+    runtimeStatus: s.runtimeStatus,
+    disposition: s.disposition,
+    waitingSince: s.waitingSince,
+  }));
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
     if (action === "pin") {
@@ -72,6 +92,9 @@ export function NavPanel() {
         onRenameSession={onRenameSession}
         onSetSessionDisposition={onSetSessionDisposition}
         onSearchSessions={onSearchSessions}
+        activeSessions={activeSessions}
+        activeNow={now}
+        onAcknowledgeSession={(sessionId) => void acknowledge(sessionId)}
         onNewSession={onNewSession}
         onNewWorkspace={onNewWorkspace}
         onLoadMoreSessions={onLoadMoreSessions}

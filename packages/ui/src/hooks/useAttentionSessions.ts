@@ -1,22 +1,29 @@
 /**
- * The sessions currently wanting attention, kept live.
+ * The sessions currently wanting attention, kept live and shared.
+ *
+ * Two consumers in the same tab — the banner and the nav's active pane — and
+ * they must never disagree, since the whole premise of this work is that every
+ * view of a session says the same thing. So the data lives in one module-level
+ * store with one poller, and both read it through `useSyncExternalStore`.
+ * Mounting a second consumer costs a subscription, not another fetch.
  *
  * Two update paths, because the set changes for two different reasons:
  *
  * - **Events.** `session.status_changed` means something moved, so refetch.
- *   Debounced, since a turn produces at least two of them and a busy morning
- *   produces a lot more.
+ *   Debounced, since a turn produces several and a busy morning produces a lot.
  * - **A clock.** Nothing fires when a snooze expires or when a session crosses
- *   the "you've been ignoring this for 15 minutes" line. Those are time, not
- *   events, so a slow interval is the only honest way to notice them.
+ *   the "you've been ignoring this for fifteen minutes" line. Those are facts
+ *   about time, not events, so a slow interval is the only honest way to see
+ *   them.
  *
  * The list is fetched rather than derived from the nav's per-workspace pages
  * on purpose: those pages hold five rows per workspace, and pagination is
  * exactly what would drop a workspace's seventh-most-recent session from a
- * list whose whole job is to not lose anything.
+ * list whose entire job is to not lose anything.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import type { GatewayClient } from "@anima/shared/gateway-client";
 import { useGatewayClientContext } from "../contexts/GatewayClientContext";
 import type { SessionDisposition, SessionRuntimeStatus } from "./useChatGateway";
 
@@ -38,16 +45,113 @@ export interface AttentionSession {
 /** How long a finished session waits before it stops being polite about it. */
 export const ESCALATE_AFTER_MS = 15 * 60_000;
 
-/** Slow enough to be invisible, fast enough that "15 minutes" means it. */
+/** Slow enough to be invisible, fast enough that "fifteen minutes" means it. */
 const POLL_INTERVAL_MS = 60_000;
 
 /** Long enough to collapse a turn's burst of events into one fetch. */
 const REFETCH_DEBOUNCE_MS = 1_000;
 
+/** How often elapsed-time labels and thresholds get re-evaluated. */
+const CLOCK_TICK_MS = 30_000;
+
+// ── Shared store ─────────────────────────────────────────────
+
+const EMPTY: AttentionSession[] = [];
+let snapshot: AttentionSession[] = EMPTY;
+const listeners = new Set<() => void>();
+let client: GatewayClient | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let stopListening: (() => void) | null = null;
+
+function getSnapshot(): AttentionSession[] {
+  return snapshot;
+}
+
+function sameSessions(a: AttentionSession[], b: AttentionSession[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((row, i) => {
+    const other = b[i];
+    return (
+      other !== undefined &&
+      row.sessionId === other.sessionId &&
+      row.runtimeStatus === other.runtimeStatus &&
+      row.disposition === other.disposition &&
+      row.waitingSince === other.waitingSince &&
+      row.title === other.title
+    );
+  });
+}
+
+function publish(next: AttentionSession[]): void {
+  // `useSyncExternalStore` compares snapshots by identity, so handing back a
+  // fresh array every poll would re-render both consumers once a minute for
+  // nothing.
+  if (sameSessions(snapshot, next)) return;
+  snapshot = next;
+  for (const listener of listeners) listener();
+}
+
+function fetchNow(): void {
+  const c = client;
+  if (!c) return;
+  void c
+    .call<{ sessions?: AttentionSession[] }>("session.list_attention")
+    .then((result) => publish(result?.sessions ?? EMPTY))
+    .catch(() => {
+      // Keep the previous list. A failed poll should not silently empty a
+      // banner that is telling Michael something real.
+    });
+}
+
+function scheduleFetch(): void {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(fetchNow, REFETCH_DEBOUNCE_MS);
+}
+
+/** Begin polling and listening. Idempotent; safe to call on every connect. */
+function start(next: GatewayClient): void {
+  client = next;
+  stopListening?.();
+  // Listens, but deliberately does not subscribe. Gateway subscriptions are
+  // per *connection*, not per component, and the nav already subscribes to
+  // this event — so a subscribe/unsubscribe pair here would silence the nav.
+  // On a route with no nav the poll below is the only update path, which is
+  // fine for a list whose fastest-moving threshold is fifteen minutes.
+  stopListening = next.on("session.status_changed", scheduleFetch);
+  if (!pollTimer) pollTimer = setInterval(fetchNow, POLL_INTERVAL_MS);
+  fetchNow();
+}
+
+function stop(): void {
+  stopListening?.();
+  stopListening = null;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = null;
+  client = null;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    // The last consumer leaving stops the poll — nothing is reading it, and a
+    // timer that outlives its readers is just a background request loop.
+    if (listeners.size === 0) stop();
+  };
+}
+
+// ── Hook ─────────────────────────────────────────────────────
+
 export interface UseAttentionSessionsReturn {
+  /** Everything wanting attention — in flight, or done and unacknowledged. */
   sessions: AttentionSession[];
-  /** Finished, unacknowledged, and waiting longer than the escalation window. */
+  /** The subset that has been waiting long enough to interrupt over. */
   overdue: AttentionSession[];
+  /** Milliseconds, ticking — so labels and thresholds move without an event. */
+  now: number;
   refresh: () => void;
   acknowledge: (sessionId: string) => Promise<void>;
   snooze: (sessionId: string, minutes: number) => Promise<void>;
@@ -65,82 +169,37 @@ export function waitedMs(session: AttentionSession, now: number): number {
 
 export function useAttentionSessions(): UseAttentionSessionsReturn {
   const ctx = useGatewayClientContext();
-  const client = ctx?.client ?? null;
+  const gatewayClient = ctx?.client ?? null;
   const isConnected = ctx?.isConnected ?? false;
 
-  const [sessions, setSessions] = useState<AttentionSession[]>([]);
-  // Re-render on a timer so elapsed-time thresholds are crossed without an
-  // event — "it has been 15 minutes" is a fact about the clock, not the data.
+  const sessions = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const [now, setNow] = useState(() => Date.now());
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clientRef = useRef(client);
 
   useEffect(() => {
-    clientRef.current = client;
-  });
+    if (!gatewayClient || !isConnected) return;
+    start(gatewayClient);
+  }, [gatewayClient, isConnected]);
 
-  const refresh = useCallback(() => {
-    const c = clientRef.current;
-    if (!c) return;
-    void c
-      .call<{ sessions?: AttentionSession[] }>("session.list_attention")
-      .then((result) => setSessions(result?.sessions ?? []))
-      .catch(() => {
-        // Leave the previous list in place. A failed poll should not empty a
-        // banner that is telling Michael something real.
-      });
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(tick);
   }, []);
 
-  useEffect(() => {
-    if (!client || !isConnected) return;
+  const refresh = useCallback(() => fetchNow(), []);
 
-    refresh();
+  const acknowledge = useCallback(async (sessionId: string) => {
+    await client?.call("session.set_status", { sessionId, disposition: "resolved" });
+    fetchNow();
+  }, []);
 
-    // Listens, but deliberately does not subscribe. Gateway subscriptions are
-    // per *connection*, not per component, and the nav already subscribes to
-    // this event — so a subscribe/unsubscribe pair here would silence the nav
-    // the moment this unmounted. Listening is free and tears down cleanly.
-    //
-    // On a route with no nav, nothing subscribes and the poll below is the
-    // only update path. That's fine for what this drives: a banner about work
-    // that has been waiting fifteen minutes does not need sub-second latency.
-    const scheduleRefresh = () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(refresh, REFETCH_DEBOUNCE_MS);
-    };
-    const off = client.on("session.status_changed", scheduleRefresh);
-
-    const timer = setInterval(() => {
-      setNow(Date.now());
-      refresh();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      off();
-      clearInterval(timer);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [client, isConnected, refresh]);
-
-  const acknowledge = useCallback(
-    async (sessionId: string) => {
-      await clientRef.current?.call("session.set_status", { sessionId, disposition: "resolved" });
-      refresh();
-    },
-    [refresh],
-  );
-
-  const snooze = useCallback(
-    async (sessionId: string, minutes: number) => {
-      await clientRef.current?.call("session.snooze", { sessionId, minutes });
-      refresh();
-    },
-    [refresh],
-  );
+  const snooze = useCallback(async (sessionId: string, minutes: number) => {
+    await client?.call("session.snooze", { sessionId, minutes });
+    fetchNow();
+  }, []);
 
   const overdue = sessions.filter(
     (s) => isAwaitingAcknowledgement(s) && waitedMs(s, now) >= ESCALATE_AFTER_MS,
   );
 
-  return { sessions, overdue, refresh, acknowledge, snooze };
+  return { sessions, overdue, now, refresh, acknowledge, snooze };
 }

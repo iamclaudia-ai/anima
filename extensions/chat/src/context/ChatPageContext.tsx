@@ -698,7 +698,14 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
             ...current,
             runtimeStatus: payload.runtimeStatus,
             disposition: payload.disposition,
+            // A status change *is* activity, so the row's recency moved with
+            // it. Without this the list keeps the order it was fetched in and
+            // a session that just came alive sits wherever it happened to be.
+            modified: payload.at ?? current.modified,
           };
+          // Re-sort newest-first, matching the order the server returns, so
+          // the tree and a fresh page never disagree about position.
+          updated.sort((a, b) => (b.modified ?? "").localeCompare(a.modified ?? ""));
           next[wsId] = updated;
           touched = true;
         }
