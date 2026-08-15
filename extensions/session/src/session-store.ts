@@ -859,6 +859,223 @@ export function listWorkspaceSessions(
   });
 }
 
+/** Runtime states that mean the agent is mid-something. */
+const IN_FLIGHT_STATUSES: readonly RuntimeStatus[] = [
+  "running",
+  "awaiting_input",
+  "awaiting_approval",
+  "failed",
+  "stalled",
+];
+
+export interface AttentionSession {
+  sessionId: string;
+  workspaceId: string;
+  workspaceName: string;
+  cwd: string;
+  title: string | null;
+  firstPrompt: string | null;
+  runtimeStatus: RuntimeStatus;
+  disposition: SessionDisposition;
+  lastActivity: string;
+  /**
+   * What "waiting 20 minutes" counts from.
+   *
+   * Not `last_activity`, which is restamped whenever agent-host readopts a
+   * live CLI pane — so a gateway restart would silently reset every waiting
+   * clock, and the escalation would never fire for anyone who reloads.
+   * `metadata.lastAssistantMessageAt` is written once, by `turn_stop`, and
+   * means exactly "when the turn ended".
+   */
+  waitingSince: string;
+  /** Set while snoozed; the session reappears once this passes. */
+  snoozedUntil: string | null;
+}
+
+/**
+ * Everything currently wanting Michael's attention, across every workspace.
+ *
+ * One predicate, two consumers. The banner asks "should I interrupt?" and the
+ * active pane asks "what's happening right now" — they're the same set, so it
+ * lives in one place rather than drifting into two definitions of "active".
+ *
+ * Two halves:
+ *
+ * - **In flight** — `running` and friends. The agent is mid-something.
+ * - **Done and unacknowledged** — `completed` with `disposition = open`. This
+ *   is the half the original plan missed. Asking for a PR review and then
+ *   forgetting to come back is the case that actually costs time, and nothing
+ *   in the system represented it: the session was finished, unremarkable, and
+ *   indistinguishable from work that had been dealt with.
+ *
+ * Deliberately **not** paginated per workspace. The nav's per-workspace pages
+ * are what lose a workspace's 7th-most-recent session, and a set defined by
+ * status can't have that problem — membership is the status itself. The set is
+ * naturally small, because it's a description of right now.
+ *
+ * Snoozed sessions drop out until their timer passes, which is what makes
+ * snooze mean "remind me later" rather than "never mind". Note that `snoozed`
+ * is admitted by the predicate and excluded by the *timestamp* — the first
+ * version filtered on disposition alone, which meant a snoozed session failed
+ * the `completed + open` branch permanently and never came back. Snooze was
+ * dismissal wearing a friendlier label; the timestamp is the source of truth
+ * for whether it's quiet right now, and the disposition only records that a
+ * snooze was set.
+ */
+export function listAttentionSessions(options?: {
+  now?: string;
+  /**
+   * Ignore work that finished longer ago than this.
+   *
+   * Without a bound the list is "everything anyone ever left unresolved",
+   * which on first run put months-old rows in a banner about coming back
+   * *now*. Past a day it isn't a forgotten errand, it's history — and the nav
+   * dot still marks it either way.
+   */
+  maxAgeHours?: number;
+}): AttentionSession[] {
+  const nowIso = options?.now ?? new Date().toISOString();
+  const maxAgeHours = options?.maxAgeHours ?? 24;
+  const cutoffIso = new Date(Date.parse(nowIso) - maxAgeHours * 3_600_000).toISOString();
+  const inFlight = IN_FLIGHT_STATUSES.map(() => "?").join(",");
+  const rows = getDb()
+    .query(
+      `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
+              s.runtime_status, s.disposition, s.last_activity,
+              w.id AS workspace_id, w.name AS workspace_name, w.cwd AS cwd
+         FROM sessions s
+         JOIN workspaces w ON w.id = s.workspace_id
+        WHERE s.purpose = 'chat'
+          AND s.status = 'active'
+          AND s.disposition NOT IN ('resolved','archived')
+          AND (s.runtime_status IN (${inFlight})
+               OR (s.runtime_status = 'completed' AND s.disposition IN ('open','snoozed')))
+        ORDER BY s.last_activity DESC`,
+    )
+    .all(...IN_FLIGHT_STATUSES) as Array<{
+    session_id: string;
+    title: string | null;
+    metadata_json: string | null;
+    runtime_status: string | null;
+    disposition: string | null;
+    last_activity: string;
+    workspace_id: string;
+    workspace_name: string;
+    cwd: string;
+  }>;
+
+  const result: AttentionSession[] = [];
+  for (const row of rows) {
+    const metadata = parseMetadata(row.metadata_json);
+    const snoozedUntil = typeof metadata?.snoozedUntil === "string" ? metadata.snoozedUntil : null;
+    // A live snooze hides the row entirely rather than flagging it — a muted
+    // item still in the list is just a quieter version of the nagging.
+    if (snoozedUntil && snoozedUntil > nowIso) continue;
+
+    const runtimeStatus: RuntimeStatus = isRuntimeStatus(row.runtime_status)
+      ? row.runtime_status
+      : "idle";
+    const waitingSince =
+      typeof metadata?.lastAssistantMessageAt === "string"
+        ? metadata.lastAssistantMessageAt
+        : row.last_activity;
+    // Only finished work ages out. Something still in flight belongs here
+    // however long it has been running — that's the stalled case, not history.
+    if (runtimeStatus === "completed" && waitingSince < cutoffIso) continue;
+
+    result.push({
+      sessionId: row.session_id,
+      workspaceId: row.workspace_id,
+      workspaceName: row.workspace_name,
+      cwd: row.cwd,
+      title: row.title,
+      firstPrompt: typeof metadata?.firstPrompt === "string" ? metadata.firstPrompt : null,
+      runtimeStatus,
+      disposition: isSessionDisposition(row.disposition) ? row.disposition : "open",
+      lastActivity: row.last_activity,
+      waitingSince,
+      snoozedUntil,
+    });
+  }
+  return result;
+}
+
+/**
+ * Snooze a session until `untilIso`, or clear the snooze with `null`.
+ *
+ * The timestamp lives in `metadata_json` rather than a column: `disposition`
+ * already says *what* the state is, and this is only the *when*. Adding a
+ * column for it would mean another table rebuild for a field nothing filters
+ * or joins on.
+ */
+/**
+ * Bulk-acknowledge the backlog: finished work nobody ever marked done.
+ *
+ * Scoped to `completed` + `open` on purpose, and **not** to every old session.
+ * Most rows in the database are `idle` — ordinary, browsable history — and
+ * `resolved` is hidden from the nav, so a sweep over all of them would empty
+ * every workspace folder. This clears the rows that would otherwise keep a
+ * blue "ready for you" mark forever, and nothing else.
+ *
+ * Reversible: `session.set_status` puts any of them back to `open`.
+ */
+export function resolveStaleCompleted(options: {
+  olderThanDays: number;
+  dryRun?: boolean;
+  now?: string;
+}): {
+  matched: number;
+  resolved: number;
+  sessions: Array<{ sessionId: string; lastActivity: string }>;
+} {
+  const nowMs = Date.parse(options.now ?? new Date().toISOString());
+  const cutoff = new Date(nowMs - options.olderThanDays * 86_400_000).toISOString();
+
+  const rows = getDb()
+    .query(
+      `SELECT provider_session_id AS session_id, last_activity
+         FROM sessions
+        WHERE purpose = 'chat'
+          AND status = 'active'
+          AND runtime_status = 'completed'
+          AND disposition = 'open'
+          AND last_activity < ?
+        ORDER BY last_activity DESC`,
+    )
+    .all(cutoff) as Array<{ session_id: string; last_activity: string }>;
+
+  const sessions = rows.map((row) => ({
+    sessionId: row.session_id,
+    lastActivity: row.last_activity,
+  }));
+  if (options.dryRun) return { matched: rows.length, resolved: 0, sessions };
+
+  const dbConn = getDb();
+  const write = dbConn.transaction((ids: string[]) => {
+    const update = dbConn.query(
+      `UPDATE sessions SET disposition = 'resolved', updated_at = datetime('now')
+        WHERE provider_session_id = ?`,
+    );
+    for (const id of ids) update.run(id);
+  });
+  write(sessions.map((s) => s.sessionId));
+
+  return { matched: rows.length, resolved: sessions.length, sessions };
+}
+
+export function setSessionSnooze(sessionId: string, untilIso: string | null): boolean {
+  const existing = getStoredSession(sessionId);
+  if (!existing) return false;
+  const metadata = { ...(existing.metadata || {}) };
+  if (untilIso) metadata.snoozedUntil = untilIso;
+  else delete metadata.snoozedUntil;
+
+  getDb()
+    .query("UPDATE sessions SET metadata_json = ?, updated_at = ? WHERE provider_session_id = ?")
+    .run(JSON.stringify(metadata), new Date().toISOString(), sessionId);
+  return true;
+}
+
 export function listSubagentSessions(filters?: {
   parentSessionId?: string;
   status?: "running" | "completed" | "failed" | "interrupted";

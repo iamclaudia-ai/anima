@@ -25,8 +25,15 @@ import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
 import { resolveRefsConfig } from "./session-reconciler";
-import { getStoredSession, setSessionTitle, type SessionDisposition } from "./session-store";
-import { applyDisposition, emitListChanged } from "./session-status-events";
+import {
+  getStoredSession,
+  listAttentionSessions,
+  resolveStaleCompleted,
+  setSessionSnooze,
+  setSessionTitle,
+  type SessionDisposition,
+} from "./session-store";
+import { applyDisposition, emitListChanged, emitStatusChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
@@ -180,6 +187,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     "session.list_commands": async (params) =>
       listCommands({ cwd: params.cwd as string | undefined }),
     "session.list_files": async (params) => listFiles({ cwd: params.cwd as string }),
+    "session.list_attention": async () => ({ sessions: listAttentionSessions() }),
     "session.health_check": async () => healthCheckDetailed(),
     "session.rotate_persistent_sessions": async () => {
       const rt = getRuntime();
@@ -228,6 +236,47 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       }
       log.info("Session renamed", { sessionId: sessionId.slice(0, 8), cleared: !title?.trim() });
       return { sessionId, title: title?.trim() || null };
+    },
+    "session.resolve_stale": async (params) => {
+      const result = resolveStaleCompleted({
+        olderThanDays: (params.olderThanDays as number | undefined) ?? 5,
+        dryRun: params.dryRun as boolean | undefined,
+      });
+      if (result.resolved > 0) {
+        // One event, not one per row: the banner and the nav both just refetch,
+        // and a few thousand status events would be a self-inflicted flood.
+        for (const workspaceId of new Set(
+          result.sessions
+            .map((s) => getStoredSession(s.sessionId)?.workspaceId)
+            .filter((id): id is string => Boolean(id)),
+        )) {
+          emitListChanged(workspaceId, "disposition_changed");
+        }
+      }
+      log.info("Resolved stale sessions", {
+        matched: result.matched,
+        resolved: result.resolved,
+        dryRun: Boolean(params.dryRun),
+      });
+      return { matched: result.matched, resolved: result.resolved };
+    },
+    "session.snooze": async (params) => {
+      const sessionId = params.sessionId as string;
+      const clear = params.clear as boolean | undefined;
+      const minutes = (params.minutes as number | undefined) ?? 30;
+      const until = clear ? null : new Date(Date.now() + minutes * 60_000).toISOString();
+      if (!setSessionSnooze(sessionId, until)) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      // Snoozing changes what the attention list contains, and the banner is
+      // driven by that list — so this has to announce itself, or the banner
+      // Michael just silenced stays up until something else moves. Extending
+      // an existing snooze isn't a disposition change, hence the fallback.
+      if (!applyDisposition(sessionId, clear ? "open" : "snoozed")) {
+        emitStatusChanged(sessionId);
+      }
+      log.info("Session snoozed", { sessionId: shortId(sessionId), until });
+      return { sessionId, snoozedUntil: until };
     },
     "session.set_status": async (params) => {
       const sessionId = params.sessionId as string;

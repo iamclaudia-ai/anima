@@ -7,8 +7,10 @@ import {
   setSessionTitle,
   getStoredSession,
   listSubagentSessions,
+  listAttentionSessions,
   listWorkspaceSessions,
   setSessionDisposition,
+  setSessionSnooze,
   setWorkspaceActiveSession,
   touchSession,
   updateSessionRuntime,
@@ -207,6 +209,89 @@ describe("session store", () => {
       // An empty allow-list means "no filter given", not "match nothing" —
       // the latter would compile to `IN ()`, which SQLite rejects.
       expect(() => listWorkspaceSessions("ws_status", { includeDispositions: [] })).not.toThrow();
+    });
+
+    // The predicate behind both the banner and the active pane.
+    describe("attention list", () => {
+      const NOW = "2026-08-15T12:00:00.000Z";
+
+      it("includes in-flight work and finished-but-unacknowledged work", () => {
+        seed("ses_running");
+        seed("ses_done_open");
+        seed("ses_done_resolved");
+        seed("ses_idle");
+        touchSession("ses_running", "running");
+        touchSession("ses_done_open", "completed");
+        touchSession("ses_done_resolved", "completed");
+        setSessionDisposition("ses_done_resolved", "resolved");
+
+        const ids = listAttentionSessions({ now: NOW }).map((s) => s.sessionId);
+        expect(ids).toContain("ses_running");
+        // The case the original plan missed: finished, and nobody has looked.
+        expect(ids).toContain("ses_done_open");
+        expect(ids).not.toContain("ses_done_resolved");
+        // Idle isn't attention — it's a session that simply isn't doing anything.
+        expect(ids).not.toContain("ses_idle");
+      });
+
+      it("hides a snoozed session until its timer passes", () => {
+        seed("ses_snooze");
+        touchSession("ses_snooze", "completed");
+        setSessionSnooze("ses_snooze", "2026-08-15T12:30:00.000Z");
+        setSessionDisposition("ses_snooze", "snoozed");
+
+        const during = listAttentionSessions({ now: NOW }).map((s) => s.sessionId);
+        expect(during).not.toContain("ses_snooze");
+
+        // "Remind me later" has to actually remind, or it's just dismissal
+        // with extra steps.
+        const after = listAttentionSessions({ now: "2026-08-15T13:00:00.000Z" }).map(
+          (s) => s.sessionId,
+        );
+        expect(after).toContain("ses_snooze");
+      });
+
+      it("clears a snooze outright", () => {
+        seed("ses_unsnooze");
+        touchSession("ses_unsnooze", "completed");
+        setSessionSnooze("ses_unsnooze", "2026-08-15T23:00:00.000Z");
+        expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).not.toContain(
+          "ses_unsnooze",
+        );
+
+        setSessionSnooze("ses_unsnooze", null);
+        expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).toContain(
+          "ses_unsnooze",
+        );
+      });
+
+      it("preserves other metadata when snoozing", () => {
+        upsertSession({
+          id: "ses_meta",
+          workspaceId: "ws_status",
+          providerSessionId: "ses_meta",
+          model: "claude-opus-5",
+          agent: "claude",
+          purpose: "chat",
+          metadata: { firstPrompt: "review the PR" },
+        });
+        setSessionSnooze("ses_meta", "2026-08-15T23:00:00.000Z");
+        expect(getStoredSession("ses_meta")?.metadata?.firstPrompt).toBe("review the PR");
+      });
+
+      it("carries what the banner needs to render a row", () => {
+        seed("ses_render");
+        touchSession("ses_render", "awaiting_input");
+
+        const row = listAttentionSessions({ now: NOW }).find((s) => s.sessionId === "ses_render");
+        expect(row).toMatchObject({
+          workspaceId: "ws_status",
+          runtimeStatus: "awaiting_input",
+          disposition: "open",
+        });
+        expect(row?.lastActivity).toBeTruthy();
+        expect(row?.workspaceName).toBeTruthy();
+      });
     });
 
     it("carries both axes onto the list rows", () => {

@@ -225,6 +225,47 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
+    name: "session.list_attention",
+    description:
+      "Sessions wanting attention across every workspace — in flight, or finished and unacknowledged. Not paginated per workspace: membership is the status itself. Snoozed sessions are omitted until their timer passes.",
+    inputSchema: z.object({}),
+    execution: { lane: "read", concurrency: "parallel" },
+  },
+  {
+    name: "session.resolve_stale",
+    description:
+      "Mark finished-but-unacknowledged sessions older than N days as resolved. Scoped to completed+open only — idle sessions are ordinary history and resolving them would empty the nav. Reversible with set_status.",
+    inputSchema: z.object({
+      olderThanDays: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .default(5)
+        .describe("Resolve completed sessions with no activity in this many days"),
+      dryRun: z.boolean().optional().default(false).describe("Report what would change"),
+    }),
+    execution: { lane: "write", concurrency: "serial" },
+  },
+  {
+    name: "session.snooze",
+    description:
+      "Hide a session from the attention list for a while, then let it come back. 'Remind me later', as distinct from 'we're done here' (which is set_status resolved).",
+    inputSchema: z.object({
+      sessionId: z.string().describe("Session UUID"),
+      minutes: z
+        .number()
+        .int()
+        .positive()
+        .max(1440)
+        .optional()
+        .default(30)
+        .describe("How long to stay quiet. Pass 0 via clear:true to un-snooze."),
+      clear: z.boolean().optional().default(false).describe("Cancel an existing snooze"),
+    }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
+  },
+  {
     name: "session.set_status",
     description:
       "Set where a session's work stands. This is the human axis — separate from runtime status, which the agent owns. 'resolved' and 'archived' hide the session from the default list.",

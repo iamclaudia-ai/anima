@@ -85,6 +85,14 @@ export class SessionRegistry {
       const runtimeStatus: RuntimeStatus =
         session.isProcessRunning && session.stale ? "stalled" : "idle";
 
+      // Adoption is not activity. Agent-host reports `lastActivity` as the
+      // moment it noticed the pane, so readopting on every reconnect was
+      // stamping live sessions with "now" — which reordered the nav on a
+      // restart and reset the clock behind "this finished 20 minutes ago and
+      // you haven't looked". A session's last activity is the last thing said
+      // in it, so an existing row keeps the value it already had.
+      const existing = getStoredSession(session.id);
+
       upsertSession({
         id: session.id,
         workspaceId: workspaceResult.workspace.id,
@@ -93,7 +101,7 @@ export class SessionRegistry {
         agent: "claude",
         purpose: "chat",
         runtimeStatus,
-        lastActivity: session.lastActivity,
+        lastActivity: existing?.lastActivity ?? session.lastActivity,
       });
 
       if (session.isActive) {
