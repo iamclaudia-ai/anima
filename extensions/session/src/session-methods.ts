@@ -94,6 +94,21 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
+    name: "session.search",
+    description:
+      "Find sessions by what was said in them — full-text over every user message and assistant prose, ranked by relevance. Tool inputs and outputs are not indexed.",
+    inputSchema: z.object({
+      query: z.string().describe("Free text; punctuation is tokenized, trailing word is a prefix"),
+      cwd: z.string().optional().describe("Restrict to one workspace (omit to search all)"),
+      ref: z
+        .string()
+        .optional()
+        .describe("Restrict to sessions carrying this PR/ticket key, e.g. 'anima#61'"),
+      limit: z.number().int().positive().max(100).optional().default(20).describe("Max sessions"),
+    }),
+    execution: { lane: "read", concurrency: "parallel" },
+  },
+  {
     name: "session.get_history",
     description: "Get session history from JSONL",
     inputSchema: z.object({

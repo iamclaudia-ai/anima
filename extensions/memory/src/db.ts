@@ -785,12 +785,137 @@ export function searchMemory(
     .all(...params) as SearchResult[];
 }
 
+export interface TranscriptSearchHit {
+  /** Claude Code session id — the join key back to the session extension's rows. */
+  sessionId: string;
+  cwd: string;
+  /** Most recent matching message in the session. */
+  timestamp: string;
+  /** Highlighted excerpt from the best-matching message. */
+  snippet: string;
+  role: "user" | "assistant";
+  /** Matching messages in this session — a rough "how much of it is about this". */
+  matches: number;
+  /** bm25 of the best match. Negative; lower is better. */
+  rank: number;
+}
+
+/**
+ * How many matching messages are considered before grouping into sessions.
+ *
+ * The result list is per-session, but bm25 ranks per-message, so the grouping
+ * has to happen after the match. This bounds that work: a term as common as
+ * "claudia" matches tens of thousands of messages, and reading all of them to
+ * return 20 sessions costs seconds instead of the ~90ms this ceiling gives.
+ *
+ * The cost is a long-tail bias — a session with one weak mention of a very
+ * common term can fall outside the window. That's the right trade for a search
+ * box: the sessions you're looking for rank near the top or the query is too
+ * broad to be useful anyway.
+ */
+const TRANSCRIPT_MATCH_WINDOW = 500;
+
+/**
+ * Full-text search across transcript messages, grouped into sessions.
+ *
+ * Reads `memory_transcript_fts` — an external-content index over
+ * `memory_transcript_entries`, so the content is never duplicated and the
+ * snippet comes straight from the stored message (see migration 023).
+ */
+export function searchTranscripts(
+  query: string,
+  opts?: {
+    limit?: number;
+    cwd?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    /** Restrict to these sessions — how a ref filter is applied by the caller. */
+    sessionIds?: readonly string[];
+  },
+): TranscriptSearchHit[] {
+  const limit = opts?.limit ?? 20;
+
+  const conditions: string[] = [];
+  const params: (string | number)[] = [query, TRANSCRIPT_MATCH_WINDOW];
+
+  if (opts?.cwd) {
+    conditions.push("e.cwd = ?");
+    params.push(opts.cwd);
+  }
+  if (opts?.dateFrom) {
+    conditions.push("e.timestamp >= ?");
+    params.push(opts.dateFrom);
+  }
+  if (opts?.dateTo) {
+    conditions.push("e.timestamp <= ?");
+    params.push(opts.dateTo);
+  }
+  if (opts?.sessionIds) {
+    // An empty allow-list means "no session qualifies", not "no filter".
+    if (opts.sessionIds.length === 0) return [];
+    conditions.push(`e.session_id IN (${opts.sessionIds.map(() => "?").join(",")})`);
+    params.push(...opts.sessionIds);
+  }
+
+  params.push(limit);
+  const filters = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  return getDb()
+    .query(
+      `WITH hits AS (
+         SELECT rowid AS entry_id,
+                bm25(memory_transcript_fts) AS rank,
+                snippet(memory_transcript_fts, 0, '«', '»', '…', 14) AS snippet
+           FROM memory_transcript_fts
+          WHERE memory_transcript_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+       ),
+       joined AS (
+         SELECT e.session_id, e.cwd, e.timestamp, e.role, h.rank, h.snippet
+           FROM hits h
+           JOIN memory_transcript_entries e ON e.id = h.entry_id
+           ${filters}
+       ),
+       ranked AS (
+         -- Window functions rather than GROUP BY: the row's snippet and role
+         -- have to come from the *best-ranked* message, and SQLite only
+         -- guarantees that pairing for bare columns when a query has exactly
+         -- one min/max aggregate. This query needs three.
+         SELECT session_id, cwd, role, rank, snippet,
+                ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY rank)  AS rn,
+                COUNT(*)     OVER (PARTITION BY session_id)                AS matches,
+                MAX(timestamp) OVER (PARTITION BY session_id)              AS last_at
+           FROM joined
+       )
+       SELECT session_id        AS sessionId,
+              COALESCE(cwd, '') AS cwd,
+              last_at           AS timestamp,
+              matches, rank, snippet, role
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY rank
+        LIMIT ?`,
+    )
+    .all(...params) as TranscriptSearchHit[];
+}
+
 /**
  * Check if the FTS table exists (for graceful degradation).
  */
 export function ftsTableExists(): boolean {
   try {
     getDb().query("SELECT count(*) FROM memory_search_fts LIMIT 1").get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Same, for the transcript index (migration 023). */
+export function transcriptFtsExists(): boolean {
+  try {
+    getDb().query("SELECT rowid FROM memory_transcript_fts LIMIT 1").get();
     return true;
   } catch {
     return false;

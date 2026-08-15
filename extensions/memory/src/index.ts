@@ -48,7 +48,9 @@ import {
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
   searchMemory,
+  searchTranscripts,
   ftsTableExists,
+  transcriptFtsExists,
   getCalendarData,
   getDayConversations,
   getMonthRange,
@@ -306,6 +308,23 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         cwd: z.string().optional().describe("Filter by workspace directory"),
         dateFrom: z.string().optional().describe("Filter results from this date (ISO format)"),
         dateTo: z.string().optional().describe("Filter results up to this date (ISO format)"),
+      }),
+      execution: { lane: "read", concurrency: "parallel" } as const,
+    },
+    {
+      name: "memory.search_transcripts",
+      description:
+        "Full-text search across transcript messages, grouped into sessions and ranked by BM25. Covers every user message and assistant prose — tool inputs and outputs are not stored, so they are not searchable.",
+      inputSchema: z.object({
+        query: z.string().describe("Search query — FTS5 syntax (quotes, AND/OR/NOT, prefix*)"),
+        limit: z.number().optional().default(20).describe("Max sessions to return"),
+        cwd: z.string().optional().describe("Filter by workspace directory"),
+        dateFrom: z.string().optional().describe("Filter results from this date (ISO format)"),
+        dateTo: z.string().optional().describe("Filter results up to this date (ISO format)"),
+        sessionIds: z
+          .array(z.string())
+          .optional()
+          .describe("Restrict results to these session ids (how a ref filter is applied)"),
       }),
       execution: { lane: "read", concurrency: "parallel" } as const,
     },
@@ -809,6 +828,23 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           query,
           totalResults: results.length,
         };
+      }
+
+      case "memory.search_transcripts": {
+        if (!transcriptFtsExists()) {
+          throw new Error(
+            "Transcript FTS index not available — migration 023 may not have run yet",
+          );
+        }
+        const query = params.query as string;
+        const results = searchTranscripts(query, {
+          limit: params.limit as number | undefined,
+          cwd: params.cwd as string | undefined,
+          dateFrom: params.dateFrom as string | undefined,
+          dateTo: params.dateTo as string | undefined,
+          sessionIds: params.sessionIds as string[] | undefined,
+        });
+        return { results, query, totalResults: results.length };
       }
 
       case "memory.get_session_context": {

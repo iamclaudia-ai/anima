@@ -554,6 +554,78 @@ export function listSessionsForRefSync(
   });
 }
 
+export interface SessionSearchRow {
+  sessionId: string;
+  workspaceId: string;
+  workspaceName: string;
+  cwd: string;
+  title?: string;
+  firstPrompt?: string;
+  modified: string;
+  /** Archived rows have no transcript on disk — the UI opens them read-only. */
+  archived: boolean;
+  refs: StoredSessionRef[];
+}
+
+/**
+ * Hydrate search hits into rows the nav can render.
+ *
+ * Search matches the transcript corpus, which reaches further back than the
+ * session table's live rows — memory holds 2,411 sessions where only ~360
+ * transcripts still exist on disk. A hit with no session row here is one whose
+ * workspace was never registered; the caller drops it rather than rendering a
+ * link that goes nowhere. Archived rows *are* returned, flagged, because their
+ * prose is the whole reason they're findable.
+ */
+export function getSessionsForSearch(sessionIds: readonly string[]): Map<string, SessionSearchRow> {
+  const found = new Map<string, SessionSearchRow>();
+  if (sessionIds.length === 0) return found;
+
+  const db = getDb();
+  const refsBySession = getRefsForSessions([...sessionIds]);
+
+  for (let i = 0; i < sessionIds.length; i += 400) {
+    const ids = sessionIds.slice(i, i + 400);
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db
+      .query(
+        `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
+                s.status, s.last_activity, w.id AS workspace_id, w.name AS workspace_name,
+                w.cwd AS cwd
+           FROM sessions s
+           JOIN workspaces w ON w.id = s.workspace_id
+          WHERE s.provider_session_id IN (${placeholders})`,
+      )
+      .all(...ids) as Array<{
+      session_id: string;
+      title: string | null;
+      metadata_json: string | null;
+      status: "active" | "archived";
+      last_activity: string;
+      workspace_id: string;
+      workspace_name: string;
+      cwd: string;
+    }>;
+
+    for (const row of rows) {
+      const metadata = parseMetadata(row.metadata_json);
+      found.set(row.session_id, {
+        sessionId: row.session_id,
+        workspaceId: row.workspace_id,
+        workspaceName: row.workspace_name,
+        cwd: row.cwd,
+        title: row.title ?? undefined,
+        firstPrompt: typeof metadata?.firstPrompt === "string" ? metadata.firstPrompt : undefined,
+        modified: row.last_activity,
+        archived: row.status === "archived",
+        refs: refsBySession.get(row.session_id) ?? [],
+      });
+    }
+  }
+
+  return found;
+}
+
 /** Sessions referencing a given PR/ticket key, most recently active first. */
 export function findSessionsByRef(refKey: string): string[] {
   const rows = getDb()

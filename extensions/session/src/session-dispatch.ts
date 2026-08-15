@@ -26,6 +26,7 @@ import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
 import { resolveRefsConfig } from "./session-reconciler";
 import { setSessionTitle } from "./session-store";
+import { searchSessions } from "./session-search";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -205,6 +206,13 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     },
     "session.get_memory_context": async (params) =>
       getMemoryContext(params.cwd as string | undefined),
+    "session.search": async (params) =>
+      searchSessions((method, args) => getRuntime().ctx.call(method, args), {
+        query: params.query as string,
+        cwd: params.cwd as string | undefined,
+        ref: params.ref as string | undefined,
+        limit: params.limit as number | undefined,
+      }),
   };
 }
 
