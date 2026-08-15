@@ -285,6 +285,18 @@ export function syncSessionRefs(
     if (!options.dryRun && cursor > watermark) recordWatermark(sessionId, cursor);
   }
 
+  // A rescan read every message, so a session that produced nothing this time
+  // genuinely has no refs — clear it rather than leaving stale chips behind.
+  // Incremental passes can't conclude that, which is why this is rescan-only.
+  if (options.rescan) {
+    for (const session of sessions) {
+      if (next.has(session.sessionId) || !session.currentRefs?.length) continue;
+      result.updated++;
+      result.added -= session.currentRefs.length;
+      if (!options.dryRun) setSessionRefs(session.sessionId, []);
+    }
+  }
+
   // 3. Persist only genuine changes. Reconcile runs on every list call, and
   //    rewriting an identical set would be a DELETE + INSERT per session per
   //    keystroke of navigation.

@@ -200,6 +200,20 @@ describe("syncSessionRefs", () => {
     expect(keysOf("s6")).toEqual(["WEB-9"]);
   });
 
+  test("rescan clears a session whose refs were all false positives", () => {
+    addSession("s8");
+    setSessionRefs("s8", [{ type: "github", key: "beehiiv/swarm#9", label: "#9" }]);
+    addEntry("s8", "user", "[Image #9] look at this");
+
+    syncSessionRefs(
+      [{ sessionId: "s8", currentRefs: getRefsForSessions(["s8"]).get("s8") }],
+      config,
+      { rescan: true },
+    );
+
+    expect(keysOf("s8")).toEqual([]);
+  });
+
   test("survives a database where memory has never ingested", () => {
     getSessionDb().exec("DROP TABLE memory_transcript_entries");
     addSession("s7");
