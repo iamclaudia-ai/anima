@@ -24,6 +24,7 @@ export function NavPanel() {
     onWorkspaceSelect,
     onSessionSelect,
     onRenameSession,
+    onSetSessionDisposition,
     onSearchSessions,
     onNewSession,
     onNewWorkspace,
@@ -69,6 +70,7 @@ export function NavPanel() {
         onWorkspaceSelect={onWorkspaceSelect}
         onSessionSelect={onSessionSelect}
         onRenameSession={onRenameSession}
+        onSetSessionDisposition={onSetSessionDisposition}
         onSearchSessions={onSearchSessions}
         onNewSession={onNewSession}
         onNewWorkspace={onNewWorkspace}

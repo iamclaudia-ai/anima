@@ -26,7 +26,14 @@ import {
   type ReactNode,
 } from "react";
 import { navigate, useGatewayClient, useRouter, WorkspaceProvider } from "@anima/ui";
-import type { WorkspaceInfo, SessionInfo, SessionSearchResult } from "@anima/ui";
+import type {
+  WorkspaceInfo,
+  SessionInfo,
+  SessionSearchResult,
+  SessionStatusChangedEvent,
+  SessionListChangedEvent,
+  SessionDisposition,
+} from "@anima/ui";
 import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
@@ -108,6 +115,7 @@ export interface ChatPageContextValue {
    */
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onRenameSession: (session: SessionInfo, title: string | null) => Promise<void>;
+  onSetSessionDisposition: (session: SessionInfo, disposition: SessionDisposition) => Promise<void>;
   /** Full-text search across every message in every workspace. */
   onSearchSessions: (query: string) => Promise<SessionSearchResult>;
   /** Create a new session in `workspace` (defaults to the active one). */
@@ -156,7 +164,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const loadingMoreRef = useRef<Set<string>>(new Set());
   const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
-  const { call, isConnected } = useGatewayClient();
+  const { call, client, isConnected } = useGatewayClient();
 
   // ── URL is the single source of truth ────────────────────────
   // `activeWorkspace` and `activeSessionId` are *derived* from the URL.
@@ -195,6 +203,17 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       return (await call<T>(method, params)) as T;
     },
     [call],
+  );
+
+  // Read by the live-event effect. Held in refs rather than listed as
+  // dependencies so a workspace list update doesn't tear down and rebuild the
+  // gateway subscription — a resubscribe cycle can drop events landing in the
+  // gap, which is exactly the staleness this is meant to remove.
+  const workspacesRef = useRef<WorkspaceInfo[]>(workspaces);
+  workspacesRef.current = workspaces;
+  const sessionCountRef = useRef<Record<string, number>>({});
+  sessionCountRef.current = Object.fromEntries(
+    Object.entries(sessionsByWorkspace).map(([id, list]) => [id, list.length]),
   );
 
   // Initial page size for each workspace's session list. "Show more" fetches
@@ -396,6 +415,35 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [callGateway],
   );
 
+  const onSetSessionDisposition = useCallback(
+    async (session: SessionInfo, disposition: SessionDisposition) => {
+      const previous = session.disposition;
+      // Optimistic, like renaming: the menu item you just clicked should take
+      // effect before the round trip. The server's `session.list_changed`
+      // arrives moments later and is what actually removes the row when the
+      // new disposition is a hidden one.
+      const patch = (next: SessionDisposition | undefined) =>
+        setSessionsByWorkspace((prev) => {
+          const updated: Record<string, SessionInfo[]> = {};
+          for (const [workspaceId, sessions] of Object.entries(prev)) {
+            updated[workspaceId] = sessions.map((s) =>
+              s.sessionId === session.sessionId ? { ...s, disposition: next } : s,
+            );
+          }
+          return updated;
+        });
+
+      patch(disposition);
+      try {
+        await callGateway("session.set_status", { sessionId: session.sessionId, disposition });
+      } catch (error) {
+        console.error("Failed to set session status", error);
+        patch(previous);
+      }
+    },
+    [callGateway],
+  );
+
   const onSearchSessions = useCallback(
     async (query: string): Promise<SessionSearchResult> => {
       const result = (await callGateway("session.search", {
@@ -568,6 +616,95 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     }
   }, [workspaceId, sessionId, workspaces, activeWorkspaceSessions]);
 
+  // ── Live session list ────────────────────────────────────────
+  // Until now every tab held its own snapshot of the session list, taken
+  // when it loaded — so two tabs disagreed within seconds and a session that
+  // went quiet stayed looking busy forever. Two server events fix that, and
+  // they're handled differently on purpose:
+  //
+  //   `session.status_changed` patches the one row in place. It's the high
+  //     frequency event, and refetching a whole workspace because a dot went
+  //     from grey to green would be absurd.
+  //
+  //   `session.list_changed` refetches the affected workspace's first page.
+  //     Membership changed, and working out where a new row sorts would mean
+  //     reimplementing the server's ordering rules in the client.
+  //
+  // A status event for a session this tab isn't showing is dropped rather
+  // than triggering a fetch: it's usually another workspace's traffic, and
+  // that workspace's own list event will arrive if membership actually moved.
+  useEffect(() => {
+    if (!client || !isConnected) return;
+
+    const events = ["session.status_changed", "session.list_changed"];
+    void client.subscribe(events).catch(() => {
+      // Non-fatal: the list falls back to the snapshot behaviour it had
+      // before, refreshed on navigation.
+    });
+
+    const offStatus = client.on("session.status_changed", (_event, raw) => {
+      const payload = raw as SessionStatusChangedEvent | undefined;
+      if (!payload?.sessionId) return;
+      setSessionsByWorkspace((prev) => {
+        // Find the row wherever it is — the payload's workspaceId is
+        // authoritative, but a session that moved workspaces would otherwise
+        // leave a stale copy behind under the old key.
+        let touched = false;
+        const next: Record<string, SessionInfo[]> = {};
+        for (const [wsId, sessions] of Object.entries(prev)) {
+          const index = sessions.findIndex((s) => s.sessionId === payload.sessionId);
+          if (index === -1) {
+            next[wsId] = sessions;
+            continue;
+          }
+          const current = sessions[index];
+          if (!current) {
+            next[wsId] = sessions;
+            continue;
+          }
+          if (
+            current.runtimeStatus === payload.runtimeStatus &&
+            current.disposition === payload.disposition
+          ) {
+            next[wsId] = sessions;
+            continue;
+          }
+          const updated = [...sessions];
+          updated[index] = {
+            ...current,
+            runtimeStatus: payload.runtimeStatus,
+            disposition: payload.disposition,
+          };
+          next[wsId] = updated;
+          touched = true;
+        }
+        // Returning `prev` unchanged keeps React from re-rendering the whole
+        // nav for an event about a session no tab is showing.
+        return touched ? next : prev;
+      });
+    });
+
+    const offList = client.on("session.list_changed", (_event, raw) => {
+      const payload = raw as SessionListChangedEvent | undefined;
+      const ws = payload?.workspaceId
+        ? workspacesRef.current.find((w) => w.id === payload.workspaceId)
+        : undefined;
+      if (!ws) return;
+      void loadSessionsForWorkspace(callGateway, ws.cwd, {
+        limit: Math.max(SESSIONS_PAGE_SIZE, sessionCountRef.current[ws.id] ?? 0),
+        offset: 0,
+      })
+        .then((result) => setSessionsForWorkspace(ws.id, result.sessions, result.hasMore))
+        .catch(() => undefined);
+    });
+
+    return () => {
+      offStatus();
+      offList();
+      void client.unsubscribe(events).catch(() => undefined);
+    };
+  }, [client, isConnected, callGateway, setSessionsForWorkspace]);
+
   // Refresh first page when the URL points at a new workspace — purely
   // a data fetch, doesn't touch selection. Decoupling this from the
   // bootstrap effect keeps deep-link navigation responsive.
@@ -597,6 +734,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onWorkspaceSelect,
       onSessionSelect,
       onRenameSession,
+      onSetSessionDisposition,
       onSearchSessions,
       onNewSession,
       onNewWorkspace,
@@ -620,6 +758,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onWorkspaceSelect,
       onSessionSelect,
       onRenameSession,
+      onSetSessionDisposition,
       onSearchSessions,
       onNewSession,
       onNewWorkspace,

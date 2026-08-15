@@ -60,6 +60,10 @@ export type {
   SessionInfo,
   SessionSearchHit,
   SessionSearchResult,
+  SessionRuntimeStatus,
+  SessionDisposition,
+  SessionStatusChangedEvent,
+  SessionListChangedEvent,
   SubagentInfo,
   GitStatusInfo,
 } from "./hooks/useChatGateway";

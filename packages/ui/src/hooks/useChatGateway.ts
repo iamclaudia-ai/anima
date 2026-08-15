@@ -53,6 +53,50 @@ export interface SessionInfo {
   gitBranch?: string;
   /** PR / ticket references extracted from the session, shown as chips. */
   refs?: SessionRefInfo[];
+  /** What the agent is doing right now — machine state, owned by the server. */
+  runtimeStatus?: SessionRuntimeStatus;
+  /** Where the work stands — human state, set from the row's menu. */
+  disposition?: SessionDisposition;
+}
+
+/** Mirrors `RuntimeStatus` in the session extension's store. */
+export type SessionRuntimeStatus =
+  | "idle"
+  | "running"
+  | "awaiting_input"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "stalled";
+
+/** Mirrors `SessionDisposition` in the session extension's store. */
+export type SessionDisposition =
+  | "open"
+  | "needs_review"
+  | "blocked"
+  | "snoozed"
+  | "resolved"
+  | "archived";
+
+/** Payload of `session.status_changed` — one session moved. */
+export interface SessionStatusChangedEvent {
+  sessionId: string;
+  workspaceId: string | null;
+  cwd: string | null;
+  runtimeStatus: SessionRuntimeStatus;
+  previousRuntimeStatus?: SessionRuntimeStatus;
+  disposition: SessionDisposition;
+  previousDisposition?: SessionDisposition;
+  at: string;
+}
+
+/** Payload of `session.list_changed` — a workspace's list membership moved. */
+export interface SessionListChangedEvent {
+  workspaceId: string;
+  cwd: string | null;
+  reason: string;
+  at: string;
 }
 
 /**

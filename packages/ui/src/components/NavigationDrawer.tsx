@@ -45,6 +45,8 @@ import type {
   SessionRefInfo,
   SessionSearchHit,
   SessionSearchResult,
+  SessionRuntimeStatus,
+  SessionDisposition,
 } from "../hooks/useChatGateway";
 
 // ── Props ───────────────────────────────────────────────────────
@@ -79,6 +81,14 @@ interface NavigationDrawerProps {
    * the pencil affordance simply doesn't render.
    */
   onRenameSession?: (session: SessionInfo, title: string | null) => Promise<void> | void;
+  /**
+   * Set where a session's work stands. Optional: without it the row's status
+   * menu doesn't render, which is what the VS Code sidebar mounts.
+   */
+  onSetSessionDisposition?: (
+    session: SessionInfo,
+    disposition: SessionDisposition,
+  ) => Promise<void> | void;
   /** Create a session in the given workspace (defaults to active when omitted). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -134,6 +144,87 @@ function formatSessionName(s: SessionInfo): string {
 /** The command that attaches a terminal to a session's CLI pane. */
 function tmuxAttachCommand(sessionId: string): string {
   return `tmux attach -t anima-cli-${sessionId}`;
+}
+
+// ── Status presentation ─────────────────────────────────────────
+
+/**
+ * How each runtime status reads in the nav.
+ *
+ * `idle` and `completed` are deliberately absent. They're the resting states —
+ * most rows are in one of them most of the time, and a column of grey dots
+ * carries no information while costing the eye something on every scan. A dot
+ * appears when there is something to say.
+ */
+const RUNTIME_PRESENTATION: Partial<
+  Record<SessionRuntimeStatus, { dotClass: string; label: string; pulse?: boolean }>
+> = {
+  running: { dotClass: "bg-emerald-500", label: "Working", pulse: true },
+  awaiting_input: { dotClass: "bg-amber-500", label: "Waiting for you", pulse: true },
+  awaiting_approval: { dotClass: "bg-amber-500", label: "Waiting for approval", pulse: true },
+  failed: { dotClass: "bg-red-500", label: "Failed" },
+  interrupted: { dotClass: "bg-gray-400", label: "Interrupted" },
+  stalled: { dotClass: "bg-orange-500", label: "Stalled" },
+};
+
+/**
+ * How each disposition reads. `open` has no chip — it's the default, and
+ * labelling every untouched session "Open" would be noise.
+ */
+const DISPOSITION_PRESENTATION: Partial<
+  Record<SessionDisposition, { label: string; className: string }>
+> = {
+  needs_review: { label: "Needs review", className: "bg-blue-50 text-blue-700 ring-blue-200" },
+  blocked: { label: "Blocked", className: "bg-red-50 text-red-700 ring-red-200" },
+  snoozed: { label: "Snoozed", className: "bg-gray-100 text-gray-600 ring-gray-200" },
+  resolved: { label: "Resolved", className: "bg-green-50 text-green-700 ring-green-200" },
+  archived: { label: "Archived", className: "bg-gray-100 text-gray-500 ring-gray-200" },
+};
+
+/** The order dispositions appear in the row menu. */
+const DISPOSITION_MENU: SessionDisposition[] = [
+  "open",
+  "needs_review",
+  "blocked",
+  "snoozed",
+  "resolved",
+  "archived",
+];
+
+const DISPOSITION_MENU_LABELS: Record<SessionDisposition, string> = {
+  open: "Open",
+  needs_review: "Needs review",
+  blocked: "Blocked",
+  snoozed: "Snoozed",
+  resolved: "Resolved",
+  archived: "Archived",
+};
+
+function RuntimeStatusDot({ status }: { status?: SessionRuntimeStatus }) {
+  const presentation = status ? RUNTIME_PRESENTATION[status] : undefined;
+  if (!presentation) return null;
+  return (
+    <span
+      title={presentation.label}
+      aria-label={presentation.label}
+      role="img"
+      className={`mt-1.5 inline-block size-2 flex-shrink-0 rounded-full ${presentation.dotClass} ${
+        presentation.pulse ? "animate-pulse" : ""
+      }`}
+    />
+  );
+}
+
+function DispositionChip({ disposition }: { disposition?: SessionDisposition }) {
+  const presentation = disposition ? DISPOSITION_PRESENTATION[disposition] : undefined;
+  if (!presentation) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${presentation.className}`}
+    >
+      {presentation.label}
+    </span>
+  );
 }
 
 // ── Click-outside hook ──────────────────────────────────────────
@@ -192,6 +283,7 @@ function SessionRow({
   href,
   onSelect,
   onRename,
+  onSetDisposition,
 }: {
   session: SessionInfo;
   isActive: boolean;
@@ -199,9 +291,16 @@ function SessionRow({
   onSelect: () => void;
   /** Omitted when the host hasn't wired renaming — the affordance hides. */
   onRename?: (session: SessionInfo, title: string | null) => Promise<void> | void;
+  /** Omitted when the host hasn't wired the human status axis. */
+  onSetDisposition?: (
+    session: SessionInfo,
+    disposition: SessionDisposition,
+  ) => Promise<void> | void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useClickOutside<HTMLSpanElement>(menuOpen, () => setMenuOpen(false));
 
   // Real <a> so right-click / cmd-click / middle-click open in a new tab.
   // Plain left-click is intercepted and routed through the SPA navigator.
@@ -251,9 +350,15 @@ function SessionRow({
             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
         }`}
       >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate">{formatSessionName(session)}</span>
-          <SessionRefChips refs={session.refs} />
+        <span className="flex min-w-0 flex-1 items-start gap-1.5">
+          <RuntimeStatusDot status={session.runtimeStatus} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{formatSessionName(session)}</span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
+              <DispositionChip disposition={session.disposition} />
+              <SessionRefChips refs={session.refs} />
+            </span>
+          </span>
         </span>
         {/* Hidden on hover so the actions can take its place — the row is
             dense already, and the time is the less useful of the two once
@@ -270,6 +375,38 @@ function SessionRow({
         />
         {onRename && (
           <RowAction icon={Pencil} label="Rename session" onClick={() => setRenaming(true)} />
+        )}
+        {onSetDisposition && (
+          <span className="relative" ref={menuRef}>
+            <RowAction
+              icon={MoreHorizontal}
+              label="Set status"
+              onClick={() => setMenuOpen((open) => !open)}
+            />
+            {menuOpen && (
+              <span className="absolute right-0 top-6 z-20 flex w-40 flex-col rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+                {DISPOSITION_MENU.map((disposition) => {
+                  const current = (session.disposition ?? "open") === disposition;
+                  return (
+                    <button
+                      key={disposition}
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (!current) void onSetDisposition(session, disposition);
+                      }}
+                      className={`flex items-center justify-between px-3 py-1.5 text-left text-xs hover:bg-gray-50 ${
+                        current ? "font-medium text-gray-900" : "text-gray-600"
+                      }`}
+                    >
+                      {DISPOSITION_MENU_LABELS[disposition]}
+                      {current && <Check className="size-3" />}
+                    </button>
+                  );
+                })}
+              </span>
+            )}
+          </span>
         )}
       </span>
     </div>
@@ -400,8 +537,10 @@ function SessionRefChips({ refs }: { refs?: SessionRefInfo[] }) {
   const shown = refs.slice(0, MAX_VISIBLE_REFS);
   const overflow = refs.length - shown.length;
 
+  // No vertical margin of its own — callers place it, because it now shares a
+  // row with the disposition chip and the two must sit on the same baseline.
   return (
-    <span className="mt-0.5 flex flex-wrap items-center gap-1">
+    <span className="flex flex-wrap items-center gap-1">
       {shown.map((ref) => {
         const isLinear = ref.type === "linear";
         const chip = (
@@ -468,6 +607,7 @@ function WorkspaceItem({
   onWorkspaceSelect,
   onSessionSelect,
   onRenameSession,
+  onSetSessionDisposition,
   onNewSession,
   onLoadMore,
   onMenuAction,
@@ -482,6 +622,10 @@ function WorkspaceItem({
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onRenameSession?: (session: SessionInfo, title: string | null) => Promise<void> | void;
+  onSetSessionDisposition?: (
+    session: SessionInfo,
+    disposition: SessionDisposition,
+  ) => Promise<void> | void;
   onNewSession: (workspace: WorkspaceInfo) => void;
   onLoadMore?: (workspaceId: string) => Promise<void> | void;
   onMenuAction?: (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => void;
@@ -640,6 +784,7 @@ function WorkspaceItem({
                 href={`/chat/${workspace.id}/${session.sessionId}`}
                 onSelect={() => onSessionSelect(session, workspace)}
                 onRename={onRenameSession}
+                onSetDisposition={onSetSessionDisposition}
               />
             ))
           )}
@@ -1008,7 +1153,7 @@ function SearchResults({
             </span>
           </span>
           <SnippetText snippet={hit.snippet} />
-          <span className="flex items-center gap-2">
+          <span className="mt-0.5 flex items-center gap-2">
             <SessionRefChips refs={hit.refs} />
             {hit.archived && (
               <span
@@ -1036,6 +1181,7 @@ export function NavigationDrawer({
   onWorkspaceSelect,
   onSessionSelect,
   onRenameSession,
+  onSetSessionDisposition,
   onNewSession,
   onNewWorkspace,
   onLoadMoreSessions,
@@ -1073,6 +1219,7 @@ export function NavigationDrawer({
                 onWorkspaceSelect={onWorkspaceSelect}
                 onSessionSelect={onSessionSelect}
                 onRenameSession={onRenameSession}
+                onSetSessionDisposition={onSetSessionDisposition}
                 onNewSession={onNewSession}
                 onLoadMore={onLoadMoreSessions}
                 onMenuAction={onWorkspaceMenuAction}
