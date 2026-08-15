@@ -161,6 +161,24 @@ export function extractRefsFromTexts(
 }
 
 /**
+ * Union of several ref lists, de-duplicated by `key`, in first-seen order.
+ *
+ * Used to fold newly-seen references into the ones a session already carries.
+ * Refs from the opening prompt are passed first so the session's subject keeps
+ * the leading chip, with anything picked up later in the conversation trailing
+ * it.
+ */
+export function mergeRefs<T extends { key: string }>(...lists: readonly (readonly T[])[]): T[] {
+  const found = new Map<string, T>();
+  for (const list of lists) {
+    for (const ref of list) {
+      if (!found.has(ref.key)) found.set(ref.key, ref);
+    }
+  }
+  return [...found.values()];
+}
+
+/**
  * Pull `owner/repo` out of a `.git/config`'s origin remote.
  *
  * Lets a bare `#28388` resolve to the workspace's own repository, which a

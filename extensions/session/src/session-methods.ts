@@ -190,6 +190,33 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "serial" },
   },
   {
+    name: "session.backfill_refs",
+    description:
+      "Re-extract PR/ticket refs for recent sessions from their full transcripts (migration tool; the reconciler keeps up incrementally after this)",
+    inputSchema: z.object({
+      days: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .default(30)
+        .describe("How far back to look, by session last activity"),
+      rescan: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Re-read whole conversations instead of resuming from each session's watermark, and replace refs rather than merging. Use after changing ref config.",
+        ),
+      dryRun: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Report what would change without writing"),
+    }),
+    execution: { lane: "write", concurrency: "serial" },
+  },
+  {
     name: "session.list_workspaces",
     description: "List all workspaces",
     inputSchema: z.object({}),

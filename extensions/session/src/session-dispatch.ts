@@ -23,6 +23,8 @@ import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
 import type { AgentHostSessionInfo } from "./session-types";
 import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
+import { backfillSessionRefs } from "./session-ref-sync";
+import { resolveRefsConfig } from "./session-reconciler";
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -207,6 +209,12 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
 
 export function createSessionWriteHandlers(): Record<string, SessionMethodHandler> {
   return {
+    "session.backfill_refs": async (params) =>
+      backfillSessionRefs(resolveRefsConfig, {
+        days: params.days as number | undefined,
+        rescan: params.rescan as boolean | undefined,
+        dryRun: params.dryRun as boolean | undefined,
+      }),
     "session.create_session": async (params) => {
       const rt = getRuntime();
       const cwd = params.cwd as string;

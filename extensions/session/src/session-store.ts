@@ -233,6 +233,17 @@ function getDb(): Database {
   return db;
 }
 
+/**
+ * The session extension's `anima.db` handle.
+ *
+ * Exposed so sibling modules (ref sync) can query alongside the session tables
+ * in the same connection rather than opening a second one — two Bun SQLite
+ * handles on a WAL database is a lock-contention source for no benefit.
+ */
+export function getSessionDb(): Database {
+  return getDb();
+}
+
 export function closeSessionDb(): void {
   if (db) {
     db.close();
@@ -442,6 +453,53 @@ export function getRefsForSessions(sessionIds: string[]): Map<string, StoredSess
     bySession.set(row.session_id, list);
   }
   return bySession;
+}
+
+export interface SessionForRefSync {
+  sessionId: string;
+  cwd: string;
+  /** Stored title, falling back to the derived first prompt. */
+  titleText?: string;
+  refs: StoredSessionRef[];
+}
+
+/**
+ * Sessions active since `sinceIso`, with everything ref extraction needs.
+ *
+ * Includes archived rows on purpose: their transcripts are gone from disk but
+ * `memory_transcript_entries` still has the prose, and their refs are exactly
+ * what makes them findable again.
+ */
+export function listSessionsForRefSync(sinceIso: string): SessionForRefSync[] {
+  const rows = getDb()
+    .query(
+      `SELECT s.provider_session_id AS session_id, s.title AS title,
+              s.metadata_json AS metadata_json, w.cwd AS cwd
+         FROM sessions s
+         JOIN workspaces w ON w.id = s.workspace_id
+        WHERE s.purpose = 'chat' AND s.last_activity >= ?
+        ORDER BY s.last_activity DESC`,
+    )
+    .all(sinceIso) as Array<{
+    session_id: string;
+    title: string | null;
+    metadata_json: string | null;
+    cwd: string;
+  }>;
+
+  const refsBySession = getRefsForSessions(rows.map((row) => row.session_id));
+
+  return rows.map((row) => {
+    const metadata = parseMetadata(row.metadata_json);
+    const firstPrompt =
+      typeof metadata?.firstPrompt === "string" ? metadata.firstPrompt : undefined;
+    return {
+      sessionId: row.session_id,
+      cwd: row.cwd,
+      titleText: row.title ?? firstPrompt,
+      refs: refsBySession.get(row.session_id) ?? [],
+    };
+  });
 }
 
 /** Sessions referencing a given PR/ticket key, most recently active first. */
