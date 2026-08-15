@@ -39,7 +39,12 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import type { WorkspaceInfo, SessionInfo, SessionRefInfo } from "../hooks/useChatGateway";
+import type {
+  WorkspaceInfo,
+  SessionInfo,
+  SessionRefInfo,
+  SessionSearchHit,
+} from "../hooks/useChatGateway";
 
 // ── Props ───────────────────────────────────────────────────────
 
@@ -82,6 +87,13 @@ interface NavigationDrawerProps {
   onWorkspaceMenuAction?: (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => void;
   /** Settings popup at the bottom. Stub-friendly. */
   onSettingsMenuAction?: (action: SettingsMenuAction) => void;
+  /**
+   * Full-text search across every message in every workspace.
+   *
+   * Optional: without it the search box stays the local title filter it always
+   * was, which is what the VS Code sidebar mounts.
+   */
+  onSearchSessions?: (query: string) => Promise<SessionSearchHit[]>;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -724,18 +736,59 @@ function SettingsPopup({
 
 // ── Search modal ────────────────────────────────────────────────
 
+/** How long typing has to settle before a query goes to the server. */
+const SEARCH_DEBOUNCE_MS = 180;
+
+/**
+ * Render a snippet, bolding the matched terms.
+ *
+ * The server wraps matches in `«»` — chosen because they never occur in code
+ * or prose here, so splitting on them can't misfire the way `**` or `<b>`
+ * would in a transcript full of markdown and HTML.
+ */
+function SnippetText({ snippet }: { snippet: string }) {
+  const parts = snippet.split(/«([^»]*)»/g);
+  return (
+    <span className="text-xs leading-relaxed text-gray-500">
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          // eslint-disable-next-line react/no-array-index-key -- split order is the identity
+          <mark key={i} className="rounded-sm bg-amber-100 px-0.5 text-gray-900">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </span>
+  );
+}
+
+/**
+ * Find a session by what was said in it.
+ *
+ * With an empty box this is still the recent-chats list it always was — the
+ * fast path for "the thing I had open ten minutes ago". Type, and it becomes a
+ * full-text search over every message in every workspace, which is a different
+ * question ("where did we work out the port hashing?") and needs the server.
+ */
 function SearchModal({
   workspaces,
   sessionsByWorkspace,
+  onSearch,
   onClose,
   onSelect,
 }: {
   workspaces: WorkspaceInfo[];
   sessionsByWorkspace: Record<string, SessionInfo[]>;
+  onSearch?: (query: string) => Promise<SessionSearchHit[]>;
   onClose: () => void;
   onSelect: (workspace: WorkspaceInfo, session: SessionInfo) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SessionSearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus the input when the modal opens.
@@ -743,23 +796,46 @@ function SearchModal({
     inputRef.current?.focus();
   }, []);
 
-  // Close on Escape.
+  // Debounced search. The generation counter is what keeps a slow early query
+  // from overwriting the results of a later, faster one.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    if (!onSearch || !query.trim()) {
+      setHits(null);
+      setSearching(false);
+      return;
+    }
 
-  // Flatten sessions across workspaces, sorted by modified desc, with their
-  // workspace name attached for the right-side label.
-  const flatSessions = useMemo(() => {
+    let live = true;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      onSearch(query)
+        .then((results) => {
+          if (!live) return;
+          setHits(results);
+          setCursor(0);
+        })
+        .catch((error: unknown) => {
+          if (!live) return;
+          console.error("Search failed", error);
+          setHits([]);
+        })
+        .finally(() => {
+          if (live) setSearching(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [query, onSearch]);
+
+  // Recent chats — the empty-query view, and the fallback when no search
+  // handler is wired (the VS Code sidebar mounts the drawer without one).
+  const recent = useMemo(() => {
     const rows: Array<{ workspace: WorkspaceInfo; session: SessionInfo }> = [];
     for (const ws of workspaces) {
-      for (const session of sessionsByWorkspace[ws.id] ?? []) {
-        rows.push({ workspace: ws, session });
-      }
+      for (const session of sessionsByWorkspace[ws.id] ?? []) rows.push({ workspace: ws, session });
     }
     rows.sort((a, b) => {
       const at = a.session.modified || a.session.created || "";
@@ -768,13 +844,46 @@ function SearchModal({
     });
     if (!query) return rows.slice(0, 50);
     const q = query.toLowerCase();
-    return rows.filter(({ workspace, session }) => {
-      return (
+    return rows.filter(
+      ({ workspace, session }) =>
         formatSessionName(session).toLowerCase().includes(q) ||
-        workspace.name.toLowerCase().includes(q)
-      );
-    });
+        workspace.name.toLowerCase().includes(q),
+    );
   }, [workspaces, sessionsByWorkspace, query]);
+
+  const searchMode = Boolean(onSearch && query.trim());
+
+  const openHit = (hit: SessionSearchHit) => {
+    const workspace = workspaces.find((ws) => ws.id === hit.workspaceId);
+    if (!workspace) return;
+    // A hit can name a session this workspace hasn't paged in, so the row is
+    // synthesized from what search returned rather than looked up.
+    onSelect(workspace, {
+      sessionId: hit.sessionId,
+      title: hit.title,
+      modified: hit.matchedAt,
+      refs: hit.refs,
+    });
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+      return;
+    }
+    if (!searchMode || !hits?.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCursor((c) => Math.min(c + 1, hits.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCursor((c) => Math.max(c - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const hit = hits[cursor];
+      if (hit) openHit(hit);
+    }
+  };
 
   return (
     <div
@@ -801,29 +910,33 @@ function SearchModal({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats"
+            onKeyDown={onKeyDown}
+            placeholder={onSearch ? "Search every message" : "Search chats"}
             className="w-full bg-transparent text-sm text-gray-900 outline-none placeholder:text-gray-400"
           />
         </div>
         <div className="max-h-96 overflow-y-auto py-1">
-          <div className="px-3 py-1 text-xs uppercase tracking-wide text-gray-400">
-            {query ? "Results" : "Recent chats"}
+          <div className="flex items-center justify-between px-3 py-1 text-xs uppercase tracking-wide text-gray-400">
+            <span>{query ? "Results" : "Recent chats"}</span>
+            {searching && <span className="normal-case tracking-normal">searching…</span>}
           </div>
-          {flatSessions.length === 0 ? (
+
+          {searchMode ? (
+            <SearchResults hits={hits} searching={searching} cursor={cursor} onOpen={openHit} />
+          ) : recent.length === 0 ? (
             <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
           ) : (
-            flatSessions.map(({ workspace, session }) => {
+            recent.map(({ workspace, session }) => {
               const href = `/chat/${workspace.id}/${session.sessionId}`;
-              const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                e.preventDefault();
-                onSelect(workspace, session);
-              };
               return (
                 <a
                   key={`${workspace.id}-${session.sessionId}`}
                   href={href}
-                  onClick={handleClick}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelect(workspace, session);
+                  }}
                   className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
                 >
                   <span className="truncate text-gray-700">{formatSessionName(session)}</span>
@@ -835,6 +948,72 @@ function SearchModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function SearchResults({
+  hits,
+  searching,
+  cursor,
+  onOpen,
+}: {
+  hits: SessionSearchHit[] | null;
+  searching: boolean;
+  cursor: number;
+  onOpen: (hit: SessionSearchHit) => void;
+}) {
+  if (hits === null) {
+    return (
+      <div className="px-3 py-2 text-sm text-gray-400">{searching ? "" : "Type to search"}</div>
+    );
+  }
+
+  if (hits.length === 0) {
+    return (
+      <div className="px-3 py-3 text-sm text-gray-500">
+        No matches.
+        {/* Stated rather than hidden: a search that silently can't see tool
+            output teaches you to distrust it. */}
+        <div className="mt-1 text-xs text-gray-400">
+          Prompts and replies are searchable; command output isn&apos;t indexed.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {hits.map((hit, i) => (
+        <button
+          key={hit.sessionId}
+          type="button"
+          onClick={() => onOpen(hit)}
+          className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-gray-50 ${
+            i === cursor ? "bg-gray-50" : ""
+          }`}
+        >
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-sm text-gray-700">{hit.title}</span>
+            <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-gray-400">
+              {hit.matches > 1 && <span>{hit.matches}×</span>}
+              <span>{hit.workspaceName}</span>
+            </span>
+          </span>
+          <SnippetText snippet={hit.snippet} />
+          <span className="flex items-center gap-2">
+            <SessionRefChips refs={hit.refs} />
+            {hit.archived && (
+              <span
+                className="text-[10px] text-gray-400"
+                title="Transcript was deleted by Claude Code; only the indexed conversation remains"
+              >
+                archived
+              </span>
+            )}
+          </span>
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -854,6 +1033,7 @@ export function NavigationDrawer({
   onLoadMoreSessions,
   onWorkspaceMenuAction,
   onSettingsMenuAction,
+  onSearchSessions,
 }: NavigationDrawerProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -910,6 +1090,7 @@ export function NavigationDrawer({
         <SearchModal
           workspaces={workspaces}
           sessionsByWorkspace={sessionsByWorkspace}
+          onSearch={onSearchSessions}
           onClose={() => setSearchOpen(false)}
           onSelect={(workspace, session) => {
             setSearchOpen(false);

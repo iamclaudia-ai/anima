@@ -30,6 +30,7 @@ import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { findSessionsByRef, getSessionsForSearch, type StoredSessionRef } from "./session-store";
+import { deriveTitleFromMessage } from "./session-title";
 
 const log = createLogger("SessionExt:Search", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -100,6 +101,43 @@ export function toMatchQuery(raw: string): string | null {
     .join(" AND ");
 }
 
+/**
+ * Tidy an excerpt for display.
+ *
+ * Slash-command turns are stored with their `<command-message>` /
+ * `<command-name>` envelopes intact — `deriveSessionTitle` strips these for the
+ * nav, and a snippet showing raw markup looks like a bug. Pasted terminal
+ * output brings ANSI colour codes along with it, which render as literal
+ * `[1;33m` in the browser. The `«»` match markers are preserved; they're what
+ * the UI highlights on.
+ */
+export function cleanSnippet(snippet: string): string {
+  return (
+    snippet
+      .replace(/<\/?(command-[a-z]+|system-reminder|local-command-[a-z]+)>/g, " ")
+      // oxlint-disable-next-line no-control-regex -- an escape sequence is what this matches
+      .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+/**
+ * The name to show for a hit.
+ *
+ * A rename wins. Otherwise the stored opening prompt is re-derived rather than
+ * shown raw: search reaches back through the whole corpus, including sessions
+ * the reconciler hasn't visited since titles were fixed, whose `firstPrompt` is
+ * still the unstripped message — `<command-message>reviewing-prs…` and all. The
+ * derivation is the same one the nav's titles came from.
+ */
+export function hitTitle(row: { sessionId: string; title?: string; firstPrompt?: string }): string {
+  const renamed = row.title?.trim();
+  if (renamed) return renamed;
+  const derived = row.firstPrompt ? deriveTitleFromMessage(row.firstPrompt) : null;
+  return derived ?? `Session ${row.sessionId.slice(0, 8)}`;
+}
+
 export async function searchSessions(
   call: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   options: SearchOptions,
@@ -141,8 +179,8 @@ export async function searchSessions(
       sessionId: hit.sessionId,
       workspaceId: row.workspaceId,
       workspaceName: row.workspaceName,
-      title: row.title || row.firstPrompt || "Untitled session",
-      snippet: hit.snippet,
+      title: hitTitle(row),
+      snippet: cleanSnippet(hit.snippet),
       role: hit.role,
       matches: hit.matches,
       matchedAt: hit.timestamp,

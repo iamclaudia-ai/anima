@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from "react";
 import { navigate, useGatewayClient, useRouter, WorkspaceProvider } from "@anima/ui";
-import type { WorkspaceInfo, SessionInfo } from "@anima/ui";
+import type { WorkspaceInfo, SessionInfo, SessionSearchHit } from "@anima/ui";
 import { createBridge } from "../app";
 import {
   createSessionForWorkspace,
@@ -108,6 +108,8 @@ export interface ChatPageContextValue {
    */
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onRenameSession: (session: SessionInfo, title: string | null) => Promise<void>;
+  /** Full-text search across every message in every workspace. */
+  onSearchSessions: (query: string) => Promise<SessionSearchHit[]>;
   /** Create a new session in `workspace` (defaults to the active one). */
   onNewSession: (workspace?: WorkspaceInfo) => void;
   onNewWorkspace: () => void;
@@ -394,6 +396,16 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [callGateway],
   );
 
+  const onSearchSessions = useCallback(
+    async (query: string): Promise<SessionSearchHit[]> => {
+      const result = (await callGateway("session.search", { query, limit: 20 })) as {
+        hits?: SessionSearchHit[];
+      } | null;
+      return result?.hits ?? [];
+    },
+    [callGateway],
+  );
+
   const onPinWorkspace = useCallback(
     async (workspace: WorkspaceInfo, pinned: boolean) => {
       // Optimistic flip so the dot + sort order update immediately;
@@ -584,6 +596,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onWorkspaceSelect,
       onSessionSelect,
       onRenameSession,
+      onSearchSessions,
       onNewSession,
       onNewWorkspace,
       onCloseCreateWorkspaceModal,
@@ -606,6 +619,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onWorkspaceSelect,
       onSessionSelect,
       onRenameSession,
+      onSearchSessions,
       onNewSession,
       onNewWorkspace,
       onCloseCreateWorkspaceModal,

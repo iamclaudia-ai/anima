@@ -55,6 +55,27 @@ export interface SessionInfo {
   refs?: SessionRefInfo[];
 }
 
+/**
+ * One session matched by `session.search`, ranked by relevance rather than
+ * recency — so a hit carries the excerpt that earned it a place in the list.
+ */
+export interface SessionSearchHit {
+  sessionId: string;
+  workspaceId: string;
+  workspaceName: string;
+  title: string;
+  /** Excerpt from the best-matching message; matched terms wrapped in `«»`. */
+  snippet: string;
+  role: "user" | "assistant";
+  /** Matching messages in the session. */
+  matches: number;
+  /** When the topic was last discussed, not when the session last ran. */
+  matchedAt: string;
+  /** Transcript is gone from disk — the session opens read-only, if at all. */
+  archived: boolean;
+  refs?: SessionRefInfo[];
+}
+
 export interface GitStatusInfo {
   branch: string | null;
   ahead: number;

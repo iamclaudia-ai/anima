@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
-import { searchSessions, toMatchQuery } from "./session-search";
+import { cleanSnippet, hitTitle, searchSessions, toMatchQuery } from "./session-search";
 import { closeSessionDb, setSessionRefs, upsertSession } from "./session-store";
 import { createWorkspace, closeDb } from "./workspace";
 
@@ -27,6 +27,55 @@ describe("toMatchQuery", () => {
 
   it("keeps non-latin queries intact", () => {
     expect(toMatchQuery("привет мир")).toBe('"привет" AND "мир"*');
+  });
+});
+
+describe("hitTitle", () => {
+  it("prefers an explicit rename", () => {
+    expect(hitTitle({ sessionId: "abc12345", title: " Nav overhaul ", firstPrompt: "x" })).toBe(
+      "Nav overhaul",
+    );
+  });
+
+  it("re-derives a stored prompt that still carries its envelope", () => {
+    // Sessions the reconciler hasn't revisited since titles were fixed still
+    // have raw markup in metadata, and search reaches all of them.
+    expect(
+      hitTitle({
+        sessionId: "abc12345",
+        firstPrompt:
+          "<command-message>reviewing-prs-with-claudia</command-message><command-name>/reviewing-prs-with-claudia</command-name><command-args>25038 group subs</command-args>",
+      }),
+    ).toBe("/reviewing-prs-with-claudia 25038 group subs");
+  });
+
+  it("labels by session id when there is nothing usable", () => {
+    expect(hitTitle({ sessionId: "abc12345-dead-beef" })).toBe("Session abc12345");
+    expect(hitTitle({ sessionId: "abc12345-dead-beef", firstPrompt: "   " })).toBe(
+      "Session abc12345",
+    );
+  });
+});
+
+describe("cleanSnippet", () => {
+  it("strips the command envelopes a slash-command turn is stored with", () => {
+    expect(
+      cleanSnippet(
+        "<command-message>guiding-«meditation»</command-message> <command-name>/x</command-name>",
+      ),
+    ).toBe("guiding-«meditation» /x");
+  });
+
+  it("strips ANSI colour codes that came in with pasted terminal output", () => {
+    expect(cleanSnippet("\u001b[1;33m●\u001b[0m Needs «review»")).toBe("● Needs «review»");
+  });
+
+  it("leaves ordinary bracketed text alone", () => {
+    expect(cleanSnippet("see [1] and [note] for «detail»")).toBe("see [1] and [note] for «detail»");
+  });
+
+  it("keeps the match markers the UI highlights on", () => {
+    expect(cleanSnippet("…the «proxy»  port   «drifted»…")).toBe("…the «proxy» port «drifted»…");
   });
 });
 
