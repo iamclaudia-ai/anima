@@ -39,7 +39,41 @@ export interface ErrorBlock {
   retryInMs?: number;
 }
 
-export type ContentBlock = TextBlock | ImageBlock | FileBlock | ToolUseBlock | ErrorBlock;
+/**
+ * A modal the CLI is blocked on (#69) — a hook confirmation, the folder-trust
+ * dialog. Rendered in place of the tool call it's gating, since that's where
+ * the context for answering it is.
+ *
+ * Lives in the message stream but is not a transcript entry: it starts live and
+ * becomes history the moment it's answered, which is what `answered` /
+ * `dismissed` record. Without them a scrolled-back block would keep offering
+ * buttons for a question that was settled an hour ago.
+ */
+export interface ModalPromptBlock {
+  type: "modal_prompt";
+  kind: "approval" | "input";
+  question: string;
+  /** The modal's body as the TUI rendered it — command, hook reason, question. */
+  context: string[];
+  options: Array<{ key: string; label: string }>;
+  fingerprint: string;
+  /** Option key we sent, once answered. */
+  answered?: string;
+  /** True when the prompt went away without us answering (someone used tmux). */
+  dismissed?: boolean;
+  /** Set when an answer was rejected — stale prompt, or it didn't clear. */
+  error?: string;
+  /** True between clicking an option and hearing back. */
+  pending?: boolean;
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ImageBlock
+  | FileBlock
+  | ToolUseBlock
+  | ErrorBlock
+  | ModalPromptBlock;
 
 export interface Message {
   role: "user" | "assistant" | "compaction_boundary";

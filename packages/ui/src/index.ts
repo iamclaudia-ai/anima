@@ -38,6 +38,7 @@ export type {
   FileBlock,
   ToolUseBlock,
   ErrorBlock,
+  ModalPromptBlock,
   Usage,
   Attachment,
   GatewayMessage,

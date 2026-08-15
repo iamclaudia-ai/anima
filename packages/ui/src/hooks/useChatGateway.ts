@@ -8,6 +8,7 @@ import type {
   TextBlock,
   ToolUseBlock,
   ErrorBlock,
+  ModalPromptBlock,
   Usage,
   Attachment,
 } from "../types";
@@ -222,6 +223,8 @@ export interface UseChatGatewayReturn {
   sendPrompt(text: string, attachments: Attachment[], tags?: string[]): void;
   sendToolResult(toolUseId: string, content: string, isError?: boolean, tags?: string[]): void;
   sendInterrupt(): void;
+  /** Answer a modal prompt the CLI runtime is blocked on (#69). */
+  answerModal(fingerprint: string, key: string): void;
   loadEarlierMessages(): void;
   createNewSession(title?: string): void;
   switchSession(sessionId: string): void;
@@ -590,6 +593,11 @@ export function useChatGateway(
           "session_stale",
           "process_died",
           "git_status",
+          // A modal is the CLI *stopping* to wait for us. Treating it as
+          // streaming activity would restart the spinner on the one event that
+          // means nothing will happen until someone answers.
+          "modal_prompt",
+          "modal_prompt_cleared",
         ].includes(eventType)
       ) {
         setIsQuerying(true);
@@ -808,6 +816,63 @@ export function useChatGateway(
         case "session_stale": {
           const minutes = (payload.minutesSinceActivity as number) || 0;
           console.warn(`[Runtime] Session appears stale (${minutes}m since last activity)`);
+          break;
+        }
+
+        case "modal_prompt": {
+          // The CLI is blocked on a modal. Until this event existed the session
+          // just looked busy forever, so the spinner has to stop: nothing is
+          // happening until someone answers.
+          stopToolTickSimulation();
+          setIsQuerying(false);
+          const fingerprint = payload.fingerprint as string;
+          console.warn(`[Modal] ${payload.kind}: ${payload.question}`);
+          setMessages((draft) => {
+            // Re-announced on reconnect (or after a poll gap) — don't stack up
+            // duplicate prompts for the one question on screen.
+            const existing = draft
+              .flatMap((m) => m.blocks)
+              .find(
+                (b): b is ModalPromptBlock =>
+                  b.type === "modal_prompt" && b.fingerprint === fingerprint,
+              );
+            if (existing) {
+              existing.answered = undefined;
+              existing.dismissed = undefined;
+              existing.pending = false;
+              return;
+            }
+            const block: ModalPromptBlock = {
+              type: "modal_prompt",
+              kind: (payload.kind as "approval" | "input") ?? "input",
+              question: (payload.question as string) || "Claude is waiting for an answer",
+              context: (payload.context as string[]) ?? [],
+              options: (payload.options as Array<{ key: string; label: string }>) ?? [],
+              fingerprint,
+            };
+            const lastMsg = draft[draft.length - 1];
+            if (lastMsg?.role === "assistant") lastMsg.blocks.push(block);
+            else draft.push({ role: "assistant", blocks: [block], timestamp: Date.now() });
+          });
+          break;
+        }
+
+        case "modal_prompt_cleared": {
+          const fingerprint = payload.fingerprint as string;
+          const answered = payload.answered as string | undefined;
+          setMessages((draft) => {
+            for (const msg of draft) {
+              for (const block of msg.blocks) {
+                if (block.type !== "modal_prompt" || block.fingerprint !== fingerprint) continue;
+                block.pending = false;
+                block.error = undefined;
+                // "Answered by someone in tmux" and "answered from here" are
+                // both settled — but only one of them knows which option.
+                if (answered) block.answered = answered;
+                else block.dismissed = true;
+              }
+            }
+          });
           break;
         }
 
@@ -1393,6 +1458,49 @@ export function useChatGateway(
     sendRequest("session.interrupt_session", { sessionId: sessionIdRef.current });
   }, [sendRequest]);
 
+  /**
+   * Answer a modal prompt the CLI is blocked on.
+   *
+   * The fingerprint goes with the answer so the runtime can reject a click that
+   * came from a tab showing a prompt that has since been replaced — a tab left
+   * open across two prompts would otherwise approve the wrong one.
+   */
+  const answerModal = useCallback(
+    (fingerprint: string, key: string) => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      const markBlocks = (fn: (block: ModalPromptBlock) => void): void => {
+        setMessages((draft) => {
+          for (const msg of draft) {
+            for (const block of msg.blocks) {
+              if (block.type === "modal_prompt" && block.fingerprint === fingerprint) fn(block);
+            }
+          }
+        });
+      };
+      markBlocks((block) => {
+        block.pending = true;
+        block.error = undefined;
+      });
+      void client
+        ?.call("session.answer_modal", { sessionId: sid, key, fingerprint })
+        .then(() => {
+          // `modal_prompt_cleared` is what actually settles the block — the
+          // runtime only resolves this after confirming the modal left the pane.
+          markBlocks((block) => {
+            block.pending = false;
+          });
+        })
+        .catch((err: unknown) => {
+          markBlocks((block) => {
+            block.pending = false;
+            block.error = err instanceof Error ? err.message : String(err);
+          });
+        });
+    },
+    [client],
+  );
+
   const loadEarlierMessages = useCallback(() => {
     if (!hasMore) return;
     if (!sessionIdRef.current) return;
@@ -1454,6 +1562,7 @@ export function useChatGateway(
     sendPrompt,
     sendToolResult,
     sendInterrupt,
+    answerModal,
     loadEarlierMessages,
     createNewSession,
     switchSession,

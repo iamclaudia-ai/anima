@@ -6,9 +6,11 @@ import type {
   ToolUseBlock,
   ErrorBlock,
   ContentBlock,
+  ModalPromptBlock as ModalPromptBlockType,
 } from "../types";
 import { MessageContent } from "./MessageContent";
 import { ToolCallBlock } from "./ToolCallBlock";
+import { ModalPromptBlock } from "./ModalPromptBlock";
 import { CopyButton } from "./CopyButton";
 import CompactionBoundary from "./CompactionBoundary";
 import { FileText, FileImage, File, OctagonX } from "lucide-react";
@@ -71,6 +73,12 @@ type Segment =
       block: ErrorBlock & { originalIndex: number };
     }
   | {
+      kind: "modal-prompt";
+      msg: Message;
+      msgIdx: number;
+      block: ModalPromptBlockType & { originalIndex: number };
+    }
+  | {
       kind: "assistant-unknown";
       msg: Message;
       msgIdx: number;
@@ -121,6 +129,13 @@ function buildSegments(messages: Message[]): Segment[] {
           block: { ...block, originalIndex: j },
           isFirstTextInMsg: isFirst,
         });
+      } else if (block.type === "modal_prompt") {
+        segments.push({
+          kind: "modal-prompt",
+          msg,
+          msgIdx: i,
+          block: { ...block, originalIndex: j },
+        });
       } else if (block.type === "error") {
         segments.push({
           kind: "assistant-error",
@@ -159,6 +174,8 @@ interface MessageListProps {
   onSendMessage?: (text: string) => void;
   /** Callback for interactive tools to send a tool_result */
   onSendToolResult?: (toolUseId: string, content: string, isError?: boolean) => void;
+  /** Answer a modal prompt the CLI runtime is blocked on (#69) */
+  onAnswerModal?: (fingerprint: string, key: string) => void;
 }
 
 export function MessageList({
@@ -171,6 +188,7 @@ export function MessageList({
   messagesEndRef,
   onSendMessage,
   onSendToolResult,
+  onAnswerModal,
 }: MessageListProps) {
   const remainingCount = totalMessages - messages.length;
   const segments = buildSegments(messages);
@@ -275,6 +293,16 @@ export function MessageList({
         }
 
         // ── Assistant error block ──
+        if (seg.kind === "modal-prompt") {
+          return (
+            <ModalPromptBlock
+              key={`modal-${seg.msgIdx}-${seg.block.originalIndex}`}
+              block={seg.block}
+              onAnswer={onAnswerModal ?? (() => {})}
+            />
+          );
+        }
+
         if (seg.kind === "assistant-error") {
           const err = seg.block;
           if (err.isRetrying) {

@@ -216,6 +216,7 @@ function ChatInner({
           messagesEndRef={gateway.messagesEndRef}
           onSendMessage={handleToolMessage}
           onSendToolResult={handleToolResult}
+          onAnswerModal={gateway.answerModal}
         />
 
         {/* Audio speaking indicator */}
