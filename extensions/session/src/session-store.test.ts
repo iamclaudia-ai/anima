@@ -8,7 +8,10 @@ import {
   getStoredSession,
   listSubagentSessions,
   listWorkspaceSessions,
+  setSessionDisposition,
   setWorkspaceActiveSession,
+  touchSession,
+  updateSessionRuntime,
   upsertSession,
 } from "./session-store";
 
@@ -126,5 +129,94 @@ describe("session store", () => {
     const parent = getStoredSession("ses_parent");
     expect(parent?.id).toBe("ses_parent");
     expect(parent?.model).toBe("claude-opus-4-6");
+  });
+
+  describe("status axes", () => {
+    const seed = (id: string) =>
+      upsertSession({
+        id,
+        workspaceId: "ws_status",
+        providerSessionId: id,
+        model: "claude-opus-5",
+        agent: "claude",
+        purpose: "chat",
+      });
+
+    it("defaults a new session to idle and open", () => {
+      seed("ses_defaults");
+      const stored = getStoredSession("ses_defaults");
+      expect(stored?.runtimeStatus).toBe("idle");
+      expect(stored?.disposition).toBe("open");
+    });
+
+    it("accepts the awaiting states the pre-024 CHECK constraint rejected", () => {
+      seed("ses_awaiting");
+      expect(touchSession("ses_awaiting", "awaiting_approval")).toEqual({
+        from: "idle",
+        to: "awaiting_approval",
+      });
+      expect(getStoredSession("ses_awaiting")?.runtimeStatus).toBe("awaiting_approval");
+    });
+
+    // The whole event design rests on this: the lifecycle calls touchSession
+    // per streamed event, so a status write that didn't move anything must not
+    // look like a transition or every token would put a message on the bus.
+    it("reports a transition only when the runtime status actually moves", () => {
+      seed("ses_transition");
+      expect(touchSession("ses_transition", "running")).toEqual({ from: "idle", to: "running" });
+      expect(touchSession("ses_transition", "running")).toBeNull();
+      expect(touchSession("ses_transition")).toBeNull();
+      expect(updateSessionRuntime("ses_transition", "completed")).toEqual({
+        from: "running",
+        to: "completed",
+      });
+      expect(updateSessionRuntime("ses_transition", "completed")).toBeNull();
+    });
+
+    it("reports nothing for a session that does not exist", () => {
+      expect(touchSession("ses_missing", "running")).toBeNull();
+      expect(setSessionDisposition("ses_missing", "resolved")).toBeNull();
+    });
+
+    // The reconciler upserts every session on every pass. If that reset the
+    // human axis, marking something resolved would last until the next sweep.
+    it("keeps disposition through an upsert", () => {
+      seed("ses_keeps");
+      setSessionDisposition("ses_keeps", "needs_review");
+      seed("ses_keeps");
+      expect(getStoredSession("ses_keeps")?.disposition).toBe("needs_review");
+    });
+
+    it("hides resolved and archived from the default list, and shows them on request", () => {
+      seed("ses_open");
+      seed("ses_resolved");
+      seed("ses_archived");
+      setSessionDisposition("ses_resolved", "resolved");
+      setSessionDisposition("ses_archived", "archived");
+
+      const visible = listWorkspaceSessions("ws_status").map((s) => s.sessionId);
+      expect(visible).toContain("ses_open");
+      expect(visible).not.toContain("ses_resolved");
+      expect(visible).not.toContain("ses_archived");
+
+      const resolvedOnly = listWorkspaceSessions("ws_status", {
+        includeDispositions: ["resolved"],
+      }).map((s) => s.sessionId);
+      expect(resolvedOnly).toEqual(["ses_resolved"]);
+
+      // An empty allow-list means "no filter given", not "match nothing" —
+      // the latter would compile to `IN ()`, which SQLite rejects.
+      expect(() => listWorkspaceSessions("ws_status", { includeDispositions: [] })).not.toThrow();
+    });
+
+    it("carries both axes onto the list rows", () => {
+      seed("ses_axes");
+      touchSession("ses_axes", "awaiting_input");
+      setSessionDisposition("ses_axes", "blocked");
+
+      const row = listWorkspaceSessions("ws_status").find((s) => s.sessionId === "ses_axes");
+      expect(row?.runtimeStatus).toBe("awaiting_input");
+      expect(row?.disposition).toBe("blocked");
+    });
   });
 });

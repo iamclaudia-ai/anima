@@ -6,7 +6,74 @@ import { createLogger } from "@anima/shared";
 
 const log = createLogger("SessionStore", join(homedir(), ".anima", "logs", "session.log"));
 
-export type RuntimeStatus = "idle" | "running" | "completed" | "failed" | "interrupted" | "stalled";
+/**
+ * What the agent is doing right now — machine state, written by the lifecycle
+ * path as events arrive from agent-host.
+ *
+ * `awaiting_input` and `awaiting_approval` are the states that used to be
+ * invisible: a session blocked on a question, or on a permission prompt in its
+ * tmux pane, was indistinguishable from an idle one.
+ */
+export type RuntimeStatus =
+  | "idle"
+  | "running"
+  | "awaiting_input"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "stalled";
+
+const RUNTIME_STATUSES: readonly RuntimeStatus[] = [
+  "idle",
+  "running",
+  "awaiting_input",
+  "awaiting_approval",
+  "completed",
+  "failed",
+  "interrupted",
+  "stalled",
+];
+
+/** Runtime states that mean "this session is blocked on a human". */
+export const AWAITING_STATUSES: readonly RuntimeStatus[] = ["awaiting_input", "awaiting_approval"];
+
+/**
+ * Where the work stands — human state, only ever written by a person.
+ *
+ * Deliberately not the same column as `status`. `status` records whether the
+ * row still has a transcript on disk (the reconciler archives rows whose JSONL
+ * Claude Code deleted); `disposition` records intent. Both can hide a row from
+ * the default list, for entirely different reasons.
+ */
+export type SessionDisposition =
+  | "open"
+  | "needs_review"
+  | "blocked"
+  | "snoozed"
+  | "resolved"
+  | "archived";
+
+const DISPOSITIONS: readonly SessionDisposition[] = [
+  "open",
+  "needs_review",
+  "blocked",
+  "snoozed",
+  "resolved",
+  "archived",
+];
+
+/** Dispositions the nav hides unless the user asks to see them. */
+export const HIDDEN_DISPOSITIONS: readonly SessionDisposition[] = ["resolved", "archived"];
+
+export function isRuntimeStatus(value: unknown): value is RuntimeStatus {
+  return typeof value === "string" && (RUNTIME_STATUSES as readonly string[]).includes(value);
+}
+
+export function isSessionDisposition(value: unknown): value is SessionDisposition {
+  return typeof value === "string" && (DISPOSITIONS as readonly string[]).includes(value);
+}
+
 export type SessionPurpose = "chat" | "subagent" | "review" | "test";
 
 interface SessionRow {
@@ -19,6 +86,7 @@ interface SessionRow {
   parent_session_id: string | null;
   status: "active" | "archived";
   runtime_status: string | null;
+  disposition: string | null;
   title: string | null;
   summary: string | null;
   metadata_json: string | null;
@@ -38,6 +106,7 @@ export interface StoredSession {
   parentSessionId: string | null;
   status: "active" | "archived";
   runtimeStatus: RuntimeStatus;
+  disposition: SessionDisposition;
   title: string | null;
   summary: string | null;
   metadata: Record<string, unknown> | null;
@@ -64,6 +133,10 @@ export interface SessionListInfo {
   gitBranch?: string;
   /** PR / ticket chips rendered under the title in the nav. */
   refs?: StoredSessionRef[];
+  /** What the agent is doing — drives the live dot on the row. */
+  runtimeStatus?: RuntimeStatus;
+  /** Where the work stands — drives the chip and the default filter. */
+  disposition?: SessionDisposition;
 }
 
 export interface StoredSessionRef {
@@ -89,15 +162,12 @@ function toStoredSession(row: SessionRow): StoredSession {
   if (!row.model || !row.model.trim()) {
     throw new Error(`Session ${row.provider_session_id} is missing model`);
   }
-  const runtimeRaw = row.runtime_status || "idle";
-  const runtimeStatus: RuntimeStatus =
-    runtimeRaw === "running" ||
-    runtimeRaw === "completed" ||
-    runtimeRaw === "failed" ||
-    runtimeRaw === "interrupted" ||
-    runtimeRaw === "stalled"
-      ? runtimeRaw
-      : "idle";
+  const runtimeStatus: RuntimeStatus = isRuntimeStatus(row.runtime_status)
+    ? row.runtime_status
+    : "idle";
+  const disposition: SessionDisposition = isSessionDisposition(row.disposition)
+    ? row.disposition
+    : "open";
   const purposeRaw = row.purpose || "chat";
   const purpose: SessionPurpose =
     purposeRaw === "subagent" || purposeRaw === "review" || purposeRaw === "test"
@@ -113,6 +183,7 @@ function toStoredSession(row: SessionRow): StoredSession {
     parentSessionId: row.parent_session_id,
     status: row.status,
     runtimeStatus,
+    disposition,
     title: row.title,
     summary: row.summary,
     metadata: parseMetadata(row.metadata_json),
@@ -157,7 +228,8 @@ function ensureSessionTable(currentDb: Database): void {
       purpose             TEXT NOT NULL DEFAULT 'chat',
       parent_session_id   TEXT,
       status              TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
-      runtime_status      TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','completed','failed','interrupted','stalled')),
+      runtime_status      TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','awaiting_input','awaiting_approval','completed','failed','interrupted','stalled')),
+      disposition         TEXT NOT NULL DEFAULT 'open' CHECK(disposition IN ('open','needs_review','blocked','snoozed','resolved','archived')),
       title               TEXT,
       summary             TEXT,
       metadata_json       TEXT,
@@ -187,10 +259,28 @@ function ensureSessionTable(currentDb: Database): void {
   addColumn("parent_session_id", "parent_session_id TEXT");
   addColumn(
     "runtime_status",
-    "runtime_status TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','completed','failed','interrupted','stalled'))",
+    "runtime_status TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_status IN ('idle','running','awaiting_input','awaiting_approval','completed','failed','interrupted','stalled'))",
+  );
+  addColumn(
+    "disposition",
+    "disposition TEXT NOT NULL DEFAULT 'open' CHECK(disposition IN ('open','needs_review','blocked','snoozed','resolved','archived'))",
   );
   addColumn("metadata_json", "metadata_json TEXT");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
+
+  // A CHECK constraint can't be widened by ALTER TABLE, so a table left behind
+  // by a pre-024 schema would reject `awaiting_input` at write time — deep
+  // inside the lifecycle path, where the throw is far from the cause. Say so
+  // here instead, once, at open.
+  const tableSql = currentDb
+    .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
+    .get() as { sql: string | null } | null;
+  if (tableSql?.sql && !tableSql.sql.includes("awaiting_input")) {
+    log.error(
+      "sessions.runtime_status still carries the pre-024 CHECK constraint — " +
+        "migration 024 has not run against this database, and awaiting_* writes will fail",
+    );
+  }
 
   currentDb.exec(
     "UPDATE sessions SET provider_session_id = COALESCE(provider_session_id, CAST(id AS TEXT))",
@@ -221,6 +311,7 @@ function ensureSessionTable(currentDb: Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_workspace_purpose ON sessions(workspace_id, purpose);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_workspace_disposition ON sessions(workspace_id, disposition);
   `);
 }
 
@@ -348,28 +439,97 @@ export function getStoredSession(id: string): StoredSession | null {
   return row ? toStoredSession(row) : null;
 }
 
-export function touchSession(id: string, runtimeStatus?: RuntimeStatus): void {
-  const now = new Date().toISOString();
-  if (runtimeStatus) {
-    getDb()
-      .query(
-        "UPDATE sessions SET runtime_status = ?, last_activity = ?, updated_at = ? WHERE provider_session_id = ?",
-      )
-      .run(runtimeStatus, now, now, id);
-    return;
-  }
-  getDb()
-    .query("UPDATE sessions SET last_activity = ?, updated_at = ? WHERE provider_session_id = ?")
-    .run(now, now, id);
+/**
+ * The runtime status a session currently has, without hydrating the whole row.
+ *
+ * Used on the hot lifecycle path, which runs per streamed event — a full
+ * `getStoredSession()` there would parse metadata JSON thousands of times a
+ * turn to answer a one-column question.
+ */
+export function getRuntimeStatus(id: string): RuntimeStatus | null {
+  const row = getDb()
+    .query("SELECT runtime_status FROM sessions WHERE provider_session_id = ?")
+    .get(id) as { runtime_status: string | null } | null;
+  if (!row) return null;
+  return isRuntimeStatus(row.runtime_status) ? row.runtime_status : "idle";
 }
 
+/**
+ * Bump `last_activity`, optionally moving the runtime status.
+ *
+ * Returns the transition when the status actually moved, and `null` when it
+ * didn't. Callers use that to decide whether to emit `session.status_changed`:
+ * this runs on every streamed event, so emitting unconditionally would put a
+ * bus message behind every token.
+ */
+export function touchSession(
+  id: string,
+  runtimeStatus?: RuntimeStatus,
+): { from: RuntimeStatus; to: RuntimeStatus } | null {
+  const now = new Date().toISOString();
+  if (!runtimeStatus) {
+    getDb()
+      .query("UPDATE sessions SET last_activity = ?, updated_at = ? WHERE provider_session_id = ?")
+      .run(now, now, id);
+    return null;
+  }
+
+  const previous = getRuntimeStatus(id);
+  getDb()
+    .query(
+      "UPDATE sessions SET runtime_status = ?, last_activity = ?, updated_at = ? WHERE provider_session_id = ?",
+    )
+    .run(runtimeStatus, now, now, id);
+  // A missing row means nothing was written, so there is no transition to
+  // report — not a transition from "idle".
+  if (previous === null || previous === runtimeStatus) return null;
+  return { from: previous, to: runtimeStatus };
+}
+
+/**
+ * Set (or clear) a session's disposition — the human axis.
+ *
+ * Deliberately not routed through `upsertSession`: the reconciler upserts every
+ * session on every pass, and disposition is the one column it must never
+ * touch. Keeping the write here means a sweep structurally cannot reset a
+ * session someone marked `resolved`, the same way `set_title` is safe from it.
+ *
+ * Returns the transition, or `null` when the session doesn't exist or was
+ * already in that disposition.
+ */
+export function setSessionDisposition(
+  id: string,
+  disposition: SessionDisposition,
+): { from: SessionDisposition; to: SessionDisposition } | null {
+  const row = getDb()
+    .query("SELECT disposition FROM sessions WHERE provider_session_id = ?")
+    .get(id) as { disposition: string | null } | null;
+  if (!row) return null;
+  const previous: SessionDisposition = isSessionDisposition(row.disposition)
+    ? row.disposition
+    : "open";
+  if (previous === disposition) return null;
+
+  getDb()
+    .query("UPDATE sessions SET disposition = ?, updated_at = ? WHERE provider_session_id = ?")
+    .run(disposition, new Date().toISOString(), id);
+  return { from: previous, to: disposition };
+}
+
+/**
+ * Write a runtime status alongside a metadata patch.
+ *
+ * Returns the transition when the status moved, `null` otherwise — same
+ * contract as `touchSession`, so both status-writing paths can drive the same
+ * event without the caller having to know which one it took.
+ */
 export function updateSessionRuntime(
   id: string,
   runtimeStatus: RuntimeStatus,
   metadataPatch?: Record<string, unknown>,
-): void {
+): { from: RuntimeStatus; to: RuntimeStatus } | null {
   const existing = getStoredSession(id);
-  if (!existing) return;
+  if (!existing) return null;
   const mergedMetadata =
     metadataPatch === undefined
       ? existing?.metadata || null
@@ -389,6 +549,9 @@ export function updateSessionRuntime(
     metadata: mergedMetadata,
     previousSessionId: existing.previousSessionId ?? null,
   });
+  return existing.runtimeStatus === runtimeStatus
+    ? null
+    : { from: existing.runtimeStatus, to: runtimeStatus };
 }
 
 export function setWorkspaceActiveSession(workspaceId: string, sessionId: string): void {
@@ -564,6 +727,8 @@ export interface SessionSearchRow {
   modified: string;
   /** Archived rows have no transcript on disk — the UI opens them read-only. */
   archived: boolean;
+  /** Where the work stands, so search can filter on it the way the nav does. */
+  disposition: SessionDisposition;
   refs: StoredSessionRef[];
 }
 
@@ -590,7 +755,8 @@ export function getSessionsForSearch(sessionIds: readonly string[]): Map<string,
     const rows = db
       .query(
         `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
-                s.status, s.last_activity, w.id AS workspace_id, w.name AS workspace_name,
+                s.status, s.disposition, s.last_activity,
+                w.id AS workspace_id, w.name AS workspace_name,
                 w.cwd AS cwd
            FROM sessions s
            JOIN workspaces w ON w.id = s.workspace_id
@@ -601,6 +767,7 @@ export function getSessionsForSearch(sessionIds: readonly string[]): Map<string,
       title: string | null;
       metadata_json: string | null;
       status: "active" | "archived";
+      disposition: string | null;
       last_activity: string;
       workspace_id: string;
       workspace_name: string;
@@ -618,6 +785,7 @@ export function getSessionsForSearch(sessionIds: readonly string[]): Map<string,
         firstPrompt: typeof metadata?.firstPrompt === "string" ? metadata.firstPrompt : undefined,
         modified: row.last_activity,
         archived: row.status === "archived",
+        disposition: isSessionDisposition(row.disposition) ? row.disposition : "open",
         refs: refsBySession.get(row.session_id) ?? [],
       });
     }
@@ -639,14 +807,33 @@ export function findSessionsByRef(refKey: string): string[] {
   return rows.map((row) => row.session_id);
 }
 
-export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
+/**
+ * Sessions for one workspace's nav section.
+ *
+ * `resolved` and `archived` are hidden by default — that's the payoff of
+ * splitting the axes, and the reason a list stops growing without bound. They
+ * are still one `includeDispositions` away, because a filter you can't undo is
+ * a data-loss bug wearing a UI costume.
+ */
+export function listWorkspaceSessions(
+  workspaceId: string,
+  options?: { includeDispositions?: readonly SessionDisposition[] },
+): SessionListInfo[] {
+  // An empty allow-list means "no filter given", not "match nothing" — the
+  // latter would compile to `IN ()`, which SQLite rejects outright.
+  const shown = options?.includeDispositions?.length ? options.includeDispositions : undefined;
+  const dispositionClause = shown
+    ? `AND disposition IN (${shown.map(() => "?").join(",")})`
+    : `AND disposition NOT IN (${HIDDEN_DISPOSITIONS.map(() => "?").join(",")})`;
+  const dispositionValues = shown ? [...shown] : [...HIDDEN_DISPOSITIONS];
+
   const rows = getDb()
     .query(
       `SELECT * FROM sessions
-       WHERE workspace_id = ? AND purpose = 'chat' AND status = 'active'
+       WHERE workspace_id = ? AND purpose = 'chat' AND status = 'active' ${dispositionClause}
        ORDER BY last_activity DESC`,
     )
-    .all(workspaceId) as SessionRow[];
+    .all(workspaceId, ...dispositionValues) as SessionRow[];
 
   // One batched lookup for the whole page rather than a query per row.
   const refsBySession = getRefsForSessions(rows.map((row) => row.provider_session_id));
@@ -656,6 +843,8 @@ export function listWorkspaceSessions(workspaceId: string): SessionListInfo[] {
     const metadata = stored.metadata || {};
     return {
       refs: refsBySession.get(stored.id),
+      runtimeStatus: stored.runtimeStatus,
+      disposition: stored.disposition,
       sessionId: stored.id,
       created: stored.createdAt,
       modified: stored.lastActivity,

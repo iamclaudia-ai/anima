@@ -81,6 +81,41 @@ describe("migrations", () => {
     expect(columns).toContain("pinned");
   });
 
+  it("gives sessions both status axes, with the widened runtime constraint", () => {
+    migrate(db);
+
+    const columns = (db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    expect(columns).toContain("runtime_status");
+    expect(columns).toContain("disposition");
+
+    db.query("INSERT INTO workspaces (id, name, cwd) VALUES ('ws', 'ws', '/tmp/ws')").run();
+    const insert = db.query(
+      `INSERT INTO sessions (workspace_id, provider_session_id, model, runtime_status)
+       VALUES ('ws', ?, 'claude-opus-5', ?)`,
+    );
+
+    // The states migration 024 exists to allow. A CHECK constraint can't be
+    // widened by ALTER TABLE, so this is the assertion that the rebuild ran
+    // rather than the column merely existing.
+    for (const status of ["awaiting_input", "awaiting_approval"]) {
+      expect(() => insert.run(`ses_${status}`, status)).not.toThrow();
+    }
+    expect(() => insert.run("ses_bogus", "daydreaming")).toThrow();
+
+    // Disposition defaults to open, and is likewise constrained.
+    const row = db
+      .query("SELECT disposition FROM sessions WHERE provider_session_id = 'ses_awaiting_input'")
+      .get() as { disposition: string };
+    expect(row.disposition).toBe("open");
+    expect(() =>
+      db
+        .query("UPDATE sessions SET disposition = 'vibes' WHERE provider_session_id = ?")
+        .run("ses_awaiting_input"),
+    ).toThrow();
+  });
+
   it("is idempotent — a second run applies nothing and changes nothing", () => {
     migrate(db);
     const first = db.query("SELECT id FROM _migrations ORDER BY id").all();
