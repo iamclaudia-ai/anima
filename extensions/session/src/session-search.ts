@@ -211,13 +211,16 @@ export async function searchSessions(
 
   const hits: SearchHit[] = [];
   let unroutable = 0;
+  // Built once rather than scanned per hit — this loop runs over every ranked
+  // result, not just the ones that survive.
+  const dispositionFilter = options.disposition?.length ? new Set(options.disposition) : null;
   for (const hit of results) {
     const row = rows.get(hit.sessionId);
     if (!row) {
       unroutable++;
       continue;
     }
-    if (options.disposition?.length && !options.disposition.includes(row.disposition)) continue;
+    if (dispositionFilter && !dispositionFilter.has(row.disposition)) continue;
     if (hits.length >= limit) continue;
     hits.push({
       sessionId: hit.sessionId,

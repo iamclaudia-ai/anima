@@ -210,11 +210,12 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   // gateway subscription — a resubscribe cycle can drop events landing in the
   // gap, which is exactly the staleness this is meant to remove.
   const workspacesRef = useRef<WorkspaceInfo[]>(workspaces);
-  workspacesRef.current = workspaces;
   const sessionCountRef = useRef<Record<string, number>>({});
-  sessionCountRef.current = Object.fromEntries(
-    Object.entries(sessionsByWorkspace).map(([id, list]) => [id, list.length]),
-  );
+  // The refetch goes through a ref for the same reason as the data above:
+  // naming it as an effect dependency would tear down and rebuild the gateway
+  // subscription whenever its identity changed, and events landing in that gap
+  // are lost — which is the staleness the subscription exists to fix.
+  const refetchWorkspaceRef = useRef<(workspaceId: string) => void>(() => undefined);
 
   // Initial page size for each workspace's session list. "Show more" fetches
   // another page of the same size. Tuned to the NavigationDrawer's default
@@ -616,6 +617,29 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     }
   }, [workspaceId, sessionId, workspaces, activeWorkspaceSessions]);
 
+  // Refreshed after every commit rather than during render — a ref written
+  // while rendering is torn by concurrent rendering, and this one is read from
+  // a WebSocket callback that can fire at any moment.
+  //
+  // The refetch asks for at least as many rows as are currently shown, so a
+  // list someone expanded with "Show more" doesn't silently collapse to five.
+  useEffect(() => {
+    workspacesRef.current = workspaces;
+    sessionCountRef.current = Object.fromEntries(
+      Object.entries(sessionsByWorkspace).map(([id, list]) => [id, list.length]),
+    );
+    refetchWorkspaceRef.current = (workspaceId: string) => {
+      const ws = workspacesRef.current.find((w) => w.id === workspaceId);
+      if (!ws) return;
+      void loadSessionsForWorkspace(callGateway, ws.cwd, {
+        limit: Math.max(SESSIONS_PAGE_SIZE, sessionCountRef.current[ws.id] ?? 0),
+        offset: 0,
+      })
+        .then((result) => setSessionsForWorkspace(ws.id, result.sessions, result.hasMore))
+        .catch(() => undefined);
+    };
+  });
+
   // ── Live session list ────────────────────────────────────────
   // Until now every tab held its own snapshot of the session list, taken
   // when it loaded — so two tabs disagreed within seconds and a session that
@@ -686,16 +710,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
 
     const offList = client.on("session.list_changed", (_event, raw) => {
       const payload = raw as SessionListChangedEvent | undefined;
-      const ws = payload?.workspaceId
-        ? workspacesRef.current.find((w) => w.id === payload.workspaceId)
-        : undefined;
-      if (!ws) return;
-      void loadSessionsForWorkspace(callGateway, ws.cwd, {
-        limit: Math.max(SESSIONS_PAGE_SIZE, sessionCountRef.current[ws.id] ?? 0),
-        offset: 0,
-      })
-        .then((result) => setSessionsForWorkspace(ws.id, result.sessions, result.hasMore))
-        .catch(() => undefined);
+      if (payload?.workspaceId) refetchWorkspaceRef.current(payload.workspaceId);
     });
 
     return () => {
@@ -703,7 +718,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       offList();
       void client.unsubscribe(events).catch(() => undefined);
     };
-  }, [client, isConnected, callGateway, setSessionsForWorkspace]);
+  }, [client, isConnected]);
 
   // Refresh first page when the URL points at a new workspace — purely
   // a data fetch, doesn't touch selection. Decoupling this from the
