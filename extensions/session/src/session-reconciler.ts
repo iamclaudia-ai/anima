@@ -127,7 +127,11 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
       model: rt.sessionConfig.model,
       agent: "claude",
       purpose: "chat",
-      runtimeStatus: "idle",
+      // Deliberately no runtime status. The reconciler reads transcripts off
+      // disk; it knows nothing about what the agent is doing right now, and
+      // asserting `idle` here was resetting the live status of every session it
+      // swept — including a session sitting on a modal prompt, roughly a minute
+      // after it started waiting.
       metadata: {
         messageCount: entry.messageCount ?? existing?.messageCount,
         firstPrompt: entry.firstPrompt ?? existing?.firstPrompt,

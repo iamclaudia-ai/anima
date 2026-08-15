@@ -82,8 +82,12 @@ export class SessionRegistry {
       // sessions permanently busy — and a dot that is always green trains you
       // to ignore the one that matters. `running` is written by the prompt
       // lifecycle, which is the only place that knows a turn actually started.
-      const runtimeStatus: RuntimeStatus =
-        session.isProcessRunning && session.stale ? "stalled" : "idle";
+      // `undefined` rather than `idle` for the healthy case: this sweep knows a
+      // process exists, which is not the same as knowing what it's doing. The
+      // lifecycle owns that, and asserting `idle` here overwrote it — a session
+      // waiting on a modal prompt was reset on the next reconnect.
+      const runtimeStatus: RuntimeStatus | undefined =
+        session.isProcessRunning && session.stale ? "stalled" : undefined;
 
       // Adoption is not activity. Agent-host reports `lastActivity` as the
       // moment it noticed the pane, so readopting on every reconnect was
