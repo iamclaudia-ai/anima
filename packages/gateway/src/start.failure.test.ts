@@ -30,6 +30,17 @@ async function getFreePort(): Promise<number> {
   });
 }
 
+/**
+ * The gateway authenticates every request, including `/health` and the
+ * WebSocket upgrade — there is no unauthenticated path. A token has to be in
+ * the config this spawns against, and on every request the test makes, or the
+ * gateway answers 401 forever and the poll below can only ever time out.
+ */
+const TEST_TOKEN = "anima_sk_00000000000000000000000000000000";
+
+/** Startup measures ~200ms; the headroom is for a loaded machine, not the norm. */
+const READY_TIMEOUT_MS = 10_000;
+
 describe("gateway startup failure handling", () => {
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   let port: number;
@@ -46,7 +57,7 @@ describe("gateway startup failure handling", () => {
       configPath,
       JSON.stringify(
         {
-          gateway: { port, host: "127.0.0.1" },
+          gateway: { port, host: "127.0.0.1", token: TEST_TOKEN },
           session: {
             model: "claude-opus-4-6",
             thinking: false,
@@ -97,32 +108,40 @@ describe("gateway startup failure handling", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it("continues startup and serves healthy gateway even if one extension entrypoint is missing", async () => {
-    type HealthPayload = {
-      status?: string;
-      extensions?: Record<string, { ok: boolean }>;
-      sourceRoutes?: Record<string, string>;
-    };
-    const healthUrl = `http://127.0.0.1:${port}/health`;
-    const start = Date.now();
-    let body: HealthPayload | null = null;
+  // The harness budget has to exceed the poll budget inside the test, or the
+  // loop is cut off before it can report what it found.
+  it(
+    "continues startup and serves healthy gateway even if one extension entrypoint is missing",
+    async () => {
+      type HealthPayload = {
+        status?: string;
+        extensions?: Record<string, { ok: boolean }>;
+        sourceRoutes?: Record<string, string>;
+      };
+      const healthUrl = `http://127.0.0.1:${port}/health`;
+      const start = Date.now();
+      let body: HealthPayload | null = null;
 
-    while (Date.now() - start < 10_000) {
-      try {
-        const res = await fetch(healthUrl);
-        if (res.ok) {
-          body = (await res.json()) as HealthPayload;
-          if (body?.extensions?.testroute) break;
+      while (Date.now() - start < READY_TIMEOUT_MS) {
+        try {
+          const res = await fetch(healthUrl, {
+            headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+          });
+          if (res.ok) {
+            body = (await res.json()) as HealthPayload;
+            if (body?.extensions?.testroute) break;
+          }
+        } catch {
+          // retry
         }
-      } catch {
-        // retry
+        await Bun.sleep(50);
       }
-      await Bun.sleep(50);
-    }
 
-    expect(body?.status).toBe("ok");
-    expect(body?.extensions?.testroute?.ok).toBe(true);
-    expect(body?.extensions?.does_not_exist).toBeUndefined();
-    expect(body?.sourceRoutes?.does_not_exist).toBeUndefined();
-  });
+      expect(body?.status).toBe("ok");
+      expect(body?.extensions?.testroute?.ok).toBe(true);
+      expect(body?.extensions?.does_not_exist).toBeUndefined();
+      expect(body?.sourceRoutes?.does_not_exist).toBeUndefined();
+    },
+    READY_TIMEOUT_MS + 5_000,
+  );
 });

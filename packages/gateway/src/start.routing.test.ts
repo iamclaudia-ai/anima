@@ -96,6 +96,17 @@ class WsClient {
   }
 }
 
+/**
+ * The gateway authenticates every request, including `/health` and the
+ * WebSocket upgrade — there is no unauthenticated path. A token has to be in
+ * the config this spawns against, and on every request the test makes, or the
+ * gateway answers 401 forever and the poll below can only ever time out.
+ */
+const TEST_TOKEN = "anima_sk_00000000000000000000000000000000";
+
+/** Startup measures ~200ms; the headroom is for a loaded machine, not the norm. */
+const READY_TIMEOUT_MS = 10_000;
+
 describe("gateway routing (isolated process)", () => {
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   let port: number;
@@ -112,7 +123,7 @@ describe("gateway routing (isolated process)", () => {
       configPath,
       JSON.stringify(
         {
-          gateway: { port, host: "127.0.0.1" },
+          gateway: { port, host: "127.0.0.1", token: TEST_TOKEN },
           session: {
             model: "claude-opus-4-6",
             thinking: false,
@@ -142,15 +153,21 @@ describe("gateway routing (isolated process)", () => {
       },
     });
 
-    // Drain output to avoid backpressure.
-    void new Response(proc.stdout).text();
-    void new Response(proc.stderr).text();
+    // Drain output to avoid backpressure, but keep it: a gateway that never
+    // becomes healthy has always said why, and throwing that away turns a
+    // diagnosable failure into a bare timeout.
+    let stdout = "";
+    let stderr = "";
+    void Bun.readableStreamToText(proc.stdout).then((t) => (stdout = t));
+    void Bun.readableStreamToText(proc.stderr).then((t) => (stderr = t));
 
     const healthUrl = `http://127.0.0.1:${port}/health`;
     const start = Date.now();
-    while (Date.now() - start < 10_000) {
+    while (Date.now() - start < READY_TIMEOUT_MS) {
       try {
-        const res = await fetch(healthUrl);
+        const res = await fetch(healthUrl, {
+          headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+        });
         if (res.ok) {
           const body = (await res.json()) as {
             extensions?: Record<string, { ok: boolean }>;
@@ -163,8 +180,14 @@ describe("gateway routing (isolated process)", () => {
       await Bun.sleep(50);
     }
 
-    throw new Error("Gateway did not become healthy in time");
-  });
+    await Bun.sleep(100);
+    throw new Error(
+      `Gateway did not become healthy in ${READY_TIMEOUT_MS}ms (exit=${proc.exitCode}).\n` +
+        `--- stdout ---\n${stdout.slice(-3000)}\n--- stderr ---\n${stderr.slice(-3000)}`,
+    );
+    // Budget above the poll loop's own, so a slow start reports the throw
+    // rather than a bare hook timeout.
+  }, READY_TIMEOUT_MS + 5_000);
 
   afterAll(async () => {
     try {
@@ -182,7 +205,9 @@ describe("gateway routing (isolated process)", () => {
   });
 
   it("sends gateway.caller events only to the requesting client", async () => {
-    const url = `ws://127.0.0.1:${port}/ws`;
+    // Auth accepts a query param precisely because a browser WebSocket
+    // cannot set an Authorization header.
+    const url = `ws://127.0.0.1:${port}/ws?token=${TEST_TOKEN}`;
     const a = new WsClient(url);
     const b = new WsClient(url);
     await a.waitOpen();
@@ -237,7 +262,9 @@ describe("gateway routing (isolated process)", () => {
   });
 
   it("enforces exclusive subscriber precedence (last wins)", async () => {
-    const url = `ws://127.0.0.1:${port}/ws`;
+    // Auth accepts a query param precisely because a browser WebSocket
+    // cannot set an Authorization header.
+    const url = `ws://127.0.0.1:${port}/ws?token=${TEST_TOKEN}`;
     const a = new WsClient(url);
     const b = new WsClient(url);
     await a.waitOpen();
