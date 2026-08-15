@@ -45,8 +45,8 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 
 ## Status — 2026-08-15
 
-**Phases 1, 2, and 3a are complete.** What's left of 3 is the "are you done?"
-notification (#31, retargeted) and the split session list.
+**Phases 1, 2, 3a, and 3b are complete.** What's left of 3 is the split
+session list (3c).
 
 |                                   | state      | notes                                                              |
 | --------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -58,8 +58,8 @@ notification (#31, retargeted) and the split session list.
 | **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
 | **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
 | **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
-| **3b — "are you done?" (#31)**    | ⬜ next    | trigger retargeted to `completed`+`open`; not blocked by Phase 4   |
-| **3c — split list + re-sort**     | ⬜         | active pane above the tree; two real gaps in the live patch        |
+| **3b — "are you done?" (#31)**    | ✅ shipped | in-page banner on `completed`+`open` after 15m; snooze + resolve   |
+| **3c — split list + re-sort**     | ⬜ next    | `session.list_attention` already exists — it is the pane's query   |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
 | **5 — web terminal (#70)**        | ⬜         |                                                                    |
 
@@ -78,9 +78,15 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**Phase 3b — "are you done?" (#31)** is next. Read that section before starting: the trigger moved from `awaiting_input` to `completed` + `disposition = open`, which is what the real complaint turns out to be and which fires today.
+**Phase 3c — the split session list** is next, and most of its server work is already done: `session.list_attention` was built for 3b's banner and **is** the active pane's query. What remains is the pane itself, the URL session pinned to its top, and re-sorting the in-tree list on the event's `at`.
 
 **Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser — so until that lands the two states are reachable only by hand. This is why 3b's trigger changed rather than 3b waiting.
+
+Three things 3b learned the hard way, all worth not rediscovering:
+
+- **`last_activity` is not "when the conversation last moved".** Agent-host restamps it whenever it readopts a live CLI pane, so a `watchdog reload` moved live sessions to "now" — reordering the nav and resetting every waiting clock. Adoption no longer advances it, and anything measuring elapsed time should read `metadata.lastAssistantMessageAt` (written once, by `turn_stop`).
+- **A predicate that filters on `disposition` alone can trap a session.** The first attention query required `disposition = 'open'`, which a snoozed row fails forever — so snooze was dismissal wearing a friendlier label. Whether something is quiet right now is a question about a _timestamp_.
+- **Any "everything unresolved" list needs an age bound.** Unbounded, the first run put two sessions from May into a banner about coming back now.
 
 What 3a established, and what a fresh session should know:
 
@@ -160,7 +166,7 @@ The reconciler, and the read-path inversion.
 
 **Ships:** every tab agrees; nothing gets silently abandoned.
 
-### Phase 3b — "Are you done?" (#31, expanded)
+### Phase 3b — "Are you done?" (#31, expanded) — ✅ shipped 2026-08-15
 
 **The trigger was wrong.** This plan assumed the notification worth having fires on `awaiting_input` — a session blocked on a modal prompt. But the case that actually costs Michael time is the opposite one: _"I ask for a PR review, get pulled into something else, and forget to come back."_ Nothing is blocked; the work is **finished and unacknowledged**, and the only thing missing is anyone noticing.
 
@@ -180,6 +186,8 @@ The escalation is that predicate plus elapsed time: past ~15 minutes, a banner t
 **This reverses a decision made on 2026-08-15.** The nav shows no dot for `completed` on the reasoning that resting states are noise — most rows are at rest, and a column of grey dots costs the eye something for nothing. The PR-review case is the counterexample: **completed-and-unacknowledged is the single most important row in the list.** Revised rule — `completed` + `open` gets a distinct "ready for you" mark; `completed` + anything else gets nothing. The principle survives, the boundary moves.
 
 **Working should read as motion.** The static pulsing dot doesn't say "busy" strongly enough at a glance; a spinner does.
+
+**As built:** `session.list_attention` (the shared predicate), `session.snooze`, `session.resolve_stale` for the existing backlog, and an app-wide `AttentionBanner` mounted outside the Router. Escalation is 15 minutes, the list is bounded to 24 hours of finished work, and the waiting clock reads `metadata.lastAssistantMessageAt` rather than `last_activity`.
 
 **Cross-tab dedupe is a real problem, not a detail.** Michael runs several tabs, and they are not even the same origin — `localhost:30086` and `anima.kiliman.dev` are both open in practice. Naive code fires one notification per tab. The Notification API's `tag` collapses duplicates **per origin**, so it solves the two-tabs-on-one-host case and not the cross-origin one. The gateway already has `exclusive` subscriptions (last subscriber wins, `exclusiveSubscribers` in `index.ts`), which is a server-side leader election and does cover it. Decide this before making the notification pretty — a duplicate notification per session is worse than none.
 
