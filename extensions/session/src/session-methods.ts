@@ -104,6 +104,12 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
         .string()
         .optional()
         .describe("Restrict to sessions carrying this PR/ticket key, e.g. 'anima#61'"),
+      disposition: z
+        .array(z.enum(["open", "needs_review", "blocked", "snoozed", "resolved", "archived"]))
+        .optional()
+        .describe(
+          "Restrict to these dispositions. Omitted searches all of them — unlike the nav, search deliberately reaches resolved and archived work, since finding it again is the point.",
+        ),
       limit: z.number().int().positive().max(100).optional().default(20).describe("Max sessions"),
     }),
     execution: { lane: "read", concurrency: "parallel" },

@@ -29,7 +29,12 @@
 import { createLogger } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { findSessionsByRef, getSessionsForSearch, type StoredSessionRef } from "./session-store";
+import {
+  findSessionsByRef,
+  getSessionsForSearch,
+  type SessionDisposition,
+  type StoredSessionRef,
+} from "./session-store";
 import { deriveTitleFromMessage } from "./session-title";
 
 const log = createLogger("SessionExt:Search", join(homedir(), ".anima", "logs", "session.log"));
@@ -53,6 +58,8 @@ export interface SearchHit {
   matchedAt: string;
   /** Transcript no longer on disk — openable only from the backup. */
   archived: boolean;
+  /** Where the work stands, so a hit reads the same as a nav row. */
+  disposition: SessionDisposition;
   refs: StoredSessionRef[];
 }
 
@@ -84,6 +91,15 @@ export interface SearchOptions {
   cwd?: string;
   /** Restrict to sessions carrying this PR/ticket key, e.g. `anima#61`. */
   ref?: string;
+  /**
+   * Restrict to sessions in these dispositions.
+   *
+   * Applied after ranking rather than as an allow-list like `ref`: unlike a
+   * ref, a disposition doesn't tell you which sessions to look for, only which
+   * to keep — and the alternative is loading every resolved session id in the
+   * corpus to exclude them.
+   */
+  disposition?: readonly SessionDisposition[];
   limit?: number;
 }
 
@@ -201,6 +217,7 @@ export async function searchSessions(
       unroutable++;
       continue;
     }
+    if (options.disposition?.length && !options.disposition.includes(row.disposition)) continue;
     if (hits.length >= limit) continue;
     hits.push({
       sessionId: hit.sessionId,
@@ -212,6 +229,7 @@ export async function searchSessions(
       matches: hit.matches,
       matchedAt: hit.timestamp,
       archived: row.archived,
+      disposition: row.disposition,
       refs: row.refs,
     });
   }
@@ -223,6 +241,7 @@ export async function searchSessions(
     unroutable,
     relaxed,
     ref: options.ref,
+    disposition: options.disposition,
   });
 
   return { query: options.query, hits, unroutable, relaxed };

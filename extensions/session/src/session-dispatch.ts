@@ -212,6 +212,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
         query: params.query as string,
         cwd: params.cwd as string | undefined,
         ref: params.ref as string | undefined,
+        disposition: params.disposition as SessionDisposition[] | undefined,
         limit: params.limit as number | undefined,
       }),
   };
