@@ -45,8 +45,8 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 
 ## Status — 2026-08-15
 
-**Phases 1, 2, 3a, and 3b are complete.** What's left of 3 is the split
-session list (3c).
+**Phase 3 is complete.** Phase 4 (modal prompts) is next — and it is also
+what would close the CLI turn-reporting gap noted below.
 
 |                                   | state      | notes                                                              |
 | --------------------------------- | ---------- | ------------------------------------------------------------------ |
@@ -59,7 +59,7 @@ session list (3c).
 | **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
 | **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
 | **3b — "are you done?" (#31)**    | ✅ shipped | in-page banner on `completed`+`open` after 15m; snooze + resolve   |
-| **3c — split list + re-sort**     | ⬜ next    | `session.list_attention` already exists — it is the pane's query   |
+| **3c — split list + re-sort**     | ✅ shipped | flat ACTIVE pane above the tree; shared store with the banner      |
 | **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
 | **5 — web terminal (#70)**        | ⬜         |                                                                    |
 
@@ -78,7 +78,7 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**Phase 3c — the split session list** is next, and most of its server work is already done: `session.list_attention` was built for 3b's banner and **is** the active pane's query. What remains is the pane itself, the URL session pinned to its top, and re-sorting the in-tree list on the event's `at`.
+**Phase 4 — modal prompts (#69)** is next. Two reasons beyond its own value: it is the only thing that will ever write `awaiting_input` / `awaiting_approval`, and it sits next to the CLI turn-reporting gap below, which is what currently keeps 3b's banner from firing for tmux-pane sessions.
 
 **Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser — so until that lands the two states are reachable only by hand. This is why 3b's trigger changed rather than 3b waiting.
 
@@ -87,6 +87,16 @@ Three things 3b learned the hard way, all worth not rediscovering:
 - **`last_activity` is not "when the conversation last moved".** Agent-host restamps it whenever it readopts a live CLI pane, so a `watchdog reload` moved live sessions to "now" — reordering the nav and resetting every waiting clock. Adoption no longer advances it, and anything measuring elapsed time should read `metadata.lastAssistantMessageAt` (written once, by `turn_stop`).
 - **A predicate that filters on `disposition` alone can trap a session.** The first attention query required `disposition = 'open'`, which a snoozed row fails forever — so snooze was dismissal wearing a friendlier label. Whether something is quiet right now is a question about a _timestamp_.
 - **Any "everything unresolved" list needs an age bound.** Unbounded, the first run put two sessions from May into a banner about coming back now.
+
+### Known gap — CLI panes stop reporting turn ends after a restart
+
+**Found 2026-08-15 while verifying 3c, and it limits how much of 3b actually fires in practice.**
+
+`completed` is written by `turn_stop`, which agent-host's CLI provider does emit (`providers/cli/session.ts:566`). But after a `watchdog reload`, live `anima-cli-*` panes stop producing it: startup adoption rebinds each proxy on the port its CLI already targets, so prompts keep working, and the session goes on to complete turn after turn — while its row sits on `idle` and no `lastAssistantMessageAt` is ever written again. Confirmed by query: zero turn-end timestamps across the whole database after the restart, despite several completed turns.
+
+Why it matters: the case 3b exists for is "I asked Claudia for a PR review in a tmux pane and forgot to come back", and a CLI session that has been restarted through never reaches `completed` — so it never enters the attention set and never raises the banner. Sessions driven through `session.send_prompt` (web UI, iMessage, scheduler) are unaffected; those were the ones verified working end to end.
+
+This is pre-existing agent-host behaviour rather than anything Phase 3 introduced — the same shape as the port-drift and reaper bugs: **adoption restores the transport but not the observation.** The fix belongs next to the adoption path, and the standing lesson applies again — the registry is a cache, the process table is ground truth, and re-attaching to a process means re-attaching to its event stream too.
 
 What 3a established, and what a fresh session should know:
 
