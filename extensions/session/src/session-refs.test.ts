@@ -14,6 +14,17 @@ const config: RefsConfig = {
 
 const keys = (text: string, cfg: RefsConfig = config) => extractRefs(text, cfg).map((r) => r.key);
 
+describe("extractRefs — pasted-screenshot placeholders", () => {
+  test("ignores Claude Code's [Image #N] markers", () => {
+    expect(keys("[Image #9] [Image #10] here's the wizard")).toEqual([]);
+    expect(keys("Image #12 shows the banner")).toEqual([]);
+  });
+
+  test("still matches a real ref in the same message", () => {
+    expect(keys("[Image #3] that's the failure from #28388")).toEqual(["beehiiv/swarm#28388"]);
+  });
+});
+
 describe("extractRefs — Linear tickets", () => {
   test("matches configured prefixes", () => {
     expect(keys("let's rename the branch to WEB-5592")).toEqual(["WEB-5592"]);

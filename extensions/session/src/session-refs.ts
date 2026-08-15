@@ -72,6 +72,20 @@ const BARE_PR = /(^|[^\w/])#(\d+)(?![\w-])/g;
  */
 const COMMAND_ARG_PR = /^\/[\w-]+\s+#?(\d{2,7})\b/;
 
+/**
+ * Claude Code's own placeholder for a pasted screenshot — `[Image #9]`.
+ *
+ * Not user prose at all, but it matches a bare `#N` perfectly, and it was the
+ * single largest source of false positives once extraction started reading
+ * whole conversations: 204 hits across 30 days, second only to genuine `PR #N`
+ * mentions. Michael pastes screenshots constantly, so this would have put a
+ * bogus chip on a large share of rows.
+ *
+ * Matched against the text immediately preceding the `#`, so the bracket being
+ * present or absent doesn't matter.
+ */
+const IMAGE_PLACEHOLDER = /\bimage\s*$/i;
+
 function githubUrl(repo: string | undefined, number: string): string | undefined {
   return repo ? `https://github.com/${repo}/issues/${number}` : undefined;
 }
@@ -124,6 +138,9 @@ export function extractRefs(text: string, config: RefsConfig = {}): SessionRef[]
   for (const match of text.matchAll(BARE_PR)) {
     const number = match[2];
     if (!number || number.length < minDigits) continue;
+    const start = match.index ?? 0;
+    const preceding = text.slice(Math.max(0, start - 24), start + (match[1]?.length ?? 0));
+    if (IMAGE_PLACEHOLDER.test(preceding)) continue;
     // A bare number in a workspace with a known repo is that repo's issue;
     // without one we still show the chip, just unlinked.
     const key = defaultRepo ? `${defaultRepo}#${number}` : `#${number}`;
