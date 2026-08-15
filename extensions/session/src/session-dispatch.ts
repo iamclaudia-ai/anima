@@ -130,6 +130,23 @@ async function healthCheckDetailed(): Promise<HealthCheckResponse> {
   };
 }
 
+/**
+ * Workspaces kept out of the ACTIVE queue, from `anima.json`:
+ *
+ *   "session": { "config": { "activeQueue": { "excludeWorkspaces": ["libby"] } } }
+ *
+ * Config rather than a hardcoded list, for the same reason the Linear ref
+ * prefixes are: which workspaces are machinery is a fact about Michael's
+ * setup, not about Anima. Matched case-insensitively against a workspace's
+ * name or its cwd.
+ */
+function resolveQueueExclusions(): string[] {
+  const queue = getRuntime().config?.activeQueue as { excludeWorkspaces?: unknown } | undefined;
+  const raw = queue?.excludeWorkspaces;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+}
+
 export function createSessionReadHandlers(): Record<string, SessionMethodHandler> {
   return {
     "session.list_sessions": async (params) =>
@@ -191,6 +208,7 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
       sessions: listAttentionSessions({
         includeSessionId: params.currentSessionId as string | undefined,
         limit: params.limit as number | undefined,
+        excludeWorkspaces: resolveQueueExclusions(),
       }),
     }),
     "session.health_check": async () => healthCheckDetailed(),

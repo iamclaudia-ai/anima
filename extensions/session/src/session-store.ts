@@ -958,9 +958,29 @@ export function listAttentionSessions(options?: {
    * thousand rows over the wire.
    */
   limit?: number;
+  /**
+   * Workspaces whose sessions never enter the queue, by name or by cwd.
+   *
+   * Some workspaces are machinery rather than work. Libby's summarization runs
+   * produce a session per conversation and nobody ever acts on one, so they'd
+   * dominate a list meant to answer "what am I in the middle of". Excluding
+   * them here rather than resolving them keeps the distinction honest: they
+   * aren't finished work, they're work that was never yours.
+   *
+   * The queue only — those sessions stay in their workspace folder and in
+   * search, and the tab's own session is still force-included, so opening one
+   * deliberately still gives you a row to act on.
+   */
+  excludeWorkspaces?: readonly string[];
 }): AttentionSession[] {
   const nowIso = options?.now ?? new Date().toISOString();
   const limit = options?.limit ?? 200;
+  const excluded = (options?.excludeWorkspaces ?? []).map((name) => name.toLowerCase());
+  const excludeClause = excluded.length
+    ? `AND (LOWER(w.name) NOT IN (${excluded.map(() => "?").join(",")})
+           AND LOWER(w.cwd) NOT IN (${excluded.map(() => "?").join(",")}))`
+    : "";
+
   const rows = getDb()
     .query(
       `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
@@ -970,12 +990,14 @@ export function listAttentionSessions(options?: {
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE s.purpose = 'chat'
           AND s.status = 'active'
-          AND (s.disposition IN ('open','needs_review','blocked','snoozed')
-               OR s.provider_session_id = ?1)
+          AND (
+            (s.disposition IN ('open','needs_review','blocked','snoozed') ${excludeClause})
+            OR s.provider_session_id = ?
+          )
         ORDER BY s.last_activity DESC
-        LIMIT ?2`,
+        LIMIT ?`,
     )
-    .all(options?.includeSessionId ?? "", limit) as Array<{
+    .all(...excluded, ...excluded, options?.includeSessionId ?? "", limit) as Array<{
     session_id: string;
     title: string | null;
     metadata_json: string | null;

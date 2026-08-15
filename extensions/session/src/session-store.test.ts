@@ -16,6 +16,7 @@ import {
   updateSessionRuntime,
   upsertSession,
 } from "./session-store";
+import { createWorkspace } from "./workspace";
 
 describe("session store", () => {
   let tmpHome: string;
@@ -254,6 +255,43 @@ describe("session store", () => {
           includeSessionId: "ses_reopened",
         }).map((s) => s.sessionId);
         expect(withCurrent).toContain("ses_reopened");
+      });
+
+      // Libby's summarization runs produce a session per conversation and
+      // nobody ever acts on one — they'd swamp a list meant to answer "what am
+      // I in the middle of".
+      it("excludes configured workspaces, by name or cwd", () => {
+        const machinery = createWorkspace({ name: "libby", cwd: join(tmpHome, "libby") });
+        upsertSession({
+          id: "ses_machinery",
+          workspaceId: machinery.id,
+          providerSessionId: "ses_machinery",
+          model: "claude-opus-5",
+          agent: "claude",
+          purpose: "chat",
+        });
+        seed("ses_mine");
+
+        const byName = listAttentionSessions({
+          now: NOW,
+          excludeWorkspaces: ["Libby"],
+        }).map((s) => s.sessionId);
+        expect(byName).toContain("ses_mine");
+        expect(byName).not.toContain("ses_machinery");
+
+        const byCwd = listAttentionSessions({
+          now: NOW,
+          excludeWorkspaces: [join(tmpHome, "libby")],
+        }).map((s) => s.sessionId);
+        expect(byCwd).not.toContain("ses_machinery");
+
+        // Opening one deliberately still gives you a row you can act on.
+        const opened = listAttentionSessions({
+          now: NOW,
+          excludeWorkspaces: ["libby"],
+          includeSessionId: "ses_machinery",
+        }).map((s) => s.sessionId);
+        expect(opened).toContain("ses_machinery");
       });
 
       it("keeps a snoozed session visible when it is the open one", () => {
