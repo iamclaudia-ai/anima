@@ -63,6 +63,25 @@ export function migrate(db: Database, options: MigrateOptions = {}): Database {
     return db;
   }
 
+  // Two files sharing an id is unrecoverable, and it fails in a way that points
+  // nowhere near the cause: `_migrations.id` is a primary key, so the first of
+  // the pair applies, the second aborts on a UNIQUE constraint, and every later
+  // migration is silently skipped. That shipped once and went unnoticed for
+  // five months because the live database had already passed the collision.
+  // Refuse up front, naming both files.
+  const byId = new Map<number, string[]>();
+  for (const migration of parsedMigrations) {
+    byId.set(migration.id, [...(byId.get(migration.id) ?? []), migration.filename]);
+  }
+  const collisions = [...byId.entries()].filter(([, files]) => files.length > 1);
+  if (collisions.length > 0) {
+    throw new Error(
+      `Duplicate migration ids: ${collisions
+        .map(([id, files]) => `${id} (${files.sort().join(", ")})`)
+        .join("; ")}. Renumber one — ids must be unique.`,
+    );
+  }
+
   // Read migration file contents
   for (const migration of parsedMigrations) {
     const filename = join(location, migration.filename);
@@ -152,7 +171,12 @@ export function migrate(db: Database, options: MigrateOptions = {}): Database {
         log.info("Applied migration", { id: migration.id, name: migration.name });
       } catch (err) {
         db.run("ROLLBACK");
-        throw err;
+        // Name the migration. A bare `no such table: X` from a stack that ends
+        // at `db.run(migration.up)` gives no way to tell which file is wrong.
+        throw new Error(
+          `Migration ${migration.id} (${migration.name}) failed: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
       }
     }
   }
