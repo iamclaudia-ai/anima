@@ -3,17 +3,24 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-async function loadStateModule(homeDir: string) {
-  const previousHome = process.env.HOME;
-  process.env.HOME = homeDir;
+/**
+ * Point the state module at a throwaway data dir.
+ *
+ * `ANIMA_DATA_DIR` rather than `HOME`: the module resolves its paths per call
+ * from that variable, which is what lets a test — and the global test preload —
+ * keep the real `~/.anima` out of reach.
+ */
+async function loadStateModule(dataDir: string) {
+  const previous = process.env.ANIMA_DATA_DIR;
+  process.env.ANIMA_DATA_DIR = dataDir;
   const mod = await import(`./state.ts?${Date.now()}`);
   return {
     mod,
     restore() {
-      if (previousHome) {
-        process.env.HOME = previousHome;
+      if (previous) {
+        process.env.ANIMA_DATA_DIR = previous;
       } else {
-        delete process.env.HOME;
+        delete process.env.ANIMA_DATA_DIR;
       }
     },
   };
@@ -44,7 +51,7 @@ describe("state persistence", () => {
 
   it("returns empty state on corrupted JSON", async () => {
     const home = mkdtempSync(join(tmpdir(), "claudia-agent-host-home-"));
-    const stateDir = join(home, ".anima", "agent-host");
+    const stateDir = join(home, "agent-host");
     const stateFile = join(stateDir, "sessions.json");
 
     // Prepare corrupted state file.

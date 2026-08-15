@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SessionHost, type AgentRuntimeSession } from "./session-host";
-import { restorePersistedSessions } from "./restore";
+import { adoptLiveCliSessions, restorePersistedSessions } from "./restore";
 
 class FakeSession extends EventEmitter {
   public isActive = true;
@@ -185,5 +185,87 @@ describe("restorePersistedSessions", () => {
       delete process.env.HOME;
     }
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("adoptLiveCliSessions", () => {
+  function deps(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      listTmuxSessions: () => [
+        { name: "anima-cli-live-one" },
+        { name: "anima-cli-dead-one" },
+        { name: "anima-cli-tracked-one" },
+        { name: "anima-session-hookpane" },
+        { name: "unrelated" },
+      ],
+      claudeProcessAlive: (id: string) => id !== "dead-one",
+      paneCurrentPath: () => "/Users/michael/Projects/beehiiv/swarm",
+      isTracked: (id: string) => id === "tracked-one",
+      ...overrides,
+    } as Parameters<typeof adoptLiveCliSessions>[1];
+  }
+
+  const silentLog = { info: () => {}, warn: () => {} };
+
+  it("adopts only untracked CLI panes whose claude is still alive", async () => {
+    const resumed: string[] = [];
+    const host = {
+      resume: async ({ sessionId }: { sessionId: string }) => {
+        resumed.push(sessionId);
+        return { sessionId };
+      },
+    };
+
+    const adopted = await adoptLiveCliSessions(host, deps(), silentLog);
+
+    // dead-one has no process, tracked-one is already covered, and neither the
+    // hook pane nor the unrelated session is a CLI session at all.
+    expect(resumed).toEqual(["live-one"]);
+    expect(adopted).toBe(1);
+  });
+
+  it("passes the pane's own cwd, which resume needs and the registry lost", async () => {
+    const seen: Array<{ sessionId: string; cwd: string }> = [];
+    const host = {
+      resume: async (params: { sessionId: string; cwd: string }) => {
+        seen.push({ sessionId: params.sessionId, cwd: params.cwd });
+        return { sessionId: params.sessionId };
+      },
+    };
+
+    await adoptLiveCliSessions(host, deps(), silentLog);
+
+    expect(seen).toEqual([{ sessionId: "live-one", cwd: "/Users/michael/Projects/beehiiv/swarm" }]);
+  });
+
+  it("skips a pane with no readable cwd rather than guessing one", async () => {
+    const resumed: string[] = [];
+    const host = {
+      resume: async ({ sessionId }: { sessionId: string }) => {
+        resumed.push(sessionId);
+        return { sessionId };
+      },
+    };
+
+    const adopted = await adoptLiveCliSessions(
+      host,
+      deps({ paneCurrentPath: () => null }),
+      silentLog,
+    );
+
+    expect(resumed).toEqual([]);
+    expect(adopted).toBe(0);
+  });
+
+  it("keeps going when one session fails to adopt", async () => {
+    const host = {
+      resume: async ({ sessionId }: { sessionId: string }) => {
+        throw new Error(`no can do: ${sessionId}`);
+      },
+    };
+
+    const adopted = await adoptLiveCliSessions(host, deps(), silentLog);
+
+    expect(adopted).toBe(0);
   });
 });

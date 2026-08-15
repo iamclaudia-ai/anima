@@ -5,6 +5,10 @@ exact = true
 [test]
 # Test configuration
 coverage = true
+# Redirect ANIMA_DATA_DIR to a temp dir before any test module loads, so a test
+# run can never write to the live ~/.anima (it once truncated the agent-host
+# session registry and got running sessions reaped).
+preload = ["./scripts/test-preload.ts"]
 
 [serve.static]
 # Tailwind CSS processing for the gateway's fullstack dev server

@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { createAgentHostServer } from "./server";
-import { killSession, listTmuxSessions } from "./providers/cli/tmux";
+import { claudeProcessAlive, killSession, listTmuxSessions } from "./providers/cli/tmux";
 
 const log = createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -83,10 +83,17 @@ const ctx = await createAgentHostServer({ port: PORT });
  * Reap orphan tmux panes:
  *  - `anima-session-*` panes from the tmux-wrap PreToolUse hook.
  *  - `anima-cli-*` panes whose session ID is NOT currently tracked by sessionHost
- *    (left behind by a prior agent-host process — the in-memory reaper has no
- *    record of them, so it never closes them).
+ *    *and* whose `claude` process is gone — genuinely abandoned shells.
  * Keeps any pane with an attached client and any pane whose tmux activity
  * timestamp is within the idle threshold.
+ *
+ * "Untracked" alone is not evidence a CLI pane is garbage. The registry is a
+ * cache: it is empty after a crash, and it was emptied outright when the test
+ * suite wrote to the real `~/.anima` (see `state.ts`). Reaping on that signal
+ * killed two of Michael's live sessions mid-conversation — the pane was idle
+ * only because he was reading, and unattached only because he was in the web
+ * UI rather than tmux. A running `claude` process is ground truth and outranks
+ * anything the registry does or doesn't remember.
  */
 function reapOrphanTmuxPanes(staleMs: number): number {
   const cutoffSec = (Date.now() - staleMs) / 1000;
@@ -99,6 +106,7 @@ function reapOrphanTmuxPanes(staleMs: number): number {
     if (isCli) {
       const sessionId = s.name.slice("anima-cli-".length);
       if (tracked.has(sessionId)) continue;
+      if (claudeProcessAlive(sessionId)) continue;
     }
     if (s.attached) continue;
     if (s.activitySec >= cutoffSec) continue;

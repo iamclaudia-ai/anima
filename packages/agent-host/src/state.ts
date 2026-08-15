@@ -15,11 +15,30 @@ import { homedir } from "node:os";
 import { createLogger } from "@anima/shared";
 import type { SessionRecord } from "./session-host";
 
-const homeDir = process.env.HOME ?? homedir();
-const log = createLogger("State", join(homeDir, ".anima", "logs", "agent-host.log"));
+const log = createLogger(
+  "State",
+  join(process.env.HOME ?? homedir(), ".anima", "logs", "agent-host.log"),
+);
 
-const STATE_DIR = join(homeDir, ".anima", "agent-host");
-const STATE_FILE = join(STATE_DIR, "sessions.json");
+/**
+ * Resolved per call, not once at import.
+ *
+ * Module-level capture made these paths unoverridable: a test that set
+ * `HOME` after the module had loaded still wrote to the real `~/.anima`, and
+ * `bun test` duly truncated the live session registry to zero — which then
+ * stranded every running CLI's proxy and got two of Michael's sessions reaped
+ * as orphans. `ANIMA_DATA_DIR` is the same override the session store already
+ * honours, and honouring it here at call time is what makes isolation possible
+ * at all.
+ */
+function stateDir(): string {
+  const base = process.env.ANIMA_DATA_DIR || join(process.env.HOME ?? homedir(), ".anima");
+  return join(base, "agent-host");
+}
+
+function stateFile(): string {
+  return join(stateDir(), "sessions.json");
+}
 
 export interface PersistedState {
   /** When the state was last written */
@@ -34,11 +53,11 @@ export interface PersistedState {
  */
 export function loadState(): PersistedState {
   try {
-    if (!existsSync(STATE_FILE)) {
+    if (!existsSync(stateFile())) {
       return { updatedAt: new Date().toISOString(), sessions: [] };
     }
 
-    const raw = readFileSync(STATE_FILE, "utf-8");
+    const raw = readFileSync(stateFile(), "utf-8");
     const state = JSON.parse(raw) as PersistedState;
 
     log.info("Loaded persisted state", { sessions: state.sessions.length });
@@ -55,8 +74,8 @@ export function loadState(): PersistedState {
  */
 export function saveState(sessions: SessionRecord[]): void {
   try {
-    if (!existsSync(STATE_DIR)) {
-      mkdirSync(STATE_DIR, { recursive: true });
+    if (!existsSync(stateDir())) {
+      mkdirSync(stateDir(), { recursive: true });
     }
 
     const state: PersistedState = {
@@ -64,7 +83,7 @@ export function saveState(sessions: SessionRecord[]): void {
       sessions,
     };
 
-    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + "\n");
+    writeFileSync(stateFile(), JSON.stringify(state, null, 2) + "\n");
     log.info("Saved state", { sessions: sessions.length });
   } catch (error) {
     log.error("Failed to save state", { error: String(error) });

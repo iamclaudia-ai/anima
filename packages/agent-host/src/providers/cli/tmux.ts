@@ -188,6 +188,17 @@ export interface TmuxSessionInfo {
   attached: boolean;
 }
 
+/**
+ * A pane's current working directory.
+ *
+ * Used to adopt a CLI session whose registry record was lost: `resume` needs a
+ * cwd, and the pane already knows the one it was launched in.
+ */
+export function paneCurrentPath(name: string): string | null {
+  const out = tmux(["display-message", "-p", "-t", name, "#{pane_current_path}"]).trim();
+  return out || null;
+}
+
 /** Snapshot of every tmux session on this host (empty array if tmux is dead). */
 export function listTmuxSessions(): TmuxSessionInfo[] {
   const out = tmux([

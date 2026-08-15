@@ -15,7 +15,8 @@ import {
   type SessionResumeParams,
 } from "./session-host";
 import { loadState, saveState, type PersistedState } from "./state";
-import { restorePersistedSessions } from "./restore";
+import { adoptLiveCliSessions, restorePersistedSessions } from "./restore";
+import { claudeProcessAlive, listTmuxSessions, paneCurrentPath } from "./providers/cli/tmux";
 import type { BufferedEvent } from "./event-buffer";
 import type { ThinkingEffort } from "@anima/shared";
 import { createAnthropicProvider } from "./providers/anthropic/sdk-session";
@@ -61,7 +62,18 @@ export interface AgentHostServerOptions {
   saveState?: typeof saveState;
   logger?: ReturnType<typeof createLogger>;
   stateSaveIntervalMs?: number | null;
+  /**
+   * How startup discovers CLI sessions the registry missed.
+   *
+   * Injectable because the real implementation shells out to tmux and the
+   * process table — a test that got the defaults would inspect, and try to
+   * adopt, the developer's own running sessions. Pass `null` to skip adoption
+   * entirely.
+   */
+  adoptDeps?: AdoptDeps | null;
 }
+
+type AdoptDeps = Parameters<typeof adoptLiveCliSessions>[1];
 
 export interface AgentHostServerContext {
   server: ReturnType<typeof Bun.serve>;
@@ -175,6 +187,26 @@ export async function createAgentHostServer(
 
   // Restore sessions to memory
   await restorePersistedSessions(sessionHost, persistedState, log);
+
+  // Then repair anything the registry missed. A `claude` still running in an
+  // `anima-cli-*` pane needs its proxy rebound on the exact port it was
+  // launched against, whether or not `sessions.json` remembers it.
+  const tracked = sessionHost.trackedIds?.() ?? new Set<string>();
+  // Under `bun test` the default is "don't", not "the real tmux" — a suite that
+  // simply forgets to pass `adoptDeps` must not be able to reach into the
+  // developer's live sessions. Tests that exercise adoption inject their own.
+  const adoptDeps =
+    options.adoptDeps === undefined && process.env.NODE_ENV === "test"
+      ? null
+      : options.adoptDeps === undefined
+        ? {
+            listTmuxSessions,
+            claudeProcessAlive,
+            paneCurrentPath,
+            isTracked: (id: string) => tracked.has(id),
+          }
+        : options.adoptDeps;
+  if (adoptDeps) await adoptLiveCliSessions(sessionHost, adoptDeps, log);
 
   // ── WebSocket Client Tracking ──────────────────────────────
   const clients = new Map<unknown, WSClient>();
