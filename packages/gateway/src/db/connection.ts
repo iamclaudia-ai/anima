@@ -14,8 +14,23 @@ import { createLogger } from "@anima/shared";
 
 const log = createLogger("DB", join(homedir(), ".anima", "logs", "gateway.log"));
 
-const ANIMA_DIR = join(homedir(), ".anima");
-const DB_PATH = join(ANIMA_DIR, "anima.db");
+/**
+ * Where the database lives — resolved per call, not at import.
+ *
+ * This used to be a module constant built from `homedir()`, which meant
+ * `ANIMA_DATA_DIR` could not redirect it and no test could avoid it. The
+ * gateway integration tests spawn a real gateway with an isolated data dir;
+ * that gateway was opening and migrating the **live** `~/.anima/anima.db`
+ * anyway. It went unnoticed because the live database was always already
+ * migrated — but the same import-time resolution in agent-host's `state.ts` is
+ * what let `bun test` truncate the live session registry and kill running CLI
+ * panes on 2026-08-15.
+ *
+ * A test run must not be able to reach the running system's state.
+ */
+function dataDir(): string {
+  return process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
+}
 
 let db: Database | null = null;
 
@@ -25,12 +40,13 @@ let db: Database | null = null;
 export function getDb(): Database {
   if (db) return db;
 
-  // Ensure ~/.anima/ exists
-  if (!existsSync(ANIMA_DIR)) {
-    mkdirSync(ANIMA_DIR, { recursive: true });
+  const dir = dataDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(DB_PATH);
+  const dbPath = join(dir, "anima.db");
+  db = new Database(dbPath);
 
   // Enable WAL mode for better concurrency
   db.exec("PRAGMA journal_mode = WAL");
@@ -40,7 +56,7 @@ export function getDb(): Database {
   // Run pending migrations
   migrate(db);
 
-  log.info("Opened database", { path: DB_PATH });
+  log.info("Opened database", { path: dbPath });
   return db;
 }
 
