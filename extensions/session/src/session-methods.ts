@@ -73,7 +73,10 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     description: "Answer a modal prompt the CLI is blocked on by pressing one of its option keys",
     inputSchema: z.object({
       sessionId: z.string().describe("Session UUID"),
-      key: z.string().describe('Option key to press, as rendered ("1", "2", ...)'),
+      // Coerced: the key is a keystroke, but every option the CLI renders is a
+      // digit, so the CLI's arg parser hands us a number and a bare
+      // `z.string()` rejects `--key 1` — the only way anyone will ever type it.
+      key: z.coerce.string().describe('Option key to press, as rendered ("1", "2", ...)'),
       fingerprint: z
         .string()
         .optional()

@@ -89,6 +89,49 @@ describe("session store", () => {
     expect(row?.firstPrompt).toBe("fix the reaper");
   });
 
+  /**
+   * The reconciler upserts every session it discovers, without a runtime
+   * status, on every pass. Before this the upsert reset the column to `idle` —
+   * which nothing noticed while the only states that mattered were re-written
+   * by a stream of events several times a second. A session blocked on a modal
+   * prompt writes `awaiting_approval` exactly once and then goes silent by
+   * definition, so it was reset within seconds, every time.
+   */
+  it("does not reset runtime status on an upsert that omits one", () => {
+    const base = {
+      id: "ses_status",
+      workspaceId: "ws_status",
+      providerSessionId: "ses_status",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat" as const,
+      lastActivity: new Date().toISOString(),
+    };
+    upsertSession({ ...base, runtimeStatus: "idle" });
+    touchSession("ses_status", "awaiting_approval");
+
+    // A reconciler pass: same row, no opinion about runtime status.
+    upsertSession(base);
+    expect(getStoredSession("ses_status")?.runtimeStatus).toBe("awaiting_approval");
+
+    // An upsert that *does* state one still wins.
+    upsertSession({ ...base, runtimeStatus: "running" });
+    expect(getStoredSession("ses_status")?.runtimeStatus).toBe("running");
+  });
+
+  it("defaults a brand-new session to idle", () => {
+    upsertSession({
+      id: "ses_fresh",
+      workspaceId: "ws_fresh",
+      providerSessionId: "ses_fresh",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat",
+      lastActivity: new Date().toISOString(),
+    });
+    expect(getStoredSession("ses_fresh")?.runtimeStatus).toBe("idle");
+  });
+
   it("reports an unknown session rather than silently succeeding", () => {
     expect(setSessionTitle("ses_does_not_exist", "nope")).toBe(false);
   });

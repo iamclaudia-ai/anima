@@ -366,6 +366,19 @@ export function closeSessionDb(): void {
   }
 }
 
+/**
+ * Insert or update a session row.
+ *
+ * `runtimeStatus` is preserved when omitted, the same protection `title` and
+ * `disposition` have — and for the same reason. The reconciler upserts every
+ * session it discovers on every pass with no opinion about runtime status, and
+ * this used to reset the column to `idle` each time. That was invisible while
+ * the only status that mattered was `running`, which a stream of events
+ * re-writes several times a second. `awaiting_approval` is the first status
+ * written once and then required to survive in silence — which is exactly what
+ * a session blocked on a modal prompt does (#69), and it was being cleared
+ * within seconds of every detection.
+ */
 export function upsertSession(params: {
   id: string;
   workspaceId: string;
@@ -412,7 +425,7 @@ export function upsertSession(params: {
         workspace_id, provider_session_id, model, agent, purpose, parent_session_id,
         status, runtime_status, title, summary, metadata_json, previous_session_id,
         last_activity, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'idle'), ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(provider_session_id) DO UPDATE SET
         workspace_id = excluded.workspace_id,
         provider_session_id = excluded.provider_session_id,
@@ -421,7 +434,9 @@ export function upsertSession(params: {
         purpose = excluded.purpose,
         parent_session_id = excluded.parent_session_id,
         status = excluded.status,
-        runtime_status = excluded.runtime_status,
+        -- See the note above the function. Bound separately from the VALUES
+        -- clause, which has already applied the default.
+        runtime_status = COALESCE(?, sessions.runtime_status),
         title = COALESCE(excluded.title, sessions.title),
         summary = COALESCE(excluded.summary, sessions.summary),
         metadata_json = COALESCE(excluded.metadata_json, sessions.metadata_json),
@@ -437,7 +452,7 @@ export function upsertSession(params: {
       params.purpose || "chat",
       params.parentSessionId ?? null,
       params.status || "active",
-      params.runtimeStatus || "idle",
+      params.runtimeStatus ?? null,
       params.title ?? null,
       params.summary ?? null,
       metadataJson,
@@ -445,6 +460,8 @@ export function upsertSession(params: {
       params.lastActivity || now,
       now,
       now,
+      // Second binding of the same value — the ON CONFLICT clause above.
+      params.runtimeStatus ?? null,
     );
 }
 

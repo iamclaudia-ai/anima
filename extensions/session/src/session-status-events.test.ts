@@ -58,9 +58,10 @@ describe("session status events", () => {
     workspaceId = workspace.id;
     // Both fixtures are seeded here, not inside the tests that use them.
     // `bunfig.toml` points the whole run at one `ANIMA_DATA_DIR`, so the
-    // database outlives each test — but `upsertSession` resets runtime_status
-    // to idle, which makes re-seeding the isolation. A session left `running`
-    // by an earlier test would otherwise be counted by the startup reconcile.
+    // database outlives each test, so the seed has to state `idle` explicitly:
+    // an upsert that omits a runtime status now *preserves* the existing one
+    // (see `upsertSession`), and a session left `running` by an earlier test
+    // would otherwise be counted by the startup reconcile.
     for (const id of ["ses_status", "ses_alive"]) {
       upsertSession({
         id,
@@ -69,6 +70,7 @@ describe("session status events", () => {
         model: "claude-opus-5",
         agent: "claude",
         purpose: "chat",
+        runtimeStatus: "idle",
       });
     }
   });
