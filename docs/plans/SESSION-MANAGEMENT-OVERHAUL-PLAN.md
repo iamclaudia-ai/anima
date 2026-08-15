@@ -45,15 +45,15 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 
 ## Status — 2026-08-14
 
-Phases 0 and 1 are **shipped and live**; Phase 2 is **half shipped** (refs done, search not started).
+**Phase 1 is complete.** Phase 2 is half shipped — refs done, search not started.
 
 |                                   | state      | notes                                                              |
 | --------------------------------- | ---------- | ------------------------------------------------------------------ |
 | **0 — spinners (#65)**            | ✅ shipped | root cause was a trailing `role: "system"` message, not a user one |
 | **1a — titles (#68)**             | ✅ shipped | 352/352 real transcripts titled, 0 markup leaks                    |
 | **1b — DB-first list (#66)**      | ✅ shipped | 247-session workspace: 154ms → 0.7ms                               |
-| **1c — `set_title` + rename UI**  | ⬜ next    | the last piece of Phase 1                                          |
-| **1d — copy tmux command button** | ⬜ next    | small, high value                                                  |
+| **1c — `set_title` + rename UI**  | ✅ shipped | inline rename in the nav; reconciler-safe, verified live           |
+| **1d — copy tmux command button** | ✅ shipped | no id normalization needed — CLI panes are `anima-cli-<id>`        |
 | **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
 | **2b — FTS search (#2)**          | ⬜ next    | biggest remaining win                                              |
 | **3 — live status (#67, #31)**    | ⬜         |                                                                    |
@@ -69,7 +69,7 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**`session.set_title` + inline rename** finishes Phase 1 and is small: the `sessions.title` column exists, `deriveSessionTitle()` is already the fallback, and the reconciler is careful never to overwrite a stored title (it carries `firstPrompt` forward when a title isn't re-derived). Needs the method, a Zod schema, and an edit affordance on the nav row.
+**Phase 2b — FTS search (#2)** is next, and it's the biggest remaining win.
 
 **Then FTS search (#2).** Design is settled in Phase 2 below — index into `memory_search_fts` as a third `source_type`, expose via memory, call from `session.search`. `session_refs` is now populated from whole conversations and indexed, so ref filters come nearly free. Worth a fresh session: it spans two extensions and a new index, and `session-ref-sync.ts` already proves the read path against `memory_transcript_entries` that search will reuse.
 
