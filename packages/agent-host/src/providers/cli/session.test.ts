@@ -68,6 +68,30 @@ describe("collectTrailingToolResults", () => {
     ]);
   });
 
+  test("finds results behind a trailing system reminder", () => {
+    // The actual shape that stranded every spinner, from proxy capture: the
+    // CLI appends a `role: "system"` reminder AFTER the tool results. Of 62
+    // captured agent requests carrying results, 10 looked like this.
+    const messages = [
+      assistantTurn("tool_1"),
+      { role: "user", content: [toolResult("tool_1")] },
+      { role: "system", content: "<system-reminder>…</system-reminder>" },
+    ];
+    expect(collectTrailingToolResults(messages)).toEqual([
+      { tool_use_id: "tool_1", content: "ok", is_error: false },
+    ]);
+  });
+
+  test("finds results behind several trailing non-user messages", () => {
+    const messages = [
+      assistantTurn("tool_1"),
+      { role: "user", content: [toolResult("tool_1")] },
+      { role: "system", content: "reminder one" },
+      { role: "user", content: [{ type: "text", text: "<system-reminder>two</system-reminder>" }] },
+    ];
+    expect(collectTrailingToolResults(messages)).toHaveLength(1);
+  });
+
   test("skips a plain-string trailing message without ending the scan", () => {
     const messages = [
       assistantTurn("tool_1"),

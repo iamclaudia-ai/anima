@@ -111,19 +111,26 @@ interface EmittedToolResult {
  * messages at the tail is exactly the current batch; the first non-user
  * message ends it and keeps the scan off the rest of the conversation.
  *
- * Scanning that whole run — rather than only `messages.at(-1)` — is what makes
- * this robust: the CLI appends extra user messages after the results (a
- * trailing `<system-reminder>` is the common one), which displaced the results
- * from the last slot and stranded the spinner forever. Non-array content
- * (a plain string message) is skipped rather than treated as the end of the
- * run, for the same reason.
+ * Scanning that run — rather than only `messages.at(-1)` — is what makes this
+ * robust. The CLI appends a `role: "system"` reminder message after the tool
+ * results, which displaces them from the last slot and stranded the spinner
+ * forever. Proxy capture confirms the shape: of 62 agent requests carrying tool
+ * results, 50 ended with the results and 10 had a trailing `system` message
+ * (the remaining 2 were `assistant then user`, i.e. an already-emitted batch).
+ *
+ * So only an `assistant` message ends the scan — anything else that isn't a
+ * user message is stepped over, since injected reminders must not hide the
+ * results behind them.
  */
 export function collectTrailingToolResults(messages: unknown[]): EmittedToolResult[] {
   const collected: EmittedToolResult[] = [];
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i] as { role?: string; content?: unknown } | null;
-    if (message?.role !== "user") break;
+    // The assistant turn that requested these results bounds the batch.
+    if (message?.role === "assistant") break;
+    // Step over injected reminders and any non-user message.
+    if (message?.role !== "user") continue;
     if (!Array.isArray(message.content)) continue;
 
     // Walk the message's own blocks in reverse too, so a single flat reverse
@@ -907,12 +914,44 @@ export class ClaudeCliSession extends EventEmitter {
     // self-limiting across turns (an assistant message ends the run), but the
     // CLI re-sends an identical body when it retries a request — without this,
     // a 429 would replay every tool result in the current batch.
-    const fresh = collectTrailingToolResults(messages).filter((result) => {
+    const found = collectTrailingToolResults(messages);
+    const fresh = found.filter((result) => {
       const id = result.tool_use_id;
       if (typeof id !== "string") return true;
       if (this._emittedToolResultIds.has(id)) return false;
       this._emittedToolResultIds.add(id);
       return true;
+    });
+
+    // This reconstruction is a heuristic over a message shape the CLI controls
+    // and has changed underneath us before (a trailing `system` reminder is
+    // what stranded every spinner). When it finds nothing, say so and describe
+    // the tail — otherwise the only symptom is a spinner that never stops, with
+    // nothing in the logs to explain it.
+    if (found.length === 0) {
+      log.warn("No tool results in request tail — spinners may not clear", {
+        messageCount: messages.length,
+        tailRoles: messages
+          .slice(-4)
+          .map((m) => (m as { role?: string } | null)?.role ?? "?")
+          .join(","),
+        tailBlockTypes: messages
+          .slice(-4)
+          .map((m) => {
+            const content = (m as { content?: unknown } | null)?.content;
+            return Array.isArray(content)
+              ? `[${content.map((b) => (b as { type?: string })?.type ?? "?").join("|")}]`
+              : typeof content;
+          })
+          .join(","),
+      });
+      return;
+    }
+
+    log.info("Surfaced tool results", {
+      found: found.length,
+      fresh: fresh.length,
+      messageCount: messages.length,
     });
     if (fresh.length === 0) return;
 
