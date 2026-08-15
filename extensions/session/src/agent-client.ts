@@ -221,6 +221,24 @@ export class AgentHostClient extends EventEmitter {
   }
 
   /**
+   * Answer a modal prompt the CLI runtime is blocked on (#69).
+   */
+  async answerModal(
+    sessionId: string,
+    key: string,
+    fingerprint?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const result = (await this.sendRequest({
+      type: "session.answer_modal",
+      requestId: "",
+      sessionId,
+      key,
+      fingerprint,
+    })) as { ok?: boolean; error?: string } | undefined;
+    return { ok: result?.ok !== false, error: result?.error };
+  }
+
+  /**
    * Close a session.
    */
   async close(sessionId: string): Promise<void> {

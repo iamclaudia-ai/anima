@@ -52,6 +52,14 @@ export class SessionAgentBridge {
     return await this.client.interrupt(sessionId);
   }
 
+  async answerModal(
+    sessionId: string,
+    key: string,
+    fingerprint?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    return await this.client.answerModal(sessionId, key, fingerprint);
+  }
+
   async closeSession(sessionId: string): Promise<void> {
     await this.client.close(sessionId);
   }

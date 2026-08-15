@@ -71,7 +71,9 @@ export function wireSessionEvents(): () => void {
     rt.ctx.emit(eventName, { ...payload, sessionId }, emitOptions);
 
     const runtimeStatus =
-      typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
+      typeof payload.type === "string"
+        ? toRuntimeStatusFromSessionEvent(payload.type, payload)
+        : null;
     if (runtimeStatus) {
       // Writes and announces in one step, and only when the status actually
       // moved — this runs per streamed event, so an unconditional emit would

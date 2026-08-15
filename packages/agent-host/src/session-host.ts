@@ -258,6 +258,22 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
+   * Answer a modal prompt the session is blocked on (#69).
+   */
+  async answerModal(
+    sessionId: string,
+    key: string,
+    fingerprint?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return { ok: false, error: "Session not found" };
+    if (!session.answerModal) {
+      return { ok: false, error: "This session's runtime has no modal prompts" };
+    }
+    return session.answerModal(key, fingerprint);
+  }
+
+  /**
    * Set the permission mode for a session.
    */
   setPermissionMode(sessionId: string, mode: string): boolean {

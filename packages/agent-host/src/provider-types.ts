@@ -66,6 +66,16 @@ export interface AgentRuntimeSession {
    * startup probes). Falls back to `close()` when omitted.
    */
   release?(): Promise<void>;
+  /**
+   * Answer a modal prompt the runtime is blocked on by pressing one of its
+   * option keys (#69). Optional: only the CLI runtime drives a real TUI that can
+   * stop on a modal — the SDK providers surface permissions as tool calls.
+   *
+   * `fingerprint` scopes the answer to the prompt the caller actually saw, so a
+   * stale click from a tab that has been open a while can't answer a *different*
+   * question than the one it rendered.
+   */
+  answerModal?(key: string, fingerprint?: string): Promise<{ ok: boolean; error?: string }>;
   setPermissionMode(mode: string): void;
   sendToolResult(toolUseId: string, content: string, isError?: boolean): void;
   getInfo(): AgentRuntimeSessionInfo;

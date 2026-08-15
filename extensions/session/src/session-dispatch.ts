@@ -384,6 +384,18 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       const ok = await rt.bridge.interruptSession(params.sessionId as string);
       return { ok };
     },
+    "session.answer_modal": async (params) => {
+      const rt = getRuntime();
+      const sessionId = params.sessionId as string;
+      log.info("Answering modal prompt", { sessionId: shortId(sessionId), key: params.key });
+      const result = await rt.bridge.answerModal(
+        sessionId,
+        params.key as string,
+        params.fingerprint as string | undefined,
+      );
+      if (!result.ok) throw new Error(result.error ?? "Failed to answer prompt");
+      return { ok: true };
+    },
     "session.close_session": async (params) => {
       const rt = getRuntime();
       log.info("Closing session", { sessionId: shortId(params.sessionId as string) });

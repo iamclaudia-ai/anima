@@ -47,6 +47,17 @@ export interface InterruptMessage {
   sessionId: string;
 }
 
+/** Answer a modal prompt the CLI runtime is blocked on (#69) */
+export interface AnswerModalMessage {
+  type: "session.answer_modal";
+  requestId: string;
+  sessionId: string;
+  /** Option key to press, as rendered in the prompt ("1", "2", …). */
+  key: string;
+  /** Fingerprint of the prompt the caller saw — rejects an answer to a stale one. */
+  fingerprint?: string;
+}
+
 /** Close a session */
 export interface CloseMessage {
   type: "session.close";
@@ -103,6 +114,7 @@ export type AgentHostClientMessage =
   | CreateSessionMessage
   | PromptMessage
   | InterruptMessage
+  | AnswerModalMessage
   | CloseMessage
   | SetPermissionModeMessage
   | SendToolResultMessage

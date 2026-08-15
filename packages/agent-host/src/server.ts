@@ -36,6 +36,11 @@ export interface SessionHostLike {
     agent?: string,
   ) => Promise<void> | void;
   interrupt: (sessionId: string) => boolean;
+  answerModal: (
+    sessionId: string,
+    key: string,
+    fingerprint?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   close: (sessionId: string) => Promise<void>;
   setPermissionMode: (sessionId: string, mode: string) => boolean;
   sendToolResult: (
@@ -371,6 +376,17 @@ export async function createAgentHostServer(
           requestId: msg.requestId,
           ok,
           ...(ok ? {} : { error: "Session not found" }),
+        });
+        break;
+      }
+
+      case "session.answer_modal": {
+        const result = await sessionHost.answerModal(msg.sessionId, msg.key, msg.fingerprint);
+        sendResponse(ws, {
+          type: "res",
+          requestId: msg.requestId,
+          ok: result.ok,
+          ...(result.ok ? {} : { error: result.error ?? "Failed to answer prompt" }),
         });
         break;
       }

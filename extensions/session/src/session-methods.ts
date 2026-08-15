@@ -69,6 +69,19 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
+    name: "session.answer_modal",
+    description: "Answer a modal prompt the CLI is blocked on by pressing one of its option keys",
+    inputSchema: z.object({
+      sessionId: z.string().describe("Session UUID"),
+      key: z.string().describe('Option key to press, as rendered ("1", "2", ...)'),
+      fingerprint: z
+        .string()
+        .optional()
+        .describe("Fingerprint from the modal_prompt event — rejects answering a stale prompt"),
+    }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
+  },
+  {
     name: "session.close_session",
     description: "Close a session (kills CLI process via query.close())",
     inputSchema: z.object({

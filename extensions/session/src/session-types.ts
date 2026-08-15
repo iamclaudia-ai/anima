@@ -62,9 +62,24 @@ export function mergeTags(primary: string[] | null, current: string[] | null): s
  * announces itself on the bus, it would be two events per turn describing one
  * transition.
  */
-export function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
+export function toRuntimeStatusFromSessionEvent(
+  type: string,
+  payload?: Record<string, unknown>,
+): RuntimeStatus | null {
   if (type === "process_started") return "running";
   if (type === "process_ended") return "idle";
+  // Modal prompts (#69) are the only writer of the two attention states. Which
+  // one depends on what the modal is asking: a hook confirmation gating a tool
+  // call is an approval, the folder-trust dialog is input.
+  if (type === "modal_prompt") {
+    return payload?.kind === "approval" ? "awaiting_approval" : "awaiting_input";
+  }
+  // Where a cleared modal leaves the session depends on whether a turn was
+  // waiting behind it — answering a hook confirmation resumes the tool call,
+  // while dismissing a trust dialog at launch just returns to idle.
+  if (type === "modal_prompt_cleared") {
+    return payload?.resumedTurn === true ? "running" : "idle";
+  }
   return null;
 }
 

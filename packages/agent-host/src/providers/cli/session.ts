@@ -39,6 +39,7 @@ import {
   sendKey,
   submit,
 } from "./tmux";
+import { detectModalPrompt, type ModalPrompt } from "./modal-prompt";
 import { copyImageToClipboard } from "./image-clipboard";
 import { ensureMitmCerts } from "./mitm-certs";
 import { recallPort, rememberPort } from "./port-registry";
@@ -91,6 +92,24 @@ const PANE_IDLE_TIMEOUT_MS = 10_000;
 const SURVEY_CLEAR_TIMEOUT_MS = 2_000;
 /** Poll interval while waiting for the survey to clear. */
 const SURVEY_CLEAR_SAMPLE_MS = 150;
+/**
+ * Modal-prompt poll cadence, mid-turn. A hook confirmation lands while a tool
+ * call is in flight, which is when we care about latency — this is the interval
+ * that decides how long a blocked session looks merely busy.
+ */
+const MODAL_POLL_ACTIVE_MS = 1_500;
+/**
+ * Modal-prompt poll cadence when no turn is in flight. Deliberately slow: each
+ * poll forks a `tmux capture-pane`, and with a dozen live panes a uniform fast
+ * poll would be a steady stream of processes for a case that is rare when idle
+ * (the trust dialog at launch, or a modal left standing by a turn we never saw
+ * start — which is exactly the post-restart adopted pane).
+ */
+const MODAL_POLL_IDLE_MS = 10_000;
+/** Max wait for a modal to clear after we answer it. */
+const MODAL_CLEAR_TIMEOUT_MS = 4_000;
+/** Poll interval while waiting for an answered modal to clear. */
+const MODAL_CLEAR_SAMPLE_MS = 150;
 
 /**
  * Detect the CLI's periodic "How is Claude doing this session?" feedback
@@ -286,6 +305,10 @@ export class ClaudeCliSession extends EventEmitter {
   /** True once claude has been launched at least once — recovery uses --resume. */
   private _launched = false;
 
+  /** The modal currently on screen, as last observed by the watcher. */
+  private _modal: ModalPrompt | null = null;
+  private _modalTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Turn tracking — the latest non-terminal/terminal stop reason on the agent stream.
   private lastStopReason = "";
 
@@ -332,6 +355,7 @@ export class ClaudeCliSession extends EventEmitter {
     this._turnStateKnown = false;
     this.lastActivityTime = Date.now();
     this.tail.start();
+    this.startModalWatch();
     this.emit("ready", { sessionId: this.id });
     this.emit("process_started");
     log.info("Started", { id: this.id.slice(0, 8), port: this.proxyPort, reuse: reused });
@@ -570,6 +594,35 @@ export class ClaudeCliSession extends EventEmitter {
       return;
     }
 
+    // A modal owns the keyboard: pasting into one types the prompt at a yes/no
+    // dialog, where the first character is read as an option key. Refuse, and
+    // say what's actually blocking — this is the state that used to look like a
+    // hang. The watcher has already announced it, so the UI can offer the
+    // answer buttons right beside this error.
+    const blocking = detectModalPrompt(capturePane(this.tmuxName));
+    if (blocking) {
+      const hint = `Answer it from the session view, or attach with \`tmux attach -t ${this.tmuxName}\`.`;
+      this.emit("sse", {
+        type: "runtime_error",
+        subtype: "submit_failed",
+        timestamp: new Date().toISOString(),
+        reason: "modal_prompt",
+        message: `Your prompt didn't reach Claude — the CLI is waiting on a prompt: "${blocking.question}". ${hint}`,
+        fingerprint: blocking.fingerprint,
+        hint,
+      } satisfies StreamEvent);
+      this.emit("sse", {
+        type: "turn_stop",
+        timestamp: new Date().toISOString(),
+        stop_reason: "modal_prompt",
+      } satisfies StreamEvent);
+      // Announced last, deliberately: `turn_stop` writes `completed`, so a modal
+      // announced before it would have its `awaiting_approval` overwritten one
+      // line later — the session would go back to looking finished.
+      this.setModal(blocking);
+      return;
+    }
+
     // Clear (and answer) any feedback survey sitting on the idle input before we
     // paste — its number keys are captured by the survey widget, not the input
     // box, so a lingering survey could swallow our first keystroke.
@@ -722,6 +775,169 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   /**
+   * Watch the pane for modal prompts (#69).
+   *
+   * A modal is the one CLI state with no out-of-band signal at all: no SSE, no
+   * JSONL entry, nothing on the proxy. The pane is the only place it exists, so
+   * a poll is the only way to see it. Self-rescheduling rather than
+   * `setInterval` so the cadence can follow the turn — see the two constants.
+   */
+  private startModalWatch(): void {
+    if (this._modalTimer) return;
+    const tick = (): void => {
+      this._modalTimer = null;
+      if (this._isClosed || !this._isStarted) return;
+      try {
+        this.pollModal();
+      } catch (err) {
+        // A capture failure is not worth tearing the watcher down for — the
+        // pane may simply have died, which the next prompt heals.
+        log.warn("modal poll failed", {
+          id: this.id.slice(0, 8),
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      this.scheduleModalPoll(tick);
+    };
+    this.scheduleModalPoll(tick);
+  }
+
+  private scheduleModalPoll(tick: () => void): void {
+    const delay = this._turnActive ? MODAL_POLL_ACTIVE_MS : MODAL_POLL_IDLE_MS;
+    this._modalTimer = setTimeout(tick, delay);
+    // Never hold the process open for a poll.
+    this._modalTimer.unref?.();
+  }
+
+  private stopModalWatch(): void {
+    if (this._modalTimer) clearTimeout(this._modalTimer);
+    this._modalTimer = null;
+  }
+
+  /**
+   * One pass: capture, detect, and announce only on a *change*. The fingerprint
+   * excludes the selection marker, so arrowing between options in an attached
+   * pane doesn't re-announce the same prompt.
+   */
+  private pollModal(): void {
+    if (!hasSession(this.tmuxName)) return;
+    const found = detectModalPrompt(capturePane(this.tmuxName));
+    if (found && found.fingerprint === this._modal?.fingerprint) return;
+    if (found) {
+      this.setModal(found);
+    } else if (this._modal) {
+      this.clearModal("dismissed");
+    }
+  }
+
+  private setModal(modal: ModalPrompt): void {
+    this._modal = modal;
+    log.info("modal prompt detected", {
+      id: this.id.slice(0, 8),
+      kind: modal.kind,
+      question: modal.question.slice(0, 120),
+      options: modal.options.length,
+      fingerprint: modal.fingerprint,
+    });
+    this.emit("sse", {
+      type: "modal_prompt",
+      timestamp: new Date().toISOString(),
+      kind: modal.kind,
+      question: modal.question,
+      context: modal.context,
+      options: modal.options,
+      footer: modal.footer,
+      fingerprint: modal.fingerprint,
+      tmux: this.tmuxName,
+    } satisfies StreamEvent);
+  }
+
+  /**
+   * Announce that the modal is gone. `resumedTurn` tells the session extension
+   * which status to fall back to: answering a hook confirmation mid-turn puts
+   * the session back to `running`, while clearing a trust dialog at launch
+   * leaves it `idle`.
+   */
+  private clearModal(reason: "answered" | "dismissed", answered?: string): void {
+    const modal = this._modal;
+    if (!modal) return;
+    this._modal = null;
+    log.info("modal prompt cleared", {
+      id: this.id.slice(0, 8),
+      reason,
+      answered,
+      fingerprint: modal.fingerprint,
+    });
+    this.emit("sse", {
+      type: "modal_prompt_cleared",
+      timestamp: new Date().toISOString(),
+      reason,
+      answered,
+      fingerprint: modal.fingerprint,
+      resumedTurn: this._turnActive,
+    } satisfies StreamEvent);
+  }
+
+  /** The modal currently on screen, if any — for `getInfo()` and answer checks. */
+  get modalPrompt(): ModalPrompt | null {
+    return this._modal;
+  }
+
+  /**
+   * Answer the modal on screen by pressing one of its option keys.
+   *
+   * This is not blind key injection: the key must be an option of a modal we can
+   * *currently* see, re-captured at call time rather than trusted from the last
+   * poll — the prompt may have been answered in an attached pane since. The
+   * fingerprint check makes the answer idempotent across two clients racing on
+   * the same prompt: the second one finds a different (or no) modal and refuses.
+   */
+  async answerModal(key: string, fingerprint?: string): Promise<{ ok: boolean; error?: string }> {
+    const live = detectModalPrompt(capturePane(this.tmuxName));
+    if (!live) {
+      this.clearModal("dismissed");
+      return { ok: false, error: "No modal prompt on screen" };
+    }
+    if (fingerprint && fingerprint !== live.fingerprint) {
+      this.setModal(live);
+      return { ok: false, error: "The prompt on screen has changed — re-read it before answering" };
+    }
+    if (!live.options.some((opt) => opt.key === key)) {
+      return { ok: false, error: `"${key}" is not one of this prompt's options` };
+    }
+
+    log.info("answering modal prompt", {
+      id: this.id.slice(0, 8),
+      key,
+      question: live.question.slice(0, 120),
+    });
+    this._modal = live;
+    sendKey(this.tmuxName, key);
+
+    // Confirm it actually cleared. A modal that survives its own answer is the
+    // failure worth reporting — silently claiming success would put the session
+    // back to `running` while it sits blocked.
+    const deadline = Date.now() + MODAL_CLEAR_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, MODAL_CLEAR_SAMPLE_MS));
+      const still = detectModalPrompt(capturePane(this.tmuxName));
+      if (still?.fingerprint === live.fingerprint) continue;
+      this.clearModal("answered", key);
+      // Answering one modal can raise the next one (trust → login, or a second
+      // hook on the same turn). Surface it immediately rather than at the next
+      // poll, so the UI never shows a gap.
+      if (still) this.setModal(still);
+      return { ok: true };
+    }
+    log.warn("modal still present after answering", {
+      id: this.id.slice(0, 8),
+      key,
+      paneTail: this.paneTail(8),
+    });
+    return { ok: false, error: "The prompt is still on screen after answering" };
+  }
+
+  /**
    * Paste `text`, submit (Enter), then confirm the CLI accepted it. The send is
    * confirmed by EITHER signal, whichever lands first:
    *   - SSE `message_start` — a fresh agent turn began (idle pane, or a steer the
@@ -846,6 +1062,7 @@ export class ClaudeCliSession extends EventEmitter {
     if (!this._isStarted && !this.proxy) return;
     this._isClosed = true;
     this.tail.stop();
+    this.stopModalWatch();
     killSession(this.tmuxName);
     this.proxy?.stop();
     this.proxy = null;
@@ -865,6 +1082,7 @@ export class ClaudeCliSession extends EventEmitter {
     if (!this._isStarted && !this.proxy) return;
     this._isClosed = true;
     this.tail.stop();
+    this.stopModalWatch();
     this.proxy?.stop();
     this.proxy = null;
     this._isStarted = false;

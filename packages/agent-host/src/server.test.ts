@@ -161,6 +161,10 @@ class FakeSessionHost extends EventEmitter implements SessionHostLike {
     return this.sessions.has(sessionId);
   }
 
+  async answerModal(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    return this.sessions.has(sessionId) ? { ok: true } : { ok: false, error: "Session not found" };
+  }
+
   async close(sessionId: string): Promise<void> {
     this.sessions.delete(sessionId);
   }
