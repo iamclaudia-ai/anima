@@ -48,20 +48,20 @@ JSONL stays the durable transcript. The DB is a **derived cache** — droppable 
 **Phase 3 is complete.** Phase 4 (modal prompts) is next — and it is also
 what would close the CLI turn-reporting gap noted below.
 
-|                                   | state      | notes                                                              |
-| --------------------------------- | ---------- | ------------------------------------------------------------------ |
-| **0 — spinners (#65)**            | ✅ shipped | root cause was a trailing `role: "system"` message, not a user one |
-| **1a — titles (#68)**             | ✅ shipped | 352/352 real transcripts titled, 0 markup leaks                    |
-| **1b — DB-first list (#66)**      | ✅ shipped | 247-session workspace: 154ms → 0.7ms                               |
-| **1c — `set_title` + rename UI**  | ✅ shipped | inline rename in the nav; reconciler-safe, verified live           |
-| **1d — copy tmux command button** | ✅ shipped | no id normalization needed — CLI panes are `anima-cli-<id>`        |
-| **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs     |
-| **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI |
-| **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn   |
-| **3b — "are you done?" (#31)**    | ✅ shipped | in-page banner on `completed`+`open` after 15m; snooze + resolve   |
-| **3c — ACTIVE queue + re-sort**   | ✅ shipped | persistent queue; resolved returns to its folder; libby excluded   |
-| **4 — modal prompts (#69)**       | ⬜         | root cause now confirmed, see below                                |
-| **5 — web terminal (#70)**        | ⬜         |                                                                    |
+|                                   | state      | notes                                                                  |
+| --------------------------------- | ---------- | ---------------------------------------------------------------------- |
+| **0 — spinners (#65)**            | ✅ shipped | root cause was a trailing `role: "system"` message, not a user one     |
+| **1a — titles (#68)**             | ✅ shipped | 352/352 real transcripts titled, 0 markup leaks                        |
+| **1b — DB-first list (#66)**      | ✅ shipped | 247-session workspace: 154ms → 0.7ms                                   |
+| **1c — `set_title` + rename UI**  | ✅ shipped | inline rename in the nav; reconciler-safe, verified live               |
+| **1d — copy tmux command button** | ✅ shipped | no id normalization needed — CLI panes are `anima-cli-<id>`            |
+| **2a — refs + chips (#61)**       | ✅ shipped | whole-conversation extraction + 30-day backfill; 58 → 809 refs         |
+| **2b — FTS search (#2)**          | ✅ shipped | 115k messages indexed; 13–45ms cross-workspace, verified in the UI     |
+| **3a — status axes + live nav**   | ✅ shipped | verified live: `idle → running → completed`, two events per turn       |
+| **3b — "are you done?" (#31)**    | ✅ shipped | in-page banner on `completed`+`open` after 15m; snooze + resolve       |
+| **3c — ACTIVE queue + re-sort**   | ✅ shipped | persistent queue; resolved returns to its folder; libby excluded       |
+| **4 — modal prompts (#69)**       | ✅ shipped | detected + answerable from the web UI; 68 real modals found on day one |
+| **5 — web terminal (#70)**        | ⬜         |                                                                        |
 
 Also fixed along the way, outside the original plan:
 
@@ -78,9 +78,18 @@ Also fixed along the way, outside the original plan:
 
 ### Where to pick up
 
-**Phase 4 — modal prompts (#69)** is next. Two reasons beyond its own value: it is the only thing that will ever write `awaiting_input` / `awaiting_approval`, and it sits next to the CLI turn-reporting gap below, which is what currently keeps 3b's banner from firing for tmux-pane sessions.
+**Phase 5 — web terminal (#70)** is what remains, and Phase 4 deliberately removed most of the reason to want it. The CLI turn-reporting gap below is still open and is now the most valuable thing left outside the numbered phases.
 
-**Nothing currently writes `awaiting_input` or `awaiting_approval`.** The states, the constraint, the dot, and the event are all in place, but the detector that would set them is Phase 4's modal-prompt parser — so until that lands the two states are reachable only by hand. This is why 3b's trigger changed rather than 3b waiting.
+**Phase 4 shipped 2026-08-15** and verified live end to end: a modal raised by dcg's `warn` tier was detected, surfaced in the web UI, and answered from the browser — the tool then ran, on a real session, with no `tmux attach`. Both `awaiting_input` and `awaiting_approval` are now written for the first time.
+
+What Phase 4 turned up that a fresh session should know:
+
+- **The detector is anchored on the footer, not the question.** `Esc to cancel` / `Enter to confirm` is what every modal shares and what ordinary scrollback never renders; the question text varies per modal and future modals will invent their own. Footer + "a numbered option block sits directly above it" is what keeps a numbered list in a transcript from reading as a prompt. Both test fixtures are verbatim `capture-pane` output from a live TUI — worth keeping that way, since the whitespace and the `❯` marker are exactly what the parser keys on.
+- **Polling is the only option.** A modal produces no SSE, no JSONL entry, nothing on the proxy. Cadence follows the turn — 1.5s mid-turn, 10s idle — because each poll forks a `capture-pane` and a dozen live panes at a uniform fast poll is a steady stream of processes.
+- **The problem was much bigger than it looked.** 68 detections in the first hours, across five of Michael's real sessions plus a folder-trust dialog that had been silently blocking one of them. This was a daily occurrence that presented as "the session is being slow".
+- **Three separate things were resetting `runtime_status`, and all three were invisible until now.** The reconciler's upsert, `recordConnectedSessions`, and the upsert default. Each one asserted `idle` on a session it knew nothing about. Nothing noticed for months because the only status that mattered was `running`, which a stream of events re-writes several times a second — a clobber heals before anyone sees it. `awaiting_approval` is the first status **written once and then required to survive in silence**, so it was cleared within a minute, every time. The rule now: the lifecycle owns that column, and a sweep that hasn't observed a turn says nothing. **A status that is only ever written once is the test case for every writer of that column.**
+- **3b's notification path was not inherited for free**, contrary to what this plan said. The banner fired on `completed` only. Blocked sessions now escalate on a separate, much shorter threshold (45s vs 15m) because the two waits are different in kind: finished work loses nothing by waiting, blocked work makes no progress at all. They also needed their own clock — `lastAssistantMessageAt` is written by `turn_stop`, so a session blocked _mid-turn_ was reporting the previous turn's age and could arrive already overdue. `metadata.blockedSince` is written when the prompt appears.
+- **The CLI's arg parser guessed types from text.** `--key 1` on a string param was rejected as "expected string, got number" before validation could see the method wanted a string. The declared type wins now.
 
 Three things 3b learned the hard way, all worth not rediscovering:
 
@@ -261,7 +270,9 @@ Two rules that follow, both learned from using it:
 
 Sequencing note: 3b and 3c want the same thing from opposite directions — 3b asks "tell me when to come back", 3c asks "show me where things stand". The `completed + open` predicate is the shared primitive. Build that once and both fall out of it.
 
-### Phase 4 — Modal prompts (#69)
+### Phase 4 — Modal prompts (#69) — ✅ shipped 2026-08-15
+
+Verified live: a `dcg warn` modal detected, surfaced, and answered from the browser; the tool ran and the turn finished, with no `tmux attach`. See "Where to pick up" for what it turned up — most of which was not about modals at all.
 
 1. Prompt detector next to the existing feedback-survey detector — parse `capture-pane` for the modal, extract question + numbered options.
 2. Surface as an actionable block in chat; answering sends the key via `send-keys`. Session sits in `awaiting_approval` meanwhile — Phase 3 already built the state, the dot, and the event, so **this phase is the only thing that will ever write those two states.** It inherits 3b's notification path for free by moving into an attention state.
