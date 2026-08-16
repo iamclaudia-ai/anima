@@ -27,6 +27,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { Check, Clock, X } from "lucide-react";
 import {
+  isBlockedOnPrompt,
   useAttentionSessions,
   waitedMs,
   type AttentionSession,
@@ -66,6 +67,28 @@ function waitedLabel(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/**
+ * One line for a mixed set.
+ *
+ * Blocked sessions lead when there are any: "finished" can wait, "blocked"
+ * cannot, and a banner that describes the whole set as finished would bury the
+ * one thing that needs an answer right now.
+ */
+function headline(rows: AttentionSession[]): string {
+  const blocked = rows.filter(isBlockedOnPrompt).length;
+  if (blocked > 0) {
+    const rest = rows.length - blocked;
+    const lead =
+      blocked === 1
+        ? "One session is waiting on your answer"
+        : `${blocked} sessions are waiting on your answer`;
+    return rest > 0 ? `${lead} · ${rest} finished` : lead;
+  }
+  return rows.length === 1
+    ? "One session finished and is waiting on you"
+    : `${rows.length} sessions finished and are waiting on you`;
+}
+
 function sessionLabel(session: AttentionSession): string {
   const name = session.title?.trim() || session.firstPrompt?.trim();
   if (name) return name;
@@ -101,11 +124,7 @@ export function AttentionBanner() {
       <div className="pointer-events-auto w-full max-w-2xl rounded-xl border border-amber-300 bg-amber-50/95 shadow-lg shadow-amber-900/10 backdrop-blur-xl">
         <div className="flex items-center gap-2 border-b border-amber-200 px-4 py-2">
           <span className="text-sm">💙</span>
-          <span className="text-sm font-medium text-amber-900">
-            {rows.length === 1
-              ? "One session finished and is waiting on you"
-              : `${rows.length} sessions finished and are waiting on you`}
-          </span>
+          <span className="text-sm font-medium text-amber-900">{headline(rows)}</span>
         </div>
 
         <ul className="divide-y divide-amber-200/70">
@@ -120,7 +139,8 @@ export function AttentionBanner() {
                   {sessionLabel(session)}
                 </span>
                 <span className="text-xs text-amber-700">
-                  {session.workspaceName} · waiting {waitedLabel(waitedMs(session, now))}
+                  {session.workspaceName} · {isBlockedOnPrompt(session) ? "blocked" : "waiting"}{" "}
+                  {waitedLabel(waitedMs(session, now))}
                 </span>
               </button>
 

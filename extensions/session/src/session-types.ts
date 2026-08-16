@@ -62,23 +62,36 @@ export function mergeTags(primary: string[] | null, current: string[] | null): s
  * announces itself on the bus, it would be two events per turn describing one
  * transition.
  */
-export function toRuntimeStatusFromSessionEvent(
-  type: string,
-  payload?: Record<string, unknown>,
-): RuntimeStatus | null {
+export function toRuntimeStatusFromSessionEvent(type: string): RuntimeStatus | null {
   if (type === "process_started") return "running";
   if (type === "process_ended") return "idle";
-  // Modal prompts (#69) are the only writer of the two attention states. Which
-  // one depends on what the modal is asking: a hook confirmation gating a tool
-  // call is an approval, the folder-trust dialog is input.
+  return null;
+}
+
+/**
+ * Runtime status for a modal-prompt event (#69), which is the only thing that
+ * writes the two attention states.
+ *
+ * Kept out of {@link toRuntimeStatusFromSessionEvent} for the same reason
+ * `turn_stop` is: these events carry metadata that must be written in the same
+ * transition as the status, so their handler owns the write rather than the
+ * generic mapper doing half of it first.
+ *
+ * Which state depends on what is being asked — a hook confirmation gating a
+ * tool call is an approval, the folder-trust dialog is input. Where a *cleared*
+ * modal lands depends on whether a turn was waiting behind it: answering a hook
+ * confirmation resumes the tool call, while dismissing a trust dialog at launch
+ * just returns to idle.
+ */
+export function toRuntimeStatusFromModalEvent(
+  type: string,
+  payload: Record<string, unknown>,
+): RuntimeStatus | null {
   if (type === "modal_prompt") {
-    return payload?.kind === "approval" ? "awaiting_approval" : "awaiting_input";
+    return payload.kind === "approval" ? "awaiting_approval" : "awaiting_input";
   }
-  // Where a cleared modal leaves the session depends on whether a turn was
-  // waiting behind it — answering a hook confirmation resumes the tool call,
-  // while dismissing a trust dialog at launch just returns to idle.
   if (type === "modal_prompt_cleared") {
-    return payload?.resumedTurn === true ? "running" : "idle";
+    return payload.resumedTurn === true ? "running" : "idle";
   }
   return null;
 }

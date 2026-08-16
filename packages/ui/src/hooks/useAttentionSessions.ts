@@ -47,6 +47,19 @@ export interface AttentionSession {
 export const ESCALATE_AFTER_MS = 15 * 60_000;
 
 /**
+ * The same, for a session *blocked* on a prompt (#69) — far shorter, because
+ * the two cases are not the same kind of waiting.
+ *
+ * A finished session can wait fifteen minutes: the work is done, nothing is
+ * lost, and interrupting immediately would fire on every turn that ends while
+ * you're reading it. A blocked one makes no progress at all until someone
+ * answers, and the whole failure this fixes is not knowing that. Still not
+ * instant — a prompt answered in the pane within a few seconds should never
+ * have raised a banner at all.
+ */
+export const ESCALATE_BLOCKED_AFTER_MS = 45_000;
+
+/**
  * And how long before it gives up asking.
  *
  * The queue keeps unresolved work forever, by design — but a banner about
@@ -178,9 +191,21 @@ export interface UseAttentionSessionsReturn {
   snooze: (sessionId: string, minutes: number) => Promise<void>;
 }
 
-/** Is this session finished and waiting on a human, as opposed to working? */
+/** Is this session blocked on a prompt only a human can answer (#69)? */
+export function isBlockedOnPrompt(session: AttentionSession): boolean {
+  return (
+    session.runtimeStatus === "awaiting_approval" || session.runtimeStatus === "awaiting_input"
+  );
+}
+
+/** Is this session waiting on a human, as opposed to working? */
 export function isAwaitingAcknowledgement(session: AttentionSession): boolean {
-  return session.runtimeStatus === "completed";
+  return session.runtimeStatus === "completed" || isBlockedOnPrompt(session);
+}
+
+/** How long this session may wait quietly before the banner speaks up. */
+export function escalateAfterMs(session: AttentionSession): number {
+  return isBlockedOnPrompt(session) ? ESCALATE_BLOCKED_AFTER_MS : ESCALATE_AFTER_MS;
 }
 
 export function waitedMs(session: AttentionSession, now: number): number {
@@ -238,7 +263,7 @@ export function useAttentionSessions(options?: {
   const overdue = sessions.filter((s) => {
     if (!isAwaitingAcknowledgement(s)) return false;
     const waited = waitedMs(s, now);
-    return waited >= ESCALATE_AFTER_MS && waited <= ESCALATE_UNTIL_MS;
+    return waited >= escalateAfterMs(s) && waited <= ESCALATE_UNTIL_MS;
   });
 
   return { sessions, overdue, now, refresh, acknowledge, snooze };

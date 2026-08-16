@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toRuntimeStatusFromSessionEvent } from "./session-types";
+import { toRuntimeStatusFromModalEvent, toRuntimeStatusFromSessionEvent } from "./session-types";
 
 /**
  * The mapper is the single funnel from agent-host events to `runtime_status`,
@@ -14,24 +14,22 @@ describe("toRuntimeStatusFromSessionEvent", () => {
   });
 
   test("an approval modal is awaiting_approval", () => {
-    expect(toRuntimeStatusFromSessionEvent("modal_prompt", { kind: "approval" })).toBe(
+    expect(toRuntimeStatusFromModalEvent("modal_prompt", { kind: "approval" })).toBe(
       "awaiting_approval",
     );
   });
 
   test("any other modal is awaiting_input", () => {
-    expect(toRuntimeStatusFromSessionEvent("modal_prompt", { kind: "input" })).toBe(
-      "awaiting_input",
-    );
+    expect(toRuntimeStatusFromModalEvent("modal_prompt", { kind: "input" })).toBe("awaiting_input");
     // Missing kind falls to input rather than claiming something was approved.
-    expect(toRuntimeStatusFromSessionEvent("modal_prompt", {})).toBe("awaiting_input");
+    expect(toRuntimeStatusFromModalEvent("modal_prompt", {})).toBe("awaiting_input");
   });
 
   test("a cleared modal returns to whatever was waiting behind it", () => {
-    expect(toRuntimeStatusFromSessionEvent("modal_prompt_cleared", { resumedTurn: true })).toBe(
+    expect(toRuntimeStatusFromModalEvent("modal_prompt_cleared", { resumedTurn: true })).toBe(
       "running",
     );
-    expect(toRuntimeStatusFromSessionEvent("modal_prompt_cleared", { resumedTurn: false })).toBe(
+    expect(toRuntimeStatusFromModalEvent("modal_prompt_cleared", { resumedTurn: false })).toBe(
       "idle",
     );
   });

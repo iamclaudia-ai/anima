@@ -1,6 +1,6 @@
 import { getStoredSession, touchSession, updateSessionRuntime } from "../session-store";
 import { applyRuntimeStatus } from "../session-status-events";
-import { toRuntimeStatusFromSessionEvent } from "../session-types";
+import { toRuntimeStatusFromModalEvent, toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
 import { getWorkspace } from "../workspace";
 import { collectGitStatus } from "../git-status";
@@ -71,9 +71,7 @@ export function wireSessionEvents(): () => void {
     rt.ctx.emit(eventName, { ...payload, sessionId }, emitOptions);
 
     const runtimeStatus =
-      typeof payload.type === "string"
-        ? toRuntimeStatusFromSessionEvent(payload.type, payload)
-        : null;
+      typeof payload.type === "string" ? toRuntimeStatusFromSessionEvent(payload.type) : null;
     if (runtimeStatus) {
       // Writes and announces in one step, and only when the status actually
       // moved — this runs per streamed event, so an unconditional emit would
@@ -111,6 +109,19 @@ export function wireSessionEvents(): () => void {
         (payload as { stop_reason?: string }).stop_reason || "unknown",
       );
       void emitGitStatus(sessionId);
+    } else if (payload.type === "modal_prompt" || payload.type === "modal_prompt_cleared") {
+      // A blocked session needs its own clock. `lastAssistantMessageAt` — what
+      // "waiting 20 minutes" normally counts from — is written by `turn_stop`,
+      // so for a session blocked mid-turn it still holds the *previous* turn's
+      // end and would report a wait that started before the prompt existed.
+      const status = toRuntimeStatusFromModalEvent(payload.type, payload);
+      if (status) {
+        applyRuntimeStatus(sessionId, status, {
+          metadataPatch: {
+            blockedSince: payload.type === "modal_prompt" ? new Date().toISOString() : null,
+          },
+        });
+      }
     } else if (payload.type === "process_died") {
       // A died process is exactly the "silently abandoned" case the nav is
       // meant to surface — it never reaches turn_stop, so without this the row

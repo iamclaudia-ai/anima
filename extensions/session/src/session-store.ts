@@ -1043,10 +1043,19 @@ export function listAttentionSessions(options?: {
     const runtimeStatus: RuntimeStatus = isRuntimeStatus(row.runtime_status)
       ? row.runtime_status
       : "idle";
+    // A session blocked on a modal prompt has been waiting since the prompt
+    // appeared, which is not when its last turn ended — that turn hasn't ended.
+    // Without this, a session blocked mid-turn reports the *previous* turn's
+    // age and can arrive already overdue.
+    const blockedSince =
+      AWAITING_STATUSES.includes(runtimeStatus) && typeof metadata?.blockedSince === "string"
+        ? metadata.blockedSince
+        : null;
     const waitingSince =
-      typeof metadata?.lastAssistantMessageAt === "string"
+      blockedSince ??
+      (typeof metadata?.lastAssistantMessageAt === "string"
         ? metadata.lastAssistantMessageAt
-        : row.last_activity;
+        : row.last_activity);
     // No age cutoff. An earlier version aged rows out after a day, which was
     // right for a banner and wrong for a queue: a queue that quietly forgets
     // items is worse than one that's long, and resolving is the intended way
