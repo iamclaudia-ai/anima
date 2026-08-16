@@ -119,6 +119,49 @@ describe("session store", () => {
     expect(getStoredSession("ses_status")?.runtimeStatus).toBe("running");
   });
 
+  /**
+   * No caller holds the whole metadata object — the reconciler knows what it
+   * reads off disk, the lifecycle knows when a turn ended, the modal watcher
+   * knows when a prompt appeared. While metadata was replaced rather than
+   * merged, whichever wrote last deleted the rest.
+   */
+  it("merges metadata instead of replacing it", () => {
+    const base = {
+      id: "ses_meta",
+      workspaceId: "ws_meta",
+      providerSessionId: "ses_meta",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat" as const,
+      lastActivity: new Date().toISOString(),
+    };
+    upsertSession({ ...base, metadata: { firstPrompt: "review the PR" } });
+    upsertSession({ ...base, metadata: { blockedSince: "2026-08-15T20:00:00.000Z" } });
+
+    // A reconciler pass, which only ever knows what it read off disk.
+    upsertSession({ ...base, metadata: { firstPrompt: "review the PR", messageCount: 12 } });
+
+    const metadata = getStoredSession("ses_meta")?.metadata;
+    expect(metadata?.blockedSince).toBe("2026-08-15T20:00:00.000Z");
+    expect(metadata?.messageCount).toBe(12);
+    expect(metadata?.firstPrompt).toBe("review the PR");
+  });
+
+  it("clears a metadata key when given an explicit null", () => {
+    const base = {
+      id: "ses_clear_meta",
+      workspaceId: "ws_clear_meta",
+      providerSessionId: "ses_clear_meta",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat" as const,
+      lastActivity: new Date().toISOString(),
+    };
+    upsertSession({ ...base, metadata: { blockedSince: "2026-08-15T20:00:00.000Z" } });
+    upsertSession({ ...base, metadata: { blockedSince: null } });
+    expect(getStoredSession("ses_clear_meta")?.metadata?.blockedSince).toBeUndefined();
+  });
+
   it("defaults a brand-new session to idle", () => {
     upsertSession({
       id: "ses_fresh",

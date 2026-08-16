@@ -378,6 +378,15 @@ export function closeSessionDb(): void {
  * written once and then required to survive in silence — which is exactly what
  * a session blocked on a modal prompt does (#69), and it was being cleared
  * within seconds of every detection.
+ *
+ * `metadata` is a **patch**, merged over what's already stored, for the same
+ * reason. No caller here holds the whole object: the reconciler knows what it
+ * can read off disk, the lifecycle knows when a turn ended, the modal watcher
+ * knows when a prompt appeared. Replacing meant whichever wrote last deleted
+ * the rest — which is how `blockedSince` vanished within a minute of every
+ * detection, and how `lastAssistantMessageAt` (the clock behind "this finished
+ * 20 minutes ago and you haven't looked") was being dropped on every sweep.
+ * Pass an explicit `null` for a key to clear it.
  */
 export function upsertSession(params: {
   id: string;
@@ -439,7 +448,12 @@ export function upsertSession(params: {
         runtime_status = COALESCE(?, sessions.runtime_status),
         title = COALESCE(excluded.title, sessions.title),
         summary = COALESCE(excluded.summary, sessions.summary),
-        metadata_json = COALESCE(excluded.metadata_json, sessions.metadata_json),
+        -- Merged, not replaced -- see the note above the function. json_patch
+        -- is RFC 7386, so an explicit null removes a key.
+        metadata_json = json_patch(
+          COALESCE(sessions.metadata_json, '{}'),
+          COALESCE(excluded.metadata_json, '{}')
+        ),
         previous_session_id = COALESCE(excluded.previous_session_id, sessions.previous_session_id),
         last_activity = excluded.last_activity,
         updated_at = excluded.updated_at`,
