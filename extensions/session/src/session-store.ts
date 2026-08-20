@@ -74,13 +74,22 @@ const DISPOSITIONS: readonly SessionDisposition[] = [
  * - `resolved` — done. Drops out of the queue and back into its workspace
  *   folder, where it stays browsable. This is the common case, and hiding it
  *   from the tree as well would mean "mark done" quietly deleted your history.
- * - `archived` — gone from the sidebar entirely; findable only by search.
+ * - `archived` — the same, filed harder. Also browsable in its folder.
  *
  * That distinction is what makes it safe to resolve thousands of old sessions
  * to clear the queue: it declutters the thing that needs decluttering and
  * touches nothing else.
+ *
+ * Nothing is hidden from the tree any more. `archived` used to be, which made
+ * it a soft delete nobody had asked for — the disposition that reads as "file
+ * this away" was the one that made a session findable only by search, and the
+ * queue dropping its force-include (2026-08-20) meant an archived session you
+ * had open appeared in no list at all. Sessions are never really deleted here;
+ * the sidebar shouldn't imply otherwise. The list stays for the *shape* of the
+ * rule — `includeDispositions` still filters, and something may earn its way
+ * back onto it — but the default is now: show everything you have.
  */
-export const HIDDEN_DISPOSITIONS: readonly SessionDisposition[] = ["archived"];
+export const HIDDEN_DISPOSITIONS: readonly SessionDisposition[] = [];
 
 export function isRuntimeStatus(value: unknown): value is RuntimeStatus {
   return typeof value === "string" && (RUNTIME_STATUSES as readonly string[]).includes(value);
@@ -898,9 +907,14 @@ export function listWorkspaceSessions(
   // An empty allow-list means "no filter given", not "match nothing" — the
   // latter would compile to `IN ()`, which SQLite rejects outright.
   const shown = options?.includeDispositions?.length ? options.includeDispositions : undefined;
+  // Three cases, and the empty ones are why this isn't a one-liner: `IN ()` and
+  // `NOT IN ()` are both syntax errors in SQLite, so "nothing hidden" has to
+  // compile to no clause rather than to an empty list.
   const dispositionClause = shown
     ? `AND disposition IN (${shown.map(() => "?").join(",")})`
-    : `AND disposition NOT IN (${HIDDEN_DISPOSITIONS.map(() => "?").join(",")})`;
+    : HIDDEN_DISPOSITIONS.length
+      ? `AND disposition NOT IN (${HIDDEN_DISPOSITIONS.map(() => "?").join(",")})`
+      : "";
   const dispositionValues = shown ? [...shown] : [...HIDDEN_DISPOSITIONS];
 
   const rows = getDb()

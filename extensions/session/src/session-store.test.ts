@@ -307,7 +307,12 @@ describe("session store", () => {
     // drops out of the ACTIVE queue and stays in its workspace folder; only
     // `archived` leaves the tree. Without that split, clearing the queue would
     // quietly empty every folder.
-    it("keeps resolved sessions in the tree and hides only archived", () => {
+    // Nothing is hidden from the tree. `archived` used to be, which made the
+    // disposition that reads as "file this away" behave as a soft delete —
+    // findable only by search. Sessions are never really deleted here and the
+    // sidebar shouldn't imply otherwise; the queue is the thing that needs
+    // decluttering, and both dispositions leave it.
+    it("keeps resolved and archived sessions browsable in the tree", () => {
       seed("ses_open");
       seed("ses_resolved");
       seed("ses_archived");
@@ -317,7 +322,15 @@ describe("session store", () => {
       const visible = listWorkspaceSessions("ws_status").map((s) => s.sessionId);
       expect(visible).toContain("ses_open");
       expect(visible).toContain("ses_resolved");
-      expect(visible).not.toContain("ses_archived");
+      expect(visible).toContain("ses_archived");
+
+      // Both are still out of the work queue, which is the point of setting
+      // either one.
+      const queued = listAttentionSessions({ now: "2026-08-15T12:00:00.000Z" }).map(
+        (s) => s.sessionId,
+      );
+      expect(queued).not.toContain("ses_resolved");
+      expect(queued).not.toContain("ses_archived");
 
       const resolvedOnly = listWorkspaceSessions("ws_status", {
         includeDispositions: ["resolved"],
