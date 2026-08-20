@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "@anima/shared";
+import { createLogger, shortId } from "@anima/shared";
 import type {
   AgentRuntimeSessionInfo,
   CreateSessionOptions,
@@ -1166,13 +1166,28 @@ export class ClaudeCliSession extends EventEmitter {
 
     this.emit("sse", event);
 
-    if (type === "message_stop" && TERMINAL_STOP.has(this.lastStopReason)) {
-      this.emit("sse", {
-        type: "turn_stop",
-        timestamp: new Date().toISOString(),
-        stop_reason: this.lastStopReason,
-      } satisfies StreamEvent);
-      this.endTurn();
+    if (type === "message_stop") {
+      const terminal = TERMINAL_STOP.has(this.lastStopReason);
+      // The one decision that determines whether a spinner ever stops, and
+      // until now it left no trace. A turn that ends without `turn_stop` looks
+      // identical from outside to a turn still running — same symptom the
+      // "No tool results in request tail" warning below exists to explain.
+      // Logged either way: knowing the reason was `tool_use` (mid-turn, so
+      // correct) is what rules the path out when it isn't the culprit.
+      log.info("message_stop", {
+        id: shortId(this.id),
+        stopReason: this.lastStopReason || "(none seen)",
+        terminal,
+        reqId: ctx.reqId,
+      });
+      if (terminal) {
+        this.emit("sse", {
+          type: "turn_stop",
+          timestamp: new Date().toISOString(),
+          stop_reason: this.lastStopReason,
+        } satisfies StreamEvent);
+        this.endTurn();
+      }
     }
   }
 
