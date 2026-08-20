@@ -64,9 +64,11 @@ function mergeSessionsPreferLocal(
   }
 
   const list = Array.from(merged.values());
+  // Newest created first — the one ordering rule the whole nav follows, so a
+  // merge never lands a row somewhere a refetch would move it from.
   list.sort((a, b) => {
-    const aTime = a.modified || a.created || "";
-    const bTime = b.modified || b.created || "";
+    const aTime = a.created || a.modified || "";
+    const bTime = b.created || b.modified || "";
     return bTime.localeCompare(aTime);
   });
 
