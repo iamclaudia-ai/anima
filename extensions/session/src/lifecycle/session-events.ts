@@ -116,6 +116,13 @@ export function wireSessionEvents(): () => void {
     } else if (payload.type === "turn_stop") {
       cancelPendingGitStatus(sessionId);
       forgetActivity(sessionId);
+      // The counterpart to agent-host's `message_stop` line. Between them they
+      // say whether a turn that ended upstream actually landed as `completed`
+      // here — the two halves of a spinner that never stops.
+      log.info("turn_stop received", {
+        sessionId: shortId(sessionId),
+        stopReason: (payload as { stop_reason?: string }).stop_reason ?? "unknown",
+      });
       applyRuntimeStatus(sessionId, "completed", {
         metadataPatch: { lastAssistantMessageAt: new Date().toISOString() },
       });
