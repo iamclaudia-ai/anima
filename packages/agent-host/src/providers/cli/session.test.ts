@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { collectTrailingToolResults, isFeedbackSurvey } from "./session";
+import { collectTrailingToolResults, isFeedbackSurvey, reportedTurnActive } from "./session";
 
 describe("isFeedbackSurvey", () => {
   test("matches the rendered feedback survey options row", () => {
@@ -139,5 +139,22 @@ describe("collectTrailingToolResults", () => {
     expect(collectTrailingToolResults([])).toEqual([]);
     expect(collectTrailingToolResults([null, undefined, 42])).toEqual([]);
     expect(collectTrailingToolResults([{ role: "user", content: [null, "text"] }])).toEqual([]);
+  });
+});
+
+describe("reportedTurnActive", () => {
+  test("reports the flag once we have a live read on the TUI", () => {
+    expect(reportedTurnActive(true, true)).toBe(true);
+    expect(reportedTurnActive(true, false)).toBe(false);
+  });
+
+  // The regression this exists for: a resume across a restart clears the
+  // known-flag *because* `_turnActive` is stale — it reads false while a turn
+  // nobody saw start is still running. Saying "no turn" there told the session
+  // reconciler to retire the status mid-turn and stopped the spinner on a
+  // session that was working.
+  test("has no opinion when the turn state isn't known, rather than saying no", () => {
+    expect(reportedTurnActive(false, false)).toBeUndefined();
+    expect(reportedTurnActive(false, true)).toBeUndefined();
   });
 });

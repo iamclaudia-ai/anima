@@ -684,7 +684,7 @@ export class ClaudeCliSession extends EventEmitter {
       claudeAlive: claudeProcessAlive(this.id),
       started: this._isStarted,
       closed: this._isClosed,
-      turnActive: this._turnActive,
+      turnActive: reportedTurnActive(this._turnStateKnown, this._turnActive),
       launched: this._launched,
       proxyPort: this.proxyPort,
       lastActivityMs: Date.now() - this.lastActivityTime,
@@ -1121,7 +1121,7 @@ export class ClaudeCliSession extends EventEmitter {
       lastActivity: new Date(this.lastActivityTime).toISOString(),
       healthy: this.isActive,
       stale: Date.now() - this.lastActivityTime >= STALE_MS,
-      turnActive: this._turnActive,
+      turnActive: reportedTurnActive(this._turnStateKnown, this._turnActive),
     };
   }
 
@@ -1250,6 +1250,21 @@ export class ClaudeCliSession extends EventEmitter {
       tool_results: fresh,
     } satisfies StreamEvent);
   }
+}
+
+/**
+ * What this session may claim about having a turn in flight.
+ *
+ * Only when we actually have a live read on the TUI. A fresh instance — and
+ * every resume across a restart — clears `_turnStateKnown` precisely because
+ * `_turnActive` is stale at that moment: the flag reads false while a turn we
+ * never saw start is still running. Reporting that as "no turn" tells the
+ * session reconciler to retire a status mid-turn, which stops the spinner on a
+ * session that is very much working. `undefined` means "no opinion", and the
+ * reconciler leaves such a row alone.
+ */
+export function reportedTurnActive(known: boolean, active: boolean): boolean | undefined {
+  return known ? active : undefined;
 }
 
 export function createClaudeCliProvider(config: ClaudeCliProviderConfig = {}) {
