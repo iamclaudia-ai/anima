@@ -242,12 +242,8 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   {
     name: "session.list_attention",
     description:
-      "The work queue: every unresolved session across every workspace, newest first. Not paginated per workspace — membership is the disposition, so nothing can be lost to a page boundary. Snoozed sessions are omitted until their timer passes; the session named by currentSessionId is always included whatever its state.",
+      "The work queue: every unresolved session across every workspace, newest created first. Not paginated per workspace — membership is the disposition, so nothing can be lost to a page boundary. Snoozed sessions are omitted until their timer passes. A resolved or archived session is not here at all, including the one a tab has open — it lives in its workspace tree, highlighted when current.",
     inputSchema: z.object({
-      currentSessionId: z
-        .string()
-        .optional()
-        .describe("Always include this session, even if resolved — the tab's open session"),
       limit: z.number().int().positive().max(500).optional().default(200),
     }),
     execution: { lane: "read", concurrency: "parallel" },

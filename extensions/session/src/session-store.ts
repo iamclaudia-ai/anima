@@ -991,6 +991,13 @@ export interface AttentionSession {
  * status can't have that problem — membership is the status itself. The set is
  * naturally small, because it's a description of right now.
  *
+ * Ordered by when the session was **created**, newest first — not by when it
+ * last did something. Recency-of-activity meant the list rearranged itself
+ * under the cursor: a row you were reading moved because some other session
+ * finished a turn. Creation order never changes, so the pane becomes a stable
+ * place where a given session is always found in the same spot, and "what did
+ * I start most recently" is the question the top of the list should answer.
+ *
  * Snoozed sessions drop out until their timer passes, which is what makes
  * snooze mean "remind me later" rather than "never mind". Note that `snoozed`
  * is admitted by the predicate and excluded by the *timestamp* — the first
@@ -1002,15 +1009,6 @@ export interface AttentionSession {
  */
 export function listAttentionSessions(options?: {
   now?: string;
-  /**
-   * Always include this session, whatever its disposition.
-   *
-   * The session a tab has open belongs in the queue even when it's resolved:
-   * reopening old work from search is a normal way to start, and the pane is
-   * where its status can be changed back. A row you're actively looking at
-   * that offers no way to act on itself is just a gap.
-   */
-  includeSessionId?: string;
   /**
    * Ceiling on rows, newest first.
    *
@@ -1052,14 +1050,12 @@ export function listAttentionSessions(options?: {
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE s.purpose = 'chat'
           AND s.status = 'active'
-          AND (
-            (s.disposition IN ('open','needs_review','blocked','snoozed') ${excludeClause})
-            OR s.provider_session_id = ?
-          )
-        ORDER BY s.last_activity DESC
+          AND s.disposition IN ('open','needs_review','blocked','snoozed')
+          ${excludeClause}
+        ORDER BY s.created_at DESC
         LIMIT ?`,
     )
-    .all(...excluded, ...excluded, options?.includeSessionId ?? "", limit) as Array<{
+    .all(...excluded, ...excluded, limit) as Array<{
     session_id: string;
     title: string | null;
     metadata_json: string | null;
@@ -1076,12 +1072,9 @@ export function listAttentionSessions(options?: {
   for (const row of rows) {
     const metadata = parseMetadata(row.metadata_json);
     const snoozedUntil = typeof metadata?.snoozedUntil === "string" ? metadata.snoozedUntil : null;
-    const isCurrent = row.session_id === options?.includeSessionId;
     // A live snooze hides the row entirely rather than flagging it — a muted
-    // item still in the list is just a quieter version of the nagging. The
-    // session you're looking at is exempt: hiding the row for the thing on
-    // screen would leave no way to change its status.
-    if (!isCurrent && snoozedUntil && snoozedUntil > nowIso) continue;
+    // item still in the list is just a quieter version of the nagging.
+    if (snoozedUntil && snoozedUntil > nowIso) continue;
 
     const runtimeStatus: RuntimeStatus = isRuntimeStatus(row.runtime_status)
       ? row.runtime_status

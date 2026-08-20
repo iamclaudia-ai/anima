@@ -92,8 +92,6 @@ let client: GatewayClient | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let stopListening: (() => void) | null = null;
-/** The session the tab is looking at — always included, whatever its state. */
-let currentSessionId: string | undefined;
 
 function getSnapshot(): AttentionSession[] {
   return snapshot;
@@ -216,9 +214,7 @@ function fetchNow(): void {
   const c = client;
   if (!c) return;
   void c
-    .call<{ sessions?: AttentionSession[] }>("session.list_attention", {
-      ...(currentSessionId ? { currentSessionId } : {}),
-    })
+    .call<{ sessions?: AttentionSession[] }>("session.list_attention", {})
     .then((result) => publish(result?.sessions ?? EMPTY))
     .catch(() => {
       // Keep the previous list. A failed poll should not silently empty a
@@ -315,14 +311,7 @@ export function waitedMs(session: AttentionSession, now: number): number {
   return Number.isFinite(at) ? now - at : 0;
 }
 
-export function useAttentionSessions(options?: {
-  /**
-   * The session this tab has open. Included in the queue whatever its
-   * disposition, so reopening resolved work from search still gives you a row
-   * to act on.
-   */
-  currentSessionId?: string;
-}): UseAttentionSessionsReturn {
+export function useAttentionSessions(): UseAttentionSessionsReturn {
   const ctx = useGatewayClientContext();
   const gatewayClient = ctx?.client ?? null;
   const isConnected = ctx?.isConnected ?? false;
@@ -334,16 +323,6 @@ export function useAttentionSessions(options?: {
     if (!gatewayClient || !isConnected) return;
     start(gatewayClient);
   }, [gatewayClient, isConnected]);
-
-  // Navigating changes which session must be force-included, so the query
-  // itself changes. Only the consumer that knows the route sets this; the
-  // other passes nothing and leaves it alone.
-  useEffect(() => {
-    if (options?.currentSessionId === undefined) return;
-    if (options.currentSessionId === currentSessionId) return;
-    currentSessionId = options.currentSessionId;
-    fetchNow();
-  }, [options?.currentSessionId]);
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);

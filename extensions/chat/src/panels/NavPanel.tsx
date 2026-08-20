@@ -44,11 +44,7 @@ export function NavPanel() {
 
   // The ACTIVE pane's data. Shares one poller with the app-wide banner — two
   // views of "what needs you" that disagreed would undercut the entire point.
-  const {
-    sessions: attention,
-    now,
-    acknowledge,
-  } = useAttentionSessions({ currentSessionId: activeSessionId ?? undefined });
+  const { sessions: attention, now, acknowledge } = useAttentionSessions();
   const activeSessions: ActiveSessionRow[] = attention.map((s) => ({
     sessionId: s.sessionId,
     workspaceId: s.workspaceId,

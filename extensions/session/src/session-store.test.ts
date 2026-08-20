@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import {
   closeSessionDb,
+  getSessionDb,
   setSessionTitle,
   getStoredSession,
   listSubagentSessions,
@@ -332,6 +333,35 @@ describe("session store", () => {
     describe("attention list", () => {
       const NOW = "2026-08-15T12:00:00.000Z";
 
+      /** Backdate a row, since every seed in a test lands on the same second. */
+      const createdAt = (id: string, iso: string) =>
+        getSessionDb()
+          .query("UPDATE sessions SET created_at = ? WHERE provider_session_id = ?")
+          .run(iso, id);
+
+      // Ordering by last activity meant the list rearranged itself under the
+      // cursor: a row being read moved because some *other* session finished a
+      // turn. Creation order never changes, so a given session is always found
+      // in the same place — which is what makes a list scannable.
+      it("orders by when a session was created, newest first", () => {
+        seed("ses_oldest");
+        seed("ses_middle");
+        seed("ses_newest");
+        createdAt("ses_oldest", "2026-08-01T00:00:00.000Z");
+        createdAt("ses_middle", "2026-08-10T00:00:00.000Z");
+        createdAt("ses_newest", "2026-08-14T00:00:00.000Z");
+
+        // The busiest session is the oldest one — under the old rule it would
+        // have led the list.
+        touchSession("ses_oldest", "running");
+
+        const seeded = new Set(["ses_oldest", "ses_middle", "ses_newest"]);
+        const ids = listAttentionSessions({ now: NOW })
+          .map((s) => s.sessionId)
+          .filter((id) => seeded.has(id));
+        expect(ids).toEqual(["ses_newest", "ses_middle", "ses_oldest"]);
+      });
+
       // The queue is "everything unresolved", not "everything busy". An idle
       // session with work still open belongs in it — that's the point of a
       // queue, and resolving is how it gets shorter.
@@ -352,9 +382,13 @@ describe("session store", () => {
         expect(ids).not.toContain("ses_done_resolved");
       });
 
-      // Reopening old work from search is a normal way to start, and a row you
-      // are looking at that offers no way to act on itself is just a gap.
-      it("always includes the session the tab has open, even resolved", () => {
+      // The queue used to force-include whatever session the tab had open, so
+      // that reopening resolved work still gave you a row to act on. In use
+      // that made the list rearrange itself as you clicked through it — a row
+      // appearing from nowhere pushes every row below it down. Resolved work
+      // belongs in the workspace tree, where it's highlighted when current and
+      // its row menu offers the same actions.
+      it("leaves a resolved session out, even the one the tab has open", () => {
         seed("ses_reopened");
         touchSession("ses_reopened", "completed");
         setSessionDisposition("ses_reopened", "resolved");
@@ -362,11 +396,6 @@ describe("session store", () => {
         expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).not.toContain(
           "ses_reopened",
         );
-        const withCurrent = listAttentionSessions({
-          now: NOW,
-          includeSessionId: "ses_reopened",
-        }).map((s) => s.sessionId);
-        expect(withCurrent).toContain("ses_reopened");
       });
 
       // Libby's summarization runs produce a session per conversation and
@@ -396,29 +425,6 @@ describe("session store", () => {
           excludeWorkspaces: [join(tmpHome, "libby")],
         }).map((s) => s.sessionId);
         expect(byCwd).not.toContain("ses_machinery");
-
-        // Opening one deliberately still gives you a row you can act on.
-        const opened = listAttentionSessions({
-          now: NOW,
-          excludeWorkspaces: ["libby"],
-          includeSessionId: "ses_machinery",
-        }).map((s) => s.sessionId);
-        expect(opened).toContain("ses_machinery");
-      });
-
-      it("keeps a snoozed session visible when it is the open one", () => {
-        seed("ses_snoozed_current");
-        touchSession("ses_snoozed_current", "completed");
-        setSessionSnooze("ses_snoozed_current", "2026-08-15T23:00:00.000Z");
-
-        expect(listAttentionSessions({ now: NOW }).map((s) => s.sessionId)).not.toContain(
-          "ses_snoozed_current",
-        );
-        expect(
-          listAttentionSessions({ now: NOW, includeSessionId: "ses_snoozed_current" }).map(
-            (s) => s.sessionId,
-          ),
-        ).toContain("ses_snoozed_current");
       });
 
       it("hides a snoozed session until its timer passes", () => {

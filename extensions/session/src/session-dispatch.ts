@@ -206,7 +206,6 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     "session.list_files": async (params) => listFiles({ cwd: params.cwd as string }),
     "session.list_attention": async (params) => ({
       sessions: listAttentionSessions({
-        includeSessionId: params.currentSessionId as string | undefined,
         limit: params.limit as number | undefined,
         excludeWorkspaces: resolveQueueExclusions(),
       }),

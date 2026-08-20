@@ -97,7 +97,7 @@ function sessionLabel(session: AttentionSession): string {
 
 export function AttentionBanner() {
   const currentSessionId = useCurrentSessionId();
-  const { overdue, now, acknowledge, snooze } = useAttentionSessions({ currentSessionId });
+  const { overdue, now, acknowledge, snooze } = useAttentionSessions();
   // Per-tab, and deliberately not persisted: "I've seen it" is a fact about
   // this tab right now, not a durable property of the session.
   const [seen, setSeen] = useState<Set<string>>(new Set());
