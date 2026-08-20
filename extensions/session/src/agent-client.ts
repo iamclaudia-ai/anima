@@ -123,6 +123,12 @@ export class AgentHostClient extends EventEmitter {
             resumeSessions: resumeSessions.length,
             resubscribed: resubscribe.length,
           });
+          // Announced after auth, so a listener can reconcile which sessions it
+          // wants. This is the only signal for the case that has no other one:
+          // an initial connect that *failed* never ran the caller's startup
+          // subscription, and the reconnect that eventually succeeds has an
+          // empty `desiredSessions` with nothing to restore.
+          this.emit("connected");
           resolve();
         };
 

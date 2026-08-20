@@ -187,19 +187,27 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       // thing that notices sessions created outside Anima (the raw CLI).
       instance.runtime.unsubscribers.push(startReconciler());
 
-      try {
-        await instance.runtime.bridge.connect();
+      /**
+       * Reconcile against what agent-host actually has, on every connect.
+       *
+       * The subscription is the part that must not be skipped. agent-host
+       * broadcasts a session's events only to clients subscribed to it, and a
+       * client subscribes by *creating* or *prompting* that session — neither
+       * of which a restarted extension does for a session already in flight.
+       * A reload mid-turn therefore left us receiving nothing for it: the CLI
+       * reached `turn_stop`, agent-host had nobody to send it to, and the row
+       * sat on `running` forever. Silent by construction, since a dropped
+       * broadcast raises nothing anywhere.
+       *
+       * Runs on reconnects too, not just startup, because the case with no
+       * other safety net is an initial connect that *fails* — the startup path
+       * never ran, and the reconnect that eventually succeeds has nothing
+       * remembered to restore.
+       */
+      const syncLiveSessions = async (): Promise<void> => {
         const activeSessions =
           (await instance.runtime.bridge.listSessions()) as AgentHostSessionInfo[];
         instance.runtime.registry.recordConnectedSessions(activeSessions);
-        // Subscribe to everything already alive, before deciding anything about
-        // it. agent-host broadcasts session events only to subscribed clients,
-        // and a client subscribes by creating or prompting a session — neither
-        // of which a *restarted* extension does for a session that was already
-        // running. So a reload mid-turn left us receiving nothing for that
-        // session: the CLI reached `turn_stop`, agent-host had nobody to send
-        // it to, and the row sat on `running` until something else moved it.
-        // Silent by construction, since a dropped broadcast raises no error.
         await instance.runtime.bridge.subscribeSessions(activeSessions.map((s) => s.id));
         // Rows claiming to be mid-turn are claims about a process that exists
         // now. Nothing writes the closing transition when we die mid-turn, so
@@ -207,15 +215,30 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         reconcileInFlightStatuses(
           new Set(activeSessions.filter((s) => s.isProcessRunning).map((s) => s.id)),
         );
+      };
+
+      try {
+        await instance.runtime.bridge.connect();
+        // Awaited, not left to the `onConnected` hook below: startup should be
+        // finished when `start()` returns, rather than racing the first prompt.
+        await syncLiveSessions();
         log.info("Session extension started 🚀", { url: globalConfig.agentHost.url });
       } catch (error) {
-        // AgentHostClient.scheduleReconnect() has been kicked off inside
-        // connect(); the extension will pick up the agent-host once it's
-        // listening. We can't preload the resumable session list here, but
-        // lazy-resume on next prompt covers that.
+        // `scheduleReconnect()` has already been kicked off inside `connect()`,
+        // and the hook below runs the sync when it lands — so a failed first
+        // attempt costs a delay, not the subscription. This is the case with no
+        // other safety net: nothing was subscribed and nothing was remembered.
         log.warn("Initial agent-host connect failed; reconnecting in background", {
           url: globalConfig.agentHost.url,
           error: String(error),
+        });
+      } finally {
+        // Registered last, so it only ever handles *re*connects — the initial
+        // one is handled above, either way it went.
+        instance.runtime.bridge.onConnected(() => {
+          void syncLiveSessions().catch((error) => {
+            log.warn("Failed to sync live sessions after reconnect", { error: String(error) });
+          });
         });
       }
     },

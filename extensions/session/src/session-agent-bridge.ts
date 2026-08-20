@@ -99,6 +99,11 @@ export class SessionAgentBridge {
     return await this.client.spawnSubagent(params);
   }
 
+  /** Run `listener` on every successful connect, including reconnects. */
+  onConnected(listener: () => void): void {
+    this.client.on("connected", listener);
+  }
+
   /** Subscribe to live sessions so their events reach us — see the client. */
   async subscribeSessions(sessionIds: string[]): Promise<void> {
     await this.client.subscribeSessions(sessionIds);
