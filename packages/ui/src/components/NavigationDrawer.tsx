@@ -1637,7 +1637,14 @@ function SearchResults({
             <span className="truncate text-sm text-gray-700">{hit.title}</span>
             <span className="flex flex-shrink-0 items-center gap-1.5 text-xs text-gray-400">
               {hit.matches > 1 && <span>{hit.matches}×</span>}
-              <span>{hit.workspaceName}</span>
+              {/* Where and when, the same pair a nav row carries. Results are
+                  ranked by relevance, which says nothing about age — without a
+                  date, a hit from this morning and one from last year sit side
+                  by side looking identical. */}
+              <span>
+                {hit.workspaceName}
+                {hit.modified && ` · ${formatTimeAgo(hit.modified)}`}
+              </span>
             </span>
           </span>
           <SnippetText snippet={hit.snippet} />

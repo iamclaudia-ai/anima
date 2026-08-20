@@ -135,6 +135,8 @@ export interface SessionSearchHit {
   matches: number;
   /** When the topic was last discussed, not when the session last ran. */
   matchedAt: string;
+  /** When the session last ran — what the nav rows date themselves by. */
+  modified: string;
   /** Transcript is gone from disk — the session opens read-only, if at all. */
   archived: boolean;
   refs?: SessionRefInfo[];

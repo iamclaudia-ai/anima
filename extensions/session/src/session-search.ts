@@ -56,6 +56,14 @@ export interface SearchHit {
   matches: number;
   /** Timestamp of the most recent matching message. */
   matchedAt: string;
+  /**
+   * When the session itself last ran.
+   *
+   * Ranking is by relevance, so the list gives no hint of age on its own — two
+   * equally-good hits can be an hour and a year apart. This is the same
+   * `last_activity` the nav rows show, so a hit reads like a nav row.
+   */
+  modified: string;
   /** Transcript no longer on disk — openable only from the backup. */
   archived: boolean;
   /** Where the work stands, so a hit reads the same as a nav row. */
@@ -231,6 +239,7 @@ export async function searchSessions(
       role: hit.role,
       matches: hit.matches,
       matchedAt: hit.timestamp,
+      modified: row.modified,
       archived: row.archived,
       disposition: row.disposition,
       refs: row.refs,
