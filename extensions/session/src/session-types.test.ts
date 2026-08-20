@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { toRuntimeStatusFromModalEvent, toRuntimeStatusFromSessionEvent } from "./session-types";
+import {
+  promptText,
+  toRuntimeStatusFromModalEvent,
+  toRuntimeStatusFromSessionEvent,
+} from "./session-types";
 
 /**
  * The mapper is the single funnel from agent-host events to `runtime_status`,
@@ -40,5 +44,29 @@ describe("toRuntimeStatusFromSessionEvent", () => {
 
   test("streamed events don't move status", () => {
     expect(toRuntimeStatusFromSessionEvent("content_block_delta")).toBeNull();
+  });
+});
+
+/**
+ * A prompt arrives as blocks from the web UI, and only the text ones say what
+ * the turn is for — which is what a session gets named from before its
+ * transcript exists on disk to be read back.
+ */
+describe("promptText", () => {
+  test("passes a plain string through", () => {
+    expect(promptText("fix the spinner")).toBe("fix the spinner");
+  });
+
+  test("joins the text blocks and drops the rest", () => {
+    expect(
+      promptText([
+        { type: "image", source: { data: "…" } },
+        { type: "text", text: "fix this" },
+      ]),
+    ).toBe("fix this");
+  });
+
+  test("a prompt with nothing but an attachment yields nothing to name it", () => {
+    expect(promptText([{ type: "image", source: { data: "…" } }])).toBe("");
   });
 });

@@ -115,3 +115,21 @@ export function summarizePrompt(content: string | unknown[]): Record<string, unk
 
   return { kind: "blocks", blocks: blocks.length, textBlocks, imageBlocks, otherBlocks };
 }
+
+/**
+ * The user-visible text of a prompt, whatever shape it arrived in.
+ *
+ * A prompt from the web UI is an array of blocks — text, images, files — and
+ * only the text ones say anything about what the turn is *for*. Joined rather
+ * than first-only: a pasted screenshot followed by "fix this" would otherwise
+ * yield nothing.
+ */
+export function promptText(content: string | unknown[]): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content as Array<Record<string, unknown>>) {
+    if (block?.type === "text" && typeof block.text === "string") parts.push(block.text);
+  }
+  return parts.join("\n").trim();
+}

@@ -5,7 +5,13 @@ import { updateSessionRuntime, type RuntimeStatus } from "../session-store";
 import { applyRuntimeStatus, emitListChanged } from "../session-status-events";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
-import { type AgentHostSessionInfo, type RequestContext, summarizePrompt } from "../session-types";
+import {
+  type AgentHostSessionInfo,
+  promptText,
+  type RequestContext,
+  summarizePrompt,
+} from "../session-types";
+import { deriveTitleFromMessage } from "../session-title";
 import { resolvePersistentSessionForCwd } from "../persistent-sessions";
 import { getRuntime } from "../runtime";
 import { sameModel } from "../model-id";
@@ -35,6 +41,7 @@ interface StoredSessionLike {
   purpose: "chat" | "subagent" | "review" | "test";
   parentSessionId: string | null;
   runtimeStatus: RuntimeStatus;
+  title?: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -288,9 +295,34 @@ async function resolveSessionStage(input: PromptLifecycleInput): Promise<PromptL
   };
 }
 
+/**
+ * The name a brand-new session should go by, derived from the prompt that
+ * started it.
+ *
+ * `metadata.firstPrompt` is normally written by the reconciler, which reads it
+ * back out of the transcript on disk — so it doesn't exist until the turn has
+ * produced a file to read, and until then the nav falls back to eight hex
+ * digits of session id. That's precisely backwards: the moment a prompt is
+ * dispatched is the moment we know most cheaply what the session is about.
+ *
+ * Written only when there's nothing better. An explicit rename outranks this,
+ * and a `firstPrompt` already on the row belongs to an earlier turn — this is
+ * the *first* prompt, not the latest one.
+ */
+export function firstPromptTitle(state: {
+  content: string | unknown[];
+  existing: { title?: string | null } | null;
+  existingMetadata: Record<string, unknown> | null;
+}): string | null {
+  if (state.existing?.title) return null;
+  if (typeof state.existingMetadata?.firstPrompt === "string") return null;
+  return deriveTitleFromMessage(promptText(state.content));
+}
+
 async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
   const rt = getRuntime();
   state.userMessageAtIso = new Date().toISOString();
+  const derivedTitle = firstPromptTitle(state);
   const activeSessions = (await rt.bridge.listSessions()) as AgentHostSessionInfo[];
   const activeSession = activeSessions.find((session) => session.id === state.sessionId);
   if (
@@ -316,7 +348,10 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       agent: state.agent,
       purpose: "chat",
       runtimeStatus: "idle",
-      metadata: { lastUserMessageAt: state.userMessageAtIso },
+      metadata: {
+        lastUserMessageAt: state.userMessageAtIso,
+        ...(derivedTitle ? { firstPrompt: derivedTitle } : {}),
+      },
     });
     rt.registry.setWorkspaceActiveSession(state.workspaceResult.workspace.id, state.sessionId);
     // A row that didn't exist a moment ago is a list-membership change, and
@@ -328,6 +363,7 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
   if (state.existing) {
     updateSessionRuntime(state.sessionId, state.existing.runtimeStatus, {
       lastUserMessageAt: state.userMessageAtIso,
+      ...(derivedTitle ? { firstPrompt: derivedTitle } : {}),
     });
   }
 }
