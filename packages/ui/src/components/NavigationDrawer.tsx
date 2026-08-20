@@ -373,7 +373,12 @@ function ActiveRow({
       <button
         type="button"
         onClick={() => onSelect(row)}
-        className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 pr-16 text-left text-sm transition-colors ${
+        // `pr-7` reserves exactly the ⋯ button that overlays the row on hover,
+        // and nothing more. It was `pr-16` — four rems of permanent gutter,
+        // left over from when several action buttons sat there. Everything but
+        // the menu moved behind it long ago, so all that padding did was
+        // truncate every title a third of the way short of the edge.
+        className={`flex w-full items-start gap-2 rounded-md py-1.5 pl-2 pr-7 text-left text-sm transition-colors ${
           isActive
             ? "bg-gray-100 text-gray-900"
             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
@@ -381,20 +386,24 @@ function ActiveRow({
       >
         <SessionStatusMark status={row.runtimeStatus} disposition={row.disposition} />
         <span className="min-w-0 flex-1">
-          {/* Exactly two lines, always. The refs used to sit on a line of their
-              own that only some rows had, so a queue alternated between two-
-              and three-line rows and read as ragged. They belong with the rest
-              of the row's context anyway. */}
+          {/* The mark leads the title; everything else is context below it.
+              Alignment comes from the fixed leading slot, not from forcing
+              every row to the same height — see `SessionStatusMark`. */}
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 flex-1 truncate">{activeRowName(row)}</span>
             {runtimeHoldsTheSlot(row.runtimeStatus, row.disposition) && (
               <DispositionChip disposition={row.disposition} />
             )}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-xs text-gray-400">
-              {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
-            </span>
+          <span className="mt-0.5 block truncate text-xs text-gray-400">
+            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+          </span>
+          {/* Their own line. Sharing the context line meant the workspace name
+              truncated to make room for chips, and a row with three refs
+              pushed the clock off entirely — two things competing for one line
+              is worse than an extra line that only appears when there's
+              something to put on it. */}
+          <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
             <SessionRefChips refs={row.refs} />
           </span>
         </span>
