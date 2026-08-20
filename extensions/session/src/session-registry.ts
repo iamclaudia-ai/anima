@@ -70,6 +70,11 @@ export class SessionRegistry {
       summary: existing.summary,
       metadata: existing.metadata,
       previousSessionId: existing.previousSessionId,
+      // Archiving is bookkeeping, not activity. Without this, `upsertSession`
+      // defaults `last_activity` to now and every archived session dates
+      // itself to the sweep that filed it — which is precisely the set search
+      // surfaces most, since archived means old.
+      lastActivity: existing.lastActivity,
     });
   }
 

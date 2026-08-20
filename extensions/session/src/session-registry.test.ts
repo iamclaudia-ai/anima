@@ -78,3 +78,52 @@ describe("session registry — connected sweep", () => {
     expect(getStoredSession("ses_live")?.runtimeStatus).toBe("stalled");
   });
 });
+
+/**
+ * Archiving files a session away because its transcript is gone from disk. It
+ * says nothing about when the session ran — but it re-upserts the row, and
+ * `upsertSession` defaults `last_activity` to now, so it used to stamp the
+ * sweep's own clock over the real date. Search shows that date, and archived
+ * sessions are exactly the old ones search reaches for: every hit from months
+ * ago read as "today".
+ */
+describe("session registry — archiving", () => {
+  let tmpHome: string;
+  let homedirSpy: ReturnType<typeof spyOn>;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(os.tmpdir(), "claudia-session-archive-"));
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+    homedirSpy = spyOn(os, "homedir").mockReturnValue(tmpHome);
+  });
+
+  afterEach(() => {
+    closeSessionDb();
+    homedirSpy.mockRestore();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("keeps the session's real last activity", () => {
+    const ranAt = "2026-02-22T20:55:12.110Z";
+    upsertSession({
+      id: "ses_old",
+      workspaceId: "ws_old",
+      providerSessionId: "ses_old",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat",
+      runtimeStatus: "idle",
+      lastActivity: ranAt,
+    });
+
+    new SessionRegistry().archiveSession("ses_old");
+
+    const stored = getStoredSession("ses_old");
+    expect(stored?.status).toBe("archived");
+    expect(stored?.lastActivity).toBe(ranAt);
+  });
+});
