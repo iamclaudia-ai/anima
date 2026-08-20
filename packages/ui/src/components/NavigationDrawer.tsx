@@ -216,10 +216,25 @@ const RUNTIME_PRESENTATION: Partial<
 /** Finished, and nobody has said they've dealt with it. */
 const READY_PRESENTATION = { dotClass: "bg-blue-500", label: "Done — ready for you" };
 
+/**
+ * Dispositions that mean "I'm done with this", and therefore outrank whatever
+ * the machine axis last claimed.
+ *
+ * `runtime_status` is a cache of a live fact and can be stale — a turn whose
+ * ending never reached us leaves a row asserting `running` indefinitely. The
+ * server sweeps those, but a sweep is periodic and a human decision isn't: the
+ * moment you mark something resolved, showing it as busy contradicts you to
+ * your face. Deliberately not `blocked` or `needs_review` — those say
+ * something about the *work*, and a session doing something while flagged for
+ * review is a fact worth seeing.
+ */
+const SETTLED_DISPOSITIONS: readonly SessionDisposition[] = ["resolved", "archived"];
+
 function runtimePresentation(
   status?: SessionRuntimeStatus,
   disposition?: SessionDisposition,
 ): { dotClass: string; label: string; pulse?: boolean } | undefined {
+  if (disposition && SETTLED_DISPOSITIONS.includes(disposition)) return undefined;
   if (status === "completed") {
     return (disposition ?? "open") === "open" ? READY_PRESENTATION : undefined;
   }
