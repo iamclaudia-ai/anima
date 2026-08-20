@@ -254,9 +254,13 @@ function elapsedLabel(since: string, now: number): string {
 /**
  * The flat "what's happening right now" list, above the workspace tree.
  *
- * Sorted by recency, except the session this tab is looking at, which is
- * pinned to the top — the row you're working in shouldn't move out from under
- * you because something finished elsewhere.
+ * Ordered by the server, newest-created first, and rendered in exactly that
+ * order — nothing is pinned or re-sorted here. Two earlier rules both had to
+ * go for the same reason: ordering by recent activity moved a row you were
+ * reading because some *other* session finished, and pinning the tab's own
+ * session to the top made every row jump each time you clicked through the
+ * list. Creation order never changes, so a session is always where you last
+ * saw it, which is the property that makes a list scannable at all.
  */
 function ActivePane({
   rows,
@@ -375,22 +379,23 @@ function ActiveRow({
             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
         }`}
       >
-        <RuntimeStatusDot status={row.runtimeStatus} disposition={row.disposition} />
+        <SessionStatusMark status={row.runtimeStatus} disposition={row.disposition} />
         <span className="min-w-0 flex-1">
-          {/* Same shape as a tree row — title, then the chip line. The only
-              thing a queue row adds is the workspace it belongs to, since it
-              no longer sits underneath one. */}
-          <span className="block truncate">{activeRowName(row)}</span>
-          <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
-            {/* The session you have open stays in the queue whatever its
-                status, so the chip is the only thing that shows a resolve
-                actually landed. Without it, marking the current session done
-                looks like nothing happened. */}
-            <DispositionChip disposition={row.disposition} />
-            <SessionRefChips refs={row.refs} />
+          {/* Exactly two lines, always. The refs used to sit on a line of their
+              own that only some rows had, so a queue alternated between two-
+              and three-line rows and read as ragged. They belong with the rest
+              of the row's context anyway. */}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate">{activeRowName(row)}</span>
+            {runtimeHoldsTheSlot(row.runtimeStatus, row.disposition) && (
+              <DispositionChip disposition={row.disposition} />
+            )}
           </span>
-          <span className="mt-0.5 block truncate text-xs text-gray-400">
-            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+          <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-xs text-gray-400">
+              {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+            </span>
+            <SessionRefChips refs={row.refs} />
           </span>
         </span>
       </button>
@@ -458,7 +463,28 @@ const DISPOSITION_MENU_LABELS: Record<SessionDisposition, string> = {
   archived: "Archived",
 };
 
-function RuntimeStatusDot({
+/**
+ * The one mark that leads every session row, in a slot of fixed width.
+ *
+ * Fixed is the whole point. A mark that only some rows carry makes the titles
+ * start at different offsets, and a column of titles that doesn't line up is
+ * one you have to read rather than scan — which defeats a pane whose entire
+ * job is answering "what's happening" at a glance. So the slot is always
+ * there, occupied or not, and every title in the sidebar begins at the same x.
+ *
+ * What goes in it, in order:
+ *
+ *   1. The **runtime** mark, when the agent is doing something. This is the
+ *      live axis and it wins, because it's the thing that changes while you're
+ *      looking at it.
+ *   2. Otherwise the **disposition** icon — where the work stands, which is
+ *      what a resting row has to say.
+ *
+ * When both exist (a `needs_review` session that started working again) the
+ * runtime mark takes the slot and the disposition follows the title, so
+ * nothing is lost and the alignment survives. See `DispositionChip`.
+ */
+function SessionStatusMark({
   status,
   disposition,
 }: {
@@ -466,29 +492,50 @@ function RuntimeStatusDot({
   disposition?: SessionDisposition;
 }) {
   const presentation = runtimePresentation(status, disposition);
-  if (!presentation) return null;
+
+  if (!presentation) {
+    // Falls through to the disposition, and to an empty slot of the same width
+    // when there's nothing to say at all.
+    return (
+      <span className="flex size-4 flex-shrink-0 items-center justify-center">
+        <DispositionChip disposition={disposition} />
+      </span>
+    );
+  }
 
   if (presentation.dotClass === "spinner") {
     return (
-      <span
-        title={presentation.label}
-        aria-label={presentation.label}
-        role="img"
-        className="mt-1 inline-block size-2.5 flex-shrink-0 animate-spin rounded-full border-[1.5px] border-emerald-500 border-t-transparent"
-      />
+      <span className="flex size-4 flex-shrink-0 items-center justify-center">
+        <span
+          title={presentation.label}
+          aria-label={presentation.label}
+          role="img"
+          className="inline-block size-2.5 animate-spin rounded-full border-[1.5px] border-emerald-500 border-t-transparent"
+        />
+      </span>
     );
   }
 
   return (
-    <span
-      title={presentation.label}
-      aria-label={presentation.label}
-      role="img"
-      className={`mt-1.5 inline-block size-2 flex-shrink-0 rounded-full ${presentation.dotClass} ${
-        presentation.pulse ? "animate-pulse" : ""
-      }`}
-    />
+    <span className="flex size-4 flex-shrink-0 items-center justify-center">
+      <span
+        title={presentation.label}
+        aria-label={presentation.label}
+        role="img"
+        className={`inline-block size-2 rounded-full ${presentation.dotClass} ${
+          presentation.pulse ? "animate-pulse" : ""
+        }`}
+      />
+    </span>
   );
+}
+
+/** Does the runtime mark hold the slot, leaving the disposition to trail? */
+function runtimeHoldsTheSlot(
+  status?: SessionRuntimeStatus,
+  disposition?: SessionDisposition,
+): boolean {
+  return runtimePresentation(status, disposition) !== undefined;
 }
 
 function DispositionChip({ disposition }: { disposition?: SessionDisposition }) {
@@ -622,11 +669,15 @@ function SessionRow({
         }`}
       >
         <span className="flex min-w-0 flex-1 items-start gap-1.5">
-          <RuntimeStatusDot status={session.runtimeStatus} disposition={session.disposition} />
+          <SessionStatusMark status={session.runtimeStatus} disposition={session.disposition} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate">{formatSessionName(session)}</span>
-            <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
-              <DispositionChip disposition={session.disposition} />
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 flex-1 truncate">{formatSessionName(session)}</span>
+              {runtimeHoldsTheSlot(session.runtimeStatus, session.disposition) && (
+                <DispositionChip disposition={session.disposition} />
+              )}
+            </span>
+            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 empty:mt-0">
               <SessionRefChips refs={session.refs} />
             </span>
           </span>
