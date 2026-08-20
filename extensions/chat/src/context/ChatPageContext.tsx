@@ -656,7 +656,8 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   // went quiet stayed looking busy forever. Two server events fix that, and
   // they're handled differently on purpose:
   //
-  //   `session.status_changed` patches the one row in place. It's the high
+  //   `session.status_changed` patches the one row in place — in place being
+  //     the operative part, since a patch must never move a row. It's the high
   //     frequency event, and refetching a whole workspace because a dot went
   //     from grey to green would be absurd.
   //
@@ -713,20 +714,26 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
             continue;
           }
           const updated = [...sessions];
+          // Patched in place: a live update changes what a row *says*, never
+          // where it sits.
+          //
+          // This used to bump `modified` from the event and re-sort, on the
+          // theory that a status change is activity and the row's recency
+          // moved with it. That was tolerable when only transitions arrived
+          // and untenable once the activity heartbeat did — a working session
+          // re-sorted the whole tree about once a second, so rows crawled
+          // upward under the cursor while you were reading them. The premise
+          // was wrong either way: a list that reorders itself while you look
+          // at it is not showing you recency, it's moving the thing you were
+          // about to click. Order belongs to the server and changes on a
+          // refetch, which is the only moment the list is allowed to move.
           updated[index] = {
             ...current,
             runtimeStatus: payload.runtimeStatus,
             disposition: payload.disposition,
             title,
             firstPrompt,
-            // A status change *is* activity, so the row's recency moved with
-            // it. Without this the list keeps the order it was fetched in and
-            // a session that just came alive sits wherever it happened to be.
-            modified: payload.at ?? current.modified,
           };
-          // Re-sort newest-first, matching the order the server returns, so
-          // the tree and a fresh page never disagree about position.
-          updated.sort((a, b) => (b.modified ?? "").localeCompare(a.modified ?? ""));
           next[wsId] = updated;
           touched = true;
         }
