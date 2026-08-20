@@ -1148,7 +1148,16 @@ export class ClaudeCliSession extends EventEmitter {
 
     // Any agent-turn event proves we have a live read on the TUI's turn state;
     // future prompts can trust `_turnActive` without re-running pane-idle.
+    //
+    // It also proves a turn is in flight *now*, which is a separate fact and
+    // was being dropped. `_turnActive` was set only by `submitPrompt`, so a
+    // session adopted or resumed mid-turn streamed a whole turn's events while
+    // reporting no turn — and once the line above flipped the state to
+    // "known", that false reading became one other code was entitled to
+    // believe. An arriving agent event is the more reliable of the two
+    // signals: it is the turn, rather than a memory of having started one.
     this._turnStateKnown = true;
+    this._turnActive = true;
     this.lastActivityTime = Date.now();
     this._activeReqId = ctx.reqId;
     const type = event.type;
