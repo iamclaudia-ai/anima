@@ -1157,7 +1157,16 @@ export class ClaudeCliSession extends EventEmitter {
     // believe. An arriving agent event is the more reliable of the two
     // signals: it is the turn, rather than a memory of having started one.
     this._turnStateKnown = true;
-    this._turnActive = true;
+    // Announce the opening edge, don't just record it. `endTurn` already emits
+    // `process_ended` for the closing one, so this is its missing partner —
+    // and without it a session adopted or resumed mid-turn had no way to say
+    // it was working until something else went looking, which meant a periodic
+    // sweep and a window of up to a minute showing the wrong thing. A stream
+    // event is the earliest honest moment to know.
+    if (!this._turnActive) {
+      this._turnActive = true;
+      this.emit("process_started");
+    }
     this.lastActivityTime = Date.now();
     this._activeReqId = ctx.reqId;
     const type = event.type;
