@@ -99,6 +99,11 @@ export class SessionAgentBridge {
     return await this.client.spawnSubagent(params);
   }
 
+  /** Subscribe to live sessions so their events reach us — see the client. */
+  async subscribeSessions(sessionIds: string[]): Promise<void> {
+    await this.client.subscribeSessions(sessionIds);
+  }
+
   onSessionEvent(listener: SessionEventListener): void {
     this.client.on("session.event", listener);
   }

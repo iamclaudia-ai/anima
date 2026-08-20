@@ -108,9 +108,27 @@ export interface SpawnSubagentMessage {
   };
 }
 
+/**
+ * Subscribe to sessions this client wants events for, without replaying them.
+ *
+ * `auth.resumeSessions` covers the reconnect case, where the client knows how
+ * far it got and wants the gap filled. This covers the one it can't: a client
+ * that has just *started* knows nothing, so it has no sequence numbers to
+ * resume from and would sit subscribed to nothing while sessions it cares
+ * about run to completion without it. Deliberately no replay — a fresh process
+ * asking for the whole buffer would re-deliver a turn's worth of deltas into
+ * a chat that already rendered them.
+ */
+export interface SubscribeSessionsMessage {
+  type: "session.subscribe";
+  requestId: string;
+  sessionIds: string[];
+}
+
 /** Union of all client-to-server messages */
 export type AgentHostClientMessage =
   | AuthMessage
+  | SubscribeSessionsMessage
   | CreateSessionMessage
   | PromptMessage
   | InterruptMessage

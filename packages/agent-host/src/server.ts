@@ -493,6 +493,23 @@ export async function createAgentHostServer(
         break;
       }
 
+      case "session.subscribe": {
+        const client = clients.get(ws);
+        const ids = msg.sessionIds ?? [];
+        if (client) for (const id of ids) client.subscribedSessions.add(id);
+        log.info("Client subscribed to sessions", {
+          extensionId: client?.extensionId ?? "(unauthenticated)",
+          count: ids.length,
+        });
+        sendResponse(ws, {
+          type: "res",
+          requestId: msg.requestId,
+          ok: true,
+          payload: { subscribed: client ? ids.length : 0 },
+        });
+        break;
+      }
+
       case "session.list": {
         const sessions = sessionHost.list();
         sendResponse(ws, {

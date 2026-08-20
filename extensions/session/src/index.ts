@@ -192,6 +192,15 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
         const activeSessions =
           (await instance.runtime.bridge.listSessions()) as AgentHostSessionInfo[];
         instance.runtime.registry.recordConnectedSessions(activeSessions);
+        // Subscribe to everything already alive, before deciding anything about
+        // it. agent-host broadcasts session events only to subscribed clients,
+        // and a client subscribes by creating or prompting a session — neither
+        // of which a *restarted* extension does for a session that was already
+        // running. So a reload mid-turn left us receiving nothing for that
+        // session: the CLI reached `turn_stop`, agent-host had nobody to send
+        // it to, and the row sat on `running` until something else moved it.
+        // Silent by construction, since a dropped broadcast raises no error.
+        await instance.runtime.bridge.subscribeSessions(activeSessions.map((s) => s.id));
         // Rows claiming to be mid-turn are claims about a process that exists
         // now. Nothing writes the closing transition when we die mid-turn, so
         // without this a restart leaves them green forever.

@@ -194,6 +194,68 @@ describe("AgentHostClient", () => {
     server.stop();
   });
 
+  // The failure this prevents was silent by construction. agent-host
+  // broadcasts a session's events only to clients subscribed to it, and a
+  // dropped broadcast raises nothing anywhere — so a reload mid-turn left the
+  // extension subscribed to nothing, the CLI's `turn_stop` went to no one, and
+  // the session's row sat on `running` forever with no error to find.
+  it("re-subscribes wanted sessions on reconnect, without asking for a replay", async () => {
+    const port = await getFreePort();
+    const auths: Array<Record<string, unknown>> = [];
+    const subscribes: Array<Record<string, unknown>> = [];
+    let latestWs: { send: (data: string) => void; close: () => void } | null = null;
+
+    const server = Bun.serve({
+      port,
+      fetch(req, server) {
+        const url = new URL(req.url);
+        if (url.pathname === "/ws") {
+          server.upgrade(req);
+          return undefined;
+        }
+        return new Response("Not Found", { status: 404 });
+      },
+      websocket: {
+        open(ws) {
+          latestWs = ws as unknown as { send: (data: string) => void; close: () => void };
+        },
+        message(ws, message) {
+          const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
+          const msg = JSON.parse(raw) as Record<string, unknown>;
+          if (msg.type === "auth") auths.push(msg);
+          if (msg.type === "session.subscribe") {
+            subscribes.push(msg);
+            ws.send(
+              JSON.stringify({ type: "res", requestId: msg.requestId, ok: true, payload: {} }),
+            );
+          }
+        },
+      },
+    });
+
+    const client = new AgentHostClient(`ws://127.0.0.1:${port}/ws`);
+    await client.connect();
+
+    // What a freshly-started extension does: ask agent-host what is alive, then
+    // subscribe to it. No events have been seen, so there is no sequence to
+    // resume from — the case `resumeSessions` structurally cannot cover.
+    await client.subscribeSessions(["s_live"]);
+    await waitFor(() => subscribes.length === 1);
+
+    (latestWs as { close: () => void } | null)?.close();
+    await waitFor(() => auths.length >= 2, 5000);
+    await waitFor(() => subscribes.length >= 2, 5000);
+
+    // Still wanted after the reconnect...
+    expect(subscribes[1]?.sessionIds).toEqual(["s_live"]);
+    // ...and still no replay: re-delivering a turn's buffered deltas would
+    // duplicate them into a chat that already rendered them.
+    expect(auths[1]?.resumeSessions).toBeUndefined();
+
+    client.disconnect();
+    server.stop();
+  });
+
   it("retries in background when the initial connect fails", async () => {
     // Reproduces the startup race we hit in production: agent-host's WS isn't
     // listening yet when the extension boots, so the first connect() rejects.

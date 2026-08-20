@@ -39,6 +39,18 @@ export class AgentHostClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private pendingRequests = new Map<string, PendingRequest>();
   private lastSeenSeq = new Map<string, number>();
+  /**
+   * Sessions this client wants events for, independent of how far it has read.
+   *
+   * `lastSeenSeq` can't answer that on its own: it's populated by *receiving*
+   * events, so a freshly-started process has an empty map, sends no
+   * `resumeSessions`, and ends up subscribed to nothing — while sessions it
+   * cares about run to completion without it. That's what stranded a spinner
+   * across every `watchdog reload` mid-turn: the CLI emitted `turn_stop`,
+   * agent-host had no subscriber to broadcast it to, and the row stayed
+   * `running` forever with no error anywhere.
+   */
+  private desiredSessions = new Set<string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectBackoff: number;
   private readonly initialReconnectBackoff: number;
@@ -87,6 +99,12 @@ export class AgentHostClient extends EventEmitter {
           const resumeSessions = Array.from(this.lastSeenSeq.entries()).map(
             ([sessionId, lastSeq]) => ({ sessionId, lastSeq }),
           );
+          // Anything wanted but never read has no sequence to resume from, so
+          // it rides the no-replay path instead — asking for the whole buffer
+          // would re-deliver a turn's deltas into a chat that already has them.
+          const resubscribe = Array.from(this.desiredSessions).filter(
+            (id) => !this.lastSeenSeq.has(id),
+          );
           const authMsg: ClientMessage = {
             type: "auth",
             extensionId: this.extensionId,
@@ -94,9 +112,16 @@ export class AgentHostClient extends EventEmitter {
           };
 
           ws.send(JSON.stringify(authMsg));
+          if (resubscribe.length > 0) {
+            void this.subscribeSessions(resubscribe).catch(() => {
+              // Non-fatal: the next prompt on a session re-subscribes it
+              // anyway. Losing this only costs the events in between.
+            });
+          }
           log.info("Connected to agent-host", {
             url: this.url,
             resumeSessions: resumeSessions.length,
+            resubscribed: resubscribe.length,
           });
           resolve();
         };
@@ -248,6 +273,23 @@ export class AgentHostClient extends EventEmitter {
       sessionId,
     });
     this.lastSeenSeq.delete(sessionId);
+    this.desiredSessions.delete(sessionId);
+  }
+
+  /**
+   * Subscribe to sessions without replaying their buffered events.
+   *
+   * Remembered, so a later reconnect restores the subscription rather than
+   * silently dropping back to nothing.
+   */
+  async subscribeSessions(sessionIds: string[]): Promise<void> {
+    for (const id of sessionIds) this.desiredSessions.add(id);
+    if (sessionIds.length === 0) return;
+    await this.sendRequest({
+      type: "session.subscribe",
+      requestId: "",
+      sessionIds,
+    });
   }
 
   /**
@@ -410,6 +452,11 @@ export class AgentHostClient extends EventEmitter {
   private handleSessionEvent(msg: SessionEventMessage): void {
     // Track sequence for reconnection replay
     this.lastSeenSeq.set(msg.sessionId, msg.seq);
+    // An event arriving is proof this session matters to us — agent-host only
+    // sends for subscribed ones, and the subscription may have been created by
+    // a prompt rather than by us asking. Recording it here is what lets a
+    // reconnect put it back.
+    this.desiredSessions.add(msg.sessionId);
 
     // Emit in the same format as the session extension's event bridge expects.
     this.emit("session.event", {
