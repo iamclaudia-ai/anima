@@ -38,7 +38,13 @@ import {
   Trash2,
   User,
   Zap,
+  Archive,
+  BellOff,
+  CircleCheck,
+  Eye,
+  OctagonAlert,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type {
   WorkspaceInfo,
   SessionInfo,
@@ -413,17 +419,24 @@ function ActiveRow({
 }
 
 /**
- * How each disposition reads. `open` has no chip — it's the default, and
- * labelling every untouched session "Open" would be noise.
+ * How each disposition reads. `open` has no mark — it's the default, and
+ * marking every untouched session "Open" would be noise.
+ *
+ * An icon rather than a worded chip. The label was costing a row's whole
+ * second line on the states that occur most, and the pane is a scan surface:
+ * you read down a column of marks and stop at the one that isn't like the
+ * others. Six distinct glyphs do that in a fraction of the width. The words
+ * aren't gone — they're the tooltip and the accessible name, which is where a
+ * label belongs once its shape is recognisable.
  */
 const DISPOSITION_PRESENTATION: Partial<
-  Record<SessionDisposition, { label: string; className: string }>
+  Record<SessionDisposition, { label: string; className: string; Icon: LucideIcon }>
 > = {
-  needs_review: { label: "Needs review", className: "bg-blue-50 text-blue-700 ring-blue-200" },
-  blocked: { label: "Blocked", className: "bg-red-50 text-red-700 ring-red-200" },
-  snoozed: { label: "Snoozed", className: "bg-gray-100 text-gray-600 ring-gray-200" },
-  resolved: { label: "Resolved", className: "bg-green-50 text-green-700 ring-green-200" },
-  archived: { label: "Archived", className: "bg-gray-100 text-gray-500 ring-gray-200" },
+  needs_review: { label: "Needs review", className: "text-blue-600", Icon: Eye },
+  blocked: { label: "Blocked", className: "text-red-600", Icon: OctagonAlert },
+  snoozed: { label: "Snoozed", className: "text-gray-400", Icon: BellOff },
+  resolved: { label: "Resolved", className: "text-green-600", Icon: CircleCheck },
+  archived: { label: "Archived", className: "text-gray-400", Icon: Archive },
 };
 
 /** The order dispositions appear in the row menu. */
@@ -481,11 +494,15 @@ function RuntimeStatusDot({
 function DispositionChip({ disposition }: { disposition?: SessionDisposition }) {
   const presentation = disposition ? DISPOSITION_PRESENTATION[disposition] : undefined;
   if (!presentation) return null;
+  const { Icon } = presentation;
   return (
     <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${presentation.className}`}
+      title={presentation.label}
+      aria-label={presentation.label}
+      role="img"
+      className={`inline-flex items-center ${presentation.className}`}
     >
-      {presentation.label}
+      <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" />
     </span>
   );
 }
@@ -738,7 +755,13 @@ function SessionActions({
                       current ? "font-medium text-gray-900" : "text-gray-600"
                     }`}
                   >
-                    {DISPOSITION_MENU_LABELS[option]}
+                    {/* The same glyph the row shows, next to the word it means.
+                        A tooltip is only discoverable once you hover the right
+                        thing; this is where the vocabulary is actually learnt. */}
+                    <span className="flex items-center gap-2">
+                      <DispositionMenuIcon disposition={option} />
+                      {DISPOSITION_MENU_LABELS[option]}
+                    </span>
                     {current && <Check className="size-3" />}
                   </button>
                 );
@@ -749,6 +772,14 @@ function SessionActions({
       )}
     </span>
   );
+}
+
+/** The menu's leading glyph — blank for `open`, which has no mark of its own. */
+function DispositionMenuIcon({ disposition }: { disposition: SessionDisposition }) {
+  const presentation = DISPOSITION_PRESENTATION[disposition];
+  if (!presentation) return <span className="size-3.5" aria-hidden="true" />;
+  const { Icon } = presentation;
+  return <Icon className={`size-3.5 ${presentation.className}`} aria-hidden="true" />;
 }
 
 /** Small icon button living inside the session row's anchor. */
