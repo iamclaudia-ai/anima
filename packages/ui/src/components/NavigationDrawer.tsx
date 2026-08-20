@@ -190,15 +190,18 @@ function tmuxAttachCommand(sessionId: string): string {
 /**
  * How each runtime status reads in the nav.
  *
- * `idle` is absent, and `completed` is conditional. The original rule was that
- * both resting states show nothing — most rows are at rest, and a column of
- * grey dots costs the eye something on every scan while saying nothing.
+ * The resting states are absent here and handled in `runtimePresentation`,
+ * because what they should show depends on the *other* axis.
  *
- * That was right in general and wrong for the one row that matters most.
- * A session that finished and hasn't been acknowledged is exactly the "I asked
- * for a PR review and forgot to come back" case, so it gets a mark; a session
- * that finished and *was* acknowledged goes quiet again. The principle held,
- * the boundary moved — see `runtimePresentation`.
+ * The original rule was that anything at rest showed nothing: most rows are at
+ * rest, and a column of identical dots costs the eye something on every scan
+ * while saying nothing. That reasoning was sound when a row's mark was
+ * optional and the ones without simply took less width. It stopped being sound
+ * once the mark got a fixed slot of its own — a resting row then reads as a
+ * *hole* in the column rather than an absence of news, which is worse than the
+ * uniform dot it was avoiding. And the dot isn't uniform anyway: the rows it
+ * appears on are exactly the open ones, so it says "still yours" against the
+ * resolved and archived rows that carry their own glyph.
  */
 const RUNTIME_PRESENTATION: Partial<
   Record<SessionRuntimeStatus, { dotClass: string; label: string; pulse?: boolean }>
@@ -215,6 +218,14 @@ const RUNTIME_PRESENTATION: Partial<
 
 /** Finished, and nobody has said they've dealt with it. */
 const READY_PRESENTATION = { dotClass: "bg-blue-500", label: "Done — ready for you" };
+
+/** At rest, still open — nothing is happening and nobody has closed it out. */
+const OPEN_PRESENTATION = { dotClass: "bg-blue-500", label: "Open — nothing running" };
+
+/** Statuses that mean "not doing anything", including having never said. */
+function isAtRest(status?: SessionRuntimeStatus): boolean {
+  return status === undefined || status === "idle";
+}
 
 /**
  * Dispositions that mean "I'm done with this", and therefore outrank whatever
@@ -235,9 +246,12 @@ function runtimePresentation(
   disposition?: SessionDisposition,
 ): { dotClass: string; label: string; pulse?: boolean } | undefined {
   if (disposition && SETTLED_DISPOSITIONS.includes(disposition)) return undefined;
-  if (status === "completed") {
-    return (disposition ?? "open") === "open" ? READY_PRESENTATION : undefined;
-  }
+  // A disposition other than `open` carries its own glyph and is the more
+  // useful of the two facts, so it takes the slot and the resting dot stands
+  // down. `open` has no glyph — this is the mark it gets.
+  const isOpen = (disposition ?? "open") === "open";
+  if (status === "completed") return isOpen ? READY_PRESENTATION : undefined;
+  if (isAtRest(status)) return isOpen ? OPEN_PRESENTATION : undefined;
   return status ? RUNTIME_PRESENTATION[status] : undefined;
 }
 
