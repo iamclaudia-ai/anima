@@ -115,7 +115,7 @@ function sameSessions(a: AttentionSession[], b: AttentionSession[]): boolean {
 }
 
 /** Payload of `session.activity` — a live session re-asserting itself. */
-interface SessionActivityPayload {
+export interface SessionActivityPayload {
   sessionId: string;
   runtimeStatus?: SessionRuntimeStatus;
   disposition?: SessionDisposition;
@@ -124,22 +124,40 @@ interface SessionActivityPayload {
 }
 
 /**
+ * How long a beat for a session we don't have may go unexamined.
+ *
+ * A beat for an absent session usually means something just became worth
+ * showing, so a fetch is right — but not every time. Some workspaces are
+ * excluded from the queue on purpose (Libby's summarization runs, which are
+ * machinery rather than work), and those stream all day. Fetching on each of
+ * their beats would be a request a second, forever, for a row that is
+ * deliberately never going to appear. One look a minute settles the question
+ * for a session that genuinely does belong, and costs nothing for one that
+ * never will.
+ */
+const UNKNOWN_SESSION_FETCH_INTERVAL_MS = 60_000;
+
+let lastUnknownFetchAt = 0;
+
+/**
  * Patch one row from a heartbeat, without going back to the server.
  *
- * A beat for a session that isn't in the list schedules a fetch instead: it
- * means something just became worth showing (a new session, or one whose
- * snooze lapsed), and only the server knows where it sorts.
+ * A beat for a session that isn't in the list asks the server about it — the
+ * client can't tell "new" from "deliberately excluded" — but rarely, per
+ * above. Only the server knows where a new row sorts, so this can't be
+ * resolved locally.
  */
-function applyActivity(payload: SessionActivityPayload): void {
-  if (!payload?.sessionId) return;
-  const index = snapshot.findIndex((s) => s.sessionId === payload.sessionId);
-  if (index === -1) {
-    scheduleFetch();
-    return;
-  }
-  const current = snapshot[index];
-  if (!current) return;
-
+/**
+ * Everything a heartbeat can move on a row, applied to it.
+ *
+ * Returns the row unchanged — by identity — when nothing moved, which is the
+ * common case: the beat exists to re-assert what is already true, and a fresh
+ * object every second would re-render the banner and the nav for nothing.
+ */
+export function mergeActivity(
+  current: AttentionSession,
+  payload: SessionActivityPayload,
+): AttentionSession {
   const next: AttentionSession = {
     ...current,
     runtimeStatus: payload.runtimeStatus ?? current.runtimeStatus,
@@ -147,14 +165,34 @@ function applyActivity(payload: SessionActivityPayload): void {
     title: payload.title !== undefined ? payload.title : current.title,
     firstPrompt: payload.firstPrompt !== undefined ? payload.firstPrompt : current.firstPrompt,
   };
+  // Identity is the signal — the caller re-renders both consumers on a change,
+  // and a heartbeat is by design mostly a repeat of what the row already says.
   if (
     next.runtimeStatus === current.runtimeStatus &&
     next.disposition === current.disposition &&
     next.title === current.title &&
     next.firstPrompt === current.firstPrompt
   ) {
+    return current;
+  }
+  return next;
+}
+
+function applyActivity(payload: SessionActivityPayload): void {
+  if (!payload?.sessionId) return;
+  const index = snapshot.findIndex((s) => s.sessionId === payload.sessionId);
+  if (index === -1) {
+    const now = Date.now();
+    if (now - lastUnknownFetchAt < UNKNOWN_SESSION_FETCH_INTERVAL_MS) return;
+    lastUnknownFetchAt = now;
+    scheduleFetch();
     return;
   }
+  const current = snapshot[index];
+  if (!current) return;
+
+  const next = mergeActivity(current, payload);
+  if (next === current) return;
 
   const updated = [...snapshot];
   updated[index] = next;
@@ -221,6 +259,7 @@ function start(next: GatewayClient): void {
 }
 
 function stop(): void {
+  lastUnknownFetchAt = 0;
   stopListening?.();
   stopListening = null;
   if (pollTimer) clearInterval(pollTimer);
