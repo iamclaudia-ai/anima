@@ -37,9 +37,15 @@ export function listSessions(
   reconcileWorkspace(cwd, workspaceId);
   const all = listWorkspaceSessions(workspaceId);
 
+  // Newest *created* first, not most recently active — the same rule the work
+  // queue follows, so the two lists in the nav never disagree about where a
+  // session lives. Recency ordering rearranged a folder every time an
+  // unrelated session finished a turn, which makes a list you can't learn:
+  // the row you reached for is no longer the row under the cursor. Creation
+  // order never changes, so a session stays where you last saw it.
   const sorted = all.sort((a, b) => {
-    const aTime = a.modified || a.created || "";
-    const bTime = b.modified || b.created || "";
+    const aTime = a.created || a.modified || "";
+    const bTime = b.created || b.modified || "";
     return bTime.localeCompare(aTime);
   });
 

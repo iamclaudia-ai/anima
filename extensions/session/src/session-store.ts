@@ -921,7 +921,7 @@ export function listWorkspaceSessions(
     .query(
       `SELECT * FROM sessions
        WHERE workspace_id = ? AND purpose = 'chat' AND status = 'active' ${dispositionClause}
-       ORDER BY last_activity DESC`,
+       ORDER BY created_at DESC`,
     )
     .all(workspaceId, ...dispositionValues) as SessionRow[];
 

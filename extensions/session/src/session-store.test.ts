@@ -312,6 +312,29 @@ describe("session store", () => {
     // findable only by search. Sessions are never really deleted here and the
     // sidebar shouldn't imply otherwise; the queue is the thing that needs
     // decluttering, and both dispositions leave it.
+    // Same rule as the work queue, so the two lists in the nav never disagree
+    // about where a session lives. Recency ordering rearranged a folder every
+    // time an unrelated session finished a turn — the row you reached for was
+    // no longer the row under the cursor.
+    it("orders the tree by creation, not by recent activity", () => {
+      seed("ses_tree_old");
+      seed("ses_tree_new");
+      getSessionDb()
+        .query("UPDATE sessions SET created_at = ? WHERE provider_session_id = ?")
+        .run("2026-08-01T00:00:00.000Z", "ses_tree_old");
+      getSessionDb()
+        .query("UPDATE sessions SET created_at = ? WHERE provider_session_id = ?")
+        .run("2026-08-12T00:00:00.000Z", "ses_tree_new");
+      // The older session is the busy one. Under the old rule it led the list.
+      touchSession("ses_tree_old", "running");
+
+      const seeded = new Set(["ses_tree_old", "ses_tree_new"]);
+      const ids = listWorkspaceSessions("ws_status")
+        .map((s) => s.sessionId)
+        .filter((id) => seeded.has(id));
+      expect(ids).toEqual(["ses_tree_new", "ses_tree_old"]);
+    });
+
     it("keeps resolved and archived sessions browsable in the tree", () => {
       seed("ses_open");
       seed("ses_resolved");
