@@ -276,6 +276,18 @@ describe("session status events", () => {
       expect(getStoredSession("ses_alive")?.runtimeStatus).toBe("running");
     });
 
+    // A sweep that only retires claims leaves the opposite error standing: a
+    // row at rest while a turn is genuinely running, which is what a missed
+    // *opening* transition looks like. Ground truth has to be believed both
+    // ways or the column only self-heals downward.
+    it("promotes a resting row when a turn is genuinely in flight", () => {
+      applyRuntimeStatus("ses_status", "completed");
+      expect(
+        reconcileInFlightStatuses(live({ running: ["ses_status"], turnActive: ["ses_status"] })),
+      ).toBe(1);
+      expect(getStoredSession("ses_status")?.runtimeStatus).toBe("running");
+    });
+
     it("leaves resting states alone", () => {
       applyRuntimeStatus("ses_status", "completed");
       expect(reconcileInFlightStatuses(nothingLive)).toBe(0);

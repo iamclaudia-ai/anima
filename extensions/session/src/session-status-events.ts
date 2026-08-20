@@ -263,8 +263,26 @@ export function reconcileInFlightStatuses(live: {
     if (applyRuntimeStatus(id, "idle", { touch: false })) corrected++;
   }
 
+  // And the other direction. A sweep that only ever retires claims leaves the
+  // opposite error uncorrected: a row resting while a turn is genuinely in
+  // flight, which is what a missed *opening* transition looks like — or what
+  // this sweep's own earlier mistake leaves behind. Re-deriving from ground
+  // truth means believing it both ways.
+  const resting = getSessionDb()
+    .query(
+      `SELECT provider_session_id FROM sessions
+        WHERE status = 'active'
+          AND runtime_status NOT IN ('running','awaiting_input','awaiting_approval')`,
+    )
+    .all() as Array<{ provider_session_id: string }>;
+
+  for (const row of resting) {
+    if (!live.turnActive.has(row.provider_session_id)) continue;
+    if (applyRuntimeStatus(row.provider_session_id, "running", { touch: false })) corrected++;
+  }
+
   if (corrected > 0) {
-    log.info("Corrected stale in-flight statuses", { corrected, checked: rows.length });
+    log.info("Corrected stale runtime statuses", { corrected, inFlightChecked: rows.length });
   }
   return corrected;
 }
