@@ -229,13 +229,27 @@ describe("session status events", () => {
 
   // The live database had four sessions permanently marked `running` before
   // this existed — each one a turn that died with the extension.
-  describe("startup reconcile", () => {
-    it("stalls in-flight rows with no live process, and spares the ones that have one", () => {
+  describe("reconcile against ground truth", () => {
+    /** Nothing alive at all. */
+    const nothingLive = {
+      running: new Set<string>(),
+      turnActive: new Set<string>(),
+      turnStateUnknown: new Set<string>(),
+    };
+    const live = (opts: { running?: string[]; turnActive?: string[]; unknown?: string[] }) => ({
+      running: new Set(opts.running ?? []),
+      turnActive: new Set(opts.turnActive ?? []),
+      turnStateUnknown: new Set(opts.unknown ?? []),
+    });
+
+    it("stalls in-flight rows with no live process, and spares the ones mid-turn", () => {
       applyRuntimeStatus("ses_status", "running");
       applyRuntimeStatus("ses_alive", "running");
       emitted = [];
 
-      expect(reconcileInFlightStatuses(new Set(["ses_alive"]))).toBe(1);
+      expect(
+        reconcileInFlightStatuses(live({ running: ["ses_alive"], turnActive: ["ses_alive"] })),
+      ).toBe(1);
       expect(getStoredSession("ses_status")?.runtimeStatus).toBe("stalled");
       expect(getStoredSession("ses_alive")?.runtimeStatus).toBe("running");
 
@@ -244,15 +258,33 @@ describe("session status events", () => {
       expect(lastStatus()).toMatchObject({ sessionId: "ses_status", runtimeStatus: "stalled" });
     });
 
+    // The case the process check alone could never catch, and the one a human
+    // notices: the session is up and answering, but its turn ended without the
+    // transition reaching us. A live process is not a live turn.
+    it("retires a running claim on a session that is alive but idle", () => {
+      applyRuntimeStatus("ses_alive", "running");
+      expect(reconcileInFlightStatuses(live({ running: ["ses_alive"] }))).toBe(1);
+      // `idle`, not `stalled` — nothing is wrong, there's just no turn.
+      expect(getStoredSession("ses_alive")?.runtimeStatus).toBe("idle");
+    });
+
+    it("says nothing about a provider that can't report its turn state", () => {
+      applyRuntimeStatus("ses_alive", "running");
+      expect(
+        reconcileInFlightStatuses(live({ running: ["ses_alive"], unknown: ["ses_alive"] })),
+      ).toBe(0);
+      expect(getStoredSession("ses_alive")?.runtimeStatus).toBe("running");
+    });
+
     it("leaves resting states alone", () => {
       applyRuntimeStatus("ses_status", "completed");
-      expect(reconcileInFlightStatuses(new Set())).toBe(0);
+      expect(reconcileInFlightStatuses(nothingLive)).toBe(0);
       expect(getStoredSession("ses_status")?.runtimeStatus).toBe("completed");
     });
 
-    it("clears the awaiting states too — they also claim a live process", () => {
+    it("clears the awaiting states too — they also claim a live turn", () => {
       applyRuntimeStatus("ses_status", "awaiting_approval");
-      expect(reconcileInFlightStatuses(new Set())).toBe(1);
+      expect(reconcileInFlightStatuses(nothingLive)).toBe(1);
       expect(getStoredSession("ses_status")?.runtimeStatus).toBe("stalled");
     });
   });

@@ -209,12 +209,16 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
           (await instance.runtime.bridge.listSessions()) as AgentHostSessionInfo[];
         instance.runtime.registry.recordConnectedSessions(activeSessions);
         await instance.runtime.bridge.subscribeSessions(activeSessions.map((s) => s.id));
-        // Rows claiming to be mid-turn are claims about a process that exists
-        // now. Nothing writes the closing transition when we die mid-turn, so
-        // without this a restart leaves them green forever.
-        reconcileInFlightStatuses(
-          new Set(activeSessions.filter((s) => s.isProcessRunning).map((s) => s.id)),
-        );
+        // Rows claiming to be mid-turn are claims about *now*, and a persisted
+        // claim about now is wrong the moment its writer dies. Ground truth
+        // lives in agent-host, so every sync re-derives it from there.
+        reconcileInFlightStatuses({
+          running: new Set(activeSessions.filter((s) => s.isProcessRunning).map((s) => s.id)),
+          turnActive: new Set(activeSessions.filter((s) => s.turnActive === true).map((s) => s.id)),
+          turnStateUnknown: new Set(
+            activeSessions.filter((s) => s.turnActive === undefined).map((s) => s.id),
+          ),
+        });
       };
 
       try {
@@ -240,6 +244,22 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
             log.warn("Failed to sync live sessions after reconnect", { error: String(error) });
           });
         });
+
+        // And on a slow interval, because a status goes stale *mid-life*, not
+        // only across a restart. `runtime_status` is a persisted cache of a
+        // live fact, so every transition it misses — a dropped event, a
+        // provider that never announced the end of a turn — leaves a row
+        // asserting something untrue with nothing scheduled to correct it. A
+        // sweep is what makes the column self-healing instead of merely
+        // usually-right. Matches the transcript reconciler's cadence; it's one
+        // cheap RPC and a query over the handful of rows claiming to be busy.
+        const sweep = setInterval(() => {
+          void syncLiveSessions().catch((error) => {
+            log.warn("Live session sweep failed", { error: String(error) });
+          });
+        }, LIVE_SWEEP_INTERVAL_MS);
+        sweep.unref?.();
+        instance.runtime.unsubscribers.push(() => clearInterval(sweep));
       }
     },
 
@@ -266,4 +286,12 @@ export default createSessionExtension;
 
 // ── Direct execution with HMR ────────────────────────────────
 import { runExtensionHost } from "@anima/extension-host";
+
+/**
+ * How often live session state is re-derived from agent-host.
+ *
+ * Matches the transcript reconciler's sweep: slow enough to be invisible, fast
+ * enough that a row asserting something untrue doesn't sit there all morning.
+ */
+const LIVE_SWEEP_INTERVAL_MS = 60_000;
 if (import.meta.main) runExtensionHost(createSessionExtension);

@@ -1121,6 +1121,7 @@ export class ClaudeCliSession extends EventEmitter {
       lastActivity: new Date(this.lastActivityTime).toISOString(),
       healthy: this.isActive,
       stale: Date.now() - this.lastActivityTime >= STALE_MS,
+      turnActive: this._turnActive,
     };
   }
 

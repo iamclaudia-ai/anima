@@ -20,6 +20,8 @@ export interface AgentHostSessionInfo {
   lastActivity: string;
   healthy: boolean;
   stale: boolean;
+  /** Whether a turn is in flight right now; absent when the provider can't say. */
+  turnActive?: boolean;
 }
 
 export interface SessionRuntimeConfig {

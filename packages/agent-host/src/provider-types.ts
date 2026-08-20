@@ -49,6 +49,18 @@ export interface AgentRuntimeSessionInfo {
   lastActivity: string;
   healthy: boolean;
   stale: boolean;
+  /**
+   * Whether a turn is in flight *right now*.
+   *
+   * The ground truth behind `runtime_status`, which is a persisted cache of a
+   * live fact and therefore wrong the moment its writer dies mid-turn. A
+   * process being alive doesn't answer this — a session can be running and
+   * idle — so `isProcessRunning` was never enough to correct a row stuck on
+   * `running`. Optional because a provider that can't know its own turn state
+   * should say nothing rather than guess: absent means "no opinion", and the
+   * reconcile leaves such a row alone.
+   */
+  turnActive?: boolean;
 }
 
 export interface AgentRuntimeSession {

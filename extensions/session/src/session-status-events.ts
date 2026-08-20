@@ -218,7 +218,22 @@ export function applyDisposition(sessionId: string, disposition: SessionDisposit
  *
  * Returns the number of rows corrected.
  */
-export function reconcileInFlightStatuses(liveSessionIds: ReadonlySet<string>): number {
+export function reconcileInFlightStatuses(live: {
+  /** Sessions agent-host currently has a process for. */
+  running: ReadonlySet<string>;
+  /**
+   * Sessions with a turn actually in flight, where the provider knows.
+   *
+   * The distinction that matters: a live process is not a live *turn*. A row
+   * stuck on `running` for a session that is up but idle passes the process
+   * check and stays wrong forever, which is precisely the case that survived
+   * the first version of this — and the one a human notices, because the
+   * spinner never stops.
+   */
+  turnActive: ReadonlySet<string>;
+  /** Sessions whose provider gave no turn state; left alone rather than guessed at. */
+  turnStateUnknown: ReadonlySet<string>;
+}): number {
   const rows = getSessionDb()
     .query(
       `SELECT provider_session_id FROM sessions
@@ -228,15 +243,28 @@ export function reconcileInFlightStatuses(liveSessionIds: ReadonlySet<string>): 
 
   let corrected = 0;
   for (const row of rows) {
-    if (liveSessionIds.has(row.provider_session_id)) continue;
-    if (applyRuntimeStatus(row.provider_session_id, "stalled", { touch: false })) corrected++;
+    const id = row.provider_session_id;
+    if (live.turnActive.has(id)) continue;
+
+    if (!live.running.has(id)) {
+      // No process at all. Deliberately `stalled` rather than `idle`: "we don't
+      // know how this turn ended" is a different and more interesting fact than
+      // "nothing is happening", and it's the one that says a session was
+      // abandoned rather than finished.
+      if (applyRuntimeStatus(id, "stalled", { touch: false })) corrected++;
+      continue;
+    }
+
+    // Alive, and the provider is sure no turn is running. The turn ended and
+    // we missed the transition — a dropped event, a restart mid-turn. `idle`,
+    // not `stalled`: the session is healthy and answering, so there is nothing
+    // wrong to flag, only a claim to retire.
+    if (live.turnStateUnknown.has(id)) continue;
+    if (applyRuntimeStatus(id, "idle", { touch: false })) corrected++;
   }
 
   if (corrected > 0) {
-    log.info("Cleared stale in-flight statuses at startup", {
-      corrected,
-      checked: rows.length,
-    });
+    log.info("Corrected stale in-flight statuses", { corrected, checked: rows.length });
   }
   return corrected;
 }

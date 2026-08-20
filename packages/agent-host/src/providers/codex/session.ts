@@ -209,6 +209,7 @@ export class CodexSession extends EventEmitter {
       lastActivity: new Date(this.lastActivityTime).toISOString(),
       healthy: this.isActive && !this._isClosed,
       stale: Date.now() - this.lastActivityTime >= 5 * 60 * 1000,
+      turnActive: this.runningPrompt,
     };
   }
 
