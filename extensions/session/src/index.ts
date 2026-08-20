@@ -19,6 +19,7 @@ import { closeDb } from "./workspace";
 import { closeSessionDb } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
 import { startReconciler } from "./session-reconciler";
+import { startRefValidator } from "./session-ref-validity";
 import { wireSubagentEvents } from "./lifecycle/subagent-events";
 import { sessionMethodDefinitions } from "./session-methods";
 import { createSessionMethodHandlers } from "./session-dispatch";
@@ -186,6 +187,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       // Keeps the sessions table current off the request path, and is the only
       // thing that notices sessions created outside Anima (the raw CLI).
       instance.runtime.unsubscribers.push(startReconciler());
+      // Asks GitHub whether extracted PR/issue refs actually exist, and
+      // remembers the misses so a hex colour is never re-extracted as a chip.
+      instance.runtime.unsubscribers.push(startRefValidator());
 
       /**
        * Reconcile against what agent-host actually has, on every connect.

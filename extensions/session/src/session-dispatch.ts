@@ -24,6 +24,7 @@ import type { AgentHostSessionInfo } from "./session-types";
 import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
 import { backfillSessionRefs } from "./session-ref-sync";
+import { validateSessionRefs } from "./session-ref-validity";
 import { resolveRefsConfig } from "./session-reconciler";
 import {
   getStoredSession,
@@ -322,6 +323,11 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         days: params.days as number | undefined,
         rescan: params.rescan as boolean | undefined,
         dryRun: params.dryRun as boolean | undefined,
+      }),
+    "session.validate_refs": async (params) =>
+      await validateSessionRefs({
+        limit: params.limit as number | undefined,
+        revalidate: params.revalidate as boolean | undefined,
       }),
     "session.create_session": async (params) => {
       const rt = getRuntime();

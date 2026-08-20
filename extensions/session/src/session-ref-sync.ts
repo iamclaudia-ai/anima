@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { RefsConfig, SessionRef } from "./session-refs";
 import { extractRefs, extractRefsFromTexts, mergeRefs } from "./session-refs";
+import { rejectKnownInvalidRefs } from "./session-ref-validity";
 import {
   getSessionDb,
   listSessionsForRefSync,
@@ -327,9 +328,16 @@ export function syncSessionRefs(
     const derivedStored = toStored(derived);
     // A rescan is authoritative: it read the whole conversation, so a ref that
     // no longer matches should actually disappear.
-    const merged = options.rescan
-      ? derivedStored
-      : mergeRefs<StoredSessionRef>(current, derivedStored);
+    // Keys GitHub has already denied are dropped here rather than in
+    // `extractRefs`: extraction stays a pure function of text and config, and
+    // this is a fact about the outside world that only the database knows.
+    // Applied to the merged set, not just the newly-derived half, so a row
+    // still carrying a debunked key sheds it on the next write instead of
+    // waiting on the validator's own delete — and so a rescan can't re-add
+    // every hex colour that was just removed, the transcripts being unchanged.
+    const merged = rejectKnownInvalidRefs(
+      options.rescan ? derivedStored : mergeRefs<StoredSessionRef>(current, derivedStored),
+    );
     if (keysOf(merged) === keysOf(current)) continue;
 
     result.updated++;

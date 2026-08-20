@@ -322,6 +322,29 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "serial" },
   },
   {
+    name: "session.validate_refs",
+    description:
+      "Check extracted GitHub PR/issue refs against the API, cache the verdicts, and remove the ones that don't exist. Invalid keys are remembered so they're never re-extracted.",
+    inputSchema: z.object({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(500)
+        .optional()
+        .default(50)
+        .describe("How many unchecked ref keys to validate this pass"),
+      revalidate: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Re-check keys that already have a cached verdict. Use after a repo is renamed or access changes.",
+        ),
+    }),
+    execution: { lane: "write", concurrency: "serial" },
+  },
+  {
     name: "session.list_workspaces",
     description: "List all workspaces",
     inputSchema: z.object({}),
