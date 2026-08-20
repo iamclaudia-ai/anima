@@ -11,6 +11,12 @@
  *
  * - **Events.** `session.status_changed` means something moved, so refetch.
  *   Debounced, since a turn produces several and a busy morning produces a lot.
+ * - **A heartbeat.** `session.activity` re-asserts a live session about once a
+ *   second while it's working, and is patched into the row in place rather
+ *   than refetched — a refetch per second per busy session would be absurd,
+ *   and the payload already carries everything that moves. This is what makes
+ *   the pane's spinner trustworthy: the transition event is a single edge, and
+ *   a tab that missed it used to sit on a resting row for up to a minute.
  * - **A clock.** Nothing fires when a snooze expires or when a session crosses
  *   the "you've been ignoring this for fifteen minutes" line. Those are facts
  *   about time, not events, so a slow interval is the only honest way to see
@@ -108,6 +114,57 @@ function sameSessions(a: AttentionSession[], b: AttentionSession[]): boolean {
   });
 }
 
+/** Payload of `session.activity` — a live session re-asserting itself. */
+interface SessionActivityPayload {
+  sessionId: string;
+  runtimeStatus?: SessionRuntimeStatus;
+  disposition?: SessionDisposition;
+  title?: string | null;
+  firstPrompt?: string | null;
+}
+
+/**
+ * Patch one row from a heartbeat, without going back to the server.
+ *
+ * A beat for a session that isn't in the list schedules a fetch instead: it
+ * means something just became worth showing (a new session, or one whose
+ * snooze lapsed), and only the server knows where it sorts.
+ */
+function applyActivity(payload: SessionActivityPayload): void {
+  if (!payload?.sessionId) return;
+  const index = snapshot.findIndex((s) => s.sessionId === payload.sessionId);
+  if (index === -1) {
+    scheduleFetch();
+    return;
+  }
+  const current = snapshot[index];
+  if (!current) return;
+
+  const next: AttentionSession = {
+    ...current,
+    runtimeStatus: payload.runtimeStatus ?? current.runtimeStatus,
+    disposition: payload.disposition ?? current.disposition,
+    title: payload.title !== undefined ? payload.title : current.title,
+    firstPrompt: payload.firstPrompt !== undefined ? payload.firstPrompt : current.firstPrompt,
+  };
+  if (
+    next.runtimeStatus === current.runtimeStatus &&
+    next.disposition === current.disposition &&
+    next.title === current.title &&
+    next.firstPrompt === current.firstPrompt
+  ) {
+    return;
+  }
+
+  const updated = [...snapshot];
+  updated[index] = next;
+  // Bypasses `publish`'s equality check: it compares by identity per row and
+  // would see this as a no-op change on a list of the same length. The
+  // comparison above has already established the row moved.
+  snapshot = updated;
+  for (const listener of listeners) listener();
+}
+
 function publish(next: AttentionSession[]): void {
   // `useSyncExternalStore` compares snapshots by identity, so handing back a
   // fresh array every poll would re-render both consumers once a minute for
@@ -149,9 +206,15 @@ function start(next: GatewayClient): void {
   // Also list changes: a rename alters what a row *says* without altering any
   // status, and the queue shows titles.
   const offList = next.on("session.list_changed", scheduleFetch);
+  // The heartbeat patches in place — see `applyActivity`. Deliberately not a
+  // refetch: this fires while a turn is streaming.
+  const offActivity = next.on("session.activity", (_event, raw) =>
+    applyActivity(raw as SessionActivityPayload),
+  );
   stopListening = () => {
     offStatus();
     offList();
+    offActivity();
   };
   if (!pollTimer) pollTimer = setInterval(fetchNow, POLL_INTERVAL_MS);
   fetchNow();

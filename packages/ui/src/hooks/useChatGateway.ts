@@ -89,6 +89,25 @@ export interface SessionStatusChangedEvent {
   previousRuntimeStatus?: SessionRuntimeStatus;
   disposition: SessionDisposition;
   previousDisposition?: SessionDisposition;
+  /** The row's name, so a rename reaches every tab without a refetch. */
+  title: string | null;
+  /** The derived name's source, for a session nobody has renamed. */
+  firstPrompt: string | null;
+  at: string;
+}
+
+/**
+ * Payload of `session.activity` — a live session re-asserting itself, roughly
+ * once a second while a turn streams. A heartbeat, not a transition: patch the
+ * row from it, never refetch on it.
+ */
+export interface SessionActivityEvent {
+  sessionId: string;
+  workspaceId: string | null;
+  runtimeStatus: SessionRuntimeStatus;
+  disposition: SessionDisposition;
+  title: string | null;
+  firstPrompt: string | null;
   at: string;
 }
 

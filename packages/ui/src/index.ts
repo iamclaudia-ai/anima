@@ -65,6 +65,7 @@ export type {
   SessionSearchResult,
   SessionRuntimeStatus,
   SessionDisposition,
+  SessionActivityEvent,
   SessionStatusChangedEvent,
   SessionListChangedEvent,
   SubagentInfo,

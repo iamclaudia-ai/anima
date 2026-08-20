@@ -44,6 +44,7 @@ const log = createLogger("SessionExt:Status", join(homedir(), ".anima", "logs", 
 
 export const SESSION_STATUS_CHANGED = "session.status_changed";
 export const SESSION_LIST_CHANGED = "session.list_changed";
+export const SESSION_ACTIVITY = "session.activity";
 
 /** Why a workspace's list needs refetching — surfaced for debugging, not logic. */
 export type ListChangeReason =
@@ -62,7 +63,39 @@ export interface SessionStatusChangedPayload {
   previousRuntimeStatus?: RuntimeStatus;
   disposition: SessionDisposition;
   previousDisposition?: SessionDisposition;
+  /** The row's name, so a rename reaches every tab without a refetch. */
+  title: string | null;
+  /** The derived name's source, for a session nobody has renamed. */
+  firstPrompt: string | null;
   /** ISO — lets a receiving tab drop an event it has already superseded. */
+  at: string;
+}
+
+/**
+ * A session is still working — a heartbeat, not a transition.
+ *
+ * `status_changed` fires once, on the edge, which is correct and turned out to
+ * be insufficient. A tab that connects mid-turn, misses the event, or has its
+ * row overwritten by something that wrote `runtime_status` outside the funnel
+ * shows a resting row for a session that is very much awake, and stays wrong
+ * until the next sixty-second poll. Michael runs a tab per session and reads
+ * the active pane as the answer to "what is she doing" across all of them, so
+ * "usually right" is the failure.
+ *
+ * A repeated assertion fixes that in a way an edge never can: every streamed
+ * event re-states the current truth, so a tab is at most one throttle window
+ * stale no matter what it missed. It is deliberately a *different* event from
+ * `status_changed` — consumers of that one treat it as a transition and refetch
+ * on it, and a refetch per token would be indefensible. This one carries the
+ * whole row's live fields so a tab can patch in place and never ask.
+ */
+export interface SessionActivityPayload {
+  sessionId: string;
+  workspaceId: string | null;
+  runtimeStatus: RuntimeStatus;
+  disposition: SessionDisposition;
+  title: string | null;
+  firstPrompt: string | null;
   at: string;
 }
 
@@ -92,6 +125,8 @@ export function emitStatusChanged(
     previousRuntimeStatus: transition?.previousRuntimeStatus,
     disposition: stored.disposition,
     previousDisposition: transition?.previousDisposition,
+    title: stored.title ?? null,
+    firstPrompt: storedFirstPrompt(stored),
     at: new Date().toISOString(),
   };
 
@@ -134,6 +169,10 @@ export function applyRuntimeStatus(
 
   if (!transition) return false;
   emitStatusChanged(sessionId, { previousRuntimeStatus: transition.from });
+  // A transition is the one beat that must never be throttled away: it's how a
+  // spinner *stops*. Forcing it also resets the window, so the next streamed
+  // event doesn't immediately re-announce what this just said.
+  emitActivity(sessionId, { force: true });
   return true;
 }
 
@@ -151,6 +190,7 @@ export function applyDisposition(sessionId: string, disposition: SessionDisposit
 
   const stored = getStoredSession(sessionId);
   emitStatusChanged(sessionId, { previousDisposition: transition.from });
+  emitActivity(sessionId, { force: true });
   if (stored?.workspaceId) emitListChanged(stored.workspaceId, "disposition_changed");
   log.info("Disposition changed", {
     sessionId: shortId(sessionId),
@@ -199,6 +239,58 @@ export function reconcileInFlightStatuses(liveSessionIds: ReadonlySet<string>): 
     });
   }
   return corrected;
+}
+
+/** The prompt a session's derived name comes from, if one has been recorded. */
+function storedFirstPrompt(stored: { metadata?: Record<string, unknown> | null }): string | null {
+  const value = stored.metadata?.firstPrompt;
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * How often one session may assert "still working" on the bus.
+ *
+ * The heartbeat is driven by streamed events, which arrive per token — so the
+ * throttle, not the source, is what sets the cost. A second is short enough
+ * that a spinner appears to start the instant a turn does, and long enough
+ * that a fast turn produces single-digit messages rather than hundreds.
+ */
+const ACTIVITY_THROTTLE_MS = 1_000;
+
+const lastActivityAt = new Map<string, number>();
+
+/**
+ * Announce that a session is alive, at most once per throttle window.
+ *
+ * Reads the row rather than taking the caller's word for the status: the point
+ * is to re-assert what is *true*, and a caller that thinks a session is
+ * running when the database says otherwise is exactly the drift this exists to
+ * correct.
+ */
+export function emitActivity(sessionId: string, options?: { force?: boolean }): void {
+  const now = Date.now();
+  const previous = lastActivityAt.get(sessionId);
+  if (!options?.force && previous !== undefined && now - previous < ACTIVITY_THROTTLE_MS) return;
+
+  const stored = getStoredSession(sessionId);
+  if (!stored) return;
+  lastActivityAt.set(sessionId, now);
+
+  const payload: SessionActivityPayload = {
+    sessionId,
+    workspaceId: stored.workspaceId ?? null,
+    runtimeStatus: stored.runtimeStatus,
+    disposition: stored.disposition,
+    title: stored.title ?? null,
+    firstPrompt: storedFirstPrompt(stored),
+    at: new Date().toISOString(),
+  };
+  safeEmit(SESSION_ACTIVITY, payload);
+}
+
+/** Drop a session's throttle state — it is finished, and won't beat again. */
+export function forgetActivity(sessionId: string): void {
+  lastActivityAt.delete(sessionId);
 }
 
 /**

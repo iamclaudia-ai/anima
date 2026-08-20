@@ -30,6 +30,7 @@ import type {
   WorkspaceInfo,
   SessionInfo,
   SessionSearchResult,
+  SessionActivityEvent,
   SessionStatusChangedEvent,
   SessionListChangedEvent,
   SessionDisposition,
@@ -39,6 +40,15 @@ import {
   createSessionForWorkspace,
   loadSessionsForWorkspace,
 } from "../pages/helpers/main-page-gateway";
+
+/**
+ * The fields a status or activity event can move on a tree row. The two events
+ * differ in *when* they fire, not in what they carry, so one patch handles both.
+ */
+type SessionRowPatch = Pick<
+  SessionActivityEvent,
+  "sessionId" | "runtimeStatus" | "disposition" | "title" | "firstPrompt"
+> & { at?: string };
 
 // ── Local helpers ─────────────────────────────────────────────
 
@@ -654,20 +664,25 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   //     Membership changed, and working out where a new row sorts would mean
   //     reimplementing the server's ordering rules in the client.
   //
+  //   `session.activity` is the same patch as the first, applied on a
+  //     heartbeat rather than an edge — so a tree row that missed a transition
+  //     self-corrects within a second instead of at the next navigation. It
+  //     also carries the name, which is how a session titled from its opening
+  //     prompt stops reading as eight hex digits the moment you send it.
+  //
   // A status event for a session this tab isn't showing is dropped rather
   // than triggering a fetch: it's usually another workspace's traffic, and
   // that workspace's own list event will arrive if membership actually moved.
   useEffect(() => {
     if (!client || !isConnected) return;
 
-    const events = ["session.status_changed", "session.list_changed"];
+    const events = ["session.status_changed", "session.list_changed", "session.activity"];
     void client.subscribe(events).catch(() => {
       // Non-fatal: the list falls back to the snapshot behaviour it had
       // before, refreshed on navigation.
     });
 
-    const offStatus = client.on("session.status_changed", (_event, raw) => {
-      const payload = raw as SessionStatusChangedEvent | undefined;
+    const patchRow = (payload: SessionRowPatch | undefined) => {
       if (!payload?.sessionId) return;
       setSessionsByWorkspace((prev) => {
         // Find the row wherever it is — the payload's workspaceId is
@@ -686,9 +701,13 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
             next[wsId] = sessions;
             continue;
           }
+          const title = payload.title ?? undefined;
+          const firstPrompt = payload.firstPrompt ?? current.firstPrompt;
           if (
             current.runtimeStatus === payload.runtimeStatus &&
-            current.disposition === payload.disposition
+            current.disposition === payload.disposition &&
+            current.title === title &&
+            current.firstPrompt === firstPrompt
           ) {
             next[wsId] = sessions;
             continue;
@@ -698,6 +717,8 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
             ...current,
             runtimeStatus: payload.runtimeStatus,
             disposition: payload.disposition,
+            title,
+            firstPrompt,
             // A status change *is* activity, so the row's recency moved with
             // it. Without this the list keeps the order it was fetched in and
             // a session that just came alive sits wherever it happened to be.
@@ -713,7 +734,14 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
         // nav for an event about a session no tab is showing.
         return touched ? next : prev;
       });
-    });
+    };
+
+    const offStatus = client.on("session.status_changed", (_event, raw) =>
+      patchRow(raw as SessionStatusChangedEvent | undefined),
+    );
+    const offActivity = client.on("session.activity", (_event, raw) =>
+      patchRow(raw as SessionActivityEvent | undefined),
+    );
 
     const offList = client.on("session.list_changed", (_event, raw) => {
       const payload = raw as SessionListChangedEvent | undefined;
@@ -722,6 +750,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
 
     return () => {
       offStatus();
+      offActivity();
       offList();
       void client.unsubscribe(events).catch(() => undefined);
     };

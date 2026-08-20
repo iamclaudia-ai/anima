@@ -19,9 +19,13 @@ import {
   applyRuntimeStatus,
   emitListChanged,
   emitStatusChanged,
+  emitActivity,
+  forgetActivity,
   reconcileInFlightStatuses,
+  SESSION_ACTIVITY,
   SESSION_LIST_CHANGED,
   SESSION_STATUS_CHANGED,
+  type SessionActivityPayload,
   type SessionStatusChangedPayload,
 } from "./session-status-events";
 import { createWorkspace } from "./workspace";
@@ -36,6 +40,8 @@ describe("session status events", () => {
   const emittedOfType = (event: string) => emitted.filter((e) => e.event === event);
   const lastStatus = (): SessionStatusChangedPayload =>
     emittedOfType(SESSION_STATUS_CHANGED).at(-1)?.payload as SessionStatusChangedPayload;
+  const lastActivity = (): SessionActivityPayload =>
+    emittedOfType(SESSION_ACTIVITY).at(-1)?.payload as SessionActivityPayload;
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(os.tmpdir(), "anima-status-events-"));
@@ -62,6 +68,8 @@ describe("session status events", () => {
     // an upsert that omits a runtime status now *preserves* the existing one
     // (see `upsertSession`), and a session left `running` by an earlier test
     // would otherwise be counted by the startup reconcile.
+    forgetActivity("ses_status");
+    forgetActivity("ses_alive");
     for (const id of ["ses_status", "ses_alive"]) {
       upsertSession({
         id,
@@ -82,6 +90,75 @@ describe("session status events", () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  describe("the activity heartbeat", () => {
+    // The premise of #2: `status_changed` is an edge, and an edge is only as
+    // reliable as the delivery of one message. A tab that missed it showed a
+    // resting row for a working session until the next sixty-second poll.
+    // These tests pin the two properties that make the heartbeat worth its
+    // traffic — it repeats, and it is cheap.
+
+    it("re-asserts a running session without a transition", () => {
+      applyRuntimeStatus("ses_status", "running");
+      forgetActivity("ses_status");
+      emitActivity("ses_status");
+
+      expect(lastActivity()).toMatchObject({
+        sessionId: "ses_status",
+        workspaceId,
+        runtimeStatus: "running",
+        disposition: "open",
+      });
+      // The whole point: no transition happened, so nothing else fired.
+      expect(emittedOfType(SESSION_STATUS_CHANGED)).toHaveLength(1);
+    });
+
+    it("throttles repeats, so a turn's tokens don't each become a message", () => {
+      forgetActivity("ses_status");
+      emitActivity("ses_status");
+      for (let i = 0; i < 50; i++) emitActivity("ses_status");
+      expect(emittedOfType(SESSION_ACTIVITY)).toHaveLength(1);
+    });
+
+    it("never throttles a transition — that's how a spinner stops", () => {
+      forgetActivity("ses_status");
+      emitActivity("ses_status");
+      // Back to back with the beat above, so only `force` can get this out.
+      applyRuntimeStatus("ses_status", "completed");
+      expect(lastActivity().runtimeStatus).toBe("completed");
+      expect(emittedOfType(SESSION_ACTIVITY)).toHaveLength(2);
+    });
+
+    it("carries the name, so a session titled from its first prompt updates live", () => {
+      upsertSession({
+        id: "ses_status",
+        workspaceId,
+        providerSessionId: "ses_status",
+        model: "claude-opus-5",
+        agent: "claude",
+        purpose: "chat",
+        metadata: { firstPrompt: "add icons to the active pane" },
+      });
+      forgetActivity("ses_status");
+      emitActivity("ses_status");
+      expect(lastActivity()).toMatchObject({
+        title: null,
+        firstPrompt: "add icons to the active pane",
+      });
+    });
+
+    it("says nothing for a session it has no row for", () => {
+      emitActivity("ses_missing");
+      expect(emittedOfType(SESSION_ACTIVITY)).toHaveLength(0);
+    });
+
+    it("reads the row rather than trusting a caller's idea of the status", () => {
+      applyRuntimeStatus("ses_status", "failed");
+      forgetActivity("ses_status");
+      emitActivity("ses_status");
+      expect(lastActivity().runtimeStatus).toBe("failed");
+    });
   });
 
   it("emits once per real transition and not at all for a repeat", () => {

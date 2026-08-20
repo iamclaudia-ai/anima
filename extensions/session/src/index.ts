@@ -174,6 +174,9 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
       // agree about the session list rather than holding its own snapshot.
       "session.status_changed",
       "session.list_changed",
+      // The heartbeat: re-asserts a running session so a tab that missed the
+      // edge still shows a spinner. See `emitActivity`.
+      "session.activity",
     ],
     sourceRoutes: [],
 
