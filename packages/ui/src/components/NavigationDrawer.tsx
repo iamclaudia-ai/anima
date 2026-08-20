@@ -649,6 +649,16 @@ function SessionRow({
   ) => Promise<void> | void;
 }) {
   const [renaming, setRenaming] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  // A folder that just opened to reveal this row is no use if the row is below
+  // the fold — a workspace can hold hundreds of sessions, and the one you
+  // navigated to may sit a long way down. `nearest` only, so revealing a
+  // session never yanks the whole page around.
+  useEffect(() => {
+    if (!isActive) return;
+    rowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [isActive]);
 
   // Real <a> so right-click / cmd-click / middle-click open in a new tab.
   // Plain left-click is intercepted and routed through the SPA navigator.
@@ -679,7 +689,7 @@ function SessionRow({
     // inside an <a> is invalid HTML, and it also poisons the row's accessible
     // name — a screen reader announced the session as "Copy tmux attach
     // command". Overlaying them keeps the whole row clickable underneath.
-    <div className="group relative">
+    <div className="group relative" ref={rowRef}>
       <a
         href={href}
         onClick={handleClick}
@@ -1048,6 +1058,7 @@ function WorkspaceItem({
   isActive,
   activeSessionId,
   defaultExpanded,
+  revealSession,
   onWorkspaceSelect,
   onSessionSelect,
   onRenameSession,
@@ -1063,6 +1074,8 @@ function WorkspaceItem({
   isActive: boolean;
   activeSessionId: string | null;
   defaultExpanded: boolean;
+  /** The open session lives here and no other list is showing it — reveal it. */
+  revealSession: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
   onRenameSession?: (session: SessionInfo, title: string | null) => Promise<void> | void;
@@ -1079,10 +1092,27 @@ function WorkspaceItem({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useClickOutside<HTMLDivElement>(menuOpen, () => setMenuOpen(false));
 
-  // No auto-expand. The ACTIVE queue above already surfaces live work from
-  // every workspace, so opening a folder because its workspace became current
-  // just unfolds the tree behind a list that already answered the question.
-  // Folders stay exactly as the user left them.
+  // Folders stay as the user left them, with one exception: a current session
+  // the ACTIVE queue isn't showing.
+  //
+  // The original rule was no auto-expand at all, on the grounds that the queue
+  // above already surfaces live work from every workspace — so unfolding a
+  // folder because its workspace became current just buries a list that had
+  // already answered the question. That holds right up until the open session
+  // *isn't* in the queue: arrive at a resolved session from search and the nav
+  // says nothing about where you are, in either list. Expanding is then the
+  // only thing that answers it.
+  // Adjusted during render on the transition, rather than in an effect: an
+  // effect would expand *after* a paint that didn't, and the folder would
+  // visibly flick open. Tracking the previous value is what keeps this a
+  // one-shot — the user can still collapse the folder afterwards, which a
+  // plain `expanded || revealSession` would make impossible for as long as the
+  // session stayed current.
+  const [wasRevealing, setWasRevealing] = useState(revealSession);
+  if (revealSession !== wasRevealing) {
+    setWasRevealing(revealSession);
+    if (revealSession) setExpanded(true);
+  }
 
   const handleLoadMore = async () => {
     if (!onLoadMore || loadingMore) return;
@@ -1639,16 +1669,26 @@ export function NavigationDrawer({
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // The session this tab is looking at sorts first, whatever its recency —
-  // the row you are working in shouldn't slide away because something
-  // finished in another workspace. Everything else stays newest-first, which
-  // is the order the server already returned.
-  const activeRows = useMemo(() => {
-    if (!activeSessions?.length) return [];
-    const pinned = activeSessions.filter((row) => row.sessionId === activeSessionId);
-    const rest = activeSessions.filter((row) => row.sessionId !== activeSessionId);
-    return [...pinned, ...rest];
-  }, [activeSessions, activeSessionId]);
+  // Rendered in the server's order, untouched.
+  //
+  // This used to hoist the tab's own session to the front, so the row you were
+  // working in couldn't slide away when something finished elsewhere. But it
+  // moves a row on *every* click: walk down the list opening sessions and each
+  // one jumps to the top as you select it, dragging the rest down a place. The
+  // row you meant to click next is no longer where you were looking. Being
+  // findable beats being first, and the highlight already says which one it is.
+  const activeRows = activeSessions ?? [];
+
+  /**
+   * The workspace whose folder should open to show the current session.
+   *
+   * Only when no other list is showing it. A session in the ACTIVE queue is
+   * already visible and already highlighted there, so expanding its folder as
+   * well would unfold the tree to say something the pane just said.
+   */
+  const currentIsQueued = activeRows.some((row) => row.sessionId === activeSessionId);
+  const revealInWorkspaceId =
+    activeSessionId && activeWorkspace && !currentIsQueued ? activeWorkspace.id : null;
 
   return (
     <>
@@ -1697,6 +1737,7 @@ export function NavigationDrawer({
                 isActive={activeWorkspace?.id === workspace.id}
                 activeSessionId={activeSessionId}
                 defaultExpanded={false}
+                revealSession={revealInWorkspaceId === workspace.id}
                 onWorkspaceSelect={onWorkspaceSelect}
                 onSessionSelect={onSessionSelect}
                 onRenameSession={onRenameSession}
