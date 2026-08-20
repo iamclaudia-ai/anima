@@ -13,6 +13,7 @@ import {
   setSessionSnooze,
   setWorkspaceActiveSession,
   touchSession,
+  updateSessionMetadata,
   updateSessionRuntime,
   upsertSession,
 } from "./session-store";
@@ -230,6 +231,31 @@ describe("session store", () => {
         agent: "claude",
         purpose: "chat",
       });
+
+    // The git-status collector runs after `turn_stop`, asynchronously, and
+    // shells out to `gh` — so it can land seconds late. It used to write
+    // `completed` on the way past, which silently overwrote the `running` of a
+    // turn started in that gap, with no event to correct it. The row read
+    // "done" while the agent was mid-sentence, which is exactly the symptom
+    // that made the active pane's spinner untrustworthy.
+    it("merges metadata without asserting a runtime status", () => {
+      seed("ses_metadata_only");
+      touchSession("ses_metadata_only", "completed");
+      updateSessionMetadata("ses_metadata_only", { gitStatus: { branch: "main" } });
+      touchSession("ses_metadata_only", "running");
+
+      expect(updateSessionMetadata("ses_metadata_only", { lastUserMessageAt: "2026-08-20" })).toBe(
+        true,
+      );
+      const stored = getStoredSession("ses_metadata_only");
+      expect(stored?.runtimeStatus).toBe("running");
+      expect(stored?.metadata?.gitStatus).toEqual({ branch: "main" });
+      expect(stored?.metadata?.lastUserMessageAt).toBe("2026-08-20");
+    });
+
+    it("reports nothing for a session it has no row for", () => {
+      expect(updateSessionMetadata("ses_absent", { anything: true })).toBe(false);
+    });
 
     it("defaults a new session to idle and open", () => {
       seed("ses_defaults");

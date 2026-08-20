@@ -1,5 +1,5 @@
-import { getStoredSession, touchSession, updateSessionRuntime } from "../session-store";
-import { applyRuntimeStatus } from "../session-status-events";
+import { getStoredSession, touchSession, updateSessionMetadata } from "../session-store";
+import { applyRuntimeStatus, emitActivity, forgetActivity } from "../session-status-events";
 import { toRuntimeStatusFromModalEvent, toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
 import { getWorkspace } from "../workspace";
@@ -40,7 +40,15 @@ export async function emitGitStatus(sessionId: string): Promise<void> {
     const resolvedPr = status.pr === undefined ? priorPr : status.pr;
     const finalStatus = { ...status, pr: resolvedPr };
     // Persist to session metadata so it's available on get_history without a new turn.
-    updateSessionRuntime(sessionId, "completed", {
+    //
+    // Metadata only — deliberately not a status write. This runs after
+    // `turn_stop`, asynchronously, and shells out to `gh`, so it can land
+    // seconds later. It used to assert `completed` on the way past, which
+    // meant a turn started in that gap had its `running` silently overwritten
+    // with no event to correct it: the row read "done" while the agent was
+    // mid-sentence. Whatever the status is by the time this returns, this is
+    // not the code that knows it.
+    updateSessionMetadata(sessionId, {
       gitStatus: { ...finalStatus, capturedAt: new Date().toISOString() },
     });
     const rt = getRuntime();
@@ -79,6 +87,12 @@ export function wireSessionEvents(): () => void {
       applyRuntimeStatus(sessionId, runtimeStatus);
     } else {
       touchSession(sessionId);
+      // Every streamed event re-asserts that this session is alive, throttled
+      // to roughly once a second. The transition event alone is an edge, and
+      // an edge is only ever as reliable as the delivery of one message; a tab
+      // that missed it sat on a stale row until the next poll. See
+      // `emitActivity` for why this is a separate event from `status_changed`.
+      emitActivity(sessionId);
     }
 
     if (payload.type === "content_block_delta") {
@@ -101,6 +115,7 @@ export function wireSessionEvents(): () => void {
       }
     } else if (payload.type === "turn_stop") {
       cancelPendingGitStatus(sessionId);
+      forgetActivity(sessionId);
       applyRuntimeStatus(sessionId, "completed", {
         metadataPatch: { lastAssistantMessageAt: new Date().toISOString() },
       });

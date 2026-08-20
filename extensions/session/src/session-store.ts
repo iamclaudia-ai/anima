@@ -570,6 +570,35 @@ export function setSessionDisposition(
  * contract as `touchSession`, so both status-writing paths can drive the same
  * event without the caller having to know which one it took.
  */
+/**
+ * Merge a patch into a session's metadata, leaving every other column alone.
+ *
+ * The counterpart to {@link updateSessionRuntime} for callers that have
+ * something to record but no opinion about what the session is doing. Keeping
+ * the two separate is the point: a status is a claim about *now*, and code
+ * that finishes asynchronously has no business making one.
+ */
+export function updateSessionMetadata(id: string, metadataPatch: Record<string, unknown>): boolean {
+  const existing = getStoredSession(id);
+  if (!existing) return false;
+  upsertSession({
+    id,
+    workspaceId: existing.workspaceId,
+    providerSessionId: existing.providerSessionId,
+    model: existing.model,
+    agent: existing.agent,
+    purpose: existing.purpose,
+    parentSessionId: existing.parentSessionId ?? null,
+    status: existing.status,
+    runtimeStatus: existing.runtimeStatus,
+    title: existing.title ?? null,
+    summary: existing.summary ?? null,
+    metadata: { ...(existing.metadata || {}), ...metadataPatch },
+    previousSessionId: existing.previousSessionId ?? null,
+  });
+  return true;
+}
+
 export function updateSessionRuntime(
   id: string,
   runtimeStatus: RuntimeStatus,
