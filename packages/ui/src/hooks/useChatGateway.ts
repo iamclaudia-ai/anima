@@ -149,8 +149,14 @@ export interface SessionSearchResult {
   relaxed: boolean;
 }
 
+export type GitOperation = "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+
 export interface GitStatusInfo {
   branch: string | null;
+  /** `branch` is a short SHA rather than a ref name. */
+  detached: boolean;
+  /** In-progress operation, or `null` when the tree is at rest. */
+  operation: GitOperation | null;
   ahead: number;
   behind: number;
   dirty: {
@@ -159,6 +165,7 @@ export interface GitStatusInfo {
     deleted: number;
     untracked: number;
     renamed: number;
+    conflicted: number;
     total: number;
   };
   pr: {
@@ -168,6 +175,33 @@ export interface GitStatusInfo {
     state: string;
     isDraft?: boolean;
   } | null;
+  /** ISO timestamp, present only on the cached copy returned by get_history. */
+  capturedAt?: string;
+}
+
+/**
+ * Fill in a git status payload from either source — the live `git_status`
+ * event or the cached copy on `get_history` — so both land in state with the
+ * same shape and a missing field never reads as a meaningful zero.
+ */
+function normalizeGitStatus(p: Partial<GitStatusInfo>): GitStatusInfo {
+  return {
+    branch: p.branch ?? null,
+    detached: p.detached ?? false,
+    operation: p.operation ?? null,
+    ahead: p.ahead ?? 0,
+    behind: p.behind ?? 0,
+    dirty: p.dirty ?? {
+      modified: 0,
+      added: 0,
+      deleted: 0,
+      untracked: 0,
+      renamed: 0,
+      conflicted: 0,
+      total: 0,
+    },
+    pr: p.pr ?? null,
+  };
 }
 
 export interface SubagentInfo {
@@ -676,21 +710,7 @@ export function useChatGateway(
           break;
 
         case "git_status": {
-          const p = payload as Partial<GitStatusInfo> & { sessionId?: string };
-          setGitStatus({
-            branch: p.branch ?? null,
-            ahead: p.ahead ?? 0,
-            behind: p.behind ?? 0,
-            dirty: p.dirty ?? {
-              modified: 0,
-              added: 0,
-              deleted: 0,
-              untracked: 0,
-              renamed: 0,
-              total: 0,
-            },
-            pr: p.pr ?? null,
-          });
+          setGitStatus(normalizeGitStatus(payload as Partial<GitStatusInfo>));
           break;
         }
 
@@ -1032,20 +1052,7 @@ export function useChatGateway(
         setTotalMessages(total);
         setHasMore(more);
         if (offset === 0 && historyGitStatus) {
-          setGitStatus({
-            branch: historyGitStatus.branch ?? null,
-            ahead: historyGitStatus.ahead ?? 0,
-            behind: historyGitStatus.behind ?? 0,
-            dirty: historyGitStatus.dirty ?? {
-              modified: 0,
-              added: 0,
-              deleted: 0,
-              untracked: 0,
-              renamed: 0,
-              total: 0,
-            },
-            pr: historyGitStatus.pr ?? null,
-          });
+          setGitStatus(normalizeGitStatus(historyGitStatus));
         }
         // Always set usage - use provided data or initialize to zero if not available
         if (historyUsage) {

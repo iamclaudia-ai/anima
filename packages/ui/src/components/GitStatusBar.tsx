@@ -14,9 +14,10 @@ import {
   CloudUpload,
   CloudDownload,
   Check,
+  TriangleAlert,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import type { GitStatusInfo } from "../hooks/useChatGateway";
+import type { GitOperation, GitStatusInfo } from "../hooks/useChatGateway";
 
 function GitIcon({ className }: { className?: string }) {
   return (
@@ -52,10 +53,21 @@ interface GitStatusBarProps {
   status: GitStatusInfo | null;
 }
 
-export function GitStatusBar({ status }: GitStatusBarProps) {
-  if (!status || !status.branch) return null;
+/** What to call each in-progress operation in the bar. */
+const OPERATION_LABEL: Record<GitOperation, string> = {
+  rebase: "rebasing",
+  merge: "merging",
+  "cherry-pick": "cherry-picking",
+  revert: "reverting",
+  bisect: "bisecting",
+};
 
-  const { branch, ahead, behind, dirty, pr } = status;
+export function GitStatusBar({ status }: GitStatusBarProps) {
+  // A missing branch no longer means "nothing to show": mid-rebase HEAD is
+  // detached, and the conflict counts are the whole point of looking.
+  if (!status || (!status.branch && status.dirty.total === 0)) return null;
+
+  const { branch, detached, operation, ahead, behind, dirty, pr } = status;
 
   type DirtyBadge = {
     key: string;
@@ -65,6 +77,16 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
     label: string;
   };
   const dirtyBadges: DirtyBadge[] = [];
+  // First — a conflict is the thing you have to deal with before anything else
+  // in the row matters.
+  if (dirty.conflicted > 0)
+    dirtyBadges.push({
+      key: "conflicted",
+      count: dirty.conflicted,
+      color: "text-red-600",
+      Icon: TriangleAlert,
+      label: "conflicted",
+    });
   if (dirty.added > 0)
     dirtyBadges.push({
       key: "added",
@@ -119,13 +141,30 @@ export function GitStatusBar({ status }: GitStatusBarProps) {
   return (
     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3 mt-2 text-sm text-gray-600">
       <div className="flex items-center gap-3 min-w-0">
-        <span
-          className="inline-flex items-center gap-1 font-medium leading-none min-w-0"
-          title={`Branch: ${branch}`}
-        >
-          <GitIcon className="size-4 shrink-0" />
-          <span className="font-mono truncate">{branch}</span>
-        </span>
+        {branch && (
+          <span
+            className="inline-flex items-center gap-1 font-medium leading-none min-w-0"
+            title={
+              detached
+                ? `Detached HEAD at ${branch}`
+                : operation
+                  ? `Branch: ${branch} (${OPERATION_LABEL[operation]})`
+                  : `Branch: ${branch}`
+            }
+          >
+            <GitIcon className="size-4 shrink-0" />
+            <span className="font-mono truncate">{detached ? `@${branch}` : branch}</span>
+          </span>
+        )}
+
+        {operation && (
+          <span
+            className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide bg-amber-100 text-amber-700 shrink-0"
+            title={`A ${operation} is in progress`}
+          >
+            {OPERATION_LABEL[operation]}
+          </span>
+        )}
 
         {(ahead > 0 || behind > 0) && (
           <span className="inline-flex items-center gap-3 font-mono font-bold shrink-0">
