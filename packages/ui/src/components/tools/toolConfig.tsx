@@ -9,6 +9,7 @@ import {
   Globe,
   ListTodo,
   MessageCircleQuestion,
+  Radar,
   Search,
   SearchCode,
   Sparkles,
@@ -74,6 +75,13 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
       return {
         icon: <Search className="size-2.5" />,
         colors: violetColors,
+      };
+
+    // Background monitors — Purple
+    case "Monitor":
+      return {
+        icon: <Radar className="size-2.5" />,
+        colors: purpleColors,
       };
 
     // Web operations — Cyan
@@ -174,6 +182,10 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
     }
     case "BashOutput":
       return "Bash Output";
+    case "Monitor": {
+      const desc = parsedInput.description as string | undefined;
+      return desc ? `Watch ${desc}` : "Monitor";
+    }
     case "Grep": {
       const pattern = parsedInput.pattern as string | undefined;
       return pattern ? `Search "${pattern}"` : "Search";
