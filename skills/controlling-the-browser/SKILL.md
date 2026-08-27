@@ -240,6 +240,24 @@ That drives JS-based hover UI (tooltips, dropdown triggers). It does **not**
 drive CSS `:hover` — a purely CSS tooltip cannot be captured this way, because
 synthetic events don't change pseudo-class state.
 
+**A method call evaluates its receiver twice.** This is a JailJS bug, not
+something the transpiler can fix. `get().m()` runs `get()` **twice**; plain
+property access (`get().p`) runs it once. So anything side-effecting in the
+receiver position fires twice:
+
+```js
+// WRONG — pops two elements
+stack.pop().toString();
+
+// RIGHT — bind it first
+var top = stack.pop();
+top.toString();
+```
+
+Keep the receiver of a method call a plain variable or property chain and this
+never bites. It is worth knowing about because the symptom is silently wrong
+data rather than an error.
+
 If an expression fails, the error comes from JailJS and names the AST node it
 choked on (`Unhandled node type: X`). That means the construct reached the
 interpreter untranspiled — worth reporting.

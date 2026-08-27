@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Interpreter, parse } from "@mariozechner/jailjs";
-import { transpileForJail } from "./transpile";
+import * as Babel from "@babel/standalone";
+import { forOfHelperPatch, transpileForJail } from "./transpile";
 
 /**
  * A faithful NodeList stand-in: indexed properties, `length`, and
@@ -70,6 +71,32 @@ describe("transpileForJail", () => {
     ],
   ])("compiles %s", (_label, source, expected) => {
     expect(runInJail(source)).toEqual(expected);
+  });
+
+  test("iterates a NodeList with for..of", () => {
+    // JailJS evaluates a method call's receiver twice, which breaks Babel's
+    // iterator helper. transpileForJail patches the helper; this proves it.
+    expect(
+      runInJail(
+        "(function(){ var n = 0; for (const el of document.querySelectorAll('*')) n++; return n; })()",
+      ),
+    ).toBe(3);
+  });
+
+  test("canary: Babel still emits the helper shape the patch targets", () => {
+    // If Babel changes this helper, the patch silently stops applying and
+    // for..of quietly breaks again. Fail here instead, loudly.
+    const raw = Babel.transform("for (const x of y) {}", {
+      presets: [["env", { targets: { ie: 9 }, useBuiltIns: false, forceAllTransforms: true }]],
+      assumptions: { arrayLikeIsIterable: true, skipForOfIteratorClosing: true },
+      filename: "canary.js",
+      code: true,
+      ast: false,
+      sourceType: "script",
+      comments: false,
+    })?.code;
+    expect(raw).toContain(forOfHelperPatch.broken);
+    expect(transpileForJail("for (const x of y) {}")).toContain(forOfHelperPatch.fixed);
   });
 
   test("passes plain ES5 through unharmed", () => {

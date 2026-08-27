@@ -43,6 +43,32 @@ const ASSUMPTIONS = {
 } as const;
 
 /**
+ * JailJS evaluates the receiver of a method call **twice** — `get().m()` runs
+ * `get()` twice, while plain property access runs it once. Babel's `for..of`
+ * helper relies on the receiver being evaluated once:
+ *
+ *     if (t) return (t = t.call(r)).next.bind(t);
+ *
+ * On the second evaluation `t` is no longer the iterator function but the
+ * iterator object, so `t.call` is undefined and the loop dies with "Value is
+ * not a function". Splitting the assignment out of the receiver position makes
+ * the double evaluation harmless.
+ *
+ * This patches only the helper we emit. It does NOT fix the underlying
+ * interpreter bug, which still affects caller code with a side-effecting
+ * receiver (`getThing().method()`) — that is documented in the skill and
+ * reported upstream.
+ */
+const FOR_OF_RECEIVER_BUG = "if (t) return (t = t.call(r)).next.bind(t);";
+const FOR_OF_RECEIVER_FIX = "if (t) { t = t.call(r); return t.next.bind(t); }";
+
+/** Exported for the canary test that catches Babel changing this helper. */
+export const forOfHelperPatch = {
+  broken: FOR_OF_RECEIVER_BUG,
+  fixed: FOR_OF_RECEIVER_FIX,
+} as const;
+
+/**
  * Returns ES5 source, or `null` if the input cannot be transpiled (a syntax
  * error, say). Callers pass the original source through on `null` so the page's
  * own `eval` fallback still gets a chance on non-CSP sites.
@@ -60,7 +86,9 @@ export function transpileForJail(source: string): string | null {
       sourceType: "script",
       comments: false,
     });
-    return result?.code ?? null;
+    const code = result?.code;
+    if (!code) return null;
+    return code.replace(FOR_OF_RECEIVER_BUG, FOR_OF_RECEIVER_FIX);
   } catch {
     return null;
   }
