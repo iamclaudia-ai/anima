@@ -1,19 +1,26 @@
 import {
+  BellRing,
   BookOpen,
+  Braces,
   Brain,
+  CircleStop,
   ClipboardList,
   Compass,
   FileEdit,
   FilePen,
   FileText,
   Globe,
+  LayoutTemplate,
   ListTodo,
   MessageCircleQuestion,
   Radar,
+  ScrollText,
   Search,
   SearchCode,
+  Send,
   Sparkles,
   Terminal,
+  Users,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -101,9 +108,31 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
         icon: <Zap className="size-2.5" />,
         colors: indigoColors,
       };
+    case "TaskStop":
+      return {
+        icon: <CircleStop className="size-2.5" />,
+        colors: indigoColors,
+      };
+    case "TaskOutput":
+      return {
+        icon: <ScrollText className="size-2.5" />,
+        colors: indigoColors,
+      };
     case "Agent":
       return {
         icon: <Compass className="size-2.5" />,
+        colors: violetColors,
+      };
+
+    // Agent coordination — Violet (same family as Agent)
+    case "SendMessage":
+      return {
+        icon: <Send className="size-2.5" />,
+        colors: violetColors,
+      };
+    case "ListAgents":
+      return {
+        icon: <Users className="size-2.5" />,
         colors: violetColors,
       };
     case "TodoWrite":
@@ -124,6 +153,20 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
         colors: roseColors,
       };
 
+    // Code intelligence — Emerald (read-only, like Read)
+    case "LSP":
+      return {
+        icon: <Braces className="size-2.5" />,
+        colors: emeraldColors,
+      };
+
+    // Published pages — Cyan (web-facing, like WebFetch)
+    case "Artifact":
+      return {
+        icon: <LayoutTemplate className="size-2.5" />,
+        colors: cyanColors,
+      };
+
     // Notebook — Teal
     case "NotebookEdit":
       return {
@@ -135,6 +178,11 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
     case "AskUserQuestion":
       return {
         icon: <MessageCircleQuestion className="size-2.5" />,
+        colors: pinkColors,
+      };
+    case "PushNotification":
+      return {
+        icon: <BellRing className="size-2.5" />,
         colors: pinkColors,
       };
     case "ExitPlanMode":
@@ -213,6 +261,32 @@ export function getToolLabel(name: string, parsedInput: Record<string, unknown> 
       return "Get Task";
     case "TaskList":
       return "List Tasks";
+    case "TaskStop":
+      return "Stop Task";
+    case "TaskOutput":
+      return "Task Output";
+    case "SendMessage": {
+      const to = parsedInput.to as string | undefined;
+      const summary = parsedInput.summary as string | undefined;
+      if (to) return `Message ${to}`;
+      return summary || "Send Message";
+    }
+    case "ListAgents":
+      return "List Agents";
+    case "PushNotification": {
+      const message = parsedInput.message as string | undefined;
+      return message || "Notify";
+    }
+    case "LSP": {
+      const operation = parsedInput.operation as string | undefined;
+      return operation || "LSP";
+    }
+    case "Artifact": {
+      const action = (parsedInput.action as string | undefined) || "publish";
+      const title = parsedInput.title as string | undefined;
+      if (action === "publish" && title) return title;
+      return `Artifact ${action}`;
+    }
     case "WebFetch": {
       const url = parsedInput.url as string | undefined;
       if (url) {
