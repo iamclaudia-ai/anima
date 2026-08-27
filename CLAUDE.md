@@ -103,12 +103,22 @@ Agent-host owns every runtime. Providers are a plain name-keyed registry
 | `claude` | `createClaudeCliProvider` or `createAnthropicProvider` | Chosen by `agentHost.claudeRuntime` (`"cli"` \| `"sdk"`) |
 | `codex`  | `createCodexProvider`                                  | OpenAI Codex CLI                                         |
 
-**Provider selection is session-level, not just sub-agent-level.**
-`session.create_session({ cwd, agent })` accepts any registered agent name
-(default `claude`), so a full session can run against Codex the same way it
-runs against Claude. Sub-agent delegation is a separate path —
-`session.spawn_agent` / `list_subagents` / `get_subagent` /
-`interrupt_subagent`.
+**Every agent is a first-class session.** `session.create_session({ cwd, agent })`
+accepts any registered agent name (default `claude`), so a Codex session is
+created by the same call, through the same provider registry, as a Claude one.
+
+"Sub-agent" is a usage role, not an architectural tier. The same peer session
+is reached two ways:
+
+- **Claudia spawns it** — `session.spawn_agent`, then `list_subagents` /
+  `get_subagent` / `interrupt_subagent` to supervise it. This is the delegation
+  path (code review, tests, second opinions).
+- **Michael creates it directly** — `session.create_session({ agent: "codex" })`.
+  Works today via CLI; there is **no web UI for it yet**.
+
+Orchestration (Claudia driving other agents' sessions) is deliberately not
+built. The registry is future-proofing, not a current goal — day-to-day work is
+one-on-one with Claudia, with delegation used to offload mundane tasks.
 
 Adding a runtime (grok-code, opencode, …) means a new directory under
 `packages/agent-host/src/providers/` exposing `{ create, resume }`, plus one
