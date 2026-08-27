@@ -17,10 +17,26 @@ Control the user's real Chrome browser — live tabs with existing auth, cookies
 | Inspect what user is looking at      | Automate new browsing tasks           |
 | Debug live pages                     | Scrape, test, fill forms from scratch |
 
-## Core Workflow: Snapshot → Ref → Act → Re-snapshot
+## Core Workflow: Name What You Want
+
+If you can describe the element in words — its label, its role and name, its
+text — say so and act in one call. No snapshot, no refs, nothing to invalidate:
 
 ```bash
-# 1. Take a snapshot to get interactive elements with @refs
+anima dominatrix find_role  --role button --name "Publish"        --perform click
+anima dominatrix find_label --label "Email"  --perform fill --value "user@example.com"
+anima dominatrix find_text  --text "Posts"                        --perform click
+```
+
+This is the fast path and should be your default for driving a page you can
+describe. Each call re-queries the live DOM, so it survives navigations,
+re-renders and dynamic content that would invalidate a ref.
+
+**Reach for `snapshot` when you cannot name the target** — exploring an
+unfamiliar page, or when several elements match and you need to pick one:
+
+```bash
+# 1. See what is on the page
 anima dominatrix snapshot
 
 # Output:
@@ -34,15 +50,16 @@ anima dominatrix snapshot
 # @e5 [input type="email"] placeholder="Enter email"
 # @e6 [button] "Submit"
 
-# 2. Interact using @refs (reliable, no CSS selector guessing)
-anima dominatrix click --ref @e3              # Click "Posts" link
-anima dominatrix fill --ref @e5 --value "user@example.com"  # Fill email
+# 2. Act on a specific one
+anima dominatrix click --ref @e3
+anima dominatrix fill  --ref @e5 --value "user@example.com"
 
-# 3. Re-snapshot after navigation/interaction (refs are invalidated)
+# 3. Re-snapshot — refs are invalidated by navigation and DOM changes
 anima dominatrix snapshot
 ```
 
-**Key principle**: Always snapshot before interacting. Refs are invalidated on page navigation or dynamic changes — re-snapshot to get fresh refs.
+**Rule of thumb**: describe it if you can, snapshot if you cannot. Refs are for
+disambiguation and exploration, not for every interaction.
 
 ## Tabs, Sessions & Profiles — read this before navigating
 
@@ -115,7 +132,7 @@ All commands go through `anima dominatrix <method>`.
 ### Snapshot & Page Info
 
 ```bash
-# Interactive snapshot with @refs (DEFAULT — use this!)
+# Interactive snapshot with @refs — for exploring or disambiguating
 anima dominatrix snapshot
 anima dominatrix snapshot --full        # Full a11y tree JSON (old behavior, large)
 anima dominatrix snapshot --scope "#main"  # Scope to CSS selector
@@ -132,7 +149,7 @@ anima dominatrix get_html               # Full page HTML
 anima dominatrix get_html --selector "div.main"  # Scoped HTML
 ```
 
-### Interaction (ref-based — preferred)
+### Interaction (ref-based — when you need a specific element)
 
 ```bash
 # Click — use @ref (preferred) or --selector fallback
@@ -151,7 +168,7 @@ anima dominatrix uncheck --ref @e7
 anima dominatrix select --ref @e5 --value "option-1"
 ```
 
-### Semantic Find (locate + act in one call)
+### Semantic Find (locate + act in one call) — prefer this
 
 ```bash
 anima dominatrix find_text --text "Posts" --perform click
@@ -160,6 +177,28 @@ anima dominatrix find_label --label "Password" --perform fill --value "secret"
 anima dominatrix find_role --role button --name "Submit" --perform click
 anima dominatrix find_placeholder --placeholder "Search..." --perform fill --value "query"
 ```
+
+**Matching is case-insensitive and partial**, so you can pass the readable part
+of a label and ignore decoration. `--label "Your beehiiv handle"` matches a
+field labelled `Your beehiiv handle *`.
+
+| Command            | Matches                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `find_label`       | Exact `aria-label`, else `<label>` text containing yours (via `for=` or a wrapped input)                                                       |
+| `find_role`        | Explicit `role=`, plus implicit roles (`a`→link, `button`→button, `textarea`→textbox, `select`→combobox). `--name` matches the accessible name |
+| `find_text`        | An element's own visible text (not text inherited from children)                                                                               |
+| `find_placeholder` | Placeholder text                                                                                                                               |
+
+Two things to know:
+
+- **`--perform` is required.** These commands always act; there is no
+  locate-only mode. To inspect without touching anything, use `snapshot`.
+- **The first visible match wins**, with no warning that others existed. When
+  a description could match several elements, `snapshot` and act on a ref
+  instead — that is what refs are for.
+
+Only visible elements are considered, and a miss is a clear error
+(`No element found with label: "..."`) rather than a silent no-op.
 
 ### Navigation & Scrolling
 
@@ -292,21 +331,23 @@ anima dominatrix snapshot --sources
 
 ## Content Reading Strategy
 
-| Method               | When to use                                        | Output size     |
-| -------------------- | -------------------------------------------------- | --------------- |
-| `snapshot`           | **Default** — find interactive elements with @refs | ~200-400 tokens |
-| `snapshot --sources` | Elements + React component names & source files    | ~300-600 tokens |
-| `get_text`           | Quick content reading, search results              | Medium          |
-| `get_markdown`       | Structured content (articles, docs)                | Medium          |
-| `snapshot --full`    | Deep DOM inspection (rarely needed)                | ~50,000+ tokens |
-| `get_html`           | Specific element inspection                        | Variable        |
-| `screenshot`         | Visual verification, layout issues                 | PNG data URL    |
+| Method               | When to use                                                    | Output size     |
+| -------------------- | -------------------------------------------------------------- | --------------- |
+| `find_*`             | **Default for acting** — describe the element, act in one call | Tiny            |
+| `snapshot`           | Exploring, or disambiguating several matches                   | ~200-400 tokens |
+| `snapshot --sources` | Elements + React component names & source files                | ~300-600 tokens |
+| `get_text`           | Quick content reading, search results                          | Medium          |
+| `get_markdown`       | Structured content (articles, docs)                            | Medium          |
+| `snapshot --full`    | Deep DOM inspection (rarely needed)                            | ~50,000+ tokens |
+| `get_html`           | Specific element inspection                                    | Variable        |
+| `screenshot`         | Visual verification, layout issues                             | PNG data URL    |
 
 ## Ref Lifecycle
 
 - Refs (`@e1`, `@e2`, ...) map directly to DOM element references in the content script
 - **Invalidated** when the page navigates or content changes significantly
 - Always re-snapshot after: clicking links, submitting forms, or waiting for dynamic content
+- Skip the whole cycle where you can: `find_*` re-queries the DOM on every call, so there is nothing to invalidate
 - The ancestor walking system handles cases like clicking a `<span>` inside an `<a>` — it finds the nearest interactive parent automatically
 
 ## Notes
