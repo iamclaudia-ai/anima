@@ -8,29 +8,49 @@ Anima is a personal AI assistant platform built around Claude Code CLI. A single
 - **CLI** — Schema-driven client with method discovery and validation
 - **VS Code Extension** — Sidebar chat with workspace auto-discovery
 - **macOS Menubar App** — Quick-access menubar app (SwiftUI, icon: 💋)
+- **Desktop App** — Tauri wrapper with always-on-top + system tray
 - **iOS App** — Native Swift voice mode app with streaming audio
-- **iMessage** — Text-based interaction via Messages
+- **Chrome Extension** — DOMINATRIX browser control + Claudia side panel
+- **iMessage** — Text-based interaction via Messages (currently disabled)
 - **Voice** — Cartesia Sonic 3.0 real-time streaming TTS
 
 ## Architecture
 
+Three long-lived processes. The watchdog (`:30085`) supervises the other two
+and restarts either on a failed health check.
+
 ```
-┌────────────────────────────────────────────────────────────┐
-│               Gateway (port 30086) — Pure Hub              │
-│                                                            │
-│  Bun.serve:                                                │
-│    /ws     → WebSocket (all client communication)          │
-│    /health → JSON status endpoint                          │
-│    /*      → SPA (web UI with extension pages)             │
-│                                                            │
-│  ┌────────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │  Extension     │  │   Event      │  │   ctx.call()   │  │
-│  │  Manager       │  │   Bus        │  │   RPC Hub      │  │
-│  │ (spawn + NDJSON│  │ (WS pub/sub) │  │  (inter-ext)   │  │
-│  │  per extension)│  │              │  │                │  │
-│  └────────────────┘  └──────────────┘  └────────────────┘  │
+                 ┌──────────────────────────────┐
+                 │   Watchdog (port 30085)      │
+                 │   spawn + health every 5s    │
+                 └───────┬──────────────┬───────┘
+                         │              │
+┌────────────────────────▼───────────┐  │
+│    Gateway (port 30086) — Pure Hub │  │
+│                                    │  │
+│  Bun.serve:                        │  │
+│    /ws     → WebSocket (clients)   │  │
+│    /health → JSON status endpoint  │  │
+│    /*      → SPA (extension pages) │  │
+│                                    │  │
+│  ┌────────────┐ ┌──────┐ ┌───────┐ │  │
+│  │ Extension  │ │Event │ │ctx.   │ │  │
+│  │ Manager    │ │Bus   │ │call() │ │  │
+│  │ (spawn +   │ │(WS   │ │RPC    │ │  │
+│  │  NDJSON    │ │pub/  │ │Hub    │ │  │
+│  │  per ext)  │ │sub)  │ │(inter)│ │  │
+│  └────────────┘ └──────┘ └───────┘ │  │
+└──────────────┬─────────────────────┘  │
+               │ session extension       │
+               │ WS RPC                  │
+┌──────────────▼─────────────────────────▼───────────────────┐
+│              Agent Host (port 30087)                       │
+│  Owns every agent runtime: cli · codex · anthropic         │
 └────────────────────────────────────────────────────────────┘
 ```
+
+A rendered, explorable version of this diagram can be regenerated with the
+`archify` skill from a typed JSON spec.
 
 ### Core Principle: Gateway as Pure Hub
 
@@ -46,17 +66,36 @@ Every feature — including the web chat UI — is an extension with routes and 
 
 Server extension loading is config-driven from `~/.anima/anima.json` and always out-of-process (one child process per enabled extension). Each extension calls `runExtensionHost(factory)` from `@anima/extension-host` — making it directly executable with `bun --hot` for native HMR.
 
-| Extension  | Location               | Server methods                                                              | Web pages                                |
-| ---------- | ---------------------- | --------------------------------------------------------------------------- | ---------------------------------------- |
-| `session`  | `extensions/session/`  | `session.create_session`, `session.send_prompt`, `session.start_task`, etc. | —                                        |
-| `chat`     | `extensions/chat/`     | —                                                                           | `/chat`, `/chat/:workspaceId/:sessionId` |
-| `voice`    | `extensions/voice/`    | `voice.speak`, `voice.stop`                                                 | —                                        |
-| `imessage` | `extensions/imessage/` | `imessage.send`, `imessage.chats`                                           | —                                        |
-| `hooks`    | `extensions/hooks/`    | `hooks.health_check`                                                        | —                                        |
-| `memory`   | `extensions/memory/`   | `memory.health_check`                                                       | —                                        |
-| `control`  | `extensions/control/`  | `control.health_check`                                                      | `/control`                               |
+Enabled extensions (from `~/.anima/anima.json`) — method counts are what the
+live gateway reports; run `anima gateway list_methods` for the current truth.
 
-**Note**: Task delegation (code review, tests, etc.) routes through `session.start_task({ agent: "codex", ... })` — agent-host owns all SDK runtimes (Claude sessions, Codex tasks, future Gemini)
+| Extension    | Server methods                                                   | Web pages                                                         |
+| ------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, … | —                                                                 |
+| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …           | —                                                                 |
+| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …         | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
+| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …       | `/scheduler`                                                      |
+| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …        | —                                                                 |
+| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …           | code-server (`webConfig.url`)                                     |
+| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`          | —                                                                 |
+| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                        | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
+| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                      | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
+| `control`    | 3 — `health_check`, `log_list`, `log_tail`                       | `/control`, `/logs`                                               |
+| `hooks`      | 2 — `health_check`, `list`                                       | —                                                                 |
+| `chat`       | —                                                                | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
+| `bogart`     | —                                                                | `/bogart`                                                         |
+
+That is all 13 extensions the gateway actually loads. Two other names appear
+but are not loaded extensions: `imessage` is present on disk and disabled in
+config, and `testroute` is a dev-only fixture absent from config. The
+`extensions.codex` block in `~/.anima/anima.json` is **not** an extension —
+there is no `extensions/codex/`; it is provider config (cliPath, model,
+personality, preambles) read by agent-host's codex provider.
+
+**Note**: Sub-agent delegation (code review, tests, second opinions) routes
+through `session.spawn_agent` / `list_subagents` / `get_subagent` /
+`interrupt_subagent`. Agent-host owns all runtimes — `cli`, `codex`, and
+`anthropic` live under `packages/agent-host/src/providers/`.
 
 ## Tech Stack
 
@@ -64,8 +103,8 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 - **Package Manager**: Bun (`bun install`, `bun add`) — **NEVER use npm, pnpm, or yarn** in this project. All dependencies are managed via `bun.lock`.
 - **Language**: TypeScript (strict)
 - **Server**: Bun.serve (HTTP + WebSocket on single port)
-- **Database**: SQLite (workspaces)
-- **Session Management**: Agent SDK via session extension (`extensions/session/`)
+- **Database**: SQLite — one `~/.anima/anima.db` (WAL) shared by gateway migrations, workspaces, and memory
+- **Session Management**: Agent Host (`packages/agent-host/`) owns every runtime; the session extension is a WS RPC client
 - **Client-side Router**: Hand-rolled pushState router (~75 lines, zero deps)
 - **TTS**: Cartesia Sonic 3.0 (real-time streaming) + ElevenLabs v3 (pre-generated content via text-to-dialogue API)
 - **Network**: Tailscale for secure remote access
@@ -78,25 +117,36 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 anima/
 ├── packages/
 │   ├── gateway/          # Pure hub — routes messages, event fanout, no business logic
-│   ├── watchdog/         # Process supervisor — spawns gateway, health checks
+│   ├── agent-host/       # Agent runtime owner (:30087) — cli, codex, anthropic providers
+│   ├── watchdog/         # Process supervisor (:30085) — spawns gateway + agent-host
 │   ├── extension-host/   # runExtensionHost() — NDJSON bridge imported by extensions
 │   ├── cli/              # Schema-driven CLI with method discovery
 │   ├── shared/           # Shared types, config, and protocol definitions
-│   ├── ui/               # Shared React components + router
-│   └── memory-mcp/       # MCP server for persistent memory system
+│   ├── shell-parser/     # Shell command parsing + permission policy evaluation
+│   └── ui/               # Shared React components + router
 ├── clients/
 │   ├── ios/              # Native Swift iOS voice mode app
 │   ├── menubar/          # macOS menubar app (SwiftUI) 💋
+│   ├── desktop/          # Tauri desktop app — always-on-top + system tray
+│   ├── dominatrix/       # Chrome extension — browser control + side panel
+│   ├── code-server-bridge/ # code-server extension backing `editor.*` methods
 │   └── vscode/           # VS Code extension with sidebar chat
 ├── extensions/
-│   ├── session/          # Session lifecycle — SDK engine, workspace CRUD, history
+│   ├── session/          # Session lifecycle — agent-host RPC, workspace CRUD, history
 │   ├── chat/             # Web chat pages (workspaces, sessions, chat)
-│   ├── voice/            # Cartesia TTS + auto-speak + audio store
-│   ├── imessage/         # iMessage bridge + auto-reply
-│   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   ├── memory/           # Memory ingestion and processing (Libby pipeline)
-│   └── control/          # System dashboard + health checks
-├── skills/               # Claude Code skills (meditation, stories, TTS tools)
+│   ├── voice/            # Cartesia TTS + auto-speak + audio store
+│   ├── dominatrix/       # Chrome browser control (profiles, tabs, DOM, console)
+│   ├── scheduler/        # Cron + one-shot tasks with SQLite persistence
+│   ├── disco/            # Inter-agent messaging channels + presence
+│   ├── editor/           # code-server bridge (open file, selection, active file)
+│   ├── presenter/        # Slide decks — presenter + display views
+│   ├── audiobooks/       # Audiobook library and chapter playback
+│   ├── control/          # System dashboard + log viewer
+│   ├── bogart/           # Web pages
+│   ├── hooks/            # Lifecycle hooks (post-response processing)
+│   └── imessage/         # iMessage bridge + auto-reply (disabled)
+├── skills/               # Claude Code skills (symlinked to ~/.claude/skills)
 ├── scripts/              # Smoke tests, E2E tests
 └── docs/                 # Architecture, API reference, testing guides
 ```
@@ -125,13 +175,13 @@ Key files:
 Thin RPC client to agent-host for session and task management:
 
 - **Agent-host RPC**: WebSocket client (`AgentHostClient`) that translates session/task operations into agent-host protocol messages
-- **Provider-aware routing**: Routes prompts and tasks by `agent` parameter (`claude`, `codex`, future `gemini`)
+- **Provider-aware routing**: Routes prompts and sub-agents by `agent` parameter (`claude`, `codex`)
 - **Workspace CRUD**: SQLite (WAL mode) for workspace registry
 - **Session Discovery**: Filesystem — reads `~/.claude/projects/{encoded-cwd}/sessions-index.json`, resolves paths via `resolveSessionPath(cwd)`
 - **History**: Parses JSONL session files from Claude Code
 - **Request context tracking**: Manages `connectionId` and tags (e.g., `voice.speak`) with primary/transient context merging
 
-Key methods: `session.create_session`, `session.send_prompt`, `session.start_task`, `session.get_task`, `session.list_tasks`, `session.interrupt_task`, `session.get_history`, `session.list_sessions`, `session.close_session`, `session.health_check`, etc.
+Key methods: `session.create_session`, `session.send_prompt`, `session.spawn_agent`, `session.list_subagents`, `session.get_subagent`, `session.interrupt_subagent`, `session.get_history`, `session.list_sessions`, `session.close_session`, `session.search`, `session.health_check`, etc.
 
 ### CLI (`packages/cli`)
 
@@ -199,17 +249,17 @@ extensions/<name>/src/
 { type: "event", event: "session.content_block_delta", payload: { ... } }
 ```
 
-**Gateway methods**: `gateway.list_methods`, `gateway.list_extensions`, `gateway.subscribe`, `gateway.unsubscribe`
+**Gateway methods**: `gateway.list_methods`, `gateway.list_extensions`, `gateway.list_web_contributions`, `gateway.subscribe`, `gateway.unsubscribe`, `gateway.register_extension`, `gateway.restart_extension`, plus the liveness-lock set (`acquire_liveness_lock`, `renew_liveness_lock`, `release_liveness_lock`, `list_liveness_locks`)
 
 **Session methods**: `session.create_session`, `session.send_prompt`, `session.get_history`, `session.switch_session`, `session.list_sessions`, `session.interrupt_session`, `session.close_session`, `session.reset_session`, `session.get_info`, `session.set_permission_mode`, `session.send_tool_result`
 
-**Task methods**: `session.start_task`, `session.get_task`, `session.list_tasks`, `session.interrupt_task` — provider-agnostic task delegation (codex code review, tests, etc.)
+**Sub-agent methods**: `session.spawn_agent`, `session.list_subagents`, `session.get_subagent`, `session.interrupt_subagent` — provider-agnostic delegation (codex code review, tests, etc.)
 
 **Workspace methods**: `session.list_workspaces`, `session.get_workspace`, `session.get_or_create_workspace`
 
 **Discovery**: `gateway.list_methods` — returns all methods with schemas
 
-**Extension methods**: `voice.speak`, `voice.stop`, `voice.health_check`, `imessage.send`, `imessage.chats`, `imessage.health_check`, `hooks.health_check`, `memory.health_check`, `control.health_check`
+**Extension methods**: see the extension table above, or run `anima gateway list_methods` — every extension exposes a `health_check`.
 
 ## Development
 
