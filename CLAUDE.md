@@ -88,14 +88,39 @@ live gateway reports; run `anima gateway list_methods` for the current truth.
 That is all 13 extensions the gateway actually loads. Two other names appear
 but are not loaded extensions: `imessage` is present on disk and disabled in
 config, and `testroute` is a dev-only fixture absent from config. The
-`extensions.codex` block in `~/.anima/anima.json` is **not** an extension —
-there is no `extensions/codex/`; it is provider config (cliPath, model,
-personality, preambles) read by agent-host's codex provider.
+`extensions.codex` block is **not** an extension either — see Agent Providers
+below.
 
-**Note**: Sub-agent delegation (code review, tests, second opinions) routes
-through `session.spawn_agent` / `list_subagents` / `get_subagent` /
-`interrupt_subagent`. Agent-host owns all runtimes — `cli`, `codex`, and
-`anthropic` live under `packages/agent-host/src/providers/`.
+### Agent Providers
+
+Agent-host owns every runtime. Providers are a plain name-keyed registry
+(`AgentRuntimeProviders = Record<string, AgentRuntimeFactory>`) wired in
+`packages/agent-host/src/server.ts` and resolved per session by
+`SessionHost.resolveProvider(agent)`:
+
+| Agent    | Factory                                                | Notes                                                    |
+| -------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| `claude` | `createClaudeCliProvider` or `createAnthropicProvider` | Chosen by `agentHost.claudeRuntime` (`"cli"` \| `"sdk"`) |
+| `codex`  | `createCodexProvider`                                  | OpenAI Codex CLI                                         |
+
+**Provider selection is session-level, not just sub-agent-level.**
+`session.create_session({ cwd, agent })` accepts any registered agent name
+(default `claude`), so a full session can run against Codex the same way it
+runs against Claude. Sub-agent delegation is a separate path —
+`session.spawn_agent` / `list_subagents` / `get_subagent` /
+`interrupt_subagent`.
+
+Adding a runtime (grok-code, opencode, …) means a new directory under
+`packages/agent-host/src/providers/` exposing `{ create, resume }`, plus one
+entry in the server's `providers` object. An unregistered name throws
+`Unsupported session agent: <name>`.
+
+**Config gotcha**: the `extensions.codex` block in `~/.anima/anima.json` is
+dead — no code reads it, and there is no `extensions/codex/`. The server reads
+`config.agentHost?.codex`, which is currently unset, so the provider runs on
+defaults (`process.env.OPENAI_API_KEY`, default codex path) and the block's
+`model`, `effort`, `sandboxMode`, `personality`, and `preambles` are all
+ignored. Move it to `agentHost.codex` to make it take effect.
 
 ## Tech Stack
 
