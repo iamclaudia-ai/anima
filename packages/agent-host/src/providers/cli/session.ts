@@ -471,6 +471,9 @@ export class ClaudeCliSession extends EventEmitter {
     const env: Record<string, string> = {
       ANTHROPIC_API_KEY: "",
       ANTHROPIC_AUTH_TOKEN: "",
+      // Lets tools run *inside* the session (the CLI's Bash tool, `anima ...`)
+      // identify themselves — dominatrix binds tabs per session off this.
+      ANIMA_SESSION_ID: this.id,
     };
     if (this.interception === "mitm") {
       const proxyUrl = `http://127.0.0.1:${this.proxyPort}`;
