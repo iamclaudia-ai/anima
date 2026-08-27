@@ -639,6 +639,11 @@ class DominatrixBackground {
   private onTabRemoved(tabId: number) {
     this.consoleLogs.delete(tabId);
     this.networkRequests.delete(tabId);
+    // Tell the gateway, so a session bound to this tab is released. Without
+    // this, closing a tab any way other than `close_tab` (cmd-W, crash, window
+    // closed) leaves a binding pointing at a dead id and the session's next
+    // command fails with "No tab with id".
+    this.sendRequest("dominatrix.tab_closed", { instanceId: this.instanceId, tabId });
   }
 
   // --------------------------------------------------------------------------

@@ -276,6 +276,11 @@ const responseParam = z.object({
   error: z.string().optional(),
 });
 
+const tabClosedParam = z.object({
+  instanceId: z.string(),
+  tabId: z.number(),
+});
+
 // ============================================================================
 // Extension Factory
 // ============================================================================
@@ -329,6 +334,35 @@ export function createDominatrixExtension(): AnimaExtension {
       binding.tabId = binding.recent[0];
     }
     saveSessions();
+  }
+
+  /**
+   * Drop a closed tab from every session bound to it.
+   *
+   * `close_tab` unbinds the calling session, but a tab closed any other way —
+   * the user hitting cmd-W, a crash, the window going away — used to leave the
+   * binding pointing at a dead id, so the session's next command failed with
+   * "No tab with id". Chrome reports those closures via `dominatrix.tab_closed`.
+   *
+   * Tab ids are only unique within a browser, so the instance must match:
+   * without that check, closing tab 42 in one profile could unbind an unrelated
+   * session working in a different profile's tab 42.
+   */
+  /**
+   * Chrome's "no such tab" rejection. Matched on the message because it comes
+   * back over the wire as a plain string, with no code to switch on.
+   */
+  function isMissingTabError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /No tab with id/i.test(message);
+  }
+
+  function forgetTab(instanceId: string, tabId: number) {
+    for (const [sessionId, binding] of [...sessions]) {
+      if (binding.instanceId !== instanceId) continue;
+      if (binding.tabId !== tabId && !binding.recent.includes(tabId)) continue;
+      unbindTab(sessionId, tabId);
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -537,7 +571,22 @@ export function createDominatrixExtension(): AnimaExtension {
     if (tabId === undefined) delete params.tabId;
     else params.tabId = tabId;
 
-    const data = await sendCommand(action, params, client.id);
+    let data: unknown;
+    try {
+      data = await sendCommand(action, params, client.id);
+    } catch (error) {
+      // The tab is gone and we never heard about it — `dominatrix.tab_closed`
+      // is best-effort, and Chrome drops it if the service worker was asleep,
+      // the browser crashed, or the whole profile went away. Clear the dead
+      // binding here so it doesn't linger and re-fail on every later command.
+      // Deliberately no retry against the next tab in the MRU: silently
+      // answering about a different tab is the failure mode this whole binding
+      // system exists to avoid. Surface the error and let the caller pick.
+      if (typeof tabId === "number" && isMissingTabError(error)) {
+        forgetTab(client.id, tabId);
+      }
+      throw error;
+    }
 
     const resolvedTabId = learnTabId(data, tabId);
 
@@ -703,6 +752,13 @@ export function createDominatrixExtension(): AnimaExtension {
         ...client,
         connectionId,
       });
+      return { ok: true };
+    },
+
+    "dominatrix.tab_closed": async (p) => {
+      const instanceId = p.instanceId as string;
+      const tabId = p.tabId as number;
+      forgetTab(instanceId, tabId);
       return { ok: true };
     },
 
@@ -982,6 +1038,12 @@ export function createDominatrixExtension(): AnimaExtension {
         name: "dominatrix.response",
         description: "Handle command response from Chrome extension",
         inputSchema: responseParam,
+        execution: { lane: "control", concurrency: "parallel" },
+      },
+      {
+        name: "dominatrix.tab_closed",
+        description: "Release session bindings for a tab Chrome just closed",
+        inputSchema: tabClosedParam,
         execution: { lane: "control", concurrency: "parallel" },
       },
       {
