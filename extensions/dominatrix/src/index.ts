@@ -298,6 +298,46 @@ export function createDominatrixExtension(): AnimaExtension {
   // doesn't lose the tab a long-running session is in the middle of.
   let sessions = new Map<string, SessionBinding>();
 
+  /**
+   * Sessions whose tab vanished out from under them, keyed to the tab id that
+   * went away. Losing a binding is invisible: the next untargeted command falls
+   * through to the most recently focused browser and answers confidently about
+   * a tab the caller never chose — in practice, usually the Anima side panel,
+   * which hands back the caller's own transcript as page text. That reads as a
+   * correct answer, so it has to be surfaced rather than inferred.
+   *
+   * Consumed once: the command that would have silently wandered fails with an
+   * explanation instead, and normal fall-through resumes afterwards so a
+   * deliberate "just read the focused browser" call still works.
+   */
+  const orphanedSessions = new Map<string, number>();
+
+  /**
+   * Tabs closed on purpose through `close_tab`, keyed to when.
+   *
+   * Chrome fires `tabs.onRemoved` for those closes too, and that event races
+   * the unbind in `dispatch` below. When the event wins, a deliberate close
+   * looks identical to a tab that vanished, and the caller gets warned about
+   * something they just did — noise that teaches them to ignore the warning
+   * that matters. Timestamped rather than timer-based so nothing is left
+   * pending on the event loop.
+   */
+  const deliberateCloses = new Map<number, number>();
+  const DELIBERATE_CLOSE_TTL_MS = 30_000;
+
+  function markDeliberateClose(tabId: number) {
+    const now = Date.now();
+    deliberateCloses.set(tabId, now);
+    for (const [id, at] of deliberateCloses) {
+      if (now - at > DELIBERATE_CLOSE_TTL_MS) deliberateCloses.delete(id);
+    }
+  }
+
+  function wasDeliberateClose(tabId: number): boolean {
+    const at = deliberateCloses.get(tabId);
+    return at !== undefined && Date.now() - at <= DELIBERATE_CLOSE_TTL_MS;
+  }
+
   // --------------------------------------------------------------------------
   // Session bindings
   // --------------------------------------------------------------------------
@@ -318,6 +358,7 @@ export function createDominatrixExtension(): AnimaExtension {
     const recent = [tabId, ...carried.filter((id) => id !== tabId)].slice(0, MAX_RECENT_TABS);
 
     sessions.set(sessionId, { instanceId, tabId, recent, updatedAt: Date.now() });
+    orphanedSessions.delete(sessionId);
     saveSessions();
     ctx.log.info("Session bound to tab", { sessionId, instanceId, tabId });
   }
@@ -362,6 +403,11 @@ export function createDominatrixExtension(): AnimaExtension {
       if (binding.instanceId !== instanceId) continue;
       if (binding.tabId !== tabId && !binding.recent.includes(tabId)) continue;
       unbindTab(sessionId, tabId);
+      // Only when nothing is left to fall back on. If the MRU promoted another
+      // tab, the session keeps working and there is nothing to report.
+      if (!sessions.has(sessionId) && !wasDeliberateClose(tabId)) {
+        orphanedSessions.set(sessionId, tabId);
+      }
     }
   }
 
@@ -560,6 +606,20 @@ export function createDominatrixExtension(): AnimaExtension {
     const binding = sessionId ? sessions.get(sessionId) : undefined;
     const boundClient = binding ? clients.get(binding.instanceId) : undefined;
 
+    // Nothing to fall back to and the caller named no target: tell them the tab
+    // is gone instead of answering about an unrelated one.
+    if (!binding && sessionId && tabIdParam === undefined && !profileHint) {
+      const lostTabId = orphanedSessions.get(sessionId);
+      if (lostTabId !== undefined) {
+        orphanedSessions.delete(sessionId);
+        throw new Error(
+          `The tab this session was working in (${lostTabId}) was closed, so '${action}' has ` +
+            "no tab to run against. Open one with new_tab, or target an existing tab with " +
+            "--tabId (list_tabs shows what is open). Re-run as-is to use the focused browser.",
+        );
+      }
+    }
+
     const client = pickClient(action, tabIdParam, profileHint, boundClient);
 
     // No explicit tab? Reuse the one this session is working in, as long as it
@@ -591,7 +651,13 @@ export function createDominatrixExtension(): AnimaExtension {
     const resolvedTabId = learnTabId(data, tabId);
 
     if (action === "close_tab") {
-      if (sessionId && resolvedTabId !== undefined) unbindTab(sessionId, resolvedTabId);
+      if (resolvedTabId !== undefined) markDeliberateClose(resolvedTabId);
+      if (sessionId && resolvedTabId !== undefined) {
+        unbindTab(sessionId, resolvedTabId);
+        // The onRemoved event may have beaten us here and already flagged the
+        // session as orphaned; this close was intentional, so drop that.
+        orphanedSessions.delete(sessionId);
+      }
       return data;
     }
 
