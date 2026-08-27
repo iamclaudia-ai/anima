@@ -470,6 +470,40 @@ export function createDominatrixExtension(): AnimaExtension {
    * the most recently focused profile, which is what "the browser I'm looking at"
    * means in practice.
    */
+  /**
+   * Which connected browser owns this tab?
+   *
+   * Chrome knows, but the gateway does not: every profile is a separate
+   * extension instance with its own tab-id space, and ids are only unique
+   * within a browser — there is no global index to consult. So we ask, and
+   * whichever instance can see the tab owns it.
+   *
+   * Without this, an explicit `--tabId` was resolved against the most recently
+   * focused profile instead of the tab's own, so targeting a tab in any other
+   * profile failed with "No tab with id" — and `navigate` refused outright,
+   * recommending the `--tabId` that had just failed.
+   *
+   * Queried in parallel; a client that errors simply loses. Results are not
+   * cached, because Chrome reuses tab ids after a tab closes and a stale entry
+   * would point at an unrelated tab.
+   */
+  async function findClientOwningTab(tabId: number): Promise<ChromeClient | undefined> {
+    const found = await Promise.all(
+      clientsByFocus().map(async (candidate) => {
+        try {
+          const tabs = (await sendCommand("get_tabs", { tabIds: [tabId] }, candidate.id)) as
+            | TabInfo[]
+            | undefined;
+          return tabs?.some((tab) => tab.id === tabId) ? candidate : undefined;
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+    // Focus order, so the pick is deterministic if ids ever collide.
+    return found.find((candidate) => candidate !== undefined);
+  }
+
   function pickClient(
     action: string,
     tabIdParam: unknown,
@@ -620,7 +654,26 @@ export function createDominatrixExtension(): AnimaExtension {
       }
     }
 
-    const client = pickClient(action, tabIdParam, profileHint, boundClient);
+    // An explicit numeric tab id names exactly one browser, so resolve it to
+    // that browser rather than guessing at the focused one. Skipped when the
+    // caller named a profile, when only one is connected, or when the session's
+    // own binding already covers the tab — none of those need a round trip.
+    let tabOwner = boundClient;
+    if (typeof tabIdParam === "number" && !profileHint && clients.size > 1) {
+      const alreadyKnown = boundClient && binding?.recent.includes(tabIdParam);
+      if (!alreadyKnown) {
+        const owner = await findClientOwningTab(tabIdParam);
+        if (!owner) {
+          throw new Error(
+            `No connected Chrome profile has a tab with id ${tabIdParam}. ` +
+              "Run list_tabs to see what is open.",
+          );
+        }
+        tabOwner = owner;
+      }
+    }
+
+    const client = pickClient(action, tabIdParam, profileHint, tabOwner);
 
     // No explicit tab? Reuse the one this session is working in, as long as it
     // lives in the profile we just picked.
