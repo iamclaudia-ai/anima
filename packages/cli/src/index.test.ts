@@ -88,6 +88,66 @@ describe("cli parsing", () => {
     });
   });
 
+  /**
+   * The schemas are camelCase because Zod is, but `--session-id` is the more
+   * natural thing to type at a shell. Both spell the same param, so the parser
+   * maps whatever was typed back onto the schema's own name.
+   */
+  describe("flag casing", () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: {
+        sessionId: { type: "string" },
+        maxTurns: { type: "number" },
+        permissionMode: { type: "string" },
+        action: {
+          type: "object",
+          properties: { targetName: { type: "string" } },
+        },
+        metadata: { type: "object" },
+      },
+    };
+
+    it.each([
+      ["--session-id", "kebab-case"],
+      ["--session_id", "snake_case"],
+      ["--sessionid", "all lower"],
+      ["--SessionId", "PascalCase"],
+      ["--SESSION_ID", "SCREAMING_SNAKE"],
+      ["--sessionId", "camelCase (unchanged)"],
+    ])("accepts %s (%s)", (flag) => {
+      expect(parseCliParams([flag, "ses_123"], schema)).toEqual({ sessionId: "ses_123" });
+    });
+
+    it("canonicalizes = syntax", () => {
+      expect(parseCliParams(["--max-turns=5"], schema)).toEqual({ maxTurns: 5 });
+    });
+
+    it("canonicalizes bare boolean flags", () => {
+      expect(parseCliParams(["--permission-mode"], schema)).toEqual({ permissionMode: true });
+    });
+
+    it("still applies string coercion rules to the canonical name", () => {
+      expect(parseCliParams(["--session-id", "1"], schema)).toEqual({ sessionId: "1" });
+    });
+
+    it("canonicalizes each segment of a dot path", () => {
+      expect(parseCliParams(["--action.target-name", "voice.speak"], schema)).toEqual({
+        action: { targetName: "voice.speak" },
+      });
+    });
+
+    it("leaves free-form object keys alone", () => {
+      expect(parseCliParams(["--metadata.my-key", "v"], schema)).toEqual({
+        metadata: { "my-key": "v" },
+      });
+    });
+
+    it("leaves an unknown param verbatim so the error names what was typed", () => {
+      expect(parseCliParams(["--not-a-param", "x"], schema)).toEqual({ "not-a-param": "x" });
+    });
+  });
+
   it("throws on positional args", () => {
     expect(() => parseCliParams(["oops"])).toThrow(
       "Unexpected positional argument: oops. Use --name value.",

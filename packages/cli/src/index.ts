@@ -157,6 +157,67 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: unkno
 }
 
 /**
+ * Strip a flag name down to its letters and digits, lowercased.
+ *
+ * `--session-id`, `--session_id`, `--SessionId` and `--sessionid` all reduce to
+ * `sessionid`, which is what lets any of them find the schema's `sessionId`.
+ */
+function normalizeKeyToken(key: string): string {
+  return key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+/**
+ * The declared properties of an object schema, looking through $ref and into
+ * anyOf/allOf branches (an optional nested object arrives as `anyOf: [obj, null]`).
+ */
+function objectProperties(
+  schema: JsonSchema | undefined,
+  root: JsonSchema,
+): Record<string, JsonSchema> | undefined {
+  const resolved = resolveSchema(schema, root);
+  if (!resolved) return undefined;
+  if (resolved.properties) return resolved.properties;
+  for (const branch of [...(resolved.anyOf ?? []), ...(resolved.allOf ?? [])]) {
+    const props = objectProperties(branch, root);
+    if (props) return props;
+  }
+  return undefined;
+}
+
+/**
+ * Rewrite a typed flag into the spelling the schema uses.
+ *
+ * The CLI mirrors Zod schemas, which are camelCase, but `--session-id` is the
+ * more natural thing to type — so every casing convention is accepted and
+ * mapped back: hyphens, underscores, and case are all ignored when matching.
+ * Each segment of a dot path is resolved against its own level of the schema.
+ *
+ * An unmatched segment is left verbatim so the existing "Unknown params" error
+ * still names what the user actually typed, and free-form objects (no declared
+ * properties) pass through untouched — their keys are data, not API surface.
+ */
+export function canonicalizeKeyPath(key: string, schema?: JsonSchema): string {
+  if (!schema) return key;
+  let level = objectProperties(schema, schema);
+  const out: string[] = [];
+
+  for (const segment of key.split(".")) {
+    let name = segment;
+    if (level && !(segment in level)) {
+      const target = normalizeKeyToken(segment);
+      const matches = Object.keys(level).filter((p) => normalizeKeyToken(p) === target);
+      // Ambiguity is only possible if a schema declares two properties that
+      // differ by punctuation alone; leave those to the validator.
+      if (matches.length === 1) name = matches[0];
+    }
+    out.push(name);
+    level = level?.[name] ? objectProperties(level[name], schema) : undefined;
+  }
+
+  return out.join(".");
+}
+
+/**
  * True when the method declares this param as a plain string.
  *
  * Used to keep {@link coerceValue} from guessing: `--key 1` on a string param
@@ -203,12 +264,15 @@ export function parseCliParams(rawArgs: string[], schema?: JsonSchema): Record<s
       key = flag;
       const next = rawArgs[i + 1];
       if (!next || next.startsWith("--")) {
-        setNestedValue(params, key, true);
+        setNestedValue(params, canonicalizeKeyPath(key, schema), true);
         continue;
       }
       raw = next;
       i += 1;
     }
+
+    // `--session-id`, `--session_id` and `--sessionId` all mean the same param.
+    key = canonicalizeKeyPath(key, schema);
 
     // The raw text stands when the method says it wants a string — no lossy
     // round-trip through Number ("1.50" would come back as "1.5").
@@ -596,6 +660,10 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
   console.log("  anima doctor                               Run local hardening checks");
   console.log("  (global) --host <host[:port]>                Override gateway host for this call");
   console.log("  (global) --gateway-url <ws(s)://.../ws>      Override full gateway URL");
+
+  console.log("\nParam names:\n");
+  console.log("  Flags are matched ignoring case, hyphens, and underscores —");
+  console.log("  --session-id, --session_id and --sessionId are all the same param.");
 
   console.log("\nNamespaces:\n");
   for (const ns of getNamespaces(methods)) {
