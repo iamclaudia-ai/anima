@@ -206,6 +206,44 @@ anima dominatrix get_cookies                                # Cookies
 anima dominatrix screenshot                                 # Screenshot as PNG data URL
 ```
 
+### Running JavaScript
+
+`exec` and `eval` do **not** run your code with the page's own `eval` — pages with
+a strict CSP (beehiiv, GitHub, most banks) forbid that. Code runs through JailJS,
+an AST interpreter, which only implements a subset of JavaScript.
+
+**You can write modern JS.** The gateway transpiles to that subset before the
+code reaches the page, so spread, `for..of`, destructuring, template literals,
+`class`, optional chaining, and default/rest params all work.
+
+Two things the transpiler cannot fix, because they are about what exists at
+runtime rather than syntax:
+
+**Only whitelisted globals exist.** `document`, `window`, `console`, `fetch`,
+`JSON`, `Math`, `Date`, timers, the DOM event constructors, and the JS
+built-ins (`Array`, `Object`, `String`, `Number`, `Promise`, `Symbol`). Anything
+else — `localStorage`, `location`, `navigator` — is reached through `window`:
+
+```bash
+anima dominatrix eval --expression "window.location.href"
+```
+
+**There is no `hover` command.** Dispatch the event yourself:
+
+```bash
+anima dominatrix eval --expression "\
+  document.querySelector('[data-tip]')\
+    .dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))"
+```
+
+That drives JS-based hover UI (tooltips, dropdown triggers). It does **not**
+drive CSS `:hover` — a purely CSS tooltip cannot be captured this way, because
+synthetic events don't change pseudo-class state.
+
+If an expression fails, the error comes from JailJS and names the AST node it
+choked on (`Unhandled node type: X`). That means the construct reached the
+interpreter untranspiled — worth reporting.
+
 ## React Source Mapping
 
 Map DOM elements back to React component source files. Works on any React dev app — no additional libraries needed.
@@ -256,7 +294,7 @@ anima dominatrix snapshot --sources
 ## Notes
 
 - **Real browser**: Controls actual Chrome with real profiles, cookies, and auth — not sandboxed
-- **CSP bypass**: Script execution uses JailJS (AST interpreter) for sites with strict CSP
+- **CSP bypass**: Script execution uses JailJS (AST interpreter) for sites with strict CSP — see [Running JavaScript](#running-javascript) for what that constrains
 - **Resilient injection**: If the content script isn't loaded (page reload, manual navigation), it's automatically injected on demand
 - **Console/Network**: Collected passively from content script load — retrieve history anytime
 - **Tab binding**: Per session, persisted across gateway restarts. `session_tabs` shows it
