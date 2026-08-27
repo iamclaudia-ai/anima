@@ -2,6 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import {
   coerceValue,
   exampleValueForSchema,
+  extractOutFlag,
   formatFlagPlaceholder,
   formatMethodCommand,
   getNamespaces,
@@ -10,6 +11,7 @@ import {
   parseCliParams,
   printCliHelp,
   printMethodExamples,
+  writeResultToFile,
   printMethodHelp,
   printMethodList,
   printNamespaceHelp,
@@ -559,5 +561,61 @@ describe("help/example output", () => {
 
     logSpy.mockRestore();
     errSpy.mockRestore();
+  });
+});
+
+describe("extractOutFlag", () => {
+  it("removes the flag and its value from the args", () => {
+    const result = extractOutFlag(["--tabId", "42", "--out", "shot.png"]);
+    expect(result.outPath).toBe("shot.png");
+    expect(result.args).toEqual(["--tabId", "42"]);
+  });
+
+  it("leaves args untouched when the flag is absent", () => {
+    const result = extractOutFlag(["--tabId", "42"]);
+    expect(result.outPath).toBeUndefined();
+    expect(result.args).toEqual(["--tabId", "42"]);
+  });
+
+  it("keeps args on both sides of the flag", () => {
+    const result = extractOutFlag(["--out", "a.png", "--fullPage", "true"]);
+    expect(result.outPath).toBe("a.png");
+    expect(result.args).toEqual(["--fullPage", "true"]);
+  });
+
+  it("rejects a missing path rather than swallowing the next flag", () => {
+    expect(() => extractOutFlag(["--out", "--fullPage"])).toThrow("--out requires a file path");
+    expect(() => extractOutFlag(["--out"])).toThrow("--out requires a file path");
+  });
+});
+
+describe("writeResultToFile", () => {
+  const tmp = (name: string) => `${process.env.TMPDIR || "/tmp"}/anima-cli-test-${name}`;
+
+  it("decodes a base64 data URI to real bytes", async () => {
+    // 1x1 transparent PNG.
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const path = tmp("shot.png");
+    const written = await writeResultToFile(`data:image/png;base64,${png}`, path);
+
+    expect(written.mediaType).toBe("image/png");
+    expect(written.bytes).toBe(Buffer.from(png, "base64").length);
+
+    // Real PNG magic bytes — proof it was decoded, not written as text.
+    const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+    expect(Array.from(bytes.slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  it("writes a plain string unchanged", async () => {
+    const path = tmp("plain.txt");
+    await writeResultToFile("Example Domain", path);
+    expect(await Bun.file(path).text()).toBe("Example Domain");
+  });
+
+  it("writes an object as formatted JSON", async () => {
+    const path = tmp("obj.json");
+    await writeResultToFile({ tabId: 7 }, path);
+    expect(JSON.parse(await Bun.file(path).text())).toEqual({ tabId: 7 });
   });
 });

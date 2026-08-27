@@ -409,6 +409,50 @@ export function validateParamsAgainstSchema(
   }
 }
 
+/**
+ * Pull `--out <path>` out of the raw args.
+ *
+ * Handled by the CLI rather than the gateway: the file belongs on the machine
+ * that ran the command, which is not necessarily the one running Chrome. No
+ * method declares it, so it has to come out before schema validation.
+ */
+export function extractOutFlag(args: string[]): { args: string[]; outPath?: string } {
+  const index = args.indexOf("--out");
+  if (index === -1) return { args };
+
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("--out requires a file path, e.g. --out shot.png");
+  }
+  return { args: [...args.slice(0, index), ...args.slice(index + 2)], outPath: value };
+}
+
+const DATA_URI = /^data:([^;,]+);base64,(.+)$/s;
+
+/**
+ * Write a result to disk, decoding a base64 data: URI to real bytes.
+ *
+ * That decoding is the whole point: `screenshot` returns a
+ * `data:image/png;base64,…` string, so saving one previously meant piping the
+ * JSON through a few lines of scripting to strip the prefix and decode it —
+ * every single time.
+ */
+export async function writeResultToFile(
+  result: unknown,
+  outPath: string,
+): Promise<{ path: string; bytes: number; mediaType?: string }> {
+  const match = typeof result === "string" ? result.match(DATA_URI) : null;
+  if (match) {
+    const bytes = Buffer.from(match[2], "base64");
+    await Bun.write(outPath, bytes);
+    return { path: outPath, bytes: bytes.length, mediaType: match[1] };
+  }
+
+  const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  await Bun.write(outPath, text);
+  return { path: outPath, bytes: Buffer.byteLength(text) };
+}
+
 export function injectSessionIdFromEnv(
   params: Record<string, unknown>,
   methodDef: MethodCatalogEntry,
@@ -689,7 +733,11 @@ async function fetchMethodCatalog(): Promise<MethodCatalogEntry[]> {
   }
 }
 
-async function invokeMethod(method: string, params: Record<string, unknown>): Promise<void> {
+async function invokeMethod(
+  method: string,
+  params: Record<string, unknown>,
+  outPath?: string,
+): Promise<void> {
   const client = createGatewayClient({ url: gatewayUrl });
   const streamPrompt = method === "session.send_prompt";
   let stopStreamResolve: (() => void) | null = null;
@@ -721,6 +769,12 @@ async function invokeMethod(method: string, params: Record<string, unknown>): Pr
 
     const payload = await client.call(method, params);
     if (!streamPrompt) {
+      if (outPath) {
+        const written = await writeResultToFile(payload, outPath);
+        const kind = written.mediaType ? `${written.mediaType}, ` : "";
+        console.log(`Wrote ${written.path} (${kind}${written.bytes} bytes)`);
+        return;
+      }
       if (payload !== undefined) {
         console.log(JSON.stringify(payload, null, 2));
       }
@@ -1916,7 +1970,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const params = parseCliParams(paramArgs, methodDef.inputSchema);
+  const { args: methodArgs, outPath } = extractOutFlag(paramArgs);
+  const params = parseCliParams(methodArgs, methodDef.inputSchema);
 
   // Auto-inject sessionId from $ANIMA_SESSION_ID if not explicitly provided
   const injectionResult = injectSessionIdFromEnv(params, methodDef, resolvedMethod);
@@ -1931,7 +1986,7 @@ async function main(): Promise<void> {
   injectCwdFromProcess(params, methodDef);
 
   validateParamsAgainstSchema(resolvedMethod, params, methodDef.inputSchema);
-  await invokeMethod(resolvedMethod, params);
+  await invokeMethod(resolvedMethod, params, outPath);
 }
 
 if (import.meta.main) {

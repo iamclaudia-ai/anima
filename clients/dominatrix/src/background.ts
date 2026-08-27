@@ -58,6 +58,35 @@ const TOKEN_STORAGE_KEY = "gatewayToken";
 // Background worker
 // ============================================================================
 
+/**
+ * Unwrap the content script's `{ success, data }` reply.
+ *
+ * That envelope is internal to the Chrome side, but it used to travel all the
+ * way to the caller, with two consequences. Commands handled by the content
+ * script (`get_text`, `click`, `find_*`, …) returned `{success:true,data:…}`
+ * while browser-level ones (`screenshot`, `new_tab`, `list_tabs`) returned
+ * their value directly — so callers had to know which family a command
+ * belonged to before they could read the result.
+ *
+ * Worse, a failure inside the content script rode home as `{success:false}`
+ * *inside a successful* transport response, so a click or fill that found
+ * nothing resolved rather than rejecting, and the CLI exited 0. A failed
+ * `find_role --perform click` reported success to the shell.
+ *
+ * Unwrapping here means every command returns its payload directly and every
+ * failure is a real rejection, carried by the transport's own error channel.
+ */
+function unwrapContentScriptReply(reply: unknown): unknown {
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)) return reply;
+
+  const envelope = reply as { success?: unknown; data?: unknown; error?: unknown };
+  if (typeof envelope.success !== "boolean") return reply;
+  if (!("data" in envelope) && !("error" in envelope)) return reply;
+
+  if (envelope.success) return envelope.data;
+  throw new Error(typeof envelope.error === "string" ? envelope.error : "Command failed");
+}
+
 class DominatrixBackground {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
@@ -417,7 +446,8 @@ class DominatrixBackground {
   ): Promise<unknown> {
     const id = await this.resolveTabId(tabId);
     // Strip the selector so the content script never sees "new"/"active".
-    return this.sendToContentScript(id, { ...message, tabId: id });
+    const reply = await this.sendToContentScript(id, { ...message, tabId: id });
+    return unwrapContentScriptReply(reply);
   }
 
   // --------------------------------------------------------------------------

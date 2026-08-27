@@ -242,7 +242,8 @@ anima dominatrix get_console                                # Console logs
 anima dominatrix get_network                                # Network requests
 anima dominatrix get_storage                                # localStorage/sessionStorage
 anima dominatrix get_cookies                                # Cookies
-anima dominatrix screenshot                                 # Screenshot as PNG data URL
+anima dominatrix screenshot --out shot.png                  # Screenshot straight to a file
+anima dominatrix screenshot                                 # ...or as a PNG data URL
 ```
 
 ### Running JavaScript
@@ -340,7 +341,30 @@ anima dominatrix snapshot --sources
 | `get_markdown`       | Structured content (articles, docs)                            | Medium          |
 | `snapshot --full`    | Deep DOM inspection (rarely needed)                            | ~50,000+ tokens |
 | `get_html`           | Specific element inspection                                    | Variable        |
-| `screenshot`         | Visual verification, layout issues                             | PNG data URL    |
+| `screenshot --out`   | Visual verification, layout issues                             | Writes a file   |
+
+## Reading Results
+
+Every command prints its result as JSON — the value itself, with no wrapper:
+
+```bash
+anima dominatrix get_url        # "https://example.com/"
+anima dominatrix new_tab …      # { "tabId": 124530013, "url": "…", … }
+anima dominatrix list_tabs      # [ { "id": …, "url": … }, … ]
+```
+
+**Failures are errors, not results.** A command that cannot do what you asked
+exits non-zero and prints `Error: …` — including a `find_*` that matched
+nothing, or a click on an element that is not there. So `cmd && next` is safe,
+and there is no `success` field to check.
+
+**`--out <path>` writes the result to a file** instead of printing it, decoding
+a base64 data URI to real bytes on the way. Mainly for screenshots:
+
+```bash
+anima dominatrix screenshot --out shot.png
+# Wrote shot.png (image/png, 21186 bytes)
+```
 
 ## Ref Lifecycle
 
