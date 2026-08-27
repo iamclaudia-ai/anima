@@ -12,6 +12,11 @@
   },
   "dependencies": {
     "@anima/shared": "workspace:*",
+    "@babel/standalone": "8.0.4",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@mariozechner/jailjs": "0.1.1",
+    "@types/babel__standalone": "7.1.9"
   }
 }

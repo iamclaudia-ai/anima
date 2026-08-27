@@ -20,6 +20,7 @@ import type {
   LoggerLike,
 } from "@anima/shared";
 import { z } from "zod";
+import { transpileForJail } from "./transpile";
 
 // ============================================================================
 // Types
@@ -510,6 +511,17 @@ export function createDominatrixExtension(): AnimaExtension {
     const params = { ...raw };
     delete params.sessionId;
     delete params.profile;
+
+    // The page evaluates JS through JailJS (an AST interpreter — pages with a
+    // strict CSP forbid real `eval`), which only understands a subset of the
+    // language. Compile to that subset here so callers can write modern JS.
+    // On a syntax error we pass the source through untouched, so the error the
+    // caller sees is about their code rather than about our transpile step.
+    for (const key of ["script", "expression"] as const) {
+      if (typeof params[key] === "string") {
+        params[key] = transpileForJail(params[key]) ?? params[key];
+      }
+    }
 
     const binding = sessionId ? sessions.get(sessionId) : undefined;
     const boundClient = binding ? clients.get(binding.instanceId) : undefined;
