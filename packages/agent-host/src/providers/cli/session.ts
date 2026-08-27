@@ -44,6 +44,7 @@ import { copyImageToClipboard } from "./image-clipboard";
 import { ensureMitmCerts } from "./mitm-certs";
 import { recallPort, rememberPort } from "./port-registry";
 import { SessionJsonlTail } from "./jsonl-tail";
+import { animaSessionEnv } from "../anima-env";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -471,9 +472,7 @@ export class ClaudeCliSession extends EventEmitter {
     const env: Record<string, string> = {
       ANTHROPIC_API_KEY: "",
       ANTHROPIC_AUTH_TOKEN: "",
-      // Lets tools run *inside* the session (the CLI's Bash tool, `anima ...`)
-      // identify themselves — dominatrix binds tabs per session off this.
-      ANIMA_SESSION_ID: this.id,
+      ...animaSessionEnv(this.id),
     };
     if (this.interception === "mitm") {
       const proxyUrl = `http://127.0.0.1:${this.proxyPort}`;

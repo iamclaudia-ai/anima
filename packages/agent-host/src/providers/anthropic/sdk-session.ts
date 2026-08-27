@@ -62,6 +62,7 @@ import type { ThinkingEffort, ImageProcessingConfig } from "@anima/shared";
 import type { CreateSessionOptions, ResumeSessionOptions, StreamEvent } from "../../provider-types";
 import { processContent } from "./image-processor";
 import { formatSkillsForPrompt, loadSkills } from "./skills";
+import { animaSessionEnvWithProcess } from "../anima-env";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -609,12 +610,10 @@ export class SDKSession extends EventEmitter {
       canUseTool: async () => ({ behavior: "allow" as const }),
 
       // Environment — clear nesting detection vars, inject session ID
-      env: {
-        ...process.env,
+      env: animaSessionEnvWithProcess(this.id, {
         CLAUDECODE: "",
         CLAUDE_CODE_ENTRYPOINT: "",
-        ANIMA_SESSION_ID: this.id,
-      },
+      }),
     };
   }
 

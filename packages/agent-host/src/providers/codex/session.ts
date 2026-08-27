@@ -9,6 +9,7 @@ import type {
   ResumeSessionOptions,
   StreamEvent,
 } from "../../provider-types";
+import { animaSessionEnvWithProcess } from "../anima-env";
 
 const log = createLogger("CodexSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -66,7 +67,7 @@ function normalizeEffort(
   return fallback || "medium";
 }
 
-async function loadCodex(config: CodexProviderConfig): Promise<CodexClient> {
+async function loadCodex(config: CodexProviderConfig, sessionId: string): Promise<CodexClient> {
   if (config.createClient) return await config.createClient();
 
   const apiKey = config.apiKey || process.env.OPENAI_API_KEY;
@@ -95,6 +96,9 @@ async function loadCodex(config: CodexProviderConfig): Promise<CodexClient> {
   return new moduleImpl.Codex({
     apiKey,
     ...(config.cliPath ? { codexPathOverride: config.cliPath } : {}),
+    // Must spread process.env: the codex SDK documents that supplying `env`
+    // stops it inheriting the parent environment entirely.
+    env: animaSessionEnvWithProcess(sessionId),
   });
 }
 
@@ -152,7 +156,7 @@ export class CodexSession extends EventEmitter {
 
     this.runningPrompt = true;
     this.abortController = new AbortController();
-    this.client ||= await loadCodex(this.config);
+    this.client ||= await loadCodex(this.config, this.id);
     this.thread ||= this.client.startThread({
       workingDirectory: this.cwd,
       skipGitRepoCheck: true,
