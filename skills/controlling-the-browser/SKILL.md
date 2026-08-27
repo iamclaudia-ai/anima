@@ -89,11 +89,15 @@ and the session has no tab yet — they fail with the profile list. Pass `--prof
 ### Switching between tabs
 
 ```bash
-anima dominatrix session_tabs        # Tabs this session has worked in, newest first
+anima dominatrix session_tabs         # Tabs this session has worked in, newest first
 anima dominatrix use_tab --tabId 4821 # Switch back to one of them
+anima dominatrix close_tab            # Close the session's current tab
+anima dominatrix close_tab --tabId 4821 # Close a specific one
 ```
 
 `session_tabs` prunes tabs that have since been closed, and marks the current one.
+**Close the tabs you opened** when you're done — they're Michael's browser, and
+`close_tab` drops the tab from the session's list as it goes.
 
 ### Tab selectors
 
