@@ -156,6 +156,22 @@ function initDominatrix() {
       JSON,
       Math,
       Date,
+      // DOM constructors. Without these, `new MouseEvent(...)` fails with
+      // "MouseEvent is not defined" — which reads like a syntax-level
+      // limitation but is only this whitelist. Real events matter: synthetic
+      // `document.createEvent` dispatch drives JS listeners but never CSS
+      // `:hover`, so a purely CSS-driven tooltip stays uncapturable without them.
+      Event,
+      MouseEvent,
+      KeyboardEvent,
+      PointerEvent,
+      FocusEvent,
+      InputEvent,
+      CustomEvent,
+      Element,
+      Node,
+      NodeList,
+      HTMLElement,
     },
     { maxOps: 1_000_000 },
   );
