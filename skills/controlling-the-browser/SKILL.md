@@ -44,9 +44,69 @@ anima dominatrix snapshot
 
 **Key principle**: Always snapshot before interacting. Refs are invalidated on page navigation or dynamic changes — re-snapshot to get fresh refs.
 
+## Tabs, Sessions & Profiles — read this before navigating
+
+Chrome is usually running **several profiles**, each connected as its own client, and
+a tab ID only means something inside one profile. Two rules keep you out of trouble:
+
+**1. Open your own tab. Never hijack one of Michael's.**
+
+```bash
+anima dominatrix navigate --url "https://example.com" --tabId new
+# → { "tabId": 4821, "url": "...", "created": true, "profile": "kiliman@gmail.com" }
+```
+
+`--tabId new` opens a fresh tab and returns its ID. Without it, `navigate` drives
+whatever tab is already in front — which may be something Michael is working in.
+
+**2. After that, just omit `--tabId`.**
+
+Every command carries the session ID automatically (from `$ANIMA_SESSION_ID`), and
+DOMINATRIX remembers the tab your session opened. So this all lands in tab 4821:
+
+```bash
+anima dominatrix navigate --url "https://example.com/login" --tabId new
+anima dominatrix snapshot            # ← same tab
+anima dominatrix click --ref @e3     # ← same tab
+anima dominatrix screenshot          # ← same tab
+```
+
+The binding is set by `navigate`, `new_tab`, `use_tab`, or any explicit numeric
+`--tabId`. Read commands alone never pin the session, so `get_title` with no tab
+bound still reports the tab Michael is actually looking at.
+
+### Picking a profile
+
+```bash
+anima dominatrix list_profiles       # Connected profiles you can target
+anima dominatrix navigate --url "https://example.com" --tabId new --profile kiliman@gmail.com
+```
+
+`navigate` and `new_tab` **refuse to guess** when more than one profile is connected
+and the session has no tab yet — they fail with the profile list. Pass `--profile`
+(label or ID prefix) to choose. Once a session is bound, its profile is implied.
+
+### Switching between tabs
+
+```bash
+anima dominatrix session_tabs        # Tabs this session has worked in, newest first
+anima dominatrix use_tab --tabId 4821 # Switch back to one of them
+```
+
+`session_tabs` prunes tabs that have since been closed, and marks the current one.
+
+### Tab selectors
+
+| `--tabId`   | Meaning                                                     |
+| ----------- | ----------------------------------------------------------- |
+| _(omitted)_ | The session's bound tab, else the side panel / active tab   |
+| `new`       | Open a fresh tab (navigate / new_tab only) and bind to it   |
+| `active`    | Force the profile's focused tab, ignoring any stale binding |
+| `<number>`  | That exact tab, and bind the session to it                  |
+
 ## Commands
 
-All commands go through `anima dominatrix <method>`. When `--tab-id` is omitted, the active tab is used.
+All commands go through `anima dominatrix <method>`.
 
 ### Snapshot & Page Info
 
@@ -100,7 +160,12 @@ anima dominatrix find_placeholder --placeholder "Search..." --perform fill --val
 ### Navigation & Scrolling
 
 ```bash
-anima dominatrix navigate --url "https://example.com"
+anima dominatrix navigate --url "https://example.com" --tabId new  # Own tab (preferred)
+anima dominatrix navigate --url "https://example.com"              # Session's bound tab
+anima dominatrix navigate --url "https://example.com" --tabId 4821 # A specific tab
+anima dominatrix new_tab --url "https://example.com"               # Same as --tabId new
+anima dominatrix new_tab                                           # Blank tab
+anima dominatrix new_tab --url "https://example.com" --background   # Don't steal focus
 
 anima dominatrix scroll_down --value 500      # Scroll down 500px (default: 300)
 anima dominatrix scroll_up --value 300         # Scroll up
@@ -190,4 +255,9 @@ anima dominatrix snapshot --sources
 - **CSP bypass**: Script execution uses JailJS (AST interpreter) for sites with strict CSP
 - **Resilient injection**: If the content script isn't loaded (page reload, manual navigation), it's automatically injected on demand
 - **Console/Network**: Collected passively from content script load — retrieve history anytime
-- **Side panel context**: When the Anima side panel is open, commands without `--tabId` target that tab
+- **Tab binding**: Per session, persisted across gateway restarts. `session_tabs` shows it
+- **Profile routing**: Each command is addressed to one profile's extension instance; the
+  others ignore it. Profiles are identified by their signed-in email, or `chrome-<id>` when
+  signed out — `list_profiles` shows both
+- **Side panel context**: With no session binding and no `--tabId`, an open Anima side panel's
+  tab wins over the active tab. Use `--tabId active` to override that

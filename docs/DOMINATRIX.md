@@ -248,205 +248,109 @@ Note: `status: "healthy"` is hardcoded for all clients — there's no actual liv
 
 ---
 
-## Tab Resolution: Current Behavior and Problems
+## Tab, Session & Profile Routing
 
-### How resolveTabId Works Today
+Three questions have to be answered before any command can run: **which profile**,
+**which tab**, and **who is asking**. The answers come from `dispatch()` in the
+gateway extension and `resolveTabId()` in the Chrome background worker.
+
+### Which profile: explicit addressing
+
+Every Chrome profile runs its own extension instance with its own `instanceId`, and
+all of them subscribe to `dominatrix.command` non-exclusively. What makes exactly one
+of them act is the `targetInstanceId` on the command payload:
+
+```
+dispatch() → pickClient() → sendCommand(action, params, targetInstanceId)
+  → ctx.emit("dominatrix.command", { requestId, action, params, targetInstanceId })
+    → every Chrome client receives it
+      → each drops it unless targetInstanceId === its own instanceId
+```
+
+`pickClient()` resolves the profile in this order:
+
+1. **`--profile <label|id>`** — explicit wins. Matched against the profile's
+   signed-in email or its instance ID, exact first then prefix/substring.
+2. **The session's bound profile** — if this session is already working in a tab,
+   commands stay in that profile.
+3. **The only connected profile** — no ambiguity to resolve.
+4. **Refuse, or fall back**: `navigate` and `new_tab` throw an error listing the
+   connected profiles rather than guessing, because opening a tab in the wrong
+   profile isn't something the caller can undo. Every other command falls back to
+   the most recently focused profile.
+
+Focus is reported by re-registering with `focused: true` on
+`chrome.windows.onFocusChanged`; the gateway keeps it as `lastFocusedAt`. It is only
+a tiebreaker for reads now, not a routing mechanism.
+
+> **Why not exclusive subscriptions?** An earlier design had each profile re-subscribe
+> with `exclusive: true` on focus, so the last-focused profile received every command.
+> It routed by a global side effect: any window click anywhere silently re-pointed an
+> unrelated session's commands at a different browser. Addressing each command to one
+> instance makes the target a property of the command instead.
+
+### Which tab: session bindings
+
+Commands declare `sessionId` in their schema, so the CLI auto-injects
+`$ANIMA_SESSION_ID`. The gateway extension keeps a per-session binding:
 
 ```typescript
-// background.ts
-private async resolveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;                              // 1. Explicit tabId wins
-  if (this.contextTabId) return this.contextTabId;      // 2. Side panel context
-  const active = await this.getActiveTab();             // 3. chrome.tabs.query fallback
-  return active.id;
-}
-
-private async getActiveTab(): Promise<TabInfo | null> {
-  // "currentWindow" = the LAST FOCUSED window for this profile
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0];
-}
-```
-
-### Side Panel Context Tracking
-
-```typescript
-// sidepanel.ts — runs when side panel opens
-const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-chrome.runtime.sendMessage({ type: "sidepanel-context", tabId: tab.id });
-
-// Also tracks tab switches while panel is open:
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.runtime.sendMessage({ type: "sidepanel-context", tabId: activeInfo.tabId });
-});
-```
-
-### Problem 1: Side Panel is Per-Window, Not Per-Tab
-
-Chrome's side panel API is window-scoped. When you open it on Tab A and switch to Tab B, the panel stays open. The `onActivated` listener updates `contextTabId` to Tab B, which is correct. But the iframe URL still has `?tabId=<Tab A's id>` from initial load — though this is cosmetic since the background worker uses `contextTabId` for routing, not the iframe URL param.
-
-### Problem 2: `currentWindow` in Service Workers
-
-`chrome.tabs.query({ active: true, currentWindow: true })` behaves differently in service workers vs page contexts:
-
-- **In a page context** (popup, side panel): `currentWindow` = the window containing that page
-- **In a service worker** (background.ts): `currentWindow` = the **last focused window**
-
-So when `getActiveTab()` is called from the service worker (which handles commands), it returns the active tab in whichever window Chrome considers "current" — which may not be the window you're looking at if you recently clicked on another window.
-
-### Problem 3: Commands Broadcast to ALL Chrome Extensions
-
-```
-sendCommand() → ctx.emit("dominatrix.command", {...})
-  → broadcastEvent("dominatrix.command", {...})
-    → ALL WebSocket clients subscribed to "dominatrix.command" receive it
-```
-
-With multiple Chrome profiles, each has its own extension instance, each subscribed to `dominatrix.command`. **ALL of them execute the command.** The gateway accepts the **first** `dominatrix.response` and the rest hit `pendingRequests` as "unknown request" warnings.
-
-This means:
-
-- Profile A's extension might respond first with the wrong tab
-- Both extensions execute side effects (screenshots, clicks, etc.)
-- Race conditions determine which response wins
-
-### Problem 4: No Profile-Aware Routing
-
-The `dominatrix.command` event has no concept of "which Chrome extension instance should handle this." Every registered client gets every command.
-
----
-
-## Tab Resolution: Options
-
-### Option A: Always Require Tab ID (Explicit Routing)
-
-The most reliable approach. Every command includes a `tabId`. The workflow becomes:
-
-1. **Get tabs**: `dominatrix tabs` → shows all tabs across all profiles with IDs
-2. **Target tab**: `dominatrix snapshot --tab-id 123`
-
-For the chat UI / agent workflow:
-
-- When Anima needs to interact with the browser, first call `dominatrix tabs` to see what's available
-- Pick the right tab from the list
-- Use `--tab-id` for all subsequent commands
-
-**Pros**: Completely unambiguous, works with any number of profiles/windows
-**Cons**: Extra step to discover tab IDs, doesn't "just work" for the common case
-
-### Option B: Focus-Aware Active Tab (OS-Level)
-
-Query the truly focused tab using `chrome.windows.getLastFocused()` combined with the active tab in that window:
-
-```typescript
-private async getActiveTab(): Promise<TabInfo | null> {
-  const window = await chrome.windows.getLastFocused({ populate: false });
-  const tabs = await chrome.tabs.query({ active: true, windowId: window.id });
-  return tabs[0];
+interface SessionBinding {
+  instanceId: string; // profile the tab lives in
+  tabId: number; // the tab the session is working in
+  recent: number[]; // MRU of tabs this session has driven
+  updatedAt: number;
 }
 ```
 
-This is slightly better than `currentWindow` but still has the same profile problem — each extension instance only sees its own profile's windows. If you're focused on a Profile B window, Profile A's extension can't know that.
+Bindings persist through `ctx.store`, so a gateway restart doesn't lose the tab a
+long-running session is in the middle of.
 
-**Pros**: Better than current `currentWindow` behavior
-**Cons**: Still can't cross profile boundaries
+A command with no `--tabId` reuses the session's bound tab, as long as that tab lives
+in the profile that was picked. Binding happens only on acts that _choose_ a tab —
+`navigate`, `new_tab`, `use_tab`, or an explicit numeric `--tabId`. A bare
+`get_title` deliberately does **not** pin the session, so "what am I looking at?"
+keeps following the user's real active tab.
 
-### Option C: Focus-Aware Sticky Subscriptions (Recommended)
+### Tab selectors
 
-Use the existing gateway subscription system. The Chrome extension subscribes to `dominatrix.command` when its window gains focus. It does NOT unsubscribe on blur — the subscription is "sticky" until another client subscribes, which implicitly takes over as the active handler.
+`--tabId` accepts a number or one of two sentinels:
 
-```
-Chrome Extension A (personal):
-  window.onFocusChanged → subscribe({events: ["dominatrix.command"]})
+| Value       | Resolution                                                      |
+| ----------- | --------------------------------------------------------------- |
+| _(omitted)_ | Session's bound tab → side panel context → active tab           |
+| `new`       | `chrome.tabs.create()`; only `navigate` and `new_tab` accept it |
+| `active`    | The profile's focused tab, bypassing a stale side-panel context |
+| `<number>`  | That tab, and the session binds to it                           |
 
-Chrome Extension B (work):
-  window.onFocusChanged → subscribe({events: ["dominatrix.command"]})
+`new` survives the CLI intact because the schema is a `z.union([z.number(),
+z.enum(["new", "active"])])` — it lands as `anyOf` in JSON Schema, and the CLI's
+coercion leaves non-numeric text as a string.
 
-Only the LAST extension to subscribe receives command events.
-If no window is focused (e.g. you're in terminal), the last-focused
-extension still handles commands.
-```
+### Getting back to a tab
 
-Combined with explicit `--tab-id` override for when you need to target a specific tab.
+`session_tabs` lists the session's MRU with live titles and URLs, pruning tabs that
+have been closed and marking the current one. `use_tab --tabId <id>` re-binds the
+session to one of them and focuses it.
 
-**Pros**: Uses existing gateway infrastructure, no bespoke routing logic, naturally handles multi-profile, recoverable (just click the window to re-assert focus)
-**Cons**: Requires gateway support for "exclusive" subscriptions (last subscriber wins)
+### Known sharp edge: side panel context is per-window
 
-### Implementation Plan
+Chrome's side panel API is window-scoped. `sidepanel.ts` reports the active tab on
+open and on every `chrome.tabs.onActivated`, and the background worker keeps it as
+`contextTabId`. It is never cleared, so with no session binding and no `--tabId` a
+long-open side panel can still point at a tab in a different window than the one in
+front. `--tabId active` overrides it; a session binding takes precedence over it.
 
-**1. Gateway: Ping/Pong Protocol (general-purpose)**
+### `chrome.tabs.query` in service workers
 
-Add connection liveness to the gateway WebSocket protocol. This benefits all clients, not just dominatrix:
+`chrome.tabs.query({ active: true, currentWindow: true })` behaves differently in a
+service worker than in a page context: `currentWindow` means the **last focused
+window** rather than the window containing the caller. Since the background worker
+handles commands, `getActiveTab()` returns the active tab of whichever window Chrome
+last considered current — another reason a session binding beats "the active tab".
 
-```typescript
-// Gateway → Client (periodic, every 30s)
-{ type: "ping", id: "ping-123", timestamp: 1234567890 }
+### Client cleanup
 
-// Client → Gateway (must respond within 10s)
-{ type: "pong", id: "ping-123" }
-
-// Missed 2 consecutive pings:
-//   → Clean up subscriptions
-//   → Remove client from clients Map
-//   → Emit "client.disconnected" event to extensions
-```
-
-This gives:
-
-- Reliable subscription state (stale clients pruned automatically)
-- Accurate Mission Control health checks (no ghost entries)
-- Latency tracking (ping/pong RTT useful for diagnostics)
-
-**2. Gateway: Exclusive Subscriptions**
-
-New subscription mode where only the last subscriber receives events for a pattern:
-
-```typescript
-// Client → Gateway
-{
-  type: "req",
-  method: "subscribe",
-  params: {
-    events: ["dominatrix.command"],
-    exclusive: true  // ← last subscriber wins
-  }
-}
-```
-
-When a client subscribes exclusively:
-
-- Previous exclusive subscriber for that pattern is unsubscribed
-- Only one client receives events matching that pattern
-- Non-exclusive subscribers are unaffected
-
-**3. Chrome Extension: Focus Tracking**
-
-```typescript
-// background.ts
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) return; // All windows lost focus
-  // Re-subscribe — this makes us the active command handler
-  this.sendRequest("subscribe", {
-    events: ["dominatrix.command"],
-    exclusive: true,
-  });
-});
-```
-
-No unsubscribe on blur. No heartbeat logic. Just re-assert on focus. Sticky by default.
-
-**4. Explicit Override: --tab-id**
-
-`--tab-id` always works regardless of focus state. The command includes the tab ID, and the Chrome extension that owns that tab handles it. For this to work, the `dominatrix.command` event payload includes the `tabId`, and Chrome extensions that receive it check if they own that tab before executing.
-
-**5. Dominatrix Extension: Client Cleanup via Gateway Events**
-
-```typescript
-ctx.on("client.disconnected", (event) => {
-  // Gateway pruned a stale connection — remove from our clients Map
-  const connectionId = event.payload.connectionId;
-  // Look up which instanceId maps to this connectionId and remove it
-});
-```
-
-No more ghost entries. Mission Control health check becomes accurate.
+The gateway prunes stale WebSocket connections via ping/pong and emits
+`client.disconnected`; the extension maps `connectionId → instanceId` and drops the
+client, so Mission Control's health check doesn't accumulate ghost profiles.

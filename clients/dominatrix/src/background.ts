@@ -30,6 +30,12 @@ interface NetworkRequest {
   responseHeaders?: Record<string, string>;
 }
 
+/**
+ * How a command names its tab: a real ID, "new" to open one, "active" to force
+ * the focused tab, or nothing at all to fall back to the default.
+ */
+type TabSelector = number | "new" | "active" | undefined;
+
 interface TabInfo {
   id: number;
   url: string;
@@ -84,16 +90,13 @@ class DominatrixBackground {
       }
     });
 
-    // Focus tracking — re-subscribe exclusively when this profile's window gains focus.
-    // This makes this extension instance the active command handler (last subscriber wins).
+    // Focus tracking — report focus so the gateway knows which profile the user is
+    // looking at. Commands are addressed by instance ID now, so focus only breaks
+    // ties for read commands that named neither a profile nor a tab.
     chrome.windows.onFocusChanged.addListener((windowId) => {
       if (windowId === chrome.windows.WINDOW_ID_NONE) return;
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.sendRequest("gateway.subscribe", {
-          events: ["dominatrix.command"],
-          exclusive: true,
-        });
-        void this.registerClient();
+        void this.registerClient({ focused: true });
       }
     });
 
@@ -171,13 +174,14 @@ class DominatrixBackground {
           this.reconnectTimer = null;
         }
 
-        // Subscribe to command events exclusively (last subscriber wins)
+        // Subscribe non-exclusively: every profile's client sees every command and
+        // drops the ones addressed to a different instance. Subscribing exclusively
+        // would hand all commands to whichever profile connected last.
         this.sendRequest("gateway.subscribe", {
           events: ["dominatrix.command"],
-          exclusive: true,
         });
 
-        await this.registerClient();
+        await this.registerClient({ focused: true });
       };
 
       this.ws.onmessage = (event) => {
@@ -236,12 +240,13 @@ class DominatrixBackground {
     );
   }
 
-  private async registerClient() {
+  private async registerClient(opts: { focused?: boolean } = {}) {
     const profileName = await this.getProfileName();
     this.sendRequest("dominatrix.register", {
       extensionId: this.extensionId,
       instanceId: this.instanceId,
       profileName,
+      focused: opts.focused === true,
     });
   }
 
@@ -277,7 +282,20 @@ class DominatrixBackground {
 
       // We only care about command events
       if (message.type === "event" && message.event === "dominatrix.command") {
-        const { requestId, action, params = {} } = message.payload as Record<string, unknown>;
+        const {
+          requestId,
+          action,
+          params = {},
+          targetInstanceId,
+        } = message.payload as Record<string, unknown>;
+
+        // Commands are addressed to one profile. Everyone else stays quiet —
+        // responding here would race the intended profile for the same requestId.
+        if (targetInstanceId && targetInstanceId !== this.instanceId) {
+          console.log("[DOMINATRIX] Command not addressed to this profile, ignoring:", action);
+          return;
+        }
+
         console.log(
           "[DOMINATRIX] Command received:",
           action,
@@ -324,7 +342,7 @@ class DominatrixBackground {
   // --------------------------------------------------------------------------
 
   private async executeCommand(action: string, params: Record<string, unknown>): Promise<unknown> {
-    const tabId = params.tabId as number | undefined;
+    const tabId = params.tabId as TabSelector;
 
     switch (action) {
       // --- Content script commands: pass action + params straight through ---
@@ -360,6 +378,14 @@ class DominatrixBackground {
         return this.takeScreenshot(tabId);
       case "navigate":
         return this.navigate(tabId, params.url as string);
+      case "new_tab":
+        return this.newTab(params.url as string | undefined, params.background === true);
+      case "use_tab":
+        return this.useTab(params.tabId, params.focus !== false);
+      case "close_tab":
+        return this.closeTab(tabId);
+      case "get_tabs":
+        return this.getTabs((params.tabIds as number[]) || []);
       case "get_console":
         return this.getConsoleLogs(tabId);
       case "get_network":
@@ -386,44 +412,39 @@ class DominatrixBackground {
    * Delegate a command to the content script via the resilient dispatcher.
    */
   private async delegateToContentScript(
-    tabId: number | undefined,
+    tabId: TabSelector,
     message: Record<string, unknown>,
   ): Promise<unknown> {
     const id = await this.resolveTabId(tabId);
-    return this.sendToContentScript(id, message);
+    // Strip the selector so the content script never sees "new"/"active".
+    return this.sendToContentScript(id, { ...message, tabId: id });
   }
 
   // --------------------------------------------------------------------------
   // Tab helpers
   // --------------------------------------------------------------------------
 
-  private async resolveTabId(tabId?: number): Promise<number> {
-    if (tabId) return tabId;
-    // Prefer the side panel's context tab over generic "active tab"
-    if (this.contextTabId) return this.contextTabId;
+  /**
+   * Turn a tab selector into a real tab ID.
+   *
+   * `"active"` explicitly asks for the focused tab, which is how a caller escapes
+   * a stale side-panel context. Bare `undefined` keeps the old precedence: the
+   * side panel's tab if there is one, otherwise the active tab.
+   */
+  private async resolveTabId(tabId: TabSelector): Promise<number> {
+    if (typeof tabId === "number") return tabId;
+    if (tabId === "new") {
+      throw new Error('tabId "new" is only supported by navigate and new_tab');
+    }
+
+    if (tabId !== "active" && this.contextTabId) return this.contextTabId;
+
     const active = await this.getActiveTab();
     if (!active) throw new Error("No active tab");
     return active.id;
   }
 
-  private async listTabs(): Promise<TabInfo[]> {
-    const tabs = await chrome.tabs.query({});
-    const profileName = await this.getProfileName();
-    return tabs.map((tab) => ({
-      id: tab.id!,
-      url: tab.url || "",
-      title: tab.title || "",
-      active: tab.active,
-      windowId: tab.windowId,
-      profileId: this.instanceId,
-      profileName,
-    }));
-  }
-
-  private async getActiveTab(): Promise<TabInfo | null> {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs.length === 0) return null;
-    const tab = tabs[0];
+  private async toTabInfo(tab: chrome.tabs.Tab): Promise<TabInfo> {
     const profileName = await this.getProfileName();
     return {
       id: tab.id!,
@@ -436,11 +457,35 @@ class DominatrixBackground {
     };
   }
 
+  private async listTabs(): Promise<TabInfo[]> {
+    const tabs = await chrome.tabs.query({});
+    return Promise.all(tabs.map((tab) => this.toTabInfo(tab)));
+  }
+
+  private async getActiveTab(): Promise<TabInfo | null> {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length === 0) return null;
+    return this.toTabInfo(tabs[0]);
+  }
+
+  /** Look up specific tabs, skipping any that have since been closed. */
+  private async getTabs(tabIds: number[]): Promise<TabInfo[]> {
+    const found: TabInfo[] = [];
+    for (const id of tabIds) {
+      try {
+        found.push(await this.toTabInfo(await chrome.tabs.get(id)));
+      } catch {
+        // Tab was closed — the caller prunes it from its list.
+      }
+    }
+    return found;
+  }
+
   // --------------------------------------------------------------------------
   // Browser-level command implementations (no content script needed)
   // --------------------------------------------------------------------------
 
-  private async takeScreenshot(tabId?: number) {
+  private async takeScreenshot(tabId: TabSelector) {
     const id = await this.resolveTabId(tabId);
     const tab = await chrome.tabs.get(id);
     if (!tab.windowId) throw new Error("Tab has no window");
@@ -448,24 +493,76 @@ class DominatrixBackground {
     return chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
   }
 
-  private async navigate(tabId?: number, url?: string) {
-    const id = await this.resolveTabId(tabId);
+  private async navigate(tabId: TabSelector, url?: string) {
     if (!url) throw new Error("No URL provided");
+
+    if (tabId === "new") return this.newTab(url, false);
+
+    const id = await this.resolveTabId(tabId);
     await chrome.tabs.update(id, { url });
-    return { tabId: id, url };
+    return { tabId: id, url, created: false };
   }
 
-  private async getConsoleLogs(tabId?: number): Promise<ConsoleLog[]> {
+  /** Open a tab. Returns its ID so the caller can keep working in it. */
+  private async newTab(url?: string, background = false) {
+    const tab = await chrome.tabs.create({ url, active: !background });
+    if (!tab.id) throw new Error("Chrome did not return an ID for the new tab");
+    return {
+      tabId: tab.id,
+      url: url || tab.pendingUrl || "",
+      windowId: tab.windowId,
+      created: true,
+    };
+  }
+
+  /** Point the caller back at an existing tab, confirming it is still open. */
+  private async useTab(tabId: unknown, focus: boolean) {
+    if (typeof tabId !== "number") {
+      throw new Error("use_tab needs a numeric --tabId (see session_tabs or list_tabs)");
+    }
+
+    let tab: chrome.tabs.Tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      throw new Error(`Tab ${tabId} is no longer open. Run session_tabs to see what's left.`);
+    }
+
+    if (focus) {
+      tab = (await chrome.tabs.update(tabId, { active: true })) ?? tab;
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+
+    // `tabId` alongside TabInfo's `id` is what tells the gateway which tab to bind.
+    return { ...(await this.toTabInfo(tab)), tabId: tab.id! };
+  }
+
+  /** Close a tab — how a session cleans up the tabs it opened. */
+  private async closeTab(tabId: TabSelector) {
+    const id = await this.resolveTabId(tabId);
+
+    let url = "";
+    try {
+      url = (await chrome.tabs.get(id)).url || "";
+    } catch {
+      throw new Error(`Tab ${id} is not open.`);
+    }
+
+    await chrome.tabs.remove(id);
+    return { tabId: id, url, closed: true };
+  }
+
+  private async getConsoleLogs(tabId: TabSelector): Promise<ConsoleLog[]> {
     const id = await this.resolveTabId(tabId);
     return this.consoleLogs.get(id) || [];
   }
 
-  private async listNetworkRequests(tabId?: number): Promise<NetworkRequest[]> {
+  private async listNetworkRequests(tabId: TabSelector): Promise<NetworkRequest[]> {
     const id = await this.resolveTabId(tabId);
     return this.networkRequests.get(id) || [];
   }
 
-  private async getCookies(tabId?: number) {
+  private async getCookies(tabId: TabSelector) {
     const id = await this.resolveTabId(tabId);
     const tab = await chrome.tabs.get(id);
     if (!tab.url) throw new Error("Tab has no URL");
@@ -473,7 +570,7 @@ class DominatrixBackground {
   }
 
   private async waitForUrl(
-    tabId?: number,
+    tabId: TabSelector,
     pattern?: string,
     timeout = 10000,
   ): Promise<{ matched: boolean; url: string }> {
