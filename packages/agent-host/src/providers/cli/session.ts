@@ -59,6 +59,10 @@ export interface ClaudeCliProviderConfig {
   model?: string;
   /** Append full request/response JSON to the proxy capture file (debugging). */
   capture?: boolean;
+  /** Persona file handed to the CLI (`~` expanded). e.g. `~/memory/personas/claudia.md`. */
+  systemPromptFile?: string;
+  /** "append" (default) keeps Claude Code's system prompt; "replace" swaps it out. */
+  systemPromptMode?: "append" | "replace";
 }
 
 /**
@@ -451,6 +455,24 @@ export class ClaudeCliSession extends EventEmitter {
     return false;
   }
 
+  /**
+   * Absolute path to the configured persona file, or undefined.
+   *
+   * The CLI hard-errors and exits on a missing `--system-prompt[-file]` path,
+   * which would break every launch, so a bad config is downgraded to a warning
+   * and the flag is dropped.
+   */
+  private resolveSystemPromptFile(): string | undefined {
+    const raw = this.config.systemPromptFile?.trim();
+    if (!raw) return undefined;
+    const path = raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
+    if (!existsSync(path)) {
+      log.warn("systemPromptFile not found — launching without it", { path });
+      return undefined;
+    }
+    return path;
+  }
+
   /** Build the claude argv + env. `resume` picks --resume vs --session-id. */
   private claudeCommand(resume: boolean): { command: string[]; env: Record<string, string> } {
     const claudeBin = findClaude(this.config.cliPath);
@@ -462,6 +484,18 @@ export class ClaudeCliSession extends EventEmitter {
       "--disallowedTools",
       DISALLOWED_TOOLS,
     );
+    // Persona file first: in "replace" mode it swaps out Claude Code's own
+    // system prompt, so it must not clobber the per-session context below.
+    const personaFile = this.resolveSystemPromptFile();
+    if (personaFile) {
+      const flag =
+        this.config.systemPromptMode === "replace"
+          ? "--system-prompt-file"
+          : "--append-system-prompt-file";
+      args.push(flag, personaFile);
+    }
+    // Per-session context (memory bootstrap + time reminder) always appends,
+    // whichever mode the persona uses.
     if (this.systemPrompt && this.systemPrompt.trim()) {
       args.push("--append-system-prompt", this.systemPrompt.trim());
     }

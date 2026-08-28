@@ -121,6 +121,17 @@ export interface AgentHostConfig {
     interception?: "base-url" | "mitm";
     /** Append full request/response JSON to ~/.anima/logs/cli-proxy-capture.jsonl. */
     capture?: boolean;
+    /**
+     * Persona file handed to the CLI (`~` expanded). Mirrors the `ccyolo`
+     * alias: `--system-prompt-file ~/memory/personas/claudia.md`.
+     */
+    systemPromptFile?: string;
+    /**
+     * How `systemPromptFile` is applied. "append" (default) keeps Claude
+     * Code's own system prompt and adds the persona after it; "replace"
+     * swaps the default system prompt out entirely, exactly like `ccyolo`.
+     */
+    systemPromptMode?: "append" | "replace";
   };
   /** Idle-reaper: close sessions whose last activity is older than this (ms). */
   idleStaleMs?: number;
