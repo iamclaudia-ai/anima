@@ -262,7 +262,7 @@ export class ClaudeCliSession extends EventEmitter {
   private proxyPort = 0;
 
   private readonly cwd: string;
-  /** Bare model id (suffix stripped) — used only for getInfo() reporting. */
+  /** Bare model id (suffix stripped) — what actually goes on the wire. */
   private readonly model: string;
   /**
    * Model id passed to the CLI's `--model`. Keeps the `[1m]` variant so the TUI's
@@ -1150,7 +1150,13 @@ export class ClaudeCliSession extends EventEmitter {
     return {
       id: this.id,
       cwd: this.cwd,
-      model: this.model,
+      // The variant-carrying id, not the bare one: `getSessionRecords()` feeds
+      // this straight into ~/.anima/agent-host/sessions.json, and restore
+      // resumes with whatever it finds. Reporting the sanitized id silently
+      // dropped `[1m]` on every agent-host restart, downgrading live 1M
+      // sessions to the 200K window. Every consumer compares through
+      // `sameModel()`, which strips the suffix anyway, so carrying it is free.
+      model: this.cliModel,
       isActive: this.isActive,
       isProcessRunning: this.isProcessRunning,
       createdAt: new Date(this.createdAt).toISOString(),
