@@ -7,10 +7,46 @@ description: "MUST be used when reviewing GitHub PRs with inline code comments. 
 
 Two complementary `gh` CLI extensions for professional PR reviews from the terminal.
 
-| Tool           | Purpose                                                           | Install                                                                |
-| -------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `gh comment`   | **Writing** reviews — inline comments, batch, reactions           | `gh extension install silouanwright/gh-comment` (or build from source) |
-| `gh pr-review` | **Reading** reviews — threads, resolve/unresolve, pending reviews | `gh extension install agynio/gh-pr-review`                             |
+| Tool           | Purpose                                                           | Install                                            |
+| -------------- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| `gh comment`   | **Writing** reviews — inline comments, batch, reactions           | **Use our fork:** `kiliman/gh-comment` (see below) |
+| `gh pr-review` | **Reading** reviews — threads, resolve/unresolve, pending reviews | `gh extension install agynio/gh-pr-review`         |
+
+## We run a fork of `gh comment` 🍴
+
+Upstream (`silouanwright/gh-comment`) went quiet after Sept 2025 — open issues from
+March 2026 have never been answered, including "cannot install with `gh extension
+install`". We maintain **`kiliman/gh-comment`** instead, checked out in place at
+`~/.local/share/gh/extensions/gh-comment` (`origin` = our fork, `upstream` = theirs).
+Don't send PRs upstream; nobody is reading them.
+
+What our fork fixes:
+
+- **Diff fetching is authenticated.** Upstream fetched `diff_url` with a bare
+  `http.Get`, which 404s on every private repo.
+- **`gh comment lines` shows real code**, and `--show-code` defaults on. Upstream
+  printed the literal string `[code content would be shown here]`.
+- **The body scan understands markdown code.** See below.
+
+Rebuild after editing: `cd ~/.local/share/gh/extensions/gh-comment && go build -o gh-comment .`
+Gate on `go test ./cmd/... ./internal/...` — the `./test/` integration suite is
+pre-existing red upstream (a fixture exercises a `--status` flag that was never built).
+
+### ⚠️ Backtick every piece of code you quote
+
+`gh comment` refuses bodies that look like injected HTML, and that check is a
+false-positive filter, not a security boundary — GitHub sanitizes markdown
+server-side. Our fork strips fenced blocks and inline spans before scanning, so
+**quoted code is fine as long as it's in backticks**:
+
+- ✅ ``the `onClose={() => setOpen(false)}` handler`` — inline span, stripped
+- ✅ a fenced ` ```tsx ` block containing JSX props — stripped
+- ❌ `onClose={...}` written bare in prose — still matches `on\w+\s*=`
+
+Raw HTML outside code is still refused by design (`<button onclick='…'>`). If a
+review is rejected with **"dangerous attributes detected"** or **"dangerous HTML
+tags detected"**, you almost certainly forgot the backticks — it is not a network
+or auth failure, and the whole review is refused rather than silently dropped.
 
 ## When to Use
 
