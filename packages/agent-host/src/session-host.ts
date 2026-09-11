@@ -368,6 +368,11 @@ export class SessionHost extends EventEmitter {
    *
    * This is deliberately NOT what `close(sessionId)` does. An explicit close
    * from a client means "tear it down"; this means "stop holding it".
+   *
+   * Only `closeAll()` may use this — agent-host is going away, so something
+   * must come back for the pane, and startup restore does. The idle reaper must
+   * NOT: nothing comes back for a pane we release while still running, and it
+   * then survives forever (#76).
    */
   private async detach(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
@@ -395,16 +400,22 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * Release sessions whose runtime is live but which have been idle beyond the
+   * Close sessions whose runtime is live but which have been idle beyond the
    * threshold. Session metadata remains persisted, so the next prompt
    * lazy-resumes.
    *
-   * Uses `detach()`, not `close()`. Killing an idle CLI session destroys the
-   * tmux pane and the `claude` process inside it, and a `Monitor` is a child of
-   * that process — so a session watching a job that stays quiet past the
-   * threshold used to be reaped precisely when it was most needed, taking the
-   * monitor with it. Idle is not the same as finished. Releasing frees what we
-   * were holding and leaves the runtime to keep working.
+   * Must be `close()`, not `detach()`. Releasing looks kinder — it preserves
+   * the tmux pane and the `claude` process, so a `Monitor` running inside
+   * survives — but it removes the ONLY path that ever terminates a CLI session:
+   * a released session is untracked, and `reapOrphanTmuxPanes()` skips every
+   * untracked pane whose process is still alive (`claudeProcessAlive` is its
+   * ground truth). Nothing else kills one. Shipping that traded a recoverable
+   * inconvenience for an unbounded leak — 52 panes and 12 GB resident in six
+   * days (#75, #76).
+   *
+   * A `Monitor` dying with its session is the accepted cost until durable
+   * watches move to the scheduler extension, where they belong: it lives in the
+   * gateway, outlives any session, and can wake a reaped one by prompting it.
    */
   async reapIdleRunningSessions(idleMs: number, nowMs: number = Date.now()): Promise<string[]> {
     if (!Number.isFinite(idleMs) || idleMs <= 0) {
@@ -430,12 +441,12 @@ export class SessionHost extends EventEmitter {
     }
 
     for (const { sessionId, idleForMs } of staleSessions) {
-      log.info("Idle reaper releasing session", {
+      log.info("Idle reaper closing session", {
         sessionId: sessionId.slice(0, 8),
         idleForMs,
         idleThresholdMs: idleMs,
       });
-      await this.detach(sessionId);
+      await this.close(sessionId);
     }
 
     return staleSessions.map((s) => s.sessionId);

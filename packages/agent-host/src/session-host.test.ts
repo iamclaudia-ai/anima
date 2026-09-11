@@ -210,7 +210,7 @@ describe("SessionHost", () => {
     expect(host.list().map((s) => (s as { id: string }).id)).toEqual(["s-fresh"]);
   });
 
-  it("releases an idle session rather than killing its runtime", async () => {
+  it("CLOSES an idle session even when the provider offers release()", async () => {
     const stale = new ReleasableFakeSession("s-monitor");
     stale.isProcessRunning = true;
     stale.lastActivityIso = new Date(1_000).toISOString();
@@ -228,12 +228,12 @@ describe("SessionHost", () => {
     const reaped = await host.reapIdleRunningSessions(300_000, 301_000);
 
     expect(reaped).toEqual(["s-monitor"]);
-    expect(stale.released).toBe(true);
-    // close() would kill the tmux pane, and with it the `claude` process and
-    // anything running inside it — a Monitor watching a job that has simply
-    // gone quiet. Idle is not finished.
-    expect(stale.closed).toBe(false);
-    // Released still means untracked: we stop holding it either way.
+    // Regression guard for #76. Releasing here preserves the tmux pane and the
+    // `claude` process, and NOTHING ever collects them afterwards: the pane
+    // reaper skips any untracked pane whose process is alive. Six days of that
+    // cost 52 panes and 12 GB. The idle reaper must close.
+    expect(stale.closed).toBe(true);
+    expect(stale.released).toBe(false);
     expect(host.list()).toEqual([]);
   });
 

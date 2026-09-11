@@ -136,17 +136,17 @@ const idleReapTimer = setInterval(async () => {
   idleReapRunning = true;
   try {
     if (ctx.sessionHost.reapIdleRunningSessions) {
-      const releasedIds = await ctx.sessionHost.reapIdleRunningSessions(IDLE_STALE_MS);
-      if (releasedIds.length > 0) {
+      const closedIds = await ctx.sessionHost.reapIdleRunningSessions(IDLE_STALE_MS);
+      if (closedIds.length > 0) {
         for (const [, client] of ctx.clients) {
-          for (const sessionId of releasedIds) {
+          for (const sessionId of closedIds) {
             client.subscribedSessions.delete(sessionId);
           }
         }
-        log.info("Released idle sessions", {
+        log.info("Closed idle sessions", {
           idleMs: IDLE_STALE_MS,
-          count: releasedIds.length,
-          sessions: releasedIds.map((id) => id.slice(0, 8)),
+          count: closedIds.length,
+          sessions: closedIds.map((id) => id.slice(0, 8)),
         });
       }
     }
