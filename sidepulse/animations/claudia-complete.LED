@@ -1,0 +1,7 @@
+off
+3:#FFC24A 200ms ease-out 0ms; 4:#FFC24A 200ms ease-out 0ms
+2:#FF6EC7 200ms ease-out 60ms; 5:#FF6EC7 200ms ease-out 60ms
+1:#B84DFF 200ms ease-out 120ms; 6:#B84DFF 200ms ease-out 120ms
+0:#2FA8FF 200ms ease-out 180ms; 7:#2FA8FF 200ms ease-out 180ms
+off 700ms cosine
+repeat 2

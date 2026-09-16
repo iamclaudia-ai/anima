@@ -1,0 +1,5 @@
+brightness 150
+off
+0:#6e1fff 380ms pulse 0ms; 1:#6e1fff 380ms pulse 98ms; 2:#6e1fff 380ms pulse 196ms; 3:#6e1fff 380ms pulse 294ms; 4:#6e1fff 380ms pulse 392ms; 5:#6e1fff 380ms pulse 490ms; 6:#6e1fff 380ms pulse 588ms; 7:#6e1fff 380ms pulse 686ms
+7:#1f41ea 380ms pulse 0ms; 6:#1f41ea 380ms pulse 98ms; 5:#1f41ea 380ms pulse 196ms; 4:#1f41ea 380ms pulse 294ms; 3:#1f41ea 380ms pulse 392ms; 2:#1f41ea 380ms pulse 490ms; 1:#1f41ea 380ms pulse 588ms; 0:#1f41ea 380ms pulse 686ms
+repeat

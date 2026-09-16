@@ -1,0 +1,4 @@
+off
+0:#6e1fff 300ms pulse 0ms; 1:#6e1fff 300ms pulse 77ms; 2:#6e1fff 300ms pulse 154ms; 3:#6e1fff 300ms pulse 231ms; 4:#6e1fff 300ms pulse 308ms; 5:#6e1fff 300ms pulse 385ms; 6:#6e1fff 300ms pulse 462ms; 7:#6e1fff 300ms pulse 539ms
+7:#1f41ea 300ms pulse 0ms; 6:#1f41ea 300ms pulse 77ms; 5:#1f41ea 300ms pulse 154ms; 4:#1f41ea 300ms pulse 231ms; 3:#1f41ea 300ms pulse 308ms; 2:#1f41ea 300ms pulse 385ms; 1:#1f41ea 300ms pulse 462ms; 0:#1f41ea 300ms pulse 539ms
+repeat
