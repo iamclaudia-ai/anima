@@ -26,7 +26,7 @@ import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { truncatePreservingSurrogates, type ExtensionContext } from "@anima/shared";
+import { truncatePreservingSurrogates, withTimeout, type ExtensionContext } from "@anima/shared";
 import {
   getNextQueued,
   getQueuedCount,
@@ -100,6 +100,33 @@ function computeEpisodePath(firstTimestamp: string, convId: number, timezone: st
 const LIBBY_TRANSCRIPTS_DIR = join(LIBBY_CWD, "transcripts");
 if (!existsSync(LIBBY_TRANSCRIPTS_DIR)) mkdirSync(LIBBY_TRANSCRIPTS_DIR, { recursive: true });
 
+/** Libby's "ready" handshake takes seconds; anything near this is a hang. */
+const INIT_TIMEOUT_MS = 2 * 60 * 1000;
+
+/** How far back `open()` looks for sessions a previous worker stranded. */
+const ORPHAN_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/** Transcript attempts before a conversation is parked for review. */
+export const MAX_CONVERSATION_ATTEMPTS = 3;
+
+/** Worker backoff after a failure: 5s, doubling, capped at 30 minutes. */
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_MAX_MS = 30 * 60 * 1000;
+
+export function backoffDelayMs(consecutiveFailures: number): number {
+  const exponent = Math.max(0, consecutiveFailures - 1);
+  return Math.min(BACKOFF_BASE_MS * 2 ** exponent, BACKOFF_MAX_MS);
+}
+
+/**
+ * Libby herself couldn't start — the system prompt failed, so this says
+ * nothing about the conversation waiting to be processed. Kept distinct so a
+ * broken Libby backs off globally instead of parking the whole queue.
+ */
+export class LibbyOpenError extends Error {
+  override name = "LibbyOpenError";
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -142,7 +169,7 @@ interface SessionRuntimeInfo {
  * Creates one session for one transcript.
  * The system prompt is sent as the first message to establish Libby's identity.
  */
-class LibbySession {
+export class LibbySession {
   private _sessionId: string | null = null;
   private initialized = false;
   promptCount = 0;
@@ -172,25 +199,11 @@ class LibbySession {
     // Get or create Libby's workspace
     await this.ctx.call("session.get_or_create_workspace", { cwd: LIBBY_CWD });
 
-    // Clean up orphaned sessions from previous runs (e.g. killed by HMR/restart)
-    try {
-      const sessions = (await this.ctx.call("session.list_sessions", { cwd: LIBBY_CWD })) as {
-        sessions: Array<{ id: string }>;
-      };
-      if (sessions?.sessions?.length) {
-        for (const s of sessions.sessions) {
-          try {
-            await this.ctx.call("session.close_session", { sessionId: s.id });
-          } catch {
-            // Already closed or gone
-          }
-        }
-      }
-    } catch {
-      // list_sessions may fail if workspace doesn't exist yet — fine
-    }
+    await this.closeOrphanedSessions();
 
-    // Create a session
+    // `create_session` only drafts a DB row — the CLI pane isn't spawned until
+    // the first prompt, so from here on we always hold the id of anything that
+    // could leak.
     const result = (await this.ctx.call("session.create_session", {
       cwd: LIBBY_CWD,
       model: this.model,
@@ -203,22 +216,62 @@ class LibbySession {
     // Send system prompt as first message
     const initPrompt = `${SYSTEM_PROMPT}\n\n---\n\nYou are now ready to process conversation transcripts. For each transcript I send, use your tools to write memories to ~/memory/, then respond with a SUMMARY or SKIP line.\n\nRespond with "ready" to confirm you understand.`;
 
-    const initResult = (await this.ctx.call("session.send_prompt", {
-      sessionId: this._sessionId,
-      content: initPrompt,
-      streaming: false,
-    })) as { text: string; stopReason?: string };
+    try {
+      const initResult = (await withTimeout(
+        this.ctx.call("session.send_prompt", {
+          sessionId: this._sessionId,
+          content: initPrompt,
+          streaming: false,
+        }),
+        INIT_TIMEOUT_MS,
+        "Libby system prompt",
+      )) as { text: string; stopReason?: string };
 
-    if (!initResult.text) {
-      const reason = initResult.stopReason || "unknown";
-      throw new Error(
-        `System prompt got no response (stop_reason: ${reason}). ` +
-          `Check API credentials and model availability.`,
-      );
+      if (!initResult.text) {
+        const reason = initResult.stopReason || "unknown";
+        throw new Error(
+          `System prompt got no response (stop_reason: ${reason}). ` +
+            `Check API credentials and model availability.`,
+        );
+      }
+    } catch (error) {
+      // A failed init must not strand its CLI pane — every retry would leave
+      // one more behind (#80).
+      await this.close();
+      throw new LibbyOpenError(error instanceof Error ? error.message : String(error));
     }
 
     this.initialized = true;
     this.promptCount = 0;
+  }
+
+  /**
+   * Close Libby sessions a previous worker left behind (crash, restart, HMR
+   * mid-open). Bounded to recent sessions: `list_sessions` returns every
+   * transcript ever written in ~/libby, and anything older than the window
+   * has long since been reaped by agent-host's idle reaper.
+   */
+  private async closeOrphanedSessions(): Promise<void> {
+    let sessions: Array<{ sessionId: string; modified?: string }>;
+    try {
+      const listed = (await this.ctx.call("session.list_sessions", { cwd: LIBBY_CWD })) as {
+        sessions?: Array<{ sessionId: string; modified?: string }>;
+      };
+      sessions = listed?.sessions ?? [];
+    } catch {
+      return; // workspace may not exist yet
+    }
+
+    const cutoff = Date.now() - ORPHAN_WINDOW_MS;
+    for (const s of sessions) {
+      const modified = s.modified ? Date.parse(s.modified) : Number.NaN;
+      if (!s.sessionId || !(modified >= cutoff)) continue;
+      try {
+        await this.ctx.call("session.close_session", { sessionId: s.sessionId });
+      } catch {
+        // Already closed or gone
+      }
+    }
   }
 
   /**
@@ -303,6 +356,10 @@ export class LibbyWorker {
   private loopPromise: Promise<void> | null = null;
   private sleepAbort: AbortController | null = null;
   private session: LibbySession | null = null;
+  /** Failed transcript attempts per conversation (open failures don't count). */
+  private conversationFailures = new Map<number, number>();
+  /** Failures in a row, any cause — drives the loop's backoff. */
+  private consecutiveFailures = 0;
 
   constructor(
     private config: LibbyConfig,
@@ -345,6 +402,10 @@ export class LibbyWorker {
    * Called when memory.process queues new conversations.
    */
   wake(): void {
+    // New work is no reason to cut a failure backoff short — that would turn
+    // it back into a retry every time a transcript is queued. stop() still
+    // aborts the sleep directly.
+    if (this.consecutiveFailures > 0) return;
     this.sleepAbort?.abort();
   }
 
@@ -376,11 +437,16 @@ export class LibbyWorker {
         } else {
           await this.sleep(WORKER_SLEEP_MS);
         }
+        this.consecutiveFailures = 0;
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        this.log("ERROR", `Libby: Worker loop error: ${msg}`);
-        // Brief pause before retrying to avoid tight error loops
-        await this.sleep(5000);
+        this.consecutiveFailures += 1;
+        const delayMs = backoffDelayMs(this.consecutiveFailures);
+        this.log(
+          "ERROR",
+          `Libby: Worker loop error (${this.consecutiveFailures} in a row, retrying in ${Math.round(delayMs / 1000)}s): ${msg}`,
+        );
+        await this.sleep(delayMs);
       }
     }
   }
@@ -512,66 +578,70 @@ export class LibbyWorker {
       `Libby: [${conv.id}] ${transcript.date} ${transcript.timeRange} — ${entries.length} entries, ${transcriptKB}KB transcript [${queuedRemaining - 1} queued]`,
     );
 
-    // Fresh session per conversation — no compaction overhead
+    // Fresh session per conversation — no compaction overhead. Everything from
+    // open() on runs inside one try/finally: a session that was opened, or
+    // half-opened, is always closed, whatever fails (#80).
     if (!this.ctx) throw new Error("Libby: No extension context — cannot create session");
-    this.session = new LibbySession(this.ctx, this.config.model, this.log);
-    this.log("INFO", "Libby: Opening session...");
-    await this.session.open();
-    this.log("INFO", "Libby: Session ready");
+    const session = new LibbySession(this.ctx, this.config.model, this.log);
+    this.session = session;
 
-    // Mark as processing with metadata (include sessionId for recovery checks)
-    updateConversationStatus(conv.id, "processing", {
-      transcriptKB: Number(transcriptKB),
-      entries: entries.length,
-      date: transcript.date,
-      timeRange: transcript.timeRange,
-      cwd: transcript.primaryCwd,
-      sessionId: this.session.sessionId,
-    });
-
-    // Look up previous conversations from same source for context
-    const previousContext = getPreviousConversationContext(conv.sourceFile, conv.firstMessageAt);
-
-    let contextBlock = "";
-    if (previousContext.length > 0) {
-      const ctxEntries = previousContext.map((pc) => {
-        const files =
-          pc.filesWritten.length > 0
-            ? `\nFiles written: ${pc.filesWritten.map((f) => f.replace(homedir() + "/memory/", "")).join(", ")}`
-            : "";
-        return `- [${pc.date}] ${pc.summary || "(no summary)"}${files}`;
-      });
-      contextBlock = `\n## Context from Previous Conversations\n\nThese are summaries and files from the conversations immediately before this one in the same session. Use them to resolve ambiguous references like "this", "it", or "what we discussed".\n\n${ctxEntries.join("\n")}\n\n`;
-    }
-
-    // Write the transcript to disk and reference it by path — pasting 30KB+
-    // through tmux bracketed-paste is unreliable (Claude's TUI silently drops
-    // very large pastes), and Libby has a Read tool anyway. The session's
-    // cwd is ~/libby, so the relative path resolves cleanly.
-    const transcriptPath = join(LIBBY_TRANSCRIPTS_DIR, `${conv.id}.md`);
     try {
-      await Bun.write(transcriptPath, transcript.text);
-    } catch (err) {
-      throw new Error(
-        `Failed to write transcript file ${transcriptPath}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+      this.log("INFO", "Libby: Opening session...");
+      await session.open();
+      this.log("INFO", "Libby: Session ready");
 
-    const prompt = `${contextBlock}Process the conversation transcript at transcripts/${conv.id}.md (conversation ID: ${conv.id}). Use your Read tool to load it.
+      // Mark as processing with metadata (include sessionId for recovery checks)
+      updateConversationStatus(conv.id, "processing", {
+        transcriptKB: Number(transcriptKB),
+        entries: entries.length,
+        date: transcript.date,
+        timeRange: transcript.timeRange,
+        cwd: transcript.primaryCwd,
+        sessionId: session.sessionId,
+      });
+
+      // Look up previous conversations from same source for context
+      const previousContext = getPreviousConversationContext(conv.sourceFile, conv.firstMessageAt);
+
+      let contextBlock = "";
+      if (previousContext.length > 0) {
+        const ctxEntries = previousContext.map((pc) => {
+          const files =
+            pc.filesWritten.length > 0
+              ? `\nFiles written: ${pc.filesWritten.map((f) => f.replace(homedir() + "/memory/", "")).join(", ")}`
+              : "";
+          return `- [${pc.date}] ${pc.summary || "(no summary)"}${files}`;
+        });
+        contextBlock = `\n## Context from Previous Conversations\n\nThese are summaries and files from the conversations immediately before this one in the same session. Use them to resolve ambiguous references like "this", "it", or "what we discussed".\n\n${ctxEntries.join("\n")}\n\n`;
+      }
+
+      // Write the transcript to disk and reference it by path — pasting 30KB+
+      // through tmux bracketed-paste is unreliable (Claude's TUI silently drops
+      // very large pastes), and Libby has a Read tool anyway. The session's
+      // cwd is ~/libby, so the relative path resolves cleanly.
+      const transcriptPath = join(LIBBY_TRANSCRIPTS_DIR, `${conv.id}.md`);
+      try {
+        await Bun.write(transcriptPath, transcript.text);
+      } catch (err) {
+        throw new Error(
+          `Failed to write transcript file ${transcriptPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      const prompt = `${contextBlock}Process the conversation transcript at transcripts/${conv.id}.md (conversation ID: ${conv.id}). Use your Read tool to load it.
 
 Episode file: ~/memory/${episodePath}
 
 FIRST write your reasoning log to ~/.anima/memory/libby/logs/${conv.id}.md, THEN write the episode to the path above and any other memories to ~/memory/, then respond with SUMMARY or SKIP.`;
 
-    this.log(
-      "INFO",
-      `Libby: [${conv.id}] Sending ${(prompt.length / 1024).toFixed(1)}KB prompt (session prompt #${this.session.promptCount + 1})`,
-    );
+      this.log(
+        "INFO",
+        `Libby: [${conv.id}] Sending ${(prompt.length / 1024).toFixed(1)}KB prompt (session prompt #${session.promptCount + 1})`,
+      );
 
-    try {
       // Send transcript — Libby uses tools to write files, then responds with SUMMARY/SKIP
       const startTime = Date.now();
-      const rawResponse = await this.session.processTranscript(prompt);
+      const rawResponse = await session.processTranscript(prompt);
       await finalizeLibbyConversation(
         conv.id,
         rawResponse,
@@ -581,19 +651,54 @@ FIRST write your reasoning log to ~/.anima/memory/libby/logs/${conv.id}.md, THEN
         this.ctx,
         startTime,
       );
+      this.conversationFailures.delete(conv.id);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.log("ERROR", `Libby: Failed conversation ${conv.id}: ${msg}`);
-
-      // Revert to queued for retry
-      updateConversationStatus(conv.id, "queued");
+      this.recordConversationFailure(conv.id, error);
+      // Rethrow so the loop backs off instead of retrying immediately.
+      throw error;
     } finally {
-      // Always close session — fresh one per conversation
-      if (this.session) {
-        await this.session.close();
-        this.session = null;
-      }
+      await session.close();
+      this.session = null;
     }
+  }
+
+  /**
+   * Decide what a failure means for the conversation.
+   *
+   * An open failure is Libby's problem, not the conversation's: it stays
+   * queued and uncounted, so a broken Libby can't park the whole queue. A
+   * transcript failure counts; after {@link MAX_CONVERSATION_ATTEMPTS} the
+   * conversation goes to `review` rather than being retried forever.
+   */
+  private recordConversationFailure(convId: number, error: unknown): void {
+    const msg = error instanceof Error ? error.message : String(error);
+
+    if (error instanceof LibbyOpenError) {
+      this.log("ERROR", `Libby: Could not start a session for conversation ${convId}: ${msg}`);
+      return;
+    }
+
+    const attempts = (this.conversationFailures.get(convId) ?? 0) + 1;
+    if (attempts >= MAX_CONVERSATION_ATTEMPTS) {
+      this.conversationFailures.delete(convId);
+      updateConversationProcessed(
+        convId,
+        "review",
+        `Libby failed ${attempts} times; parked for review. Last error: ${msg}`,
+      );
+      this.log(
+        "ERROR",
+        `Libby: Parked conversation ${convId} for review after ${attempts} failed attempts: ${msg}`,
+      );
+      return;
+    }
+
+    this.conversationFailures.set(convId, attempts);
+    updateConversationStatus(convId, "queued");
+    this.log(
+      "ERROR",
+      `Libby: Failed conversation ${convId} (attempt ${attempts}/${MAX_CONVERSATION_ATTEMPTS}): ${msg}`,
+    );
   }
 
   /**
