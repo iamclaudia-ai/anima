@@ -55,7 +55,7 @@ import {
   getDayConversations,
   getMonthRange,
 } from "./db";
-import { ingestFile, ingestDirectoryCooperative } from "./ingest";
+import { ingestFile, ingestDirectoryCooperative, isWorkspaceExcluded } from "./ingest";
 import { MemoryWatcher } from "./watcher";
 import { formatTranscript } from "./transcript-formatter";
 import { LibbyWorker, pushMemoryChanges, type LibbyConfig } from "./libby";
@@ -853,6 +853,16 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         const includeAllSummaries = (params.includeAllSummaries as boolean | undefined) ?? false;
         const maxRecentMessages = (params.maxRecentMessages as number | undefined) ?? 20;
         const maxSummaries = (params.maxSummaries as number | undefined) ?? 5;
+
+        // A workspace excluded from ingestion gets no memory context. Its rows
+        // stop growing at the moment of exclusion, so anything still in the DB
+        // is a frozen snapshot — for Libby's own workspace, months of her
+        // system prompt replayed as "Michael:" messages, which the API's
+        // safeguards refuse outright.
+        if (isWorkspaceExcluded(cwd, basePath, cfg.exclude)) {
+          ctx?.log.info("[memory] get_session_context skipped (workspace excluded)", { cwd });
+          return { recentMessages: [], recentSummaries: [] };
+        }
 
         // Recent transcript entries — query by cwd column (absolute path)
         const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);

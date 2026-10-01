@@ -127,6 +127,19 @@ export function shouldExcludeFile(filePath: string, basePath: string, exclude: s
 }
 
 /**
+ * Whether a workspace's transcripts are excluded from ingestion.
+ *
+ * Claude Code stores a workspace's sessions under `<basePath>/<encoded cwd>/`,
+ * encoding the cwd by replacing `/` and `.` with `-`. Asking the file matcher
+ * about a path inside that directory keeps workspace and file exclusion on one
+ * set of rules.
+ */
+export function isWorkspaceExcluded(cwd: string, basePath: string, exclude: string[]): boolean {
+  const projectDir = join(basePath, cwd.replace(/[/.]/g, "-"));
+  return shouldExcludeFile(join(projectDir, "session.jsonl"), basePath, exclude);
+}
+
+/**
  * Recover from crashed ingestions.
  * Called on startup before the normal scan.
  *
