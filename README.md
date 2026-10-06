@@ -114,7 +114,6 @@ anima/
 │   ├── voice/            # Cartesia TTS + auto-speak + audio store
 │   ├── imessage/         # iMessage bridge + auto-reply
 │   └── control/          # System dashboard + health checks
-├── skills/               # Claude Code skills (meditation, stories, TTS tools)
 └── docs/                 # Architecture, API reference, testing guides
 ```
 

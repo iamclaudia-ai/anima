@@ -181,7 +181,6 @@ anima/
 │   ├── bogart/           # Web pages
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
-├── skills/               # Claude Code skills (symlinked to ~/.claude/skills)
 ├── scripts/              # Smoke tests, E2E tests
 └── docs/                 # Architecture, API reference, testing guides
 ```

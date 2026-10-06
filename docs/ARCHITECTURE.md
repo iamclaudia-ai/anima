@@ -585,5 +585,4 @@ scripts/
   smoke.ts              # Quick smoke test (health + gateway.list_methods)
   e2e-smoke.ts          # Full E2E test with model call
 
-skills/                 # Claude Code skills (meditation, stories, TTS tools)
 ```
