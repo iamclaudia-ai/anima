@@ -69,6 +69,15 @@ or auth failure, and the whole review is refused rather than silently dropped.
 - Verify the change follows existing conventions in neighboring files
 - Check for missing changes (e.g., did they update the tests? the types? the serializer?)
 
+### The shared checkout is not part of the review
+
+The session's cwd (the main checkout) may belong to an Other Claudia mid-task on something
+unrelated: a feature branch, uncommitted edits, a rebase in flight. **None of that is the review's
+business.** Don't run `git status` / `git branch` there, don't report its branch or dirtiness to
+Michael, and don't `git checkout main` or `git pull` before starting. A review only needs
+`git fetch` (which never touches the working tree) and the worktree. Cleanup is verified with
+`git worktree list`, never with the main checkout's status.
+
 ### Worktree Setup
 
 ```bash
@@ -85,6 +94,9 @@ git worktree add "$WORKTREE_PATH" "origin/$REVIEW_BRANCH"
 #     would cold-build ~32k files/minutes; instead snapshot main's index and
 #     `sync` only the branch delta (~7s of index work). See "CodeGraph in the
 #     worktree" below for why this is safe and needs no daemon cleanup.
+#     ⚠️ dcg blocks sqlite3 when its input contains an unresolved variable
+#     (rule `database.sqlite:stdin-unverified`), so run this step with the
+#     worktree path written out LITERALLY, not as $WORKTREE_PATH.
 if [ -f "$HOME/Projects/beehiiv/swarm/.codegraph/codegraph.db" ]; then
   mkdir -p "$WORKTREE_PATH/.codegraph"
   # .backup (not cp) = consistent snapshot despite main's live WAL writer
@@ -109,6 +121,7 @@ fi
 #    (sync/explore/query), so nothing persistent is watching the worktree —
 #    deleting it just drops its private .codegraph too. No daemon to stop.
 git worktree remove "$WORKTREE_PATH" --force
+git worktree list    # confirms it's gone; don't check the shared checkout's status
 ```
 
 ### CodeGraph in the worktree — why the seed is safe
@@ -162,10 +175,37 @@ gh api repos/owner/repo/pulls/<PR>/comments --jq '.[] | {user: .user.login, path
 3. **Read the diff** — `gh pr diff <PR>`. For a scoped diff inside the worktree use **three dots** (`git diff origin/main...HEAD -- <path>`); two dots invents deletions — see [Never diff a PR with two dots](#-never-diff-a-pr-with-two-dots).
 4. **Read the Linear ticket** — `linctl issue get <KEY>` if the PR mentions one. The ticket often lists the **expected files** for a feature; cross-check that they're all in the diff. Missing files = the PR description is making promises the diff doesn't keep.
 5. **Explore in worktree** — Read the full files, not just changed lines. Check callers, tests, related code.
-6. **Present findings** — Show review findings to Michael for discussion before submitting
-7. **Submit review** — For APPROVE/REQUEST_CHANGES use the **split process**: `gh comment review --event COMMENT` for inline comments, then native `gh pr review --approve` for the decision (see [Submitting Reviews](#submitting-reviews-recommended-pattern)). COMMENT-only reviews can stay in one `gh comment` call.
-8. **VERIFY both landed** — Query the API to confirm (a) inline comments attached AND (b) the review decision registered. **0 comments = silent failure; missing APPROVED = the decision didn't take** (see [Verifying a Submission](#verifying-a-submission)).
-9. **Clean up worktree** — Only after the review is live AND verified. Don't tear down on "I think we're done."
+6. **Verify claims by mutating — in the worktree, never the shared checkout** — see below.
+7. **Present findings** — Show review findings to Michael for discussion before submitting
+8. **Submit review** — For APPROVE/REQUEST_CHANGES use the **split process**: `gh comment review --event COMMENT` for inline comments, then native `gh pr review --approve` for the decision (see [Submitting Reviews](#submitting-reviews-recommended-pattern)). COMMENT-only reviews can stay in one `gh comment` call.
+9. **VERIFY both landed** — Query the API to confirm (a) inline comments attached AND (b) the review decision registered. **0 comments = silent failure; missing APPROVED = the decision didn't take** (see [Verifying a Submission](#verifying-a-submission)).
+10. **Clean up worktree** — Only after the review is live AND verified. Don't tear down on "I think we're done."
+
+### ⚠️ Mutation-test inside the worktree, never the shared checkout
+
+Verifying a claim usually means _editing_ the author's code: neuter the fix and confirm their test
+goes red, or break an invariant and confirm something catches it. That write has to land in the
+worktree.
+
+**Why this is the rule and not a preference:** the main checkout is shared. Other sessions work in
+it, and `git checkout` / an uncommitted edit there yanks the working tree out from under whoever
+else is mid-task. It has happened twice — once leaving a review's canary (`title={'ZZZ mutation
+canary'}`) stranded on a detached HEAD while another session was trying to merge a stack.
+
+The worktree rule at the top of this skill is read during **setup**; this violation happens later,
+at **verification** time, which is why it is repeated here where the writing actually starts.
+
+```bash
+cd "$WORKTREE_PATH"                 # every mutation happens here
+cp <file> /tmp/keep.<ext>           # snapshot — not `git stash`, which no-ops on a clean path
+# neuter the thing under test
+<run the spec>                      # expect RED
+cp /tmp/keep.<ext> <file>           # restore
+git diff --stat -- <file>           # MUST be empty — proves a clean restore
+```
+
+Leave the shared checkout exactly as you found it. If you ever need to look at something there,
+read it — do not check out, do not edit.
 
 ## ⚠️ Never diff a PR with two dots
 
