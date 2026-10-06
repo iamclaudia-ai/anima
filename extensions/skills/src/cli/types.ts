@@ -59,7 +59,7 @@ export interface SkillCommandConfig {
 export interface SkillJson {
   /** Skill identifier — should match the directory name. */
   id: string;
-  /** Human-readable description for `anima skills list`. */
+  /** Human-readable description for `anima skills commands`. */
   description?: string;
   /** Map of command name → config. Convention-based commands also work without entries here. */
   commands?: Record<string, SkillCommandConfig>;

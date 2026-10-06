@@ -1,8 +1,8 @@
 /**
- * `anima skills list` — discover available skills and their commands.
+ * `anima skills commands` — discover available skills and their commands.
  *
- *   anima skills list                    → all skills with at least one command
- *   anima skills list <skill-id>         → that skill's commands with descriptions
+ *   anima skills commands                    → all skills with at least one command
+ *   anima skills commands <skill-id>         → that skill's commands with descriptions
  */
 
 import { listSkills, loadSkillJson, resolveSkillDir } from "./resolve.js";
@@ -25,7 +25,9 @@ function listAllSkills(): void {
     return;
   }
 
-  console.log(`\nSkills (${skills.length}) — use \`anima skills list <skill-id>\` for details\n`);
+  console.log(
+    `\nSkills (${skills.length}) — use \`anima skills commands <skill-id>\` for details\n`,
+  );
 
   // Compute padding
   const idWidth = Math.max(...skills.map((s) => s.id.length), 10);

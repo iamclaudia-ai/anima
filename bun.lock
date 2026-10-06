@@ -233,7 +233,9 @@
       "name": "@anima/ext-skills",
       "version": "0.1.0",
       "dependencies": {
+        "@anima/extension-host": "workspace:*",
         "@anima/shared": "workspace:*",
+        "zod": "catalog:",
       },
     },
     "extensions/voice": {

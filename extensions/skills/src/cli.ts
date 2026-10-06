@@ -17,7 +17,7 @@ import { runSkillHelp } from "./cli/help.js";
 
 export const cli: ExtensionCli = {
   commands: {
-    list: {
+    commands: {
       description: "List skills with runnable commands, or one skill's commands",
       usage: "[skill-id]",
       async run(args) {

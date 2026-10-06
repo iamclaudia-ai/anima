@@ -278,7 +278,7 @@ An extension can export `cli: ExtensionCli` (from `@anima/shared`) in `src/cli.t
 
 - **The rule:** a command belongs in `cli.ts` only if it would behave differently when the CLI runs on another machine than the gateway (it needs the caller's stdio, exit code, or local files). Everything else is a server method.
 - `cli.ts` must never import the extension's server entry (`src/index.ts`) or `@anima/extension-host`, and a local command name must never equal a server method name. `packages/cli/src/extension-cli.test.ts` enforces both for every extension.
-- First user: `extensions/skills` (the skill runner, `anima skills run|task|list|help`).
+- First user: `extensions/skills` (the skill runner, `anima skills run|task|commands|help`).
 
 ### WebSocket Protocol
 

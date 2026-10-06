@@ -4,13 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./extension": "./src/index.ts",
     "./cli": "./src/cli.ts"
   },
   "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun",
     "test": "bun test",
     "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@anima/shared": "workspace:*"
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
+    "zod": "catalog:"
   }
 }
