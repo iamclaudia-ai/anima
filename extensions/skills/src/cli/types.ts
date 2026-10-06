@@ -19,7 +19,7 @@ export interface SkillCommandArg {
   type?: "absolute-file" | "absolute-folder" | "string" | "number" | "boolean";
   /** Whether the argument must be provided. */
   required?: boolean;
-  /** Help text shown in `anima skill help`. */
+  /** Help text shown in `anima skills help`. */
   description?: string;
 }
 
@@ -46,7 +46,7 @@ export interface SkillCommandConfig {
   runtime?: SkillRuntime;
   /** True → auto-enables --task mode (override with --sync). */
   longRunning?: boolean;
-  /** Help text for `anima skill help`. */
+  /** Help text for `anima skills help`. */
   description?: string;
   /** Required positional/flag args (for help generation; validation in Phase 4+). */
   args?: SkillCommandArg[];
@@ -59,7 +59,7 @@ export interface SkillCommandConfig {
 export interface SkillJson {
   /** Skill identifier — should match the directory name. */
   id: string;
-  /** Human-readable description for `anima skill list`. */
+  /** Human-readable description for `anima skills list`. */
   description?: string;
   /** Map of command name → config. Convention-based commands also work without entries here. */
   commands?: Record<string, SkillCommandConfig>;

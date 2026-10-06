@@ -16,3 +16,4 @@ export * from "./retry";
 export * from "./text";
 export * from "./utils";
 export * from "./auth";
+export * from "./extension-cli";

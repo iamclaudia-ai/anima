@@ -1,5 +1,5 @@
 /**
- * `anima skill help <skill-id> <command>` — show full help for a specific command.
+ * `anima skills help <skill-id> <command>` — show full help for a specific command.
  *
  * Help text is generated from skill.json when available; convention-resolved
  * commands get a minimal help showing their resolved script path.
@@ -12,7 +12,7 @@ export function runSkillHelp(args: string[]): void {
   const command = args[1];
 
   if (!skillId || !command) {
-    console.error("Usage: anima skill help <skill-id> <command>");
+    console.error("Usage: anima skills help <skill-id> <command>");
     process.exit(1);
   }
 
@@ -60,14 +60,14 @@ export function runSkillHelp(args: string[]): void {
   }
 
   console.log("\n  Invoke:");
-  console.log(`    anima skill run ${skillId} ${command} <args...>`);
+  console.log(`    anima skills run ${skillId} ${command} <args...>`);
   if (resolved.longRunning) {
     console.log(
-      `    anima skill run ${skillId} ${command} <args...> --sync   # override task mode`,
+      `    anima skills run ${skillId} ${command} <args...> --sync   # override task mode`,
     );
   } else {
     console.log(
-      `    anima skill run ${skillId} ${command} <args...> --task   # queue via scheduler`,
+      `    anima skills run ${skillId} ${command} <args...> --task   # queue via scheduler`,
     );
   }
   console.log("");

@@ -13,7 +13,12 @@
 import { createGatewayClient, loadConfig, generateToken, writeConfigToken } from "@anima/shared";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { skillCommand } from "./commands/skill/index.js";
+import type { ExtensionCli } from "@anima/shared";
+import {
+  formatLocalCommands,
+  listExtensionCliNamespaces,
+  loadExtensionCli,
+} from "./extension-cli.js";
 
 const DEFAULT_GATEWAY_URL = "ws://localhost:30086/ws";
 let gatewayUrl = process.env.ANIMA_GATEWAY_URL || DEFAULT_GATEWAY_URL;
@@ -660,19 +665,30 @@ export function getNamespaces(methods: MethodCatalogEntry[]): string[] {
   return Array.from(names).sort();
 }
 
-export function printNamespaceHelp(namespace: string, methods: MethodCatalogEntry[]): void {
+export function printNamespaceHelp(
+  namespace: string,
+  methods: MethodCatalogEntry[],
+  extensionCli?: ExtensionCli | null,
+): void {
   const rows = methods
     .filter((m) => splitMethod(m.method)?.namespace === namespace)
     .sort((a, b) => a.method.localeCompare(b.method));
+  const local = extensionCli ? formatLocalCommands(namespace, extensionCli) : [];
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && local.length === 0) {
     console.error(`Unknown namespace: ${namespace}`);
     return;
   }
 
   console.log(`\nNamespace: ${namespace}`);
+  if (local.length > 0) {
+    console.log("\n  Local commands (run on this machine):");
+    for (const line of local) console.log(`    ${line}`);
+    if (rows.length > 0) console.log("\n  Gateway methods:");
+  }
+  const indent = local.length > 0 ? "    " : "  ";
   for (const entry of rows) {
-    console.log(`  ${formatMethodCommand(entry)}`);
+    console.log(`${indent}${formatMethodCommand(entry)}`);
   }
 }
 
@@ -693,7 +709,7 @@ export function printMethodList(methods: MethodCatalogEntry[], namespace?: strin
   }
 }
 
-export function printCliHelp(methods: MethodCatalogEntry[]): void {
+export function printCliHelp(methods: MethodCatalogEntry[], localNamespaces: string[] = []): void {
   console.log("Anima CLI — gateway client for the Anima AI assistant platform.\n");
   console.log("Usage:\n");
   console.log("  anima <namespace> <action> --param value  Call a method");
@@ -710,7 +726,7 @@ export function printCliHelp(methods: MethodCatalogEntry[]): void {
   console.log("  --session-id, --session_id and --sessionId are all the same param.");
 
   console.log("\nNamespaces:\n");
-  for (const ns of getNamespaces(methods)) {
+  for (const ns of [...new Set([...getNamespaces(methods), ...localNamespaces])].sort()) {
     console.log(`  ${ns}`);
   }
 
@@ -1904,21 +1920,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args[0] === "skill") {
-    await skillCommand(args.slice(1), gatewayUrl);
-    return;
+  // Extension CLI contributions run locally, before (and without) the gateway
+  // catalog, so they keep working when the gateway is down.
+  const extensionCli = await loadExtensionCli(args[0] ?? "");
+  if (extensionCli) {
+    const name = args[1];
+    if (name && Object.hasOwn(extensionCli.commands, name)) {
+      const exitCode = await extensionCli.commands[name].run(args.slice(2), { gatewayUrl });
+      process.exit(exitCode ?? 0);
+    }
+    if (!name || name === "--help") {
+      const methods = await fetchMethodCatalog().catch(() => []);
+      printNamespaceHelp(args[0], methods, extensionCli);
+      return;
+    }
   }
 
   const methods = [...(await fetchMethodCatalog()), ...WATCHDOG_METHODS];
   const methodMap = new Map(methods.map((m) => [m.method, m] as const));
 
-  if (args.length === 0) {
-    printCliHelp(methods);
-    return;
-  }
-
-  if (args[0] === "help" || args[0] === "--help") {
-    printCliHelp(methods);
+  if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
+    printCliHelp(methods, listExtensionCliNamespaces());
     return;
   }
 
@@ -1949,12 +1971,12 @@ async function main(): Promise<void> {
   if (!resolvedMethod) {
     // Check if the first arg looks like a known namespace
     const namespaces = new Set(methods.map((m) => m.method.split(".")[0]));
-    if (namespaces.has(args[0])) {
-      console.error(`Unknown method: ${args[0]}.${args[1] || "?"}\n`);
-      printNamespaceHelp(args[0], methods);
+    if (namespaces.has(args[0]) || extensionCli) {
+      console.error(`Unknown command: ${args[0]} ${args[1] || "?"}\n`);
+      printNamespaceHelp(args[0], methods, extensionCli);
     } else {
       console.error(`Unknown command: ${args.join(" ")}\n`);
-      printCliHelp(methods);
+      printCliHelp(methods, listExtensionCliNamespaces());
     }
     process.exit(1);
   }

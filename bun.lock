@@ -229,6 +229,13 @@
         "@types/bun": "catalog:",
       },
     },
+    "extensions/skills": {
+      "name": "@anima/ext-skills",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anima/shared": "workspace:*",
+      },
+    },
     "extensions/voice": {
       "name": "@anima/voice",
       "version": "0.1.0",
@@ -395,6 +402,8 @@
     "@anima/ext-presenter": ["@anima/ext-presenter@workspace:extensions/presenter"],
 
     "@anima/ext-scheduler": ["@anima/ext-scheduler@workspace:extensions/scheduler"],
+
+    "@anima/ext-skills": ["@anima/ext-skills@workspace:extensions/skills"],
 
     "@anima/extension-host": ["@anima/extension-host@workspace:packages/extension-host"],
 

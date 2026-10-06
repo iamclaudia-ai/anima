@@ -180,6 +180,7 @@ anima/
 │   ├── control/          # System dashboard + log viewer
 │   ├── bogart/           # Web pages
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
+│   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
 ├── scripts/              # Smoke tests, E2E tests
 └── docs/                 # Architecture, API reference, testing guides
@@ -268,7 +269,16 @@ extensions/<name>/src/
   index.ts       # Server-side extension (methods, events, lifecycle)
   routes.ts      # Client-side route declarations
   pages/         # React page components
+  cli.ts         # Optional local CLI commands (see below)
 ```
+
+#### Extension CLI contributions (`cli.ts`)
+
+An extension can export `cli: ExtensionCli` (from `@anima/shared`) in `src/cli.ts`. `anima <name> <command>` runs a declared command **locally**; anything else falls through to the gateway method `<name>.<command>`. The CLI imports `cli.ts` lazily, only when the first argument matches, before fetching the gateway catalog, so local commands keep working with the gateway down. Local commands are listed in `anima <name> --help`.
+
+- **The rule:** a command belongs in `cli.ts` only if it would behave differently when the CLI runs on another machine than the gateway (it needs the caller's stdio, exit code, or local files). Everything else is a server method.
+- `cli.ts` must never import the extension's server entry (`src/index.ts`) or `@anima/extension-host`, and a local command name must never equal a server method name. `packages/cli/src/extension-cli.test.ts` enforces both for every extension.
+- First user: `extensions/skills` (the skill runner, `anima skills run|task|list|help`).
 
 ### WebSocket Protocol
 

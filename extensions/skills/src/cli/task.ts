@@ -1,9 +1,9 @@
 /**
- * `anima skill task <task-id>` — inspect a queued/running/completed skill task.
+ * `anima skills task <task-id>` — inspect a queued/running/completed skill task.
  *
- *   anima skill task <id>            → JSON status (latest execution)
- *   anima skill task <id> --watch    → poll until completion
- *   anima skill task <id> --cancel   → delegate to scheduler.cancel_task
+ *   anima skills task <id>            → JSON status (latest execution)
+ *   anima skills task <id> --watch    → poll until completion
+ *   anima skills task <id> --cancel   → delegate to scheduler.cancel_task
  *
  * Thin wrapper over scheduler.get_history + scheduler.list_tasks (for fireAt) +
  * scheduler.cancel_task.

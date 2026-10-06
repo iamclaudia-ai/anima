@@ -1,5 +1,7 @@
 # Skill Runner Plan
 
+> **Update (2026-10-06):** the runner now lives in `extensions/skills/src/cli.ts` as an extension CLI contribution, and the command is `anima skills …` (plural). Examples below use the original `anima skill` spelling. See #82.
+
 > Claudia's wishlist for fixing the two papercuts I hit every time I run a skill script: brittle CWD assumptions, and zero visibility into long-running background work.
 
 ## The pitch

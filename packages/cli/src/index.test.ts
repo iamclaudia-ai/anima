@@ -532,6 +532,30 @@ describe("help/example output", () => {
     logSpy.mockRestore();
   });
 
+  it("merges extension CLI commands into namespace help", () => {
+    const logSpy = spyOn(console, "log").mockImplementation(() => undefined);
+    const errSpy = spyOn(console, "error").mockImplementation(() => undefined);
+    const cli = {
+      commands: {
+        run: { description: "Run it", usage: "<id>", run: async () => {} },
+      },
+    };
+
+    // Local commands alone make a namespace known, even with no gateway methods.
+    printNamespaceHelp("skills", [], cli);
+    // Alongside gateway methods, both sections are listed.
+    printNamespaceHelp("dominatrix", methods, cli);
+
+    const lines = logSpy.mock.calls.flat().map((v) => String(v));
+    expect(lines.some((l) => l.includes("anima skills run <id>  — Run it"))).toBe(true);
+    expect(lines.some((l) => l.includes("Gateway methods:"))).toBe(true);
+    expect(lines.some((l) => l.includes("anima dominatrix html"))).toBe(true);
+    expect(errSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
   it("prints fallbacks for unknown namespaces and methods", () => {
     const logSpy = spyOn(console, "log").mockImplementation(() => undefined);
     const errSpy = spyOn(console, "error").mockImplementation(() => undefined);

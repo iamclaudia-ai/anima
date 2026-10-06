@@ -1,0 +1,16 @@
+{
+  "name": "@anima/ext-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@anima/shared": "workspace:*"
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * `anima skill run <skill-id> <command> [args...]` — run a skill command.
+ * `anima skills run <skill-id> <command> [args...]` — run a skill command.
  *
  * Synchronous mode (default): exec'd inline, stdio inherited.
  * Task mode (--task or longRunning: true in skill.json): submitted to the
@@ -133,8 +133,8 @@ async function submitAsTask(resolved: ResolvedCommand, opts: RunSkillOptions): P
 
     console.log(`Task queued: ${result.taskId}`);
     console.log(`  Skill:   ${resolved.skillId}/${resolved.command}`);
-    console.log(`  Status:  anima skill task ${result.taskId}`);
-    console.log(`  Watch:   anima skill task ${result.taskId} --watch`);
+    console.log(`  Status:  anima skills task ${result.taskId}`);
+    console.log(`  Watch:   anima skills task ${result.taskId} --watch`);
     return 0;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
