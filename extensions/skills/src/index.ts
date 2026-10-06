@@ -16,7 +16,15 @@ import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
-import { buildInventory, projectRootsFromWorkspaces, type SkillInventory } from "./inventory";
+import {
+  buildInventory,
+  projectRootsFromWorkspaces,
+  SKILL_VISIBILITIES,
+  type SkillInventory,
+  type SkillVisibility,
+} from "./inventory";
+import { linkSkill, unlinkSkill } from "./placement";
+import { readSkillOverrides, setSkillVisibility } from "./settings";
 
 export interface SkillsConfig {
   /** The skills repo. `~` is expanded. */
@@ -34,13 +42,11 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
   let home = "";
   let repoPath: string | null = null;
 
-  async function readOverrides(): Promise<Record<string, unknown>> {
-    try {
-      const settings = JSON.parse(await Bun.file(join(home, ".claude", "settings.json")).text());
-      return (settings.skillOverrides as Record<string, unknown>) ?? {};
-    } catch {
-      return {};
-    }
+  const settingsPath = () => join(home, ".claude", "settings.json");
+
+  function placementPaths(): { home: string; repoPath: string } {
+    if (!repoPath) throw new Error("skills.repoPath is not configured in anima.json");
+    return { home, repoPath };
   }
 
   async function listProjects(): Promise<string[]> {
@@ -64,7 +70,7 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
       home,
       repoPath,
       projects: await listProjects(),
-      overrides: await readOverrides(),
+      overrides: readSkillOverrides(settingsPath()),
     });
   }
 
@@ -83,6 +89,33 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
           "Inventory every skill: source (repo, third-party, synced, project), placements, and skillOverrides visibility, plus problems and skills-repo dirt",
         inputSchema: z.object({}),
       },
+      {
+        name: "skills.link",
+        description:
+          "Place a skills-repo skill globally (~/.claude/skills) or into one project; project links are hidden via the repo's local .git/info/exclude",
+        inputSchema: z.object({
+          skill: z.string().min(1).describe("Skill directory name in the skills repo"),
+          project: z.string().optional().describe("Absolute project root; omit for global"),
+        }),
+      },
+      {
+        name: "skills.unlink",
+        description:
+          "Remove a placement of a skills-repo skill. Only removes our own symlinks; other skills are hidden with set_visibility",
+        inputSchema: z.object({
+          skill: z.string().min(1),
+          project: z.string().optional().describe("Absolute project root; omit for global"),
+        }),
+      },
+      {
+        name: "skills.set_visibility",
+        description:
+          "Set a skill's skillOverrides entry in ~/.claude/settings.json (on removes the entry)",
+        inputSchema: z.object({
+          skill: z.string().min(1).describe("Skill name (frontmatter name)"),
+          visibility: z.enum(SKILL_VISIBILITIES),
+        }),
+      },
     ],
     events: [],
 
@@ -98,7 +131,7 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
       ctx = null;
     },
 
-    async handleMethod(method: string) {
+    async handleMethod(method: string, params: Record<string, unknown>) {
       switch (method) {
         case "skills.health_check": {
           const inv = await inventory();
@@ -120,6 +153,44 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
 
         case "skills.list_skills":
           return await inventory();
+
+        case "skills.link": {
+          const result = linkSkill(placementPaths(), {
+            skill: params.skill as string,
+            project: params.project as string | undefined,
+          });
+          ctx?.log.info("Linked skill", { ...result, skill: params.skill });
+          return result;
+        }
+
+        case "skills.unlink": {
+          const result = unlinkSkill(placementPaths(), {
+            skill: params.skill as string,
+            project: params.project as string | undefined,
+          });
+          ctx?.log.info("Unlinked skill", { ...result, skill: params.skill });
+          return result;
+        }
+
+        case "skills.set_visibility": {
+          const name = params.skill as string;
+          const matches = (await inventory()).skills.filter((s) => s.name === name);
+          if (matches.length === 0) throw new Error(`No skill named "${name}"`);
+          if (matches.some((s) => s.source === "synced")) {
+            // Unverified whether Claude Code keys synced skills as "docx" or
+            // "anthropic-skills:docx"; a wrong key would fail silently.
+            throw new Error(
+              `"${name}" is a claude.ai synced skill; toggle it in claude.ai settings for now`,
+            );
+          }
+          const change = setSkillVisibility(
+            settingsPath(),
+            name,
+            params.visibility as SkillVisibility,
+          );
+          ctx?.log.info("Set skill visibility", { ...change });
+          return change;
+        }
 
         default:
           throw new Error(`Unknown method: ${method}`);
