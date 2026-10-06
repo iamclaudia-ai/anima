@@ -3,7 +3,7 @@
  *
  * Rules:
  * - Only skills from the skills repo are placed; we own those links and nothing else.
- * - `unlink` removes only symlinks that resolve into the repo. Third-party,
+ * - `remove_link` removes only symlinks that resolve into the repo. Third-party,
  *   synced, and project-owned skills are never moved or deleted (hide them with
  *   visibility instead).
  * - A project's `.claude/skills` may itself be a symlink (e.g. to a tracked
@@ -47,7 +47,7 @@ export interface LinkResult {
   excluded: string | null;
 }
 
-export interface UnlinkResult {
+export interface RemoveLinkResult {
   path: string;
   /** The `.git/info/exclude` entry removed, if any. */
   unexcluded: string | null;
@@ -188,7 +188,7 @@ export function linkSkill(paths: PlacementPaths, target: PlacementTarget): LinkR
   return { path: entry, created, excluded };
 }
 
-export function unlinkSkill(paths: PlacementPaths, target: PlacementTarget): UnlinkResult {
+export function removeSkillLink(paths: PlacementPaths, target: PlacementTarget): RemoveLinkResult {
   validate(target);
   const repoReal = realpathSync(paths.repoPath);
   const logical = join(target.project ?? paths.home, ".claude", "skills");

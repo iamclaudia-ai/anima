@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { linkSkill, unlinkSkill } from "./placement";
+import { linkSkill, removeSkillLink } from "./placement";
 import { readSkillOverrides, setSkillVisibility } from "./settings";
 
 function sh(cwd: string, ...args: string[]): string {
@@ -36,7 +36,7 @@ function skill(dir: string): void {
 const status = (repo: string) => sh(repo, "status", "--porcelain").trim();
 const exclude = (repo: string) => readFileSync(join(repo, ".git", "info", "exclude"), "utf8");
 
-describe("linkSkill / unlinkSkill", () => {
+describe("linkSkill / removeSkillLink", () => {
   let root: string;
   let home: string;
   let repo: string;
@@ -131,9 +131,9 @@ describe("linkSkill / unlinkSkill", () => {
     expect(status(worktree)).toBe("");
   });
 
-  it("unlinks our links and tidies the exclude file", () => {
-    unlinkSkill(paths(), { skill: "beta", project: worktree });
-    const result = unlinkSkill(paths(), { skill: "alpha", project: plain });
+  it("removes our links and tidies the exclude file", () => {
+    removeSkillLink(paths(), { skill: "beta", project: worktree });
+    const result = removeSkillLink(paths(), { skill: "alpha", project: plain });
     expect(result.unexcluded).toBe("/.claude/skills/alpha");
     expect(existsSync(join(plain, ".claude", "skills", "alpha"))).toBe(false);
     // Our header goes once nothing is left under it; the user's lines stay.
@@ -141,12 +141,12 @@ describe("linkSkill / unlinkSkill", () => {
     expect(status(plain)).toBe("");
   });
 
-  it("refuses to unlink real directories and links that leave the repo", () => {
-    expect(() => unlinkSkill(paths(), { skill: "team-skill", project: swarmy })).toThrow(
+  it("refuses to remove real directories and links that leave the repo", () => {
+    expect(() => removeSkillLink(paths(), { skill: "team-skill", project: swarmy })).toThrow(
       "real directory",
     );
     symlinkSync(foreign, join(home, ".claude", "skills", "foreign"));
-    expect(() => unlinkSkill(paths(), { skill: "foreign" })).toThrow(
+    expect(() => removeSkillLink(paths(), { skill: "foreign" })).toThrow(
       "links outside the skills repo",
     );
     expect(existsSync(join(home, ".claude", "skills", "foreign"))).toBe(true);

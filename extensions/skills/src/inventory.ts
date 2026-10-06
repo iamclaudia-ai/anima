@@ -43,7 +43,7 @@ export interface SkillRecord {
   source: SkillSource;
   /** Real directory holding SKILL.md (symlinks resolved). */
   sourcePath: string;
-  /** Every `.claude/skills` entry that resolves to this skill. Empty = available but unlinked. */
+  /** Every `.claude/skills` entry that resolves to this skill. Empty = available but not placed. */
   placements: SkillPlacement[];
   visibility: SkillVisibility;
 }

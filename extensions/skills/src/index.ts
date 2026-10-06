@@ -23,7 +23,7 @@ import {
   type SkillInventory,
   type SkillVisibility,
 } from "./inventory";
-import { linkSkill, unlinkSkill } from "./placement";
+import { linkSkill, removeSkillLink } from "./placement";
 import { readSkillOverrides, setSkillVisibility } from "./settings";
 
 export interface SkillsConfig {
@@ -99,7 +99,7 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
         }),
       },
       {
-        name: "skills.unlink",
+        name: "skills.remove_link",
         description:
           "Remove a placement of a skills-repo skill. Only removes our own symlinks; other skills are hidden with set_visibility",
         inputSchema: z.object({
@@ -163,12 +163,12 @@ export function createSkillsExtension(config: SkillsConfig = {}): AnimaExtension
           return result;
         }
 
-        case "skills.unlink": {
-          const result = unlinkSkill(placementPaths(), {
+        case "skills.remove_link": {
+          const result = removeSkillLink(placementPaths(), {
             skill: params.skill as string,
             project: params.project as string | undefined,
           });
-          ctx?.log.info("Unlinked skill", { ...result, skill: params.skill });
+          ctx?.log.info("Removed skill link", { ...result, skill: params.skill });
           return result;
         }
 
