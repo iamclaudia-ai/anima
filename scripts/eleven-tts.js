@@ -39,11 +39,11 @@ const API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
 
 /**
- * Report progress to the scheduler when running under `anima skill run --task`.
+ * Report progress to the scheduler when running under `anima skills run --task`.
  * No-op in synchronous mode (ANIMA_TASK_ID not set).
  *
  * The scheduler stores the latest message on the running execution row, and
- * `anima skill task <id>` surfaces it. Failures here are silent — progress
+ * `anima skills task <id>` surfaces it. Failures here are silent — progress
  * reporting is best-effort.
  */
 function progress(message) {
