@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.ts",
-    "build": "bun build --compile src/index.ts --outfile dist/anima-watchdog",
-    "deploy": "bun run build && mkdir -p ~/.anima/bin && cp dist/anima-watchdog ~/.anima/bin/watchdog && echo '✅ Deployed to ~/.anima/bin/watchdog'"
+    "build": "bun build --compile src/index.ts --outfile dist/anima-watchdog && bun run sign",
+    "sign": "[ \"$(uname)\" != Darwin ] || codesign --force --sign - dist/anima-watchdog",
+    "deploy": "bun run build && mkdir -p ~/.anima/bin && install -m 700 dist/anima-watchdog ~/.anima/bin/watchdog && echo '✅ Deployed to ~/.anima/bin/watchdog (restart com.anima.watchdog to pick it up)'"
   },
   "dependencies": {
     "@anima/shared": "workspace:*"
