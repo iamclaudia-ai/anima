@@ -858,7 +858,7 @@ function broadcastEvent(
 // Combined HTTP + WebSocket server (single port, like the old claudia-code layout)
 const server = Bun.serve<ClientState>({
   port: PORT,
-  hostname: config.gateway.host || "localhost",
+  hostname: config.gateway.host || "127.0.0.1",
   reusePort: false,
   // Custom fetch handler for WebSocket upgrades
   fetch(req, server) {

@@ -53,7 +53,7 @@ describe("config loader", () => {
     const config = loadConfig(configPath);
     expect(config.gateway.port).toBe(40001);
     expect(config.gateway.endpoint).toBe("gateway.example.com");
-    expect(config.gateway.host).toBe("localhost");
+    expect(config.gateway.host).toBe("127.0.0.1");
     expect(config.session.model).toBe("claude-opus");
     expect(config.session.thinking).toBe(true);
     expect(config.session.effort).toBe("high");

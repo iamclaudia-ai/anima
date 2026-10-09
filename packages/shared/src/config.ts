@@ -20,6 +20,11 @@ import type { WebStaticPath } from "./types";
 
 export interface GatewayConfig {
   port: number;
+  /**
+   * Bind address. Use a literal IP, not "localhost": Bun binds only the first
+   * address a name resolves to, and macOS 27 resolves localhost to ::1 first,
+   * which leaves the gateway unreachable to IPv4 proxies like Caddy.
+   */
   host: string;
   /** Public endpoint hostname for remote clients (e.g., "claudia-gateway.kiliman.dev") */
   endpoint?: string;
@@ -171,7 +176,7 @@ export interface AnimaConfig {
 const DEFAULT_CONFIG: AnimaConfig = {
   gateway: {
     port: 30086,
-    host: "localhost",
+    host: "127.0.0.1",
     heartbeatIntervalMs: 300000, // 5 minutes
   },
   session: {
