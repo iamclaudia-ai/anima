@@ -93,6 +93,9 @@ export function toRuntimeStatusFromModalEvent(
     return payload.kind === "approval" ? "awaiting_approval" : "awaiting_input";
   }
   if (type === "modal_prompt_cleared") {
+    // Another modal replaced this one: still blocked, and its own
+    // `modal_prompt` (right behind this event) sets the status.
+    if (payload.reason === "superseded") return null;
     return payload.resumedTurn === true ? "running" : "idle";
   }
   return null;

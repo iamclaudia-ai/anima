@@ -38,6 +38,15 @@ describe("toRuntimeStatusFromSessionEvent", () => {
     );
   });
 
+  test("a superseded modal leaves the status to the modal that replaced it", () => {
+    expect(
+      toRuntimeStatusFromModalEvent("modal_prompt_cleared", {
+        reason: "superseded",
+        resumedTurn: true,
+      }),
+    ).toBeNull();
+  });
+
   test("turn_stop is deliberately unmapped — its own handler writes completed", () => {
     expect(toRuntimeStatusFromSessionEvent("turn_stop")).toBeNull();
   });

@@ -61,6 +61,13 @@ export interface ModalPromptBlock {
   answered?: string;
   /** True when the prompt went away without us answering (someone used tmux). */
   dismissed?: boolean;
+  /**
+   * ISO deadline after which the CLI denies the prompt by itself — Claude Code
+   * counts one down on permission prompts in unattended sessions (#83).
+   */
+  autoDenyAt?: string;
+  /** True when the prompt cleared because that deadline passed, not an answer. */
+  autoDenied?: boolean;
   /** Set when an answer was rejected — stale prompt, or it didn't clear. */
   error?: string;
   /** True between clicking an option and hearing back. */

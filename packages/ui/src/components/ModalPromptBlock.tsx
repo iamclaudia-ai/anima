@@ -23,7 +23,8 @@
  *   choices and states what happened.
  */
 
-import { Check, CircleAlert, ShieldQuestion, Terminal } from "lucide-react";
+import { Check, CircleAlert, ShieldQuestion, Terminal, TimerOff } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ModalPromptBlock as ModalPromptBlockType } from "../types";
 
 interface ModalPromptBlockProps {
@@ -31,19 +32,57 @@ interface ModalPromptBlockProps {
   onAnswer: (fingerprint: string, key: string) => void;
 }
 
+/** The countdown's time as the TUI renders it, e.g. `deny this request in 1:44`. */
+const COUNTDOWN_RE = /(deny this request in\s+)\d+:\d{2}/i;
+
+function formatClock(totalSec: number): string {
+  const sec = Math.max(0, totalSec);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
 /**
- * Body lines minus the question, which is already the headline. The TUI hard-
- * wraps its text, so a wrapped continuation line is joined back rather than
- * rendered as its own paragraph.
+ * Seconds until `deadline`, re-rendering once a second while it is live. The
+ * captured context holds the countdown frozen at the moment the prompt was
+ * read; this is what keeps the card telling the truth after that.
  */
-function bodyLines(block: ModalPromptBlockType): string[] {
-  return block.context.filter((line) => line && line !== block.question);
+function useSecondsLeft(deadline: string | undefined, live: boolean): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!deadline || !live) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [deadline, live]);
+  return deadline ? Math.ceil((Date.parse(deadline) - now) / 1000) : undefined;
+}
+
+/**
+ * Body lines minus the question, which is already the headline. A live
+ * countdown replaces the frozen time in the auto-deny sentence.
+ */
+function bodyLines(block: ModalPromptBlockType, secondsLeft: number | undefined): string[] {
+  return block.context
+    .filter((line) => line && line !== block.question)
+    .map((line) =>
+      secondsLeft === undefined
+        ? line
+        : line.replace(COUNTDOWN_RE, `$1${formatClock(secondsLeft)}`),
+    );
+}
+
+function headline(block: ModalPromptBlockType, chosenLabel: string | undefined): string {
+  if (block.answered) return `Answered — ${chosenLabel ?? block.answered}`;
+  if (block.autoDenied) return "Denied automatically — no answer before the timeout";
+  if (block.dismissed) return "Answered in the terminal";
+  return block.kind === "approval"
+    ? "Claude needs your approval"
+    : "Claude is waiting for an answer";
 }
 
 export function ModalPromptBlock({ block, onAnswer }: ModalPromptBlockProps): React.ReactElement {
   const settled = Boolean(block.answered) || Boolean(block.dismissed);
   const chosen = block.options.find((opt) => opt.key === block.answered);
-  const body = bodyLines(block);
+  const secondsLeft = useSecondsLeft(block.autoDenyAt, !settled);
+  const body = bodyLines(block, settled ? undefined : secondsLeft);
 
   return (
     <div
@@ -56,20 +95,19 @@ export function ModalPromptBlock({ block, onAnswer }: ModalPromptBlockProps): Re
           settled ? "text-slate-600" : "text-amber-900"
         }`}
       >
-        {settled ? (
+        {block.autoDenied ? (
+          <TimerOff className="size-4 shrink-0 text-slate-400" />
+        ) : settled ? (
           <Check className="size-4 shrink-0 text-slate-400" />
         ) : (
           <ShieldQuestion className="size-4 shrink-0 text-amber-500" />
         )}
-        <span className="font-medium">
-          {settled
-            ? block.answered
-              ? `Answered — ${chosen?.label ?? block.answered}`
-              : "Answered in the terminal"
-            : block.kind === "approval"
-              ? "Claude needs your approval"
-              : "Claude is waiting for an answer"}
-        </span>
+        <span className="font-medium">{headline(block, chosen?.label)}</span>
+        {!settled && secondsLeft !== undefined && (
+          <span className="ml-auto font-mono text-xs tabular-nums text-amber-700">
+            auto-denies in {formatClock(secondsLeft)}
+          </span>
+        )}
       </div>
 
       <div className={`px-3 pb-2 ${settled ? "text-slate-500" : "text-amber-900"}`}>

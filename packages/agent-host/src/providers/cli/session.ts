@@ -867,6 +867,12 @@ export class ClaudeCliSession extends EventEmitter {
   }
 
   private setModal(modal: ModalPrompt): void {
+    // A different modal replacing the one on record settles the old one first,
+    // so its card stops offering buttons instead of piling up beside the new
+    // one (#83). Same fingerprint is a re-announce, which the UI dedupes.
+    if (this._modal && this._modal.fingerprint !== modal.fingerprint) {
+      this.clearModal("superseded");
+    }
     this._modal = modal;
     log.info("modal prompt detected", {
       id: this.id.slice(0, 8),
@@ -884,6 +890,12 @@ export class ClaudeCliSession extends EventEmitter {
       options: modal.options,
       footer: modal.footer,
       fingerprint: modal.fingerprint,
+      // A deadline rather than the seconds left, so a re-announce or a late
+      // reader still counts down to the same moment.
+      autoDenyAt:
+        modal.autoDenySec === undefined
+          ? undefined
+          : new Date(Date.now() + modal.autoDenySec * 1000).toISOString(),
       tmux: this.tmuxName,
     } satisfies StreamEvent);
   }
@@ -892,9 +904,10 @@ export class ClaudeCliSession extends EventEmitter {
    * Announce that the modal is gone. `resumedTurn` tells the session extension
    * which status to fall back to: answering a hook confirmation mid-turn puts
    * the session back to `running`, while clearing a trust dialog at launch
-   * leaves it `idle`.
+   * leaves it `idle`. `superseded` means another modal took its place, so the
+   * session is still blocked and its status should not move.
    */
-  private clearModal(reason: "answered" | "dismissed", answered?: string): void {
+  private clearModal(reason: "answered" | "dismissed" | "superseded", answered?: string): void {
     const modal = this._modal;
     if (!modal) return;
     this._modal = null;

@@ -199,3 +199,74 @@ describe("fingerprint", () => {
     );
   });
 });
+
+/**
+ * Permission prompt with Claude Code's auto-deny countdown (#83), as it renders
+ * in an unattended session. Built from the wording in the reported screenshot,
+ * not a live capture: the countdown never reached a log. Hard-wrapped at the
+ * 80 columns Anima's panes use, which splits the countdown sentence.
+ */
+function countdownModal(clock: string): string {
+  return [
+    "⏺ Bash(doppler run --project swarm --config prd -- bash -c '…')",
+    "  ⎿  Waiting…",
+    "",
+    "────────────────────────────────────────────────────────────────────────────────",
+    " Bash command",
+    "",
+    "   doppler run --project swarm --config prd -- bash -c '…'",
+    "   Look up whyldcut branded link and probe its routing",
+    "",
+    " This shell -c script runs rm and could not be checked",
+    ` ⚠ Claude Code will automatically deny this request in ${clock}, to avoid`,
+    " blocking progress on an unattended session",
+    "",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. No",
+    "",
+    " Esc to cancel · Tab to amend · ctrl+e to explain",
+    "",
+  ].join("\n");
+}
+
+describe("auto-deny countdown", () => {
+  test("the ticking clock does not change the fingerprint", () => {
+    const early = detectModalPrompt(countdownModal("1:44"));
+    const later = detectModalPrompt(countdownModal("1:41"));
+    const lastMinute = detectModalPrompt(countdownModal("0:09"));
+    expect(early).not.toBeNull();
+    expect(later?.fingerprint).toBe(early!.fingerprint);
+    expect(lastMinute?.fingerprint).toBe(early!.fingerprint);
+  });
+
+  test("still tells apart prompts about different commands", () => {
+    const other = countdownModal("1:44").replace(/whyldcut/g, "elsewhere");
+    expect(detectModalPrompt(other)?.fingerprint).not.toBe(
+      detectModalPrompt(countdownModal("1:44"))?.fingerprint,
+    );
+  });
+
+  test("parses the time left in seconds", () => {
+    expect(detectModalPrompt(countdownModal("1:44"))?.autoDenySec).toBe(104);
+    expect(detectModalPrompt(countdownModal("0:09"))?.autoDenySec).toBe(9);
+  });
+
+  test("parses it when the wrap falls between the words and the clock", () => {
+    const pane = countdownModal("1:44").replace(
+      "deny this request in 1:44, to avoid",
+      "deny this request in\n 1:44, to avoid",
+    );
+    expect(detectModalPrompt(pane)?.autoDenySec).toBe(104);
+  });
+
+  test("keeps the countdown in the context, where the card shows it", () => {
+    expect(detectModalPrompt(countdownModal("1:44"))?.context.join("\n")).toContain(
+      "automatically deny this request in 1:44",
+    );
+  });
+
+  test("is absent on a prompt without one", () => {
+    expect(detectModalPrompt(HOOK_MODAL)?.autoDenySec).toBeUndefined();
+  });
+});

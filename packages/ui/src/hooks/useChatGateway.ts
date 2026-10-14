@@ -13,6 +13,9 @@ import type {
   Attachment,
 } from "../types";
 
+/** How early a cleared prompt still counts as auto-denied — one modal poll plus skew. */
+const AUTO_DENY_SLACK_MS = 3_000;
+
 function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -877,10 +880,13 @@ export function useChatGateway(
                 (b): b is ModalPromptBlock =>
                   b.type === "modal_prompt" && b.fingerprint === fingerprint,
               );
+            const autoDenyAt = payload.autoDenyAt as string | undefined;
             if (existing) {
               existing.answered = undefined;
               existing.dismissed = undefined;
+              existing.autoDenied = undefined;
               existing.pending = false;
+              existing.autoDenyAt = autoDenyAt;
               return;
             }
             const block: ModalPromptBlock = {
@@ -890,6 +896,7 @@ export function useChatGateway(
               context: (payload.context as string[]) ?? [],
               options: (payload.options as Array<{ key: string; label: string }>) ?? [],
               fingerprint,
+              autoDenyAt,
             };
             const lastMsg = draft[draft.length - 1];
             if (lastMsg?.role === "assistant") lastMsg.blocks.push(block);
@@ -911,6 +918,17 @@ export function useChatGateway(
                 // both settled — but only one of them knows which option.
                 if (answered) block.answered = answered;
                 else block.dismissed = true;
+                // Cleared unanswered at (or past) its deadline: the CLI's own
+                // timeout denied it, which is worth saying — "answered in the
+                // terminal" would claim someone was there. A little slack for
+                // the poll interval and clock skew.
+                if (
+                  !answered &&
+                  block.autoDenyAt &&
+                  Date.now() >= Date.parse(block.autoDenyAt) - AUTO_DENY_SLACK_MS
+                ) {
+                  block.autoDenied = true;
+                }
               }
             }
           });
