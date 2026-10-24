@@ -21,6 +21,13 @@ const SpawnAgentSchema = z.object({
   effort: z.string().optional().describe("Effort/reasoning override (low|medium|high|max)"),
   sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  profile: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,31}$/)
+    .optional()
+    .describe(
+      "Permission profile (yolo, auto, mail, ...); defaults to extensions.session.config.spawnProfile. Fixed for the session's life",
+    ),
 });
 
 const GetSubagentSchema = z.object({
@@ -48,6 +55,13 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       systemPrompt: z.string().optional().describe("System prompt"),
       thinking: z.boolean().optional().describe("Enable thinking"),
       effort: z.enum(["low", "medium", "high", "max"]).optional().describe("Thinking effort"),
+      profile: z
+        .string()
+        .regex(/^[a-z][a-z0-9-]{0,31}$/)
+        .optional()
+        .describe(
+          "Permission profile (yolo, auto, mail, ...); defaults to yolo, for sessions Michael creates directly. Fixed for the session's life",
+        ),
     }),
     execution: { lane: "write", concurrency: "serial" },
   },

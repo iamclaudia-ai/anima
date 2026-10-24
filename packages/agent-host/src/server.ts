@@ -132,6 +132,11 @@ export async function createAgentHostServer(
         ? createClaudeCliProvider({
             ...config.agentHost?.claudeCli,
             model: config.session.model,
+            extensionMcp: {
+              serverName: extensionMcpConfig.serverName || "anima",
+              url: extensionMcpUrl,
+              headers: extensionMcpHeaders,
+            },
           })
         : createAnthropicProvider({
             imageProcessing:
@@ -161,6 +166,7 @@ export async function createAgentHostServer(
     options.sessionHost ??
     new SessionHost({
       providers,
+      profiles: config.agentHost?.sessionProfiles,
     });
   const sessionModel =
     typeof sessionExtConfig.model === "string" && sessionExtConfig.model.trim().length > 0
@@ -315,6 +321,7 @@ export async function createAgentHostServer(
               systemPrompt?: string;
               thinking?: boolean;
               effort?: ThinkingEffort;
+              profile: string;
             },
           );
 
@@ -352,7 +359,14 @@ export async function createAgentHostServer(
             client.subscribedSessions.add(msg.sessionId);
           }
 
-          await sessionHost.prompt(msg.sessionId, msg.content, msg.cwd, msg.model, msg.agent);
+          await sessionHost.prompt(
+            msg.sessionId,
+            msg.content,
+            msg.cwd,
+            msg.model,
+            msg.agent,
+            msg.profile,
+          );
           sendResponse(ws, {
             type: "res",
             requestId: msg.requestId,
@@ -431,6 +445,7 @@ export async function createAgentHostServer(
             thinking: msg.params.thinking,
             effort: msg.params.effort as ThinkingEffort | undefined,
             sandbox: msg.params.sandbox,
+            profile: msg.params.profile,
           });
           const client = clients.get(ws);
           if (client) {
@@ -442,6 +457,7 @@ export async function createAgentHostServer(
             msg.params.cwd,
             msg.params.model,
             agent,
+            msg.params.profile,
           );
           sendResponse(ws, {
             type: "res",

@@ -20,6 +20,12 @@ import { createLogger } from "@anima/shared";
 import type { ThinkingEffort } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import {
+  LEGACY_PROFILE,
+  resolveProfile,
+  type ResolvedProfile,
+  type SessionProfile,
+} from "./profiles";
 import type {
   AgentRuntimeFactory,
   AgentRuntimeProviders,
@@ -58,6 +64,8 @@ export interface SessionCreateParams {
   effort?: ThinkingEffort;
   /** Runtime sandbox mode, when supported */
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  /** Permission profile name (required: there is no implicit default). */
+  profile: string;
 }
 
 export interface SessionResumeParams {
@@ -75,6 +83,11 @@ export interface SessionResumeParams {
   thinking?: boolean;
   /** Thinking effort level */
   effort?: ThinkingEffort;
+  /**
+   * Permission profile name. Omitted only by restore/adopt, which can't know
+   * it; the next prompt carries the real one and rebuilds a mismatch.
+   */
+  profile?: string;
 }
 
 /** Session defaults from config */
@@ -92,6 +105,8 @@ export interface SessionRecord {
   model: string;
   createdAt: string;
   lastActivity: string;
+  /** Permission profile the session runs under. */
+  profile?: string;
 }
 
 const DEFAULT_AGENT = "claude";
@@ -113,13 +128,30 @@ function createDefaultProviders(): AgentRuntimeProviders {
 export class SessionHost extends EventEmitter {
   private sessions = new Map<string, AgentRuntimeSession>();
   private sessionAgents = new Map<string, string>();
+  private sessionProfiles = new Map<string, string>();
+  private profiles: Record<string, SessionProfile>;
   private eventBuffers = new Map<string, EventBuffer>();
   private defaults: SessionDefaults = {};
   private providers: AgentRuntimeProviders;
 
-  constructor(options?: { providers?: AgentRuntimeProviders }) {
+  constructor(options?: {
+    providers?: AgentRuntimeProviders;
+    /** `agentHost.sessionProfiles` from anima.json, merged over the built-ins. */
+    profiles?: Record<string, SessionProfile>;
+  }) {
     super();
     this.providers = options?.providers || createDefaultProviders();
+    this.profiles = options?.profiles ?? {};
+  }
+
+  /** Resolve a profile name against config + built-ins. Throws when unknown. */
+  resolveProfile(name: string): ResolvedProfile {
+    return resolveProfile(name, this.profiles);
+  }
+
+  /** The profile a tracked session runs under, if any. */
+  getSessionProfile(sessionId: string): string | undefined {
+    return this.sessionProfiles.get(sessionId);
   }
 
   /**
@@ -140,6 +172,8 @@ export class SessionHost extends EventEmitter {
     if (!resolvedModel) {
       throw new Error("Session model is required. Configure extensions.session.config.model.");
     }
+    if (!params.profile) throw new Error("A session profile is required to create a session");
+    const profile = this.resolveProfile(params.profile);
     const options: CreateSessionOptions = {
       sessionId: params.sessionId,
       cwd: params.cwd,
@@ -148,6 +182,7 @@ export class SessionHost extends EventEmitter {
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
       sandbox: params.sandbox,
+      profile,
     };
 
     const session = provider.create(options);
@@ -155,10 +190,15 @@ export class SessionHost extends EventEmitter {
 
     this.sessions.set(session.id, session);
     this.sessionAgents.set(session.id, agent);
+    this.sessionProfiles.set(session.id, profile.name);
     this.eventBuffers.set(session.id, new EventBuffer());
     this.wireSession(session);
 
-    log.info("Created session", { agent, sessionId: session.id.slice(0, 8) });
+    log.info("Created session", {
+      agent,
+      sessionId: session.id.slice(0, 8),
+      profile: profile.name,
+    });
     return { sessionId: session.id };
   }
 
@@ -180,12 +220,14 @@ export class SessionHost extends EventEmitter {
     if (!resolvedModel) {
       throw new Error("Session model is required. Configure extensions.session.config.model.");
     }
+    const profile = this.resolveProfile(params.profile ?? LEGACY_PROFILE);
     const options: ResumeSessionOptions = {
       cwd: params.cwd,
       model: resolvedModel,
       lastActivity: params.lastActivity,
       thinking: params.thinking ?? this.defaults.thinking,
       effort: params.effort ?? this.defaults.effort,
+      profile,
     };
 
     const session = provider.resume(params.sessionId, options);
@@ -193,12 +235,17 @@ export class SessionHost extends EventEmitter {
 
     this.sessions.set(session.id, session);
     this.sessionAgents.set(session.id, agent);
+    this.sessionProfiles.set(session.id, profile.name);
     if (!this.eventBuffers.has(session.id)) {
       this.eventBuffers.set(session.id, new EventBuffer());
     }
     this.wireSession(session);
 
-    log.info("Resumed session", { agent, sessionId: session.id.slice(0, 8) });
+    log.info("Resumed session", {
+      agent,
+      sessionId: session.id.slice(0, 8),
+      profile: profile.name,
+    });
     return { sessionId: session.id };
   }
 
@@ -212,11 +259,29 @@ export class SessionHost extends EventEmitter {
     cwd?: string,
     model?: string,
     agent?: string,
+    profileName?: string,
   ): Promise<void> {
     const resolvedAgent = agent || this.sessionAgents.get(sessionId) || DEFAULT_AGENT;
     this.resolveProvider(resolvedAgent);
+    if (!profileName) throw new Error(`A session profile is required to prompt ${sessionId}`);
+    const profile = this.resolveProfile(profileName);
 
     let session = this.sessions.get(sessionId);
+
+    // The caller's profile is authoritative (it lives on the session's row).
+    // A session restored or adopted without one, or under a different one, is
+    // closed, not just released: a CLI pane keeps the flags it was launched
+    // with, so only a fresh launch is guaranteed to carry the right powers.
+    const runningProfile = this.sessionProfiles.get(sessionId);
+    if (session && runningProfile !== profile.name) {
+      log.warn("Session profile mismatch; rebuilding before prompt", {
+        sessionId: sessionId.slice(0, 8),
+        running: runningProfile ?? "unknown",
+        expected: profile.name,
+      });
+      await this.close(sessionId);
+      session = undefined;
+    }
 
     if (!session || !session.isActive) {
       // Lazy resume — session died or agent-host restarted
@@ -240,6 +305,7 @@ export class SessionHost extends EventEmitter {
         model: resumeModel,
         thinking: this.defaults.thinking,
         effort: this.defaults.effort,
+        profile: profile.name,
       });
       session = this.sessions.get(sessionId)!;
     }
@@ -303,6 +369,7 @@ export class SessionHost extends EventEmitter {
     await session.close();
     this.sessions.delete(sessionId);
     this.sessionAgents.delete(sessionId);
+    this.sessionProfiles.delete(sessionId);
     // Keep event buffer around briefly for clients that haven't seen close yet
     log.info("Closed session", { sessionId: sessionId.slice(0, 8) });
   }
@@ -350,6 +417,7 @@ export class SessionHost extends EventEmitter {
         model: info.model,
         createdAt: info.createdAt,
         lastActivity: info.lastActivity,
+        profile: this.sessionProfiles.get(info.id),
       }));
   }
 
@@ -388,6 +456,7 @@ export class SessionHost extends EventEmitter {
     }
     this.sessions.delete(sessionId);
     this.sessionAgents.delete(sessionId);
+    this.sessionProfiles.delete(sessionId);
   }
 
   /**
@@ -521,6 +590,7 @@ export class SessionHost extends EventEmitter {
     session.on("closed", () => {
       this.sessions.delete(sessionId);
       this.sessionAgents.delete(sessionId);
+      this.sessionProfiles.delete(sessionId);
       this.eventBuffers.delete(sessionId);
       log.info("Cleaned up session buffers", { sessionId: sessionId.slice(0, 8) });
     });

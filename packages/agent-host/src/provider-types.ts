@@ -1,4 +1,5 @@
 import type { ThinkingEffort } from "@anima/shared";
+import type { ResolvedProfile } from "./profiles";
 
 /** Emitted runtime event. Anthropic events use native SSE event names; other
  * providers should normalize their stream to the same high-level shape. */
@@ -22,6 +23,12 @@ export interface CreateSessionOptions {
   effort?: ThinkingEffort;
   /** Runtime sandbox mode, when supported */
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  /**
+   * Permission profile, resolved by SessionHost (which always supplies one).
+   * Providers that support profiles fall back to `yolo` only when called
+   * directly, as tests do.
+   */
+  profile?: ResolvedProfile;
 }
 
 export interface ResumeSessionOptions {
@@ -37,6 +44,8 @@ export interface ResumeSessionOptions {
   effort?: ThinkingEffort;
   /** Runtime sandbox mode, when supported */
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  /** Permission profile; see CreateSessionOptions.profile. */
+  profile?: ResolvedProfile;
 }
 
 export interface AgentRuntimeSessionInfo {

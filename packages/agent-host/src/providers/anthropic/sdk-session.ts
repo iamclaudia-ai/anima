@@ -63,6 +63,12 @@ import type { CreateSessionOptions, ResumeSessionOptions, StreamEvent } from "..
 import { processContent } from "./image-processor";
 import { formatSkillsForPrompt, loadSkills } from "./skills";
 import { animaSessionEnvWithProcess } from "../anima-env";
+import {
+  BUILTIN_PROFILES,
+  LEGACY_PROFILE,
+  bypassesPermissions,
+  type ResolvedProfile,
+} from "../../profiles";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -249,6 +255,8 @@ export class SDKSession extends EventEmitter {
   private cwd: string;
   private model: string;
   private systemPrompt?: string;
+  /** Permission profile, applied as query options at every (re)start. */
+  private readonly profile: ResolvedProfile;
   private effort?: ThinkingEffort;
   private isFirstPrompt: boolean;
   private imageProcessingConfig: ImageProcessingConfig;
@@ -288,11 +296,17 @@ export class SDKSession extends EventEmitter {
     this.cwd = options.cwd;
     this.model = options.model;
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
+    this.profile = options.profile ?? { name: LEGACY_PROFILE, ...BUILTIN_PROFILES[LEGACY_PROFILE] };
     this.effort = options.effort;
     this.isFirstPrompt = !isResume;
     this.imageProcessingConfig = deps?.config?.imageProcessing || DEFAULT_IMAGE_PROCESSING_CONFIG;
     this.skillsPaths = deps?.config?.skillsPaths || [];
     this.extensionMcp = deps?.config?.extensionMcp;
+    if (this.profile.mcp === "anima-only" && !this.extensionMcp) {
+      throw new Error(
+        `Session profile ${this.profile.name} needs Anima's MCP server, but none is configured`,
+      );
+    }
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"
@@ -553,10 +567,12 @@ export class SDKSession extends EventEmitter {
       // Plain system prompt string: CLAUDE.md chain + custom prompt.
       ...(combinedSystemPrompt ? { systemPrompt: combinedSystemPrompt } : {}),
 
-      // Load filesystem settings so SDK can discover user, project, and local project config.
-      settingSources: ["user", "project", "local"],
+      // Load filesystem settings so SDK can discover user, project, and local
+      // project config. A restricted profile ignores them all, so nothing in
+      // a settings file (hooks, permission rules) can widen what it may do.
+      settingSources: this.profile.restricted ? [] : ["user", "project", "local"],
 
-      ...(this.extensionMcp?.enabled
+      ...(this.extensionMcp && (this.extensionMcp.enabled || this.profile.mcp === "anima-only")
         ? {
             mcpServers: {
               [this.extensionMcp.serverName]: {
@@ -572,8 +588,11 @@ export class SDKSession extends EventEmitter {
           }
         : {}),
 
-      // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum
-      disallowedTools: DISALLOWED_TOOLS,
+      // Disallow interactive tools instead of SYSTEM_PROMPT.md addendum, plus
+      // whatever the profile denies.
+      disallowedTools: [...DISALLOWED_TOOLS, ...(this.profile.disallowedTools ?? [])],
+      ...(this.profile.tools !== undefined ? { tools: this.profile.tools } : {}),
+      ...(this.profile.allowedTools?.length ? { allowedTools: this.profile.allowedTools } : {}),
 
       // Thinking configuration — Opus 4.7+ requires adaptive mode; older
       // models use manual mode with an explicit token budget.
@@ -596,9 +615,9 @@ export class SDKSession extends EventEmitter {
             }
         : {}),
 
-      // Permissions — bypass everything (headless mode)
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      // Permissions come from the session's profile (yolo bypasses everything).
+      permissionMode: this.profile.permissionMode,
+      ...(bypassesPermissions(this.profile) ? { allowDangerouslySkipPermissions: true } : {}),
 
       // Enable streaming events (critical — gives us stream_event messages)
       includePartialMessages: true,

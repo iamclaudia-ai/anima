@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { createLogger, shortId } from "@anima/shared";
 import { getRuntime } from "../runtime";
 import { emitListChanged } from "../session-status-events";
+import { setSessionProfile } from "../session-store";
 
 const log = createLogger("SessionExt:Create", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -26,6 +27,8 @@ export interface DraftSessionParams {
   systemPrompt?: string;
   thinking?: boolean;
   effort?: Effort;
+  /** Permission profile, fixed for the session's life. */
+  profile: string;
 }
 
 /**
@@ -46,7 +49,14 @@ export function createDraftSession(params: DraftSessionParams): {
   const effort = params.effort || rt.sessionConfig.effort;
   const systemPrompt = params.systemPrompt || rt.sessionConfig.systemPrompt || undefined;
 
-  log.info("Creating session", { agent, cwd: params.cwd, model, thinking, effort });
+  log.info("Creating session", {
+    agent,
+    cwd: params.cwd,
+    model,
+    thinking,
+    effort,
+    profile: params.profile,
+  });
   const workspaceResult = rt.registry.getOrCreateWorkspace(params.cwd);
   const workspaceId = workspaceResult.workspace.id;
   const sessionId = randomUUID();
@@ -64,6 +74,7 @@ export function createDraftSession(params: DraftSessionParams): {
       bootstrapEffort: effort,
     },
   });
+  setSessionProfile(sessionId, params.profile);
   rt.registry.setWorkspaceActiveSession(workspaceId, sessionId);
   // The other tabs have no idea this row appeared. `send_prompt` emits the
   // same event for a session created implicitly by a first prompt; this is
@@ -73,13 +84,16 @@ export function createDraftSession(params: DraftSessionParams): {
   return { sessionId, workspaceId, agent, model };
 }
 
-export interface TopLevelSessionParams extends Omit<DraftSessionParams, "cwd"> {
+export interface TopLevelSessionParams extends Omit<DraftSessionParams, "cwd" | "profile"> {
   cwd?: string;
+  profile?: string;
   prompt: string;
   name?: string;
 }
 
 export interface TopLevelSessionDeps {
+  /** Profile when the caller names none (extensions.session.config.spawnProfile). */
+  defaultProfile: string;
   createDraft: (params: DraftSessionParams) => { sessionId: string; agent: string; model: string };
   setTitle: (sessionId: string, title: string) => void;
   sendPrompt: (params: {
@@ -120,6 +134,7 @@ export async function startTopLevelSession(
     systemPrompt: params.systemPrompt,
     thinking: params.thinking,
     effort: params.effort,
+    profile: params.profile ?? deps.defaultProfile,
   });
 
   const title = params.name?.trim() || null;

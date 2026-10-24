@@ -404,6 +404,7 @@ describe("session extension", () => {
       "/repo/project",
       "claude-test",
       "claude",
+      "yolo",
     );
 
     await ext.stop();
@@ -910,6 +911,7 @@ describe("session extension", () => {
       undefined,
       expect.any(String),
       expect.any(String),
+      expect.any(String),
     );
 
     await ext.stop();
@@ -926,7 +928,14 @@ describe("session extension", () => {
       cwd: "/repo/project",
       model: "claude-sonnet-4-6",
     });
-    expect(promptSpy).toHaveBeenCalledWith("resume-1", "", "/repo/project", "claude-sonnet-4-6");
+    expect(promptSpy).toHaveBeenCalledWith(
+      "resume-1",
+      "",
+      "/repo/project",
+      "claude-sonnet-4-6",
+      undefined,
+      "yolo",
+    );
     expect(switched).toEqual({ sessionId: "resume-1" });
 
     const reset = await ext.handleMethod("session.reset_session", {
@@ -936,6 +945,7 @@ describe("session extension", () => {
     expect(createSpy).toHaveBeenCalledWith({
       cwd: "/repo/project",
       model: "claude-opus",
+      profile: "yolo",
     });
     expect(reset).toEqual({ sessionId: "reset-session-1" });
 
@@ -976,6 +986,7 @@ describe("session extension", () => {
       "/repo/project",
       "claude-opus-4-6",
       "claude",
+      "yolo",
     );
 
     await ext.stop();

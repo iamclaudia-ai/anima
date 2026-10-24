@@ -5,6 +5,8 @@ import * as os from "node:os";
 import {
   closeSessionDb,
   getSessionDb,
+  getSessionProfile,
+  setSessionProfile,
   setSessionTitle,
   getStoredSession,
   listSubagentSessions,
@@ -41,6 +43,19 @@ describe("session store", () => {
       process.env.HOME = originalHome;
     }
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("stores a session's profile once and never lets it change", () => {
+    upsertSession({ id: "ses_prof", workspaceId: "ws_prof", model: "m" });
+    expect(getSessionProfile("ses_prof")).toBe("yolo"); // legacy NULL row
+    expect(setSessionProfile("ses_prof", "mail")).toBe(true);
+    expect(setSessionProfile("ses_prof", "yolo")).toBe(false);
+    expect(getSessionProfile("ses_prof")).toBe("mail");
+    // An upsert from any other path leaves the profile alone.
+    upsertSession({ id: "ses_prof", workspaceId: "ws_prof", model: "m", runtimeStatus: "running" });
+    expect(getSessionProfile("ses_prof")).toBe("mail");
+    expect(getSessionProfile("ses_missing")).toBeNull();
+    expect(setSessionProfile("ses_missing", "mail")).toBe(false);
   });
 
   it("keeps a user rename separate from the derived title", () => {

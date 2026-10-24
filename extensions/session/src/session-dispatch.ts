@@ -336,7 +336,11 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         revalidate: params.revalidate as boolean | undefined,
       }),
     "session.create_session": async (params) => {
-      const { sessionId } = createDraftSession(params as unknown as DraftSessionParams);
+      const { sessionId } = createDraftSession({
+        ...(params as unknown as DraftSessionParams),
+        // Sessions created directly are Michael's (web, iOS, menubar, CLI).
+        profile: (params.profile as string | undefined) ?? "yolo",
+      });
       return { sessionId };
     },
     "session.send_prompt": async (params) => {
@@ -430,6 +434,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
 
       if (params.parentSessionId === NEW_SESSION_PARENT) {
         return await startTopLevelSession(params as unknown as TopLevelSessionParams, {
+          defaultProfile: rt.sessionConfig.spawnProfile,
           createDraft: createDraftSession,
           setTitle: (sessionId, title) => {
             setSessionTitle(sessionId, title);
@@ -451,6 +456,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
           effort: params.effort as string | undefined,
           sandbox: params.sandbox as "read-only" | "workspace-write" | "danger-full-access",
           metadata: params.metadata as Record<string, unknown> | undefined,
+          profile: (params.profile as string | undefined) ?? rt.sessionConfig.spawnProfile,
         },
         request,
       );

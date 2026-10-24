@@ -1,7 +1,13 @@
 import { createLogger, PERSISTENT_SESSION_ID, shortId, withTimeout } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { updateSessionRuntime, type RuntimeStatus } from "../session-store";
+import {
+  LEGACY_SESSION_PROFILE,
+  getSessionProfile,
+  setSessionProfile,
+  updateSessionRuntime,
+  type RuntimeStatus,
+} from "../session-store";
 import { applyRuntimeStatus, emitListChanged } from "../session-status-events";
 import { resolveSessionPath } from "../parse-session";
 import { formatMemoryContext, type MemoryContextResult } from "../memory-context";
@@ -192,6 +198,9 @@ async function ensureSessionBootstrapped(params: {
     includeAllSummaries: params.includeAllSummaries,
   });
 
+  // A session created implicitly by its first prompt has no row yet; those
+  // come from Michael's own clients, so they get the legacy (yolo) profile.
+  const profile = getSessionProfile(params.sessionId) ?? LEGACY_SESSION_PROFILE;
   await rt.bridge.createSession({
     sessionId: params.sessionId,
     cwd: params.cwd,
@@ -200,6 +209,7 @@ async function ensureSessionBootstrapped(params: {
     systemPrompt,
     thinking: params.thinking,
     effort: params.effort,
+    profile,
   });
 
   rt.registry.upsertSession({
@@ -218,6 +228,7 @@ async function ensureSessionBootstrapped(params: {
       bootstrapEffort: params.effort,
     },
   });
+  setSessionProfile(params.sessionId, profile);
   log.info("Session bootstrapped", { sessionId: shortId(params.sessionId), cwd: params.cwd });
 }
 

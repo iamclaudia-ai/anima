@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { listSubagentSessions } from "../session-store";
+import { listSubagentSessions, setSessionProfile } from "../session-store";
 import type { StoredSession } from "../session-store";
 import { getWorkspace } from "../workspace";
 import type { AgentHostSessionInfo, RequestContext } from "../session-types";
@@ -71,6 +71,8 @@ export async function spawnSubagent(
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     metadata?: Record<string, unknown>;
+    /** Permission profile, fixed for the session's life. */
+    profile: string;
   },
   request: { connectionId: string | null; tags: string[] | null },
 ): Promise<Record<string, unknown>> {
@@ -146,6 +148,7 @@ export async function spawnSubagent(
     },
     lastActivity: nowIso,
   });
+  setSessionProfile(subagentId, params.profile);
 
   let result: { status?: string; message?: string };
   try {
@@ -161,6 +164,7 @@ export async function spawnSubagent(
       effort: params.effort,
       sandbox: params.sandbox,
       metadata: params.metadata,
+      profile: params.profile,
     });
   } catch (error) {
     const failedAt = new Date().toISOString();

@@ -1,7 +1,12 @@
 import { createLogger, shortId, withTimeout } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { getWorkspaceActiveSession } from "../session-store";
+import {
+  LEGACY_SESSION_PROFILE,
+  getSessionProfile,
+  getWorkspaceActiveSession,
+  setSessionProfile,
+} from "../session-store";
 import type { AgentHostSessionInfo } from "../session-types";
 import { getRuntime } from "../runtime";
 import { sameModel } from "../model-id";
@@ -90,7 +95,9 @@ export async function resetSession(params: {
   await transitionConversation(params.cwd);
 
   log.info("Resetting session", { cwd: params.cwd });
-  const result = await rt.bridge.createSession({ cwd: params.cwd, model });
+  const profile =
+    (previousSessionId ? getSessionProfile(previousSessionId) : null) ?? LEGACY_SESSION_PROFILE;
+  const result = await rt.bridge.createSession({ cwd: params.cwd, model, profile });
   rt.registry.upsertSession({
     id: result.sessionId,
     workspaceId: workspaceResult.workspace.id,
@@ -101,6 +108,7 @@ export async function resetSession(params: {
     runtimeStatus: "idle",
     previousSessionId,
   });
+  setSessionProfile(result.sessionId, profile);
   rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, result.sessionId);
   return result;
 }

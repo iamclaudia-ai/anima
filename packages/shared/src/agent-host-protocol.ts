@@ -26,6 +26,8 @@ export interface CreateSessionMessage {
     thinking?: boolean;
     effort?: string;
     agent?: string;
+    /** Permission profile name (required by agent-host). */
+    profile: string;
   };
 }
 
@@ -38,6 +40,8 @@ export interface PromptMessage {
   cwd?: string; // for auto-resume
   model?: string; // preferred model for auto-resume
   agent?: string;
+  /** Permission profile from the session's row; authoritative for (re)launch. */
+  profile: string;
 }
 
 /** Interrupt a session */
@@ -105,6 +109,8 @@ export interface SpawnSubagentMessage {
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     metadata?: Record<string, unknown>;
+    /** Permission profile name (required by agent-host). */
+    profile: string;
   };
 }
 

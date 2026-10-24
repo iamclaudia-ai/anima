@@ -105,6 +105,21 @@ export interface AgentHostConfig {
     url?: string;
     alwaysLoad?: boolean;
   };
+  /**
+   * Session permission profiles, merged over the built-ins (`yolo`, `auto`).
+   * See packages/agent-host/src/profiles.ts.
+   */
+  sessionProfiles?: Record<
+    string,
+    {
+      permissionMode: "bypassPermissions" | "auto" | "dontAsk" | "acceptEdits" | "plan" | "default";
+      tools?: string[];
+      allowedTools?: string[];
+      disallowedTools?: string[];
+      mcp?: "default" | "anima-only";
+      restricted?: boolean;
+    }
+  >;
   /** Codex provider configuration */
   codex?: {
     apiKey?: string;

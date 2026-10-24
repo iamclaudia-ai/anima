@@ -209,6 +209,7 @@ export class AgentHostClient extends EventEmitter {
     thinking?: boolean;
     effort?: string;
     agent?: string;
+    profile: string;
   }): Promise<{ sessionId: string }> {
     const result = await this.sendRequest({
       type: "session.create",
@@ -224,9 +225,10 @@ export class AgentHostClient extends EventEmitter {
   async prompt(
     sessionId: string,
     content: string | unknown[],
-    cwd?: string,
-    model?: string,
-    agent?: string,
+    cwd: string | undefined,
+    model: string | undefined,
+    agent: string | undefined,
+    profile: string,
   ): Promise<void> {
     await this.sendRequest({
       type: "session.prompt",
@@ -236,6 +238,7 @@ export class AgentHostClient extends EventEmitter {
       cwd,
       model,
       agent,
+      profile,
     });
   }
 
@@ -321,6 +324,7 @@ export class AgentHostClient extends EventEmitter {
     effort?: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     metadata?: Record<string, unknown>;
+    profile: string;
   }): Promise<{
     subagentId: string;
     sessionId: string;

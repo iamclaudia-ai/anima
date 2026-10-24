@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { SessionHost, type AgentRuntimeSession } from "./session-host";
 
+const YOLO = { name: "yolo", permissionMode: "bypassPermissions" };
+
 class FakeSession extends EventEmitter {
   public isProcessRunning = false;
   public lastActivityIso = new Date().toISOString();
@@ -73,7 +75,7 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
     fake.emit("sse", { type: "content_block_delta", delta: { text: "hi" } });
 
     expect(host.getEventsAfter("s-cleanup", 0)).toHaveLength(1);
@@ -98,6 +100,7 @@ describe("SessionHost", () => {
     });
 
     await host.create({
+      profile: "yolo",
       sessionId: "draft-session-1",
       cwd: "/repo",
       model: "claude-opus-4-6",
@@ -111,6 +114,7 @@ describe("SessionHost", () => {
         systemPrompt: undefined,
         thinking: undefined,
         effort: undefined,
+        profile: YOLO,
       },
     ]);
   });
@@ -136,13 +140,19 @@ describe("SessionHost", () => {
     });
 
     host.setDefaults({ model: "claude-opus-4-6", thinking: true, effort: "low" });
-    await host.prompt("s-resume", "hi", "/repo");
+    await host.prompt("s-resume", "hi", "/repo", undefined, undefined, "yolo");
 
     expect(startCalls).toBe(1);
     expect(resumed).toEqual([
       {
         sessionId: "s-resume",
-        options: { cwd: "/repo", model: "claude-opus-4-6", thinking: true, effort: "low" },
+        options: {
+          cwd: "/repo",
+          model: "claude-opus-4-6",
+          thinking: true,
+          effort: "low",
+          profile: YOLO,
+        },
       },
     ]);
   });
@@ -168,13 +178,19 @@ describe("SessionHost", () => {
     });
 
     host.setDefaults({ model: "claude-sonnet-4-6", thinking: true, effort: "low" });
-    await host.prompt("s-explicit-model", "hi", "/repo", "claude-opus-4-6");
+    await host.prompt("s-explicit-model", "hi", "/repo", "claude-opus-4-6", undefined, "yolo");
 
     expect(startCalls).toBe(1);
     expect(resumed).toEqual([
       {
         sessionId: "s-explicit-model",
-        options: { cwd: "/repo", model: "claude-opus-4-6", thinking: true, effort: "low" },
+        options: {
+          cwd: "/repo",
+          model: "claude-opus-4-6",
+          thinking: true,
+          effort: "low",
+          profile: YOLO,
+        },
       },
     ]);
   });
@@ -201,8 +217,8 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
 
     const closed = await host.reapIdleRunningSessions(300_000, 301_000);
     expect(closed).toEqual(["s-stale"]);
@@ -224,7 +240,7 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
     const reaped = await host.reapIdleRunningSessions(300_000, 301_000);
 
     expect(reaped).toEqual(["s-monitor"]);
@@ -257,8 +273,8 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
-    await host.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
+    await host.create({ profile: "yolo", cwd: "/repo", model: "claude-opus-4-6" });
 
     const records = host.getSessionRecords();
     expect(records.map((r) => r.id)).toEqual(["s-running"]);
@@ -281,7 +297,7 @@ describe("SessionHost", () => {
       },
     });
 
-    await host.create({ agent: "alt", cwd: "/repo", model: "alt-model" });
+    await host.create({ profile: "yolo", agent: "alt", cwd: "/repo", model: "alt-model" });
 
     expect(created).toEqual([
       {
@@ -291,6 +307,7 @@ describe("SessionHost", () => {
         systemPrompt: undefined,
         thinking: undefined,
         effort: undefined,
+        profile: YOLO,
       },
     ]);
     expect(host.getSessionRecords().map((r) => r.agent)).toEqual(["alt"]);
@@ -298,8 +315,8 @@ describe("SessionHost", () => {
 
   it("rejects unsupported session agents", async () => {
     const host = new SessionHost({ providers: {} });
-    await expect(host.create({ agent: "missing", cwd: "/repo", model: "x" })).rejects.toThrow(
-      "Unsupported session agent: missing",
-    );
+    await expect(
+      host.create({ profile: "yolo", agent: "missing", cwd: "/repo", model: "x" }),
+    ).rejects.toThrow("Unsupported session agent: missing");
   });
 });

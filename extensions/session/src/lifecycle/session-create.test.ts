@@ -5,9 +5,12 @@ function recordingDeps() {
   const calls: string[] = [];
   const titles: Array<[string, string]> = [];
   const prompts: Array<Record<string, unknown>> = [];
+  const profiles: string[] = [];
   const deps: TopLevelSessionDeps = {
+    defaultProfile: "auto",
     createDraft: (params) => {
       calls.push(`create:${params.cwd}`);
+      profiles.push(params.profile);
       return { sessionId: "sess-1", agent: params.agent ?? "claude", model: "opus" };
     },
     setTitle: (sessionId, title) => {
@@ -19,10 +22,17 @@ function recordingDeps() {
       prompts.push(params);
     },
   };
-  return { deps, calls, titles, prompts };
+  return { deps, calls, titles, prompts, profiles };
 }
 
 describe("startTopLevelSession", () => {
+  test("uses the spawn default profile unless the caller names one", async () => {
+    const { deps, profiles } = recordingDeps();
+    await startTopLevelSession({ cwd: "/repo", prompt: "a" }, deps);
+    await startTopLevelSession({ cwd: "/repo", prompt: "b", profile: "mail" }, deps);
+    expect(profiles).toEqual(["auto", "mail"]);
+  });
+
   test("creates, names, then prompts, in that order", async () => {
     const { deps, calls, titles, prompts } = recordingDeps();
     const result = await startTopLevelSession(

@@ -10,6 +10,7 @@ type SessionResumer = {
     agent?: string;
     model?: string;
     lastActivity?: string;
+    profile?: string;
   }) => Promise<{ sessionId: string }>;
 };
 
@@ -62,6 +63,7 @@ export async function restorePersistedSessions(
         agent: record.agent,
         model: record.model,
         lastActivity,
+        profile: record.profile,
       });
       restoredCount += 1;
     } catch (error) {

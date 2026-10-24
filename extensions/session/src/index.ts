@@ -16,7 +16,7 @@ import { AgentHostClient } from "./agent-client";
 import type { AgentHostSessionInfo, SessionRuntimeConfig } from "./session-types";
 import type { SessionSubagent } from "./lifecycle/subagent-workflow";
 import { closeDb } from "./workspace";
-import { closeSessionDb } from "./session-store";
+import { LEGACY_SESSION_PROFILE, closeSessionDb, getSessionProfile } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
 import { startReconciler } from "./session-reconciler";
 import { startRefValidator } from "./session-ref-validity";
@@ -72,13 +72,20 @@ export function createSessionExtension(config: Record<string, unknown> = {}): An
     thinking: (config.thinking as boolean | undefined) ?? false,
     effort: (config.effort as "low" | "medium" | "high" | "max" | undefined) || "medium",
     systemPrompt: (config.systemPrompt as string | null | undefined) ?? null,
+    spawnProfile: (config.spawnProfile as string | undefined) || "auto",
   };
 
   // ── Runtime objects (initialized before start, ctx bound in start) ──
   const agentClient = new AgentHostClient(
     withAuthToken(globalConfig.agentHost.url, globalConfig.gateway.token),
   );
-  const bridge = new SessionAgentBridge(agentClient);
+  // A session with no row (a transcript started outside Anima, then prompted
+  // here) was created by Michael and has always run as yolo. Every session
+  // Anima creates gets a row with its profile, and a stored profile always wins.
+  const bridge = new SessionAgentBridge(
+    agentClient,
+    (sessionId) => getSessionProfile(sessionId) ?? LEGACY_SESSION_PROFILE,
+  );
   const registry = new SessionRegistry();
   const methodHandlers = createSessionMethodHandlers();
 

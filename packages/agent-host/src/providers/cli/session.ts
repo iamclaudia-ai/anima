@@ -45,6 +45,8 @@ import { ensureMitmCerts } from "./mitm-certs";
 import { recallPort, rememberPort } from "./port-registry";
 import { SessionJsonlTail } from "./jsonl-tail";
 import { animaSessionEnv } from "../anima-env";
+import { BUILTIN_PROFILES, LEGACY_PROFILE, type ResolvedProfile } from "../../profiles";
+import { type ExtensionMcpTarget, profileCliArgs, writeSessionMcpConfig } from "./profile-args";
 
 const log = createLogger("ClaudeCliSession", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -63,6 +65,8 @@ export interface ClaudeCliProviderConfig {
   systemPromptFile?: string;
   /** "append" (default) keeps Claude Code's system prompt; "replace" swaps it out. */
   systemPromptMode?: "append" | "replace";
+  /** Anima's extension MCP server, for profiles with `mcp: "anima-only"`. */
+  extensionMcp?: ExtensionMcpTarget;
 }
 
 /**
@@ -75,7 +79,6 @@ export interface ClaudeCliProviderConfig {
  * sits beside the gateway's 30086, and is below the OS ephemeral range.
  */
 const DEFAULT_BASE_PORT = 31000;
-const DISALLOWED_TOOLS = "AskUserQuestion,EnterPlanMode,ExitPlanMode";
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence", "max_tokens"]);
 const INIT_TIMEOUT_MS = 12_000;
 const STALE_MS = 5 * 60 * 1000;
@@ -317,6 +320,9 @@ export class ClaudeCliSession extends EventEmitter {
   // Turn tracking — the latest non-terminal/terminal stop reason on the agent stream.
   private lastStopReason = "";
 
+  /** Permission profile, applied as launch flags (the CLI can't change it later). */
+  private readonly profile: ResolvedProfile;
+
   private readonly createdAt = Date.now();
   private lastActivityTime = Date.now();
 
@@ -335,6 +341,7 @@ export class ClaudeCliSession extends EventEmitter {
     this.model = sanitizeModel(rawModel);
     this.cliModel = rawModel;
     this.systemPrompt = "systemPrompt" in options ? options.systemPrompt : undefined;
+    this.profile = options.profile ?? { name: LEGACY_PROFILE, ...BUILTIN_PROFILES[LEGACY_PROFILE] };
     this.isResume = isResume;
     this.interception = config.interception === "mitm" ? "mitm" : "base-url";
     // A direct-tmux Escape (user typing in an attached pane) never calls
@@ -477,13 +484,11 @@ export class ClaudeCliSession extends EventEmitter {
   private claudeCommand(resume: boolean): { command: string[]; env: Record<string, string> } {
     const claudeBin = findClaude(this.config.cliPath);
     const args = resume ? ["--resume", this.id] : ["--session-id", this.id];
-    args.push(
-      "--model",
-      this.cliModel,
-      "--dangerously-skip-permissions",
-      "--disallowedTools",
-      DISALLOWED_TOOLS,
-    );
+    const mcpConfigPath =
+      this.profile.mcp === "anima-only" && this.config.extensionMcp
+        ? writeSessionMcpConfig(this.id, this.config.extensionMcp)
+        : undefined;
+    args.push("--model", this.cliModel, ...profileCliArgs(this.profile, mcpConfigPath));
     // Persona file first: in "replace" mode it swaps out Claude Code's own
     // system prompt, so it must not clobber the per-session context below.
     const personaFile = this.resolveSystemPromptFile();

@@ -79,10 +79,12 @@ describe("AgentHostClient", () => {
     const client = new AgentHostClient(`ws://127.0.0.1:${port}/ws`);
     await client.connect();
 
-    const created = await client.createSession({ cwd: "/repo" });
+    const created = await client.createSession({ cwd: "/repo", profile: "yolo" });
     expect(created).toEqual({ sessionId: "s1" });
 
-    await expect(client.prompt("s1", "hi")).resolves.toBeUndefined();
+    await expect(
+      client.prompt("s1", "hi", undefined, undefined, undefined, "yolo"),
+    ).resolves.toBeUndefined();
     await expect(client.list()).resolves.toEqual([]);
 
     client.disconnect();
@@ -122,7 +124,9 @@ describe("AgentHostClient", () => {
     const client = new AgentHostClient(`ws://127.0.0.1:${port}/ws`);
     await client.connect();
 
-    await expect(client.prompt("s1", "hi")).rejects.toThrow("boom");
+    await expect(
+      client.prompt("s1", "hi", undefined, undefined, undefined, "yolo"),
+    ).rejects.toThrow("boom");
 
     client.disconnect();
     server.stop();
@@ -172,7 +176,7 @@ describe("AgentHostClient", () => {
     client.on("session.event", (payload) => events.push(payload as Record<string, unknown>));
 
     await client.connect();
-    await client.createSession({ cwd: "/repo" });
+    await client.createSession({ cwd: "/repo", profile: "yolo" });
 
     (latestWs as { send: (data: string) => void } | null)?.send(
       JSON.stringify({

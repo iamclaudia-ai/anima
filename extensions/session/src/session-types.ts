@@ -29,6 +29,12 @@ export interface SessionRuntimeConfig {
   thinking: boolean;
   effort: "low" | "medium" | "high" | "max";
   systemPrompt: string | null;
+  /**
+   * Profile for sessions started by spawn_agent (delegation, scheduled tasks)
+   * when the caller names none. Sessions Michael creates directly
+   * (create_session) default to yolo.
+   */
+  spawnProfile: string;
 }
 
 export interface RequestContext {

@@ -259,6 +259,7 @@ function ensureSessionTable(currentDb: Database): void {
       summary             TEXT,
       metadata_json       TEXT,
       previous_session_id TEXT,
+      profile             TEXT,
       last_activity       TEXT NOT NULL DEFAULT (datetime('now')),
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
@@ -291,6 +292,8 @@ function ensureSessionTable(currentDb: Database): void {
     "disposition TEXT NOT NULL DEFAULT 'open' CHECK(disposition IN ('open','needs_review','blocked','snoozed','resolved','archived'))",
   );
   addColumn("metadata_json", "metadata_json TEXT");
+  // Migration 027: the permission profile, write-once (see setSessionProfile).
+  addColumn("profile", "profile TEXT");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
 
   // A CHECK constraint can't be widened by ALTER TABLE, so a table left behind
@@ -508,6 +511,30 @@ export function getRuntimeStatus(id: string): RuntimeStatus | null {
     .get(id) as { runtime_status: string | null } | null;
   if (!row) return null;
   return isRuntimeStatus(row.runtime_status) ? row.runtime_status : "idle";
+}
+
+/** Profile name for sessions whose row predates profiles (all were yolo). */
+export const LEGACY_SESSION_PROFILE = "yolo";
+
+/**
+ * Record the permission profile a session was created with. Write-once: a
+ * row that already has one keeps it, so no later call can widen a session's
+ * powers. Returns false when the row is missing or already has a profile.
+ */
+export function setSessionProfile(id: string, profile: string): boolean {
+  const result = getDb()
+    .query("UPDATE sessions SET profile = ? WHERE provider_session_id = ? AND profile IS NULL")
+    .run(profile, id);
+  return result.changes > 0;
+}
+
+/** The profile a session runs under; legacy rows (NULL) read as yolo. Null when no row. */
+export function getSessionProfile(id: string): string | null {
+  const row = getDb()
+    .query("SELECT profile FROM sessions WHERE provider_session_id = ?")
+    .get(id) as { profile: string | null } | null;
+  if (!row) return null;
+  return row.profile ?? LEGACY_SESSION_PROFILE;
 }
 
 /**

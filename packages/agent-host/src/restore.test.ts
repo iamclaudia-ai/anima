@@ -95,7 +95,11 @@ describe("restorePersistedSessions", () => {
       },
     });
 
-    const { sessionId } = await hostA.create({ cwd: "/repo", model: "claude-opus-4-6" });
+    const { sessionId } = await hostA.create({
+      profile: "yolo",
+      cwd: "/repo",
+      model: "claude-opus-4-6",
+    });
     mod.saveState(hostA.getSessionRecords());
 
     const hostB = new SessionHost({
@@ -126,7 +130,7 @@ describe("restorePersistedSessions", () => {
     });
 
     expect(hostB.list()).toHaveLength(1);
-    await hostB.prompt(sessionId, "hi", "/repo");
+    await hostB.prompt(sessionId, "hi", "/repo", undefined, undefined, "yolo");
     expect(prompted).toEqual([sessionId]);
 
     restore();
