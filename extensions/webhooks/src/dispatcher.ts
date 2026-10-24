@@ -104,6 +104,8 @@ export class Dispatcher {
     try {
       const due = this.deps.store.due(this.now().toISOString(), batchSize);
       for (const delivery of due) {
+        // Sequential on purpose: a backlog must not hit a target all at once.
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
         await this.dispatch(delivery.id);
       }
       return due.length;
