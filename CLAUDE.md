@@ -69,23 +69,24 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 Enabled extensions (from `~/.anima/anima.json`) — method counts are what the
 live gateway reports; run `anima gateway list_methods` for the current truth.
 
-| Extension    | Server methods                                                   | Web pages                                                         |
-| ------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, … | —                                                                 |
-| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …           | —                                                                 |
-| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …         | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
-| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …       | `/scheduler`                                                      |
-| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …        | —                                                                 |
-| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …           | code-server (`webConfig.url`)                                     |
-| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`          | —                                                                 |
-| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                        | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
-| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                      | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
-| `control`    | 3 — `health_check`, `log_list`, `log_tail`                       | `/control`, `/logs`                                               |
-| `hooks`      | 2 — `health_check`, `list`                                       | —                                                                 |
-| `chat`       | —                                                                | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
-| `bogart`     | —                                                                | `/bogart`                                                         |
+| Extension    | Server methods                                                      | Web pages                                                         |
+| ------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, …    | —                                                                 |
+| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …              | —                                                                 |
+| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …            | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
+| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …          | `/scheduler`                                                      |
+| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …           | —                                                                 |
+| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …              | code-server (`webConfig.url`)                                     |
+| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`             | —                                                                 |
+| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                           | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
+| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                         | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
+| `control`    | 3 — `health_check`, `log_list`, `log_tail`                          | `/control`, `/logs`                                               |
+| `hooks`      | 2 — `health_check`, `list`                                          | —                                                                 |
+| `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, … | —                                                                 |
+| `chat`       | —                                                                   | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
+| `bogart`     | —                                                                   | `/bogart`                                                         |
 
-That is all 13 extensions the gateway actually loads. Two other names appear
+That is all 14 extensions the gateway actually loads. Two other names appear
 but are not loaded extensions: `imessage` is present on disk and disabled in
 config, and `testroute` is a dev-only fixture absent from config. The
 `extensions.codex` block is **not** an extension either — see Agent Providers
@@ -185,6 +186,7 @@ anima/
 │   ├── control/          # System dashboard + log viewer
 │   ├── bogart/           # Web pages
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
+│   ├── webhooks/         # Inbound webhooks (:30089, public via Cloudflare tunnel) → inbox + target method
 │   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
 ├── scripts/              # Smoke tests, E2E tests
@@ -284,6 +286,14 @@ An extension can export `cli: ExtensionCli` (from `@anima/shared`) in `src/cli.t
 - **The rule:** a command belongs in `cli.ts` only if it would behave differently when the CLI runs on another machine than the gateway (it needs the caller's stdio, exit code, or local files). Everything else is a server method.
 - `cli.ts` must never import the extension's server entry (`src/index.ts`) or `@anima/extension-host`, and a local command name must never equal a server method name. `packages/cli/src/extension-cli.test.ts` enforces both for every extension.
 - First user: `extensions/skills` (the skill runner, `anima skills run|task|commands|help`).
+
+#### Inbound webhooks (`extensions/webhooks`)
+
+External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secret>` (Cloudflare tunnel → `127.0.0.1:30089`; see `docs/SECURITY.md`). Hooks are declared in `extensions.webhooks.config.hooks`, each with a path `secret`, an optional `signature` (`"zoho"` or an HMAC header spec), and an optional `target` method.
+
+- Every accepted delivery is stored in `webhook_deliveries` before the 200, then `webhooks.received` is emitted (metadata only).
+- With a `target`, the extension calls it with `{ id, hook, receivedAt, contentType, headers, body }`. `body` is the raw text: parse it yourself (Zoho's ids overflow JS numbers). Throwing schedules a retry (30s, 2m, 10m, 1h, 6h, then `failed`), so a target must be idempotent on `id`.
+- `anima webhooks list_deliveries`, `get_delivery`, `redeliver`, `reset_signing_secret` manage the inbox.
 
 ### WebSocket Protocol
 

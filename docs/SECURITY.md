@@ -67,26 +67,46 @@ theft, data exfiltration, or persistence.
 
 All Anima-owned control services should bind to loopback:
 
-| Service                    | Port                    | Expected bind |
-| -------------------------- | ----------------------- | ------------- |
-| Gateway                    | `30086`                 | `127.0.0.1`   |
-| Agent-host                 | `30087`                 | `127.0.0.1`   |
-| Watchdog                   | `30085`                 | `127.0.0.1`   |
-| Code server                | `30088`                 | `127.0.0.1`   |
-| Claude CLI proxy internals | ephemeral/base          | `127.0.0.1`   |
-| Scheduler webhook server   | `30089` default if used | `127.0.0.1`   |
+| Service                    | Port           | Expected bind |
+| -------------------------- | -------------- | ------------- |
+| Gateway                    | `30086`        | `127.0.0.1`   |
+| Agent-host                 | `30087`        | `127.0.0.1`   |
+| Watchdog                   | `30085`        | `127.0.0.1`   |
+| Code server                | `30088`        | `127.0.0.1`   |
+| Claude CLI proxy internals | ephemeral/base | `127.0.0.1`   |
+| Webhooks extension         | `30089`        | `127.0.0.1`   |
 
 Caddy is the remote entry point for Tailscale-reachable HTTPS routes. Current
 intended routes:
 
 - `anima.kiliman.dev` -> `127.0.0.1:30086`
 - `watchdog.kiliman.dev` -> `127.0.0.1:30085`
-- `webhooks.kiliman.dev` -> `127.0.0.1:30089`
 - `code.kiliman.dev` -> `127.0.0.1:30088`
 
 The watchdog route is intentionally available remotely so the gateway can be
 restarted when it is stuck. That route is acceptable only because watchdog APIs
 also require the Anima gateway token.
+
+### Public Ingress (Webhooks)
+
+The only route reachable from the public internet is
+`https://webhooks.kiliman.dev/hook/*`, carried by the `anima-webhooks`
+Cloudflare tunnel (`~/.cloudflared/config.yml`, run by the
+`com.cloudflare.cloudflared` LaunchAgent) to the webhooks extension on
+`127.0.0.1:30089`. Every other path stops at Cloudflare's edge with a 404, and
+Caddy has no webhooks route.
+
+Each hook is `POST /hook/<name>/<secret>`. The path secret (32+ characters) is
+compared in constant time, and a wrong secret looks the same as a missing hook
+(404). A hook can also require a signature: an HMAC header (`hex` or `base64`,
+optional prefix), or Zoho Mail's scheme, where the signing secret arrives once
+in `x-hook-secret` on the first request and is stored in
+`webhook_signing_secrets`. A stored secret is never replaced in-band (409);
+`anima webhooks reset_signing_secret --hook <name>` clears it for a new
+handshake. Deliveries are stored before the 200 response and handed to their
+target as data. Treat bodies as untrusted input.
+
+`anima doctor` checks the tunnel's ingress rules and the 30089 loopback bind.
 
 ### Authentication
 

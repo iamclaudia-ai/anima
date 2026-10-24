@@ -248,6 +248,15 @@
         "zod": "catalog:",
       },
     },
+    "extensions/webhooks": {
+      "name": "@anima/ext-webhooks",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anima/extension-host": "workspace:*",
+        "@anima/shared": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
     "packages/agent-host": {
       "name": "@anima/agent-host",
       "version": "0.1.0",
@@ -411,6 +420,8 @@
     "@anima/ext-scheduler": ["@anima/ext-scheduler@workspace:extensions/scheduler"],
 
     "@anima/ext-skills": ["@anima/ext-skills@workspace:extensions/skills"],
+
+    "@anima/ext-webhooks": ["@anima/ext-webhooks@workspace:extensions/webhooks"],
 
     "@anima/extension-host": ["@anima/extension-host@workspace:packages/extension-host"],
 

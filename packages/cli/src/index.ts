@@ -1085,6 +1085,7 @@ async function doctorCommand(_args: string[]): Promise<void> {
   })();
   const gatewayPort = config?.gateway.port ?? 30086;
   const agentHostPort = config?.agentHost.port ?? 30087;
+  const webhooksPort = Number(config?.extensions.webhooks?.config?.port ?? 30089);
   const watchdogPort = (() => {
     try {
       return Number(new URL(WATCHDOG_URL).port || "80");
@@ -1112,6 +1113,7 @@ async function doctorCommand(_args: string[]): Promise<void> {
   addListenerCheck(checks, lsofOutput, gatewayPort, "gateway");
   addListenerCheck(checks, lsofOutput, agentHostPort, "agent-host");
   addListenerCheck(checks, lsofOutput, 30088, "code-server");
+  addListenerCheck(checks, lsofOutput, webhooksPort, "webhooks");
 
   const caddyfile = readTextIfExists("/opt/homebrew/etc/Caddyfile");
   if (caddyfile) {
@@ -1121,8 +1123,6 @@ async function doctorCommand(_args: string[]): Promise<void> {
     const watchdogCaddyPattern = new RegExp(
       `watchdog\\.kiliman\\.dev\\s*\\{[\\s\\S]*?reverse_proxy\\s+127\\.0\\.0\\.1:${watchdogPort}[\\s\\S]*?\\}`,
     );
-    const webhooksCaddyPattern =
-      /webhooks\.kiliman\.dev\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:30089[\s\S]*?\}/;
     checks.push({
       level: animaCaddyPattern.test(caddyfile) ? "pass" : "fail",
       name: `Caddy anima.kiliman.dev proxies to 127.0.0.1:${gatewayPort}`,
@@ -1131,14 +1131,36 @@ async function doctorCommand(_args: string[]): Promise<void> {
       level: watchdogCaddyPattern.test(caddyfile) ? "pass" : "fail",
       name: `Caddy watchdog.kiliman.dev proxies to 127.0.0.1:${watchdogPort}`,
     });
-    checks.push({
-      level: webhooksCaddyPattern.test(caddyfile) ? "pass" : "fail",
-      name: "Caddy webhooks.kiliman.dev proxies to 127.0.0.1:30089",
-    });
   } else {
     checks.push({
       level: "warn",
       name: "/opt/homebrew/etc/Caddyfile readable",
+      detail: "not found or unreadable",
+    });
+  }
+
+  // Webhooks reach the machine only through the anima-webhooks Cloudflare
+  // tunnel: /hook/* on webhooks.kiliman.dev, everything else a 404 at the edge.
+  const tunnelConfig = readTextIfExists(resolve(homeDir, ".cloudflared", "config.yml"));
+  if (tunnelConfig) {
+    const webhooksIngress = new RegExp(
+      `hostname:\\s*webhooks\\.kiliman\\.dev\\s+path:\\s*\\^/hook/\\s+service:\\s*http://127\\.0\\.0\\.1:${webhooksPort}\\b`,
+    );
+    const rules = tunnelConfig.match(/^\s*-\s*(?:hostname|service):.*$/gm) ?? [];
+    const lastRule = rules.at(-1) ?? "";
+    checks.push({
+      level: webhooksIngress.test(tunnelConfig) ? "pass" : "fail",
+      name: `Tunnel routes webhooks.kiliman.dev/hook/* to 127.0.0.1:${webhooksPort}`,
+    });
+    checks.push({
+      level: /service:\s*http_status:404/.test(lastRule) ? "pass" : "fail",
+      name: "Tunnel catch-all rule returns 404",
+      detail: lastRule.trim() || "no ingress rules found",
+    });
+  } else {
+    checks.push({
+      level: "warn",
+      name: "~/.cloudflared/config.yml readable",
       detail: "not found or unreadable",
     });
   }
