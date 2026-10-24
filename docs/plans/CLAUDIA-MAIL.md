@@ -24,6 +24,21 @@ first draft) where they differ. Runs on **Anima Sedes**.
   `~/.anima/mail-session` is pre-trusted in `~/.claude.json` (it must be on Sedes too). **Libby still
   runs as yolo** and will read transcripts that contain email: give her a restricted profile.
 
+- Step 3b (wake queue): verified trusted Inbox mail (kiliman@gmail.com, michael@3votech.com) wakes
+  the daily "Mail · YYYY-MM-DD" session (mail profile), batched (2 min quiet, 10 min cap, 6/hour);
+  everything else waits for the next wake or the 18:00 digest. `mail.wake_status` / `mail.wake_now`.
+  Verified live: an unverified email with an injection line went to waiting, `wake_now` started the
+  Mail session, which reported the injection instead of obeying it, then marked the email read and archived it.
+  **3votech.com has no DMARC record**, so mail from michael@3votech.com never verifies (dmarc=none).
+
+### Next
+
+- Michael sends a real email from kiliman@gmail.com to test the trusted wake end to end.
+- Step 4: reply/send behind the approved-recipient list + iMessage confirmation.
+- Step 5: move tunnel + webhooks + mail to Anima Sedes (pre-trust `~/.anima/mail-session` there,
+  turn wake off on vesuvius), and route iMessage with memory context.
+- Libby gets a restricted profile; #86 strict validation; DMARC for 3votech.com (Michael's call).
+
 ## Decisions
 
 | Topic            | Decision                                                                                                                                                                                                                                                                                                                                                                            |
