@@ -18,6 +18,12 @@ first draft) where they differ. Runs on **Anima Sedes**.
   announce once), reconcile every 30 min. Live: email to `mail.received` in about 3s. MCP tools move
   to step 3, together with the `mail` session profile that will use them.
 
+- Step 3a (session profiles, 369f077): `yolo` / `auto` / `mail`, stored write-once on the row and
+  enforced on every launch. Verified live: a `mail` session lists mail, has no shell at all, and
+  `memory_remember` is denied by `dontAsk`. Mail MCP tools are live (5def314). The workspace
+  `~/.anima/mail-session` is pre-trusted in `~/.claude.json` (it must be on Sedes too). **Libby still
+  runs as yolo** and will read transcripts that contain email: give her a restricted profile.
+
 ## Decisions
 
 | Topic            | Decision                                                                                                                                                                                                                                                                                                                                                                            |

@@ -123,6 +123,20 @@ is reached two ways:
   session Michael can open later. `name` also works for child spawns. Without
   it, the title falls back to the first prompt.
 
+### Session permission profiles
+
+Every session runs under a **profile**, chosen at creation and fixed for its life:
+
+| Profile | Mode                                                                | Used by                                                                                                                                                                           |
+| ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `yolo`  | `bypassPermissions`                                                 | `create_session` default: sessions Michael creates (web, iOS, menubar, CLI), Libby, and unattended runbooks that ask for it explicitly (the deps sweep, the NutWords deploy gate) |
+| `auto`  | Claude Code auto mode                                               | `spawn_agent` default (`extensions.session.config.spawnProfile`)                                                                                                                  |
+| `mail`  | `dontAsk`, no built-in tools, only Anima's MCP server, `restricted` | mail sessions: mail tools + read-only memory, nothing else                                                                                                                        |
+
+- Profiles beyond the built-ins live in `agentHost.sessionProfiles` (`permissionMode`, `tools`, `allowedTools`, `disallowedTools`, `mcp: "anima-only"`, `restricted`). Code: `packages/agent-host/src/profiles.ts`.
+- The profile is stored write-once in `sessions.profile` and sent with **every** create and prompt (the session bridge looks it up), so a resumed session keeps its powers. agent-host rejects a missing or unknown profile, and closes and relaunches a session running under the wrong one. Legacy rows (NULL) read as `yolo`.
+- Non-yolo CLI sessions see Claude Code's workspace-trust dialog in a folder it hasn't seen, and nobody is there to answer it. Pre-trust their working directory (`projects[<dir>].hasTrustDialogAccepted` in `~/.claude.json`). The mail workspace is `~/.anima/mail-session`.
+
 Orchestration (Claudia driving other agents' sessions) is deliberately not
 built. The registry is future-proofing, not a current goal — day-to-day work is
 one-on-one with Claudia, with delegation used to offload mundane tasks.
