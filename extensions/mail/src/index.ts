@@ -26,6 +26,8 @@ import { z } from "zod";
 import { type MailConfig, parseMailConfig } from "./config";
 import { MAIL_RECEIVED, Mailbox, type MessageSummary, type ReadResult } from "./mailbox";
 import { MailStore, openAnimaDb } from "./store";
+import { isAuthenticatedSender, parseAuthentication } from "./parse";
+import { WakeQueue } from "./wake";
 import { type FetchLike, type ZohoMessage, ZohoMailClient } from "./zoho";
 
 export interface MailExtensionOptions {
@@ -48,6 +50,8 @@ export function createMailExtension(
   let store: MailStore | null = null;
   let mailbox: Mailbox | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let digestTimer: ReturnType<typeof setInterval> | null = null;
+  let wake: WakeQueue | null = null;
   let lastReconcile: { at: string; announced: number } | null = null;
   let lastError: { at: string; message: string } | null = null;
   /** messageId → folderId, learned from every listing, so read needs no folder. */
@@ -151,6 +155,16 @@ export function createMailExtension(
       }),
     },
     {
+      name: "mail.wake_status",
+      description: "Show the wake queue: mail waiting to be delivered and today's Mail session",
+      inputSchema: z.object({}),
+    },
+    {
+      name: "mail.wake_now",
+      description: "Deliver everything queued to today's Mail session now",
+      inputSchema: z.object({}),
+    },
+    {
       name: "mail.reconcile",
       description: "Announce Inbox mail the webhook missed (also runs on a timer)",
       inputSchema: z.object({}),
@@ -242,6 +256,23 @@ export function createMailExtension(
       ctx = context;
       db = options.db ?? openAnimaDb();
       store = new MailStore(db);
+      const state = {
+        get: <T>(key: string) => context.store.get<T>(key),
+        set: (key: string, value: unknown) => context.store.set(key, value),
+      };
+      wake = new WakeQueue({
+        config: config.wake,
+        trustedSenders: config.trustedSenders,
+        state,
+        log: context.log,
+        isVerified: async (message) =>
+          isAuthenticatedSender(
+            message.from,
+            parseAuthentication(await client.getHeaders(message.folderId, message.messageId)),
+          ),
+        call: (method, params) => context.call(method, params),
+      });
+      const activeWake = wake;
       mailbox = new Mailbox({
         client,
         store,
@@ -252,7 +283,11 @@ export function createMailExtension(
           set: (key, value) => context.store.set(key, value),
         },
         emit: (event, payload) => context.emit(event, payload),
+        onAnnounced: (message) => void activeWake.onMail(message),
       });
+      // Resume a batch persisted before a restart, and check for the digest.
+      activeWake.schedule();
+      digestTimer = setInterval(() => void activeWake.tick(), 60_000);
       timer = setInterval(() => void runReconcile(), config.reconcileMinutes * 60_000);
       void runReconcile();
       context.log.info("Mail started", {
@@ -264,6 +299,10 @@ export function createMailExtension(
     async stop() {
       if (timer) clearInterval(timer);
       timer = null;
+      if (digestTimer) clearInterval(digestTimer);
+      digestTimer = null;
+      wake?.stop();
+      wake = null;
       mailbox = null;
       store = null;
       if (db && !options.db) db.close();
@@ -387,6 +426,13 @@ export function createMailExtension(
         }
         return { moved: p.messageIds.length, folder: folder.folderName };
       }
+
+      case "mail.wake_status":
+        return { enabled: config.wake.enabled, ...wake?.snapshot() };
+
+      case "mail.wake_now":
+        if (!wake) throw new Error("Mail extension is not started");
+        return await wake.fire("new-mail");
 
       case "mail.reconcile": {
         const result = await box.reconcile();

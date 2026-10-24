@@ -68,6 +68,8 @@ export interface MailboxDeps {
   config: MailConfig;
   log: LoggerLike;
   emit(event: string, payload: unknown): void;
+  /** Called once per newly announced message (the wake queue). */
+  onAnnounced?: (message: MessageSummary) => void;
   now?: () => Date;
 }
 
@@ -199,6 +201,7 @@ export class Mailbox {
     });
     if (isNew) {
       this.deps.emit(MAIL_RECEIVED, { ...summary, source });
+      this.deps.onAnnounced?.(summary);
       this.deps.log.info("Mail received", {
         messageId: summary.messageId,
         folder: summary.folder,
