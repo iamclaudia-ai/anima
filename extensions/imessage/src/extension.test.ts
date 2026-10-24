@@ -88,12 +88,12 @@ describe("iMessage extension", () => {
     const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const emitted: Array<{ eventName: string; payload: unknown }> = [];
 
-    startSpy = spyOn(ImsgRpcClient.prototype, "start").mockImplementation(
-      function (this: ImsgRpcClient) {
-        clientInstance = this;
-        return Promise.resolve();
-      },
-    );
+    startSpy = spyOn(ImsgRpcClient.prototype, "start").mockImplementation(function (
+      this: ImsgRpcClient,
+    ) {
+      clientInstance = this;
+      return Promise.resolve();
+    });
     stopSpy = spyOn(ImsgRpcClient.prototype, "stop").mockResolvedValue(undefined);
     listChatsSpy = spyOn(ImsgRpcClient.prototype, "listChats").mockResolvedValue([]);
     subscribeSpy = spyOn(ImsgRpcClient.prototype, "subscribe").mockResolvedValue(1);
@@ -221,12 +221,12 @@ describe("iMessage extension", () => {
     let clientInstance: ImsgRpcClient | null = null;
     const callFn = mock(async () => ({ text: "ignored", sessionId: "session-1" }));
 
-    startSpy = spyOn(ImsgRpcClient.prototype, "start").mockImplementation(
-      function (this: ImsgRpcClient) {
-        clientInstance = this;
-        return Promise.resolve();
-      },
-    );
+    startSpy = spyOn(ImsgRpcClient.prototype, "start").mockImplementation(function (
+      this: ImsgRpcClient,
+    ) {
+      clientInstance = this;
+      return Promise.resolve();
+    });
     stopSpy = spyOn(ImsgRpcClient.prototype, "stop").mockResolvedValue(undefined);
     listChatsSpy = spyOn(ImsgRpcClient.prototype, "listChats").mockResolvedValue([]);
     subscribeSpy = spyOn(ImsgRpcClient.prototype, "subscribe").mockResolvedValue(1);

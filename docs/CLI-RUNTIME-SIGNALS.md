@@ -91,7 +91,7 @@ Consequences:
   optimistic stop (a direct-tmux Escape, where `interrupt()` never runs) Anima
   hung in "processing" **indefinitely**.
 - The reliable signal sat in the JSONL the whole time: `[Request interrupted by
-user]` (text/thinking) or `[Request interrupted by user for tool use]`
+  user]` (text/thinking) or `[Request interrupted by user for tool use]`
   (tools), written at the **instant** of interrupt — ~33s before the stream
   ended. Single Escape is 100% reliable; double Escape == single.
 

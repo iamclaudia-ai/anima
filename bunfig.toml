@@ -1,6 +1,13 @@
 [install]
 # Use exact versions by default
 exact = true
+# Supply-chain cooling-off period: never install a version published less than
+# 3 days ago, so a hijacked release is usually caught and yanked before it lands.
+minimumReleaseAge = 259200
+# Security fixes too new for the window, exempted by exact version only. Each
+# entry can be removed once its version is older than the window.
+#   body-parser@2.4.0: GHSA-27r3-jxmh-p828 (DoS via trailing bytes), published 2026-10-22
+minimumReleaseAgeExcludes = ["body-parser@2.4.0"]
 
 [test]
 # Test configuration

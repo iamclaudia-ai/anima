@@ -99,7 +99,7 @@ clients **need zero changes**.
    becomes a no-op; we launch with `--dangerously-skip-permissions`.
 
 3. **Disable interactive tools at parity with the SDK** via `--disallowedTools
-AskUserQuestion EnterPlanMode ExitPlanMode` (same list as `DISALLOWED_TOOLS` in
+   AskUserQuestion EnterPlanMode ExitPlanMode` (same list as `DISALLOWED_TOOLS` in
    `sdk-session.ts`; not used in the SDK runtime either). _(Verify exact flag name during
    Phase 0.)_
 
@@ -130,7 +130,7 @@ AskUserQuestion EnterPlanMode ExitPlanMode` (same list as `DISALLOWED_TOOLS` in
 **✅ Results (2026-05-23, `tmp/cli-runtime-spike/recon.ts`):**
 
 - base-URL pass-through **forwards the OAuth subscription token** (`Authorization: Bearer
-sk-ant-oat01-…`, no `x-api-key`).
+  sk-ant-oat01-…`, no `x-api-key`).
 - Anthropic billed it against the **subscription** — response carried
   `anthropic-ratelimit-unified-5h/-7d` buckets (the Max plan windows), not API rate limits;
   `overage-status: rejected` (subscription-only org).

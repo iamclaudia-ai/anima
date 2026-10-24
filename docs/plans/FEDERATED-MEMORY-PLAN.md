@@ -144,11 +144,12 @@ New extension: `extensions/federation/`
 ```
 
 **Methods:**
-| Method | Description |
-|--------|-------------|
-| `federation.status` | List peers, connection state, last sync time |
-| `federation.get_transcript` | Fetch transcript from peer by conversation ID |
-| `federation.peers` | List configured peers and their online/offline status |
+
+| Method                      | Description                                           |
+| --------------------------- | ----------------------------------------------------- |
+| `federation.status`         | List peers, connection state, last sync time          |
+| `federation.get_transcript` | Fetch transcript from peer by conversation ID         |
+| `federation.peers`          | List configured peers and their online/offline status |
 
 **Connection model:**
 

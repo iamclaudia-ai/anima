@@ -1066,9 +1066,7 @@ import { createMyFeatureExtension } from "./index";
 
 describe("my-feature", () => {
   test("handles do-thing method", async () => {
-    const ext = createMyFeatureExtension({
-      /* config */
-    });
+    const ext = createMyFeatureExtension({/* config */});
     await ext.start(mockContext);
 
     const result = await ext.handleMethod("my-feature.do_thing", { input: "hello" });
