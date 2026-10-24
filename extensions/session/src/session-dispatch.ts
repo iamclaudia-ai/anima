@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { createLogger, shortId, formatElapsed } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -20,6 +19,13 @@ import { emitGitStatus } from "./lifecycle/session-events";
 import { dropGitStatusDebounce } from "./lifecycle/git-status-debouncer";
 import { switchSession, resetSession } from "./lifecycle/session-activation";
 import { runPromptLifecycle } from "./lifecycle/prompt-lifecycle";
+import {
+  createDraftSession,
+  NEW_SESSION_PARENT,
+  startTopLevelSession,
+  type DraftSessionParams,
+  type TopLevelSessionParams,
+} from "./lifecycle/session-create";
 import type { AgentHostSessionInfo } from "./session-types";
 import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
@@ -330,39 +336,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         revalidate: params.revalidate as boolean | undefined,
       }),
     "session.create_session": async (params) => {
-      const rt = getRuntime();
-      const cwd = params.cwd as string;
-      const agent = (params.agent as string | undefined) || "claude";
-      const model = (params.model as string | undefined) || rt.sessionConfig.model;
-      const thinking = (params.thinking as boolean | undefined) ?? rt.sessionConfig.thinking;
-      const effort =
-        (params.effort as "low" | "medium" | "high" | "max" | undefined) || rt.sessionConfig.effort;
-      const systemPrompt =
-        (params.systemPrompt as string | undefined) || rt.sessionConfig.systemPrompt || undefined;
-
-      log.info("Creating session", { agent, cwd, model, thinking, effort });
-      const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
-      const sessionId = randomUUID();
-      rt.registry.upsertSession({
-        id: sessionId,
-        workspaceId: workspaceResult.workspace.id,
-        providerSessionId: sessionId,
-        model,
-        agent,
-        purpose: "chat",
-        runtimeStatus: "idle",
-        metadata: {
-          bootstrapSystemPrompt: systemPrompt,
-          bootstrapThinking: thinking,
-          bootstrapEffort: effort,
-        },
-      });
-      rt.registry.setWorkspaceActiveSession(workspaceResult.workspace.id, sessionId);
-      // The other tabs have no idea this row appeared. `send_prompt` emits the
-      // same event for a session created implicitly by a first prompt; this is
-      // the explicit path, and it's the one the New Session button takes.
-      emitListChanged(workspaceResult.workspace.id, "session_created");
-      log.info("Session draft created", { sessionId: shortId(sessionId), cwd });
+      const { sessionId } = createDraftSession(params as unknown as DraftSessionParams);
       return { sessionId };
     },
     "session.send_prompt": async (params) => {
@@ -451,7 +425,20 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
     },
     "session.spawn_agent": async (params) => {
       const rt = getRuntime();
-      return await spawnSubagent(
+      const request = { connectionId: rt.ctx.connectionId, tags: rt.ctx.tags };
+      const name = params.name as string | undefined;
+
+      if (params.parentSessionId === NEW_SESSION_PARENT) {
+        return await startTopLevelSession(params as unknown as TopLevelSessionParams, {
+          createDraft: createDraftSession,
+          setTitle: (sessionId, title) => {
+            setSessionTitle(sessionId, title);
+          },
+          sendPrompt: (prompt) => runPromptLifecycle({ ...prompt, streaming: true }, request),
+        });
+      }
+
+      const spawned = await spawnSubagent(
         {
           parentSessionId: params.parentSessionId as string,
           agent: params.agent as string | undefined,
@@ -465,11 +452,11 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
           sandbox: params.sandbox as "read-only" | "workspace-write" | "danger-full-access",
           metadata: params.metadata as Record<string, unknown> | undefined,
         },
-        {
-          connectionId: rt.ctx.connectionId,
-          tags: rt.ctx.tags,
-        },
+        request,
       );
+      const title = name?.trim() || null;
+      if (title) setSessionTitle(spawned.sessionId as string, title);
+      return { ...spawned, title };
     },
     "session.interrupt_subagent": async (params) => {
       const rt = getRuntime();

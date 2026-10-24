@@ -25,6 +25,16 @@ describe("session method execution policies", () => {
     });
   });
 
+  it("accepts a NEW parent and an optional session name on spawn_agent", () => {
+    const schema = getMethod("session.spawn_agent").inputSchema;
+    expect(
+      schema.safeParse({ parentSessionId: "NEW", cwd: "/repo", prompt: "go", name: "Weekly" })
+        .success,
+    ).toBe(true);
+    expect(schema.safeParse({ parentSessionId: "abc", prompt: "go" }).success).toBe(true);
+    expect(schema.safeParse({ parentSessionId: "NEW", prompt: "go", name: 7 }).success).toBe(false);
+  });
+
   it("classifies prompts onto the keyed long-running lane", () => {
     expect(getMethod("session.send_prompt").execution).toEqual({
       lane: "long_running",

@@ -115,6 +115,11 @@ is reached two ways:
   path (code review, tests, second opinions).
 - **Michael creates it directly** — `session.create_session({ agent: "codex" })`.
   Works today via CLI; there is **no web UI for it yet**.
+- **Anything unattended starts one** — `session.spawn_agent({ parentSessionId: "NEW",
+  cwd, prompt, name })` creates a top-level chat session, stores `name` as its
+  title, and sends the prompt in one call. A scheduled task uses this to start a
+  session Michael can open later. `name` also works for child spawns. Without
+  it, the title falls back to the first prompt.
 
 Orchestration (Claudia driving other agents' sessions) is deliberately not
 built. The registry is future-proofing, not a current goal — day-to-day work is

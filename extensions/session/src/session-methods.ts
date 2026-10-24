@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { ExtensionMethodDefinition } from "@anima/shared";
 
 const SpawnAgentSchema = z.object({
-  parentSessionId: z.string().describe("Parent session UUID"),
+  parentSessionId: z
+    .string()
+    .describe(
+      'Parent session UUID, or "NEW" to start a top-level session (created, named, and prompted in one call; cwd required)',
+    ),
+  name: z.string().optional().describe("Session title; defaults to one derived from the prompt"),
   agent: z.string().optional().describe("Child agent/provider; defaults to the parent agent"),
   prompt: z.string().min(1).describe("Initial child-agent prompt"),
   purpose: z.enum(["subagent", "review", "test"]).optional().default("subagent"),
@@ -13,7 +18,7 @@ const SpawnAgentSchema = z.object({
     .optional()
     .describe("Optional provider-specific system prompt/instructions"),
   thinking: z.boolean().optional().describe("Provider-specific thinking toggle"),
-  effort: z.string().optional().describe("Effort/reasoning override"),
+  effort: z.string().optional().describe("Effort/reasoning override (low|medium|high|max)"),
   sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
@@ -203,7 +208,8 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   },
   {
     name: "session.spawn_agent",
-    description: "Spawn a child agent session and send its initial prompt",
+    description:
+      'Spawn a child agent session and send its initial prompt, or start a top-level session with parentSessionId "NEW"',
     inputSchema: SpawnAgentSchema,
     execution: { lane: "long_running", concurrency: "keyed", keyParam: "parentSessionId" },
   },
