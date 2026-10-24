@@ -89,6 +89,24 @@ describe("mail extension", () => {
     expect(listing).toContain("limit=25");
   });
 
+  it("exposes exactly the read and manage tools over MCP (nothing that sends)", async () => {
+    expect(ext.mcpTools?.map((t) => t.name)).toEqual([
+      "mail_list_folders",
+      "mail_list_messages",
+      "mail_search",
+      "mail_read",
+      "mail_mark_read",
+      "mail_archive",
+      "mail_move",
+    ]);
+    const listed = await ext.handleMcpTool!("mail_list_messages", {});
+    expect(JSON.parse(String(listed.content[0].text)).folder).toBe("Inbox");
+
+    const bad = await ext.handleMcpTool!("mail_mark_read", { messageIds: ["1; drop"] });
+    expect(bad.isError).toBe(true);
+    await expect(ext.handleMcpTool!("mail_send", {})).rejects.toThrow("Unknown MCP tool");
+  });
+
   it("rejects ids that aren't digits before reaching Zoho", async () => {
     await expect(ext.handleMethod("mail.mark_read", { messageIds: ["1,2"] })).rejects.toThrow();
     await expect(ext.handleMethod("mail.mark_read", { messageIds: [] })).rejects.toThrow();

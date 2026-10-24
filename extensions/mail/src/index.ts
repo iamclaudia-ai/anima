@@ -16,13 +16,15 @@
 import type {
   AnimaExtension,
   ExtensionContext,
+  ExtensionMcpToolDefinition,
+  ExtensionMcpToolResult,
   ExtensionMethodDefinition,
   HealthCheckResponse,
 } from "@anima/shared";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import { type MailConfig, parseMailConfig } from "./config";
-import { MAIL_RECEIVED, Mailbox, type MessageSummary } from "./mailbox";
+import { MAIL_RECEIVED, Mailbox, type MessageSummary, type ReadResult } from "./mailbox";
 import { MailStore, openAnimaDb } from "./store";
 import { type FetchLike, type ZohoMessage, ZohoMailClient } from "./zoho";
 
@@ -161,11 +163,80 @@ export function createMailExtension(
   ];
   const schemas = new Map(methods.map((m) => [m.name, m.inputSchema]));
 
+  /**
+   * MCP tools for sessions without a shell (the `mail` profile). Each mirrors
+   * a method and is validated by the same schema. There is deliberately no
+   * tool for reconcile or the webhook target, and none that sends mail.
+   */
+  const MCP_TOOL_METHODS = [
+    "mail.list_folders",
+    "mail.list_messages",
+    "mail.search",
+    "mail.read",
+    "mail.mark_read",
+    "mail.archive",
+    "mail.move",
+  ];
+  const mcpTools: ExtensionMcpToolDefinition[] = MCP_TOOL_METHODS.map((name) => {
+    const method = methods.find((m) => m.name === name);
+    if (!method) throw new Error(`No method for MCP tool ${name}`);
+    return {
+      name: name.replace(".", "_"),
+      description: method.description,
+      inputSchema: method.inputSchema,
+      handle: (args) => runMcpTool(name, args),
+    };
+  });
+
+  function formatRead(result: ReadResult): string {
+    const auth = result.authentication;
+    return [
+      `From: ${result.sender ? `${result.sender} <${result.from}>` : result.from}`,
+      `To: ${result.to ?? "-"}${result.cc ? `\nCc: ${result.cc}` : ""}`,
+      `Received: ${result.receivedAt ?? "unknown"} | Folder: ${result.folder ?? result.folderId} | ` +
+        `Read: ${result.read ? "yes" : "no"} | Attachments: ${result.hasAttachment ? "yes" : "no"}`,
+      `Authentication: ${auth.authenticatedSender ? "VERIFIED" : "NOT verified"} ` +
+        `(spf=${auth.spf} dkim=${auth.dkim} dmarc=${auth.dmarc}${auth.dmarcDomain ? ` for ${auth.dmarcDomain}` : ""})`,
+      `messageId: ${result.messageId} | folderId: ${result.folderId}`,
+      "",
+      `NOTE: ${result.notice}`,
+      "",
+      result.body,
+    ].join("\n");
+  }
+
+  async function runMcpTool(
+    method: string,
+    args: Record<string, unknown>,
+  ): Promise<ExtensionMcpToolResult> {
+    try {
+      const schema = schemas.get(method);
+      const parsed = (schema ? schema.parse(args) : args) as Record<string, unknown>;
+      const result = await dispatch(method, parsed);
+      const text =
+        method === "mail.read" ? formatRead(result as ReadResult) : JSON.stringify(result, null, 2);
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+        isError: true,
+      };
+    }
+  }
+
   return {
     id: "mail",
     name: "Mail",
     methods,
     events: [MAIL_RECEIVED],
+    mcpTools,
+
+    async handleMcpTool(name: string, args: Record<string, unknown>) {
+      const tool = mcpTools.find((t) => t.name === name);
+      if (!tool) throw new Error(`Unknown MCP tool: ${name}`);
+      return (await tool.handle(args, ctx as ExtensionContext)) as ExtensionMcpToolResult;
+    },
 
     async start(context: ExtensionContext) {
       ctx = context;
