@@ -18,6 +18,7 @@
 import type {
   AnimaExtension,
   ExtensionContext,
+  ExtensionMethodDefinition,
   HealthCheckResponse,
   LoggerLike,
 } from "@anima/shared";
@@ -86,46 +87,51 @@ export function createWebhooksExtension(
 
   const hookName = z.string().min(1).describe("Hook name from extensions.webhooks.config.hooks");
 
+  // The extension host does not validate params (#86), so each call is
+  // parsed here: defaults apply and bad input fails before any handler runs.
+  const methods: ExtensionMethodDefinition[] = [
+    {
+      name: "webhooks.health_check",
+      description: "Return health status of the webhooks extension",
+      inputSchema: z.object({}),
+    },
+    {
+      name: "webhooks.list_hooks",
+      description: "List configured hooks: target, signature scheme, last delivery (no secrets)",
+      inputSchema: z.object({}),
+    },
+    {
+      name: "webhooks.list_deliveries",
+      description: "List recent deliveries, newest first (bodies omitted)",
+      inputSchema: z.object({
+        hook: hookName.optional(),
+        status: z.enum(["pending", "delivered", "failed"]).optional(),
+        limit: z.number().int().min(1).max(500).default(50),
+      }),
+    },
+    {
+      name: "webhooks.get_delivery",
+      description: "Get one delivery, including its headers and raw body",
+      inputSchema: z.object({ id: z.string().min(1) }),
+    },
+    {
+      name: "webhooks.redeliver",
+      description: "Queue a delivery again (attempts reset) and dispatch it now",
+      inputSchema: z.object({ id: z.string().min(1) }),
+    },
+    {
+      name: "webhooks.reset_signing_secret",
+      description:
+        "Forget a hook's learned signing secret so the sender's next handshake can set a new one",
+      inputSchema: z.object({ hook: hookName }),
+    },
+  ];
+  const schemas = new Map(methods.map((m) => [m.name, m.inputSchema]));
+
   return {
     id: "webhooks",
     name: "Webhooks",
-    methods: [
-      {
-        name: "webhooks.health_check",
-        description: "Return health status of the webhooks extension",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "webhooks.list_hooks",
-        description: "List configured hooks: target, signature scheme, last delivery (no secrets)",
-        inputSchema: z.object({}),
-      },
-      {
-        name: "webhooks.list_deliveries",
-        description: "List recent deliveries, newest first (bodies omitted)",
-        inputSchema: z.object({
-          hook: hookName.optional(),
-          status: z.enum(["pending", "delivered", "failed"]).optional(),
-          limit: z.number().int().min(1).max(500).default(50),
-        }),
-      },
-      {
-        name: "webhooks.get_delivery",
-        description: "Get one delivery, including its headers and raw body",
-        inputSchema: z.object({ id: z.string().min(1) }),
-      },
-      {
-        name: "webhooks.redeliver",
-        description: "Queue a delivery again (attempts reset) and dispatch it now",
-        inputSchema: z.object({ id: z.string().min(1) }),
-      },
-      {
-        name: "webhooks.reset_signing_secret",
-        description:
-          "Forget a hook's learned signing secret so the sender's next handshake can set a new one",
-        inputSchema: z.object({ hook: hookName }),
-      },
-    ],
+    methods,
     events: ["webhooks.received"],
 
     async start(context: ExtensionContext) {
@@ -177,7 +183,9 @@ export function createWebhooksExtension(
       ctx = null;
     },
 
-    async handleMethod(method: string, params: Record<string, unknown>) {
+    async handleMethod(method: string, rawParams: Record<string, unknown>) {
+      const schema = schemas.get(method);
+      const params = (schema ? schema.parse(rawParams) : rawParams) as Record<string, unknown>;
       switch (method) {
         case "webhooks.health_check": {
           const counts = requireStore().counts();

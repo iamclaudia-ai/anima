@@ -95,6 +95,14 @@ describe("webhooks extension", () => {
     expect(full.body).toBe('{"subject":"Hello"}');
   });
 
+  it("applies schema defaults when a caller omits params", async () => {
+    const result = (await ext.handleMethod("webhooks.list_deliveries", {})) as {
+      deliveries: unknown[];
+    };
+    expect(result.deliveries).toEqual([]);
+    await expect(ext.handleMethod("webhooks.list_deliveries", { limit: 0 })).rejects.toThrow();
+  });
+
   it("lists hooks without exposing secrets", async () => {
     const result = await ext.handleMethod("webhooks.list_hooks", {});
     expect(JSON.stringify(result)).not.toContain(SECRET);

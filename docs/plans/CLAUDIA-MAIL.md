@@ -13,6 +13,11 @@ first draft) where they differ. Runs on **Anima Sedes**.
 - Step 1 (API access): Self Client created, five scopes granted (no delete), refresh token and
   accountId stored in `extensions.mail.config` (disabled until the extension exists).
 
+- Step 2 (`extensions/mail` core): list / search / read (untrusted envelope + DMARC verdict) /
+  mark read / archive / move, `mail.handle_webhook` as the `zoho-mail` target (re-fetch by id,
+  announce once), reconcile every 30 min. Live: email to `mail.received` in about 3s. MCP tools move
+  to step 3, together with the `mail` session profile that will use them.
+
 ## Decisions
 
 | Topic            | Decision                                                                                                                                                                                                                                                                                                                                                                            |

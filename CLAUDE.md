@@ -69,24 +69,25 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 Enabled extensions (from `~/.anima/anima.json`) — method counts are what the
 live gateway reports; run `anima gateway list_methods` for the current truth.
 
-| Extension    | Server methods                                                      | Web pages                                                         |
-| ------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, …    | —                                                                 |
-| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …              | —                                                                 |
-| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …            | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
-| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …          | `/scheduler`                                                      |
-| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …           | —                                                                 |
-| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …              | code-server (`webConfig.url`)                                     |
-| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`             | —                                                                 |
-| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                           | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
-| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                         | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
-| `control`    | 3 — `health_check`, `log_list`, `log_tail`                          | `/control`, `/logs`                                               |
-| `hooks`      | 2 — `health_check`, `list`                                          | —                                                                 |
-| `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, … | —                                                                 |
-| `chat`       | —                                                                   | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
-| `bogart`     | —                                                                   | `/bogart`                                                         |
+| Extension    | Server methods                                                            | Web pages                                                         |
+| ------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, …          | —                                                                 |
+| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …                    | —                                                                 |
+| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …                  | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
+| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …                | `/scheduler`                                                      |
+| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …                 | —                                                                 |
+| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …                    | code-server (`webConfig.url`)                                     |
+| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`                   | —                                                                 |
+| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                                 | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
+| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                               | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
+| `control`    | 3 — `health_check`, `log_list`, `log_tail`                                | `/control`, `/logs`                                               |
+| `hooks`      | 2 — `health_check`, `list`                                                | —                                                                 |
+| `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, …       | —                                                                 |
+| `mail`       | 10 — `list_messages`, `search`, `read`, `mark_read`, `archive`, `move`, … | —                                                                 |
+| `chat`       | —                                                                         | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
+| `bogart`     | —                                                                         | `/bogart`                                                         |
 
-That is all 14 extensions the gateway actually loads. Two other names appear
+That is all 15 extensions the gateway actually loads. Two other names appear
 but are not loaded extensions: `imessage` is present on disk and disabled in
 config, and `testroute` is a dev-only fixture absent from config. The
 `extensions.codex` block is **not** an extension either — see Agent Providers
@@ -187,6 +188,7 @@ anima/
 │   ├── bogart/           # Web pages
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   ├── webhooks/         # Inbound webhooks (:30089, public via Cloudflare tunnel) → inbox + target method
+│   ├── mail/             # Claudia's mailbox (Zoho API): read/search/archive, webhook target, reconcile
 │   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
 ├── scripts/              # Smoke tests, E2E tests
@@ -294,6 +296,12 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 - Every accepted delivery is stored in `webhook_deliveries` before the 200, then `webhooks.received` is emitted (metadata only).
 - With a `target`, the extension calls it with `{ id, hook, receivedAt, contentType, headers, body }`. `body` is the raw text: parse it yourself (Zoho's ids overflow JS numbers). Throwing schedules a retry (30s, 2m, 10m, 1h, 6h, then `failed`), so a target must be idempotent on `id`.
 - `anima webhooks list_deliveries`, `get_delivery`, `redeliver`, `reset_signing_secret` manage the inbox.
+
+#### Claudia's mail (`extensions/mail`)
+
+`claudia@iamclaudia.ai` through the Zoho REST API (Self Client, no delete scope; credentials in `extensions.mail.config`). The `zoho-mail` webhook targets `mail.handle_webhook`, which only reads the message id from the payload, re-fetches the message from the API (a forged POST names nothing real), and emits `mail.received` once per message. A reconcile pass (startup + every 30 min) announces Inbox mail the webhook missed. `mail.read` returns plain text inside an `<untrusted_email … authenticated="yes|no">` envelope; `authenticated` means DMARC passed at Zoho's MX for the From domain. Plan and next steps: `docs/plans/CLAUDIA-MAIL.md`.
+
+**Known platform gap (#86):** the extension host does not validate params, so schema defaults never apply. New extensions should parse params against their own method schemas in `handleMethod` until #86 is fixed.
 
 ### WebSocket Protocol
 
