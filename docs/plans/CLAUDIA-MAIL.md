@@ -10,6 +10,8 @@ first draft) where they differ. Runs on **Anima Sedes**.
   Zoho "Outgoing Webhook Bot" (Mail, all emails, full data) delivers about 4s after receipt, signed
   and verified. It has no target yet.
 - Mailbox: `claudia@iamclaudia.ai`, Zoho `.com` data center.
+- Step 1 (API access): Self Client created, five scopes granted (no delete), refresh token and
+  accountId stored in `extensions.mail.config` (disabled until the extension exists).
 
 ## Decisions
 
@@ -44,6 +46,6 @@ first draft) where they differ. Runs on **Anima Sedes**.
 
 Fields: summary, sentDateInGMT, subject, Mode, messageId, toAddress, folderId, zuid, threadId,
 hasAttachment, size, sender, receivedTime, fromAddress, html, messageIdString, IntegIdList.
-`messageId` and `folderId` overflow JS numbers. `messageIdString` ends in "00" in every sample, so
-verify it against the API's ids before trusting it. The setup POST carries `x-hook-secret` and a
+`messageId` and `folderId` overflow JS numbers. `messageIdString` matches the API's `messageId`
+exactly (verified 2026-10-24). The setup POST carries `x-hook-secret` and a
 sample body; later ones carry `x-hook-signature` (base64 HMAC-SHA256 of the raw body).
