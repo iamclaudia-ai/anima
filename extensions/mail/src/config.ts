@@ -14,7 +14,7 @@ export const mailConfigSchema = z.object({
     .string()
     .regex(/^[a-z.]+$/)
     .default("com"),
-  address: z.string().email(),
+  address: z.email(),
   clientId: z.string().min(1),
   clientSecret: z.string().min(1),
   refreshToken: z.string().min(1),

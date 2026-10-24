@@ -156,7 +156,7 @@ export function createMailExtension(
     {
       name: "mail.handle_webhook",
       description: "Webhook target for the zoho-mail hook (called by the webhooks extension)",
-      inputSchema: z.object({ id: z.string(), body: z.string() }).passthrough(),
+      inputSchema: z.looseObject({ id: z.string(), body: z.string() }),
     },
   ];
   const schemas = new Map(methods.map((m) => [m.name, m.inputSchema]));

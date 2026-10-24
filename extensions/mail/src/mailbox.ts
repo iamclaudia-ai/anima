@@ -261,7 +261,9 @@ export class Mailbox {
     const inbox = await this.resolveFolder("inbox");
     let checked = 0;
     let announced = 0;
+    // Sequential on purpose: each page decides whether the next is needed.
     for (let page = 0; page < RECONCILE_MAX_PAGES; page++) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const messages = await this.deps.client.listMessages({
         folderId: inbox.folderId,
         start: page * RECONCILE_PAGE + 1,
@@ -275,6 +277,8 @@ export class Mailbox {
           continue;
         }
         checked++;
+        // In receive order, so mail.received events arrive in a stable order.
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
         if (await this.announce(message, "reconcile")) announced++;
       }
       if (reachedCutoff) break;
