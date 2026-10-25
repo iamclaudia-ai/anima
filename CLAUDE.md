@@ -136,6 +136,7 @@ Every session runs under a **profile**, chosen at creation and fixed for its lif
 
 - Profiles beyond the built-ins live in `agentHost.sessionProfiles` (`permissionMode`, `tools`, `allowedTools`, `disallowedTools`, `mcp: "anima-only"`, `restricted`). Code: `packages/agent-host/src/profiles.ts`.
 - The profile is stored write-once in `sessions.profile` and sent with **every** create and prompt (the session bridge looks it up), so a resumed session keeps its powers. agent-host rejects a missing or unknown profile, and closes and relaunches a session running under the wrong one. Legacy rows (NULL) read as `yolo`.
+- A running CLI session keeps the flags it launched with, even across an `anima watchdog reload` (agent-host re-adopts the pane). After changing a profile's config, `anima session close_session` its sessions so the next prompt relaunches them with the new flags.
 - Non-yolo CLI sessions see Claude Code's workspace-trust dialog in a folder it hasn't seen, and nobody is there to answer it. Pre-trust their working directory (`projects[<dir>].hasTrustDialogAccepted` in `~/.claude.json`). The mail workspace is `~/.anima/mail-session`.
 
 Orchestration (Claudia driving other agents' sessions) is deliberately not
