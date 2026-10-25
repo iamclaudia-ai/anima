@@ -5,10 +5,13 @@ import { homedir, tmpdir } from "node:os";
 import {
   closeDb,
   createWorkspace,
+  findWorkspace,
   getOrCreateWorkspace,
   getWorkspace,
   getWorkspaceByCwd,
   listWorkspaces,
+  parseGithubRemote,
+  updateWorkspaceProject,
 } from "./workspace";
 
 describe("workspace db", () => {
@@ -105,5 +108,60 @@ describe("workspace db", () => {
   it("returns null for missing workspace id/cwd lookups", () => {
     expect(getWorkspace("ws_missing")).toBeNull();
     expect(getWorkspaceByCwd(join(dataDir, "repo", "missing"))).toBeNull();
+  });
+
+  it("stores project fields and resolves a project by name, alias, email, repo or Sentry slug", () => {
+    const tnh = createWorkspace({ name: "tnh", cwd: "/repo/tnh" });
+    const other = createWorkspace({ name: "anima", cwd: "/repo/anima" });
+    expect(tnh.aliases).toEqual([]);
+    expect(tnh.githubRepo).toBeNull();
+
+    const updated = updateWorkspaceProject(tnh.id, {
+      description: "  NutWords  ",
+      aliases: ["NutWords", "the nuthouse", "nutwords", " "],
+      emailDomains: ["NutWords.com"],
+      githubRepo: "kiliman/tnh",
+      sentryProject: "NutWords",
+    });
+    expect(updated).toMatchObject({
+      description: "NutWords",
+      aliases: ["nutwords", "the nuthouse"],
+      emailDomains: ["nutwords.com"],
+      githubRepo: "kiliman/tnh",
+      sentryProject: "nutwords",
+    });
+
+    expect(findWorkspace({ name: "TNH" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ name: "The Nuthouse" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ email: "help@nutwords.com" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ email: "login@mail.nutwords.com" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ email: "x@notnutwords.com" })).toBeNull();
+    expect(findWorkspace({ githubRepo: "Kiliman/TNH" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ sentryProject: "nutwords" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ name: "anima" })?.id).toBe(other.id);
+    expect(findWorkspace({ name: "nope" })).toBeNull();
+
+    // Omitted fields stay; null clears.
+    const cleared = updateWorkspaceProject(tnh.id, { githubRepo: null });
+    expect(cleared?.githubRepo).toBeNull();
+    expect(cleared?.aliases).toEqual(["nutwords", "the nuthouse"]);
+    expect(updateWorkspaceProject("ws_missing", { description: "x" })).toBeNull();
+  });
+
+  it("refuses to guess when an alias is shared", () => {
+    const a = createWorkspace({ name: "a", cwd: "/repo/a" });
+    const b = createWorkspace({ name: "b", cwd: "/repo/b" });
+    updateWorkspaceProject(a.id, { aliases: ["shared"] });
+    updateWorkspaceProject(b.id, { aliases: ["shared"] });
+    expect(findWorkspace({ name: "shared" })).toBeNull();
+  });
+
+  it("parses GitHub remotes", () => {
+    expect(parseGithubRemote("git@github.com:kiliman/tnh.git")).toBe("kiliman/tnh");
+    expect(parseGithubRemote("https://github.com/iamclaudia-ai/anima.git\n")).toBe(
+      "iamclaudia-ai/anima",
+    );
+    expect(parseGithubRemote("https://github.com/owner/repo")).toBe("owner/repo");
+    expect(parseGithubRemote("https://gitlab.com/owner/repo.git")).toBeNull();
   });
 });

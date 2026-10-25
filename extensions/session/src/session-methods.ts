@@ -30,6 +30,45 @@ const SpawnAgentSchema = z.object({
     ),
 });
 
+const nullableText = z.string().max(500).nullable().optional();
+
+export const workspaceUpdateSchema = z
+  .object({
+    id: z.string().optional().describe("Workspace ID (or pass cwd)"),
+    cwd: z.string().optional().describe("Workspace folder (or pass id)"),
+    name: z.string().min(1).max(100).optional(),
+    description: nullableText,
+    aliases: z.array(z.string().min(1).max(100)).max(20).optional(),
+    emailDomains: z
+      .array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, "a domain like nutwords.com"))
+      .max(20)
+      .optional(),
+    githubRepo: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/, "owner/repo")
+      .nullable()
+      .optional(),
+    sentryProject: z
+      .string()
+      .regex(/^[a-z0-9_-]+$/i, "a Sentry project slug")
+      .nullable()
+      .optional(),
+    detect: z.boolean().default(false).describe("Fill githubRepo from the git origin remote"),
+  })
+  .refine((p) => p.id || p.cwd, "Pass id or cwd");
+
+export const workspaceFindSchema = z
+  .object({
+    name: z.string().min(1).optional().describe("Workspace name or alias"),
+    email: z.string().min(3).optional().describe("Email address or domain"),
+    githubRepo: z.string().min(3).optional().describe("owner/repo"),
+    sentryProject: z.string().min(1).optional().describe("Sentry project slug"),
+  })
+  .refine(
+    (p) => [p.name, p.email, p.githubRepo, p.sentryProject].filter(Boolean).length === 1,
+    "Pass exactly one of name, email, githubRepo, sentryProject",
+  );
+
 const GetSubagentSchema = z.object({
   subagentId: z.string().describe("Subagent session ID"),
 });
@@ -386,6 +425,20 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       pinned: z.boolean().describe("True to pin, false to unpin"),
     }),
     execution: { lane: "write", concurrency: "serial" },
+  },
+  {
+    name: "session.update_workspace",
+    description:
+      "Set a workspace's project fields (description, aliases, email domains, GitHub repo, Sentry project). Omitted fields are unchanged; null clears. detect: true fills githubRepo from the git origin remote when it isn't given.",
+    inputSchema: workspaceUpdateSchema,
+    execution: { lane: "write", concurrency: "serial" },
+  },
+  {
+    name: "session.find_workspace",
+    description:
+      "Resolve a project reference to its workspace: a name or alias, an email address or domain, a GitHub repo (owner/repo), or a Sentry project slug. Returns null unless exactly one workspace matches.",
+    inputSchema: workspaceFindSchema,
+    execution: { lane: "read", concurrency: "parallel" },
   },
   {
     name: "session.get_or_create_workspace",

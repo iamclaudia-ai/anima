@@ -27,8 +27,28 @@ export interface Workspace {
   /** User-pinned — sorts to the top of the workspace list with a visual badge. */
   pinned: boolean;
   cwdDisplay: string; // Normalized path with ~ for display
+  /** One line about the project, for humans and for routing. */
+  description: string | null;
+  /** Other names the project goes by ("nutwords", "the nuthouse"). Lowercase. */
+  aliases: string[];
+  /** Email domains that belong to the project ("nutwords.com"). Lowercase. */
+  emailDomains: string[];
+  /** "owner/repo" on GitHub. */
+  githubRepo: string | null;
+  /** Sentry project slug. */
+  sentryProject: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Project fields settable with `updateWorkspaceProject`. */
+export interface WorkspaceProjectFields {
+  name?: string;
+  description?: string | null;
+  aliases?: string[];
+  emailDomains?: string[];
+  githubRepo?: string | null;
+  sentryProject?: string | null;
 }
 
 /** Raw row from SQLite (snake_case) */
@@ -39,6 +59,11 @@ interface WorkspaceRow {
   general: number;
   pinned: number;
   active_session_id: string | null; // Still in schema but we ignore it
+  description: string | null;
+  aliases: string;
+  email_domains: string;
+  github_repo: string | null;
+  sentry_project: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +79,16 @@ function normalizePathForDisplay(path: string): string {
   return path;
 }
 
+function parseList(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const value = JSON.parse(json) as unknown;
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Convert DB row to API type */
 function toWorkspace(row: WorkspaceRow): Workspace {
   return {
@@ -63,6 +98,11 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     general: row.general === 1,
     pinned: row.pinned === 1,
     cwdDisplay: normalizePathForDisplay(row.cwd), // Normalized for display
+    description: row.description ?? null,
+    aliases: parseList(row.aliases),
+    emailDomains: parseList(row.email_domains),
+    githubRepo: row.github_repo ?? null,
+    sentryProject: row.sentry_project ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -109,6 +149,19 @@ function getDb(): Database {
   }
   if (!columns.some((column) => column.name === "pinned")) {
     db.exec("ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
+  }
+  // Project fields (gateway migration 028); added here for standalone tests.
+  const projectColumns: Array<[string, string]> = [
+    ["description", "TEXT"],
+    ["aliases", "TEXT NOT NULL DEFAULT '[]'"],
+    ["email_domains", "TEXT NOT NULL DEFAULT '[]'"],
+    ["github_repo", "TEXT"],
+    ["sentry_project", "TEXT"],
+  ];
+  for (const [name, type] of projectColumns) {
+    if (!columns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE workspaces ADD COLUMN ${name} ${type}`);
+    }
   }
 
   log.info("Opened workspace database", { path: dbPath });
@@ -274,4 +327,88 @@ export function deleteWorkspace(cwd: string): boolean {
   getDb().query("DELETE FROM workspaces WHERE cwd = ?").run(cwd);
   log.info("Deleted workspace", { cwd, id: existing.id });
   return true;
+}
+
+// ── Project fields ───────────────────────────────────────────
+
+function normalizeList(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim().toLowerCase()).filter(Boolean))];
+}
+
+/** Set a workspace's project fields. Omitted fields are left alone; null clears. */
+export function updateWorkspaceProject(
+  id: string,
+  fields: WorkspaceProjectFields,
+): Workspace | null {
+  const sets: string[] = [];
+  const args: Array<string | null> = [];
+  const set = (column: string, value: string | null) => {
+    sets.push(`${column} = ?`);
+    args.push(value);
+  };
+  if (fields.name !== undefined) set("name", fields.name.trim());
+  if (fields.description !== undefined) set("description", fields.description?.trim() || null);
+  if (fields.aliases !== undefined) set("aliases", JSON.stringify(normalizeList(fields.aliases)));
+  if (fields.emailDomains !== undefined) {
+    set("email_domains", JSON.stringify(normalizeList(fields.emailDomains)));
+  }
+  if (fields.githubRepo !== undefined) set("github_repo", fields.githubRepo?.trim() || null);
+  if (fields.sentryProject !== undefined) {
+    set("sentry_project", fields.sentryProject?.trim().toLowerCase() || null);
+  }
+  if (sets.length === 0) return getWorkspace(id);
+  sets.push("updated_at = datetime('now')");
+  const result = getDb()
+    .query(`UPDATE workspaces SET ${sets.join(", ")} WHERE id = ?`)
+    .run(...args, id);
+  return result.changes === 0 ? null : getWorkspace(id);
+}
+
+/** "owner/repo" from a GitHub remote URL (https or ssh), or null. */
+export function parseGithubRemote(url: string): string | null {
+  const match = url.trim().match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/** The workspace's GitHub repo from its git `origin` remote, or null. */
+export function detectGithubRepo(cwd: string): string | null {
+  const result = Bun.spawnSync(["git", "-C", cwd, "remote", "get-url", "origin"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) return null;
+  return parseGithubRemote(result.stdout.toString());
+}
+
+export interface WorkspaceQuery {
+  /** Name or alias, case-insensitive. */
+  name?: string;
+  /** An email address or a bare domain; subdomains match their parent. */
+  email?: string;
+  githubRepo?: string;
+  sentryProject?: string;
+}
+
+/** The one workspace a project reference points at, or null if none (or several) match. */
+export function findWorkspace(query: WorkspaceQuery): Workspace | null {
+  const rows = getDb().query("SELECT * FROM workspaces").all() as WorkspaceRow[];
+  const all = rows.map(toWorkspace);
+  let matches: Workspace[] = [];
+
+  if (query.name) {
+    const wanted = query.name.trim().toLowerCase();
+    matches = all.filter((w) => w.name.toLowerCase() === wanted || w.aliases.includes(wanted));
+  } else if (query.email) {
+    const domain = query.email.trim().toLowerCase().split("@").pop() ?? "";
+    matches = all.filter((w) =>
+      w.emailDomains.some((d) => domain === d || domain.endsWith(`.${d}`)),
+    );
+  } else if (query.githubRepo) {
+    const wanted = query.githubRepo.trim().toLowerCase();
+    matches = all.filter((w) => w.githubRepo?.toLowerCase() === wanted);
+  } else if (query.sentryProject) {
+    const wanted = query.sentryProject.trim().toLowerCase();
+    matches = all.filter((w) => w.sentryProject === wanted);
+  }
+  return matches.length === 1 ? matches[0] : null;
 }

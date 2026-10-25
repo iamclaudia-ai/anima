@@ -42,6 +42,11 @@ import {
 } from "./session-store";
 import { applyDisposition, emitListChanged, emitStatusChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
+import { workspaceFindSchema, workspaceUpdateSchema } from "./session-methods";
+
+function expandHome(path: string): string {
+  return path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path;
+}
 
 const log = createLogger("SessionExt:Dispatch", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -505,6 +510,24 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
     "session.delete_workspace": async (params) => {
       const rt = getRuntime();
       return { deleted: rt.registry.deleteWorkspace(params.cwd as string) };
+    },
+    "session.update_workspace": async (params) => {
+      const rt = getRuntime();
+      const p = workspaceUpdateSchema.parse(params);
+      const workspace = p.id
+        ? rt.registry.getWorkspace(p.id)
+        : rt.registry.getWorkspaceByCwd(expandHome(p.cwd as string));
+      if (!workspace) throw new Error(`Unknown workspace: ${p.id ?? p.cwd}`);
+      const { id: _id, cwd: _cwd, detect, ...fields } = p;
+      if (detect && fields.githubRepo === undefined) {
+        const detected = rt.registry.detectGithubRepo(workspace.cwd);
+        if (detected) fields.githubRepo = detected;
+      }
+      return { workspace: rt.registry.updateWorkspaceProject(workspace.id, fields) };
+    },
+    "session.find_workspace": async (params) => {
+      const rt = getRuntime();
+      return { workspace: rt.registry.findWorkspace(workspaceFindSchema.parse(params)) };
     },
     "session.set_workspace_pinned": async (params) => {
       const rt = getRuntime();

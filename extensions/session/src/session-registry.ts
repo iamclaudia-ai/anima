@@ -8,14 +8,31 @@ import {
 } from "./session-store";
 import {
   deleteWorkspace,
+  detectGithubRepo,
+  findWorkspace,
   getOrCreateWorkspace,
   getWorkspace,
   getWorkspaceByCwd,
   listWorkspaces,
   setWorkspacePinned,
+  updateWorkspaceProject,
+  type WorkspaceProjectFields,
+  type WorkspaceQuery,
 } from "./workspace";
 
 export class SessionRegistry {
+  updateWorkspaceProject(id: string, fields: WorkspaceProjectFields) {
+    return updateWorkspaceProject(id, fields);
+  }
+
+  findWorkspace(query: WorkspaceQuery) {
+    return findWorkspace(query);
+  }
+
+  detectGithubRepo(cwd: string) {
+    return detectGithubRepo(cwd);
+  }
+
   getOrCreateWorkspace(cwd: string, name?: string, general?: boolean) {
     return getOrCreateWorkspace(cwd, name, general);
   }
