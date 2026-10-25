@@ -164,16 +164,16 @@ the computer." So:
 2. Support extension: tables, methods, MCP tools, web page. ✅ (3d664a2)
 3. Delegation and `create_issue`. ✅ The Mail session's wake prompt and
    profile include the support tools (5dafc9e).
-4. GitHub and Sentry handlers. ✅ Both hooks are configured in
-   `extensions.webhooks.config.hooks`; `github` is tested end to end through
-   the tunnel (signed deliveries reach `support.handle_github`, a forged one
-   gets 401). Still to do on the services:
-   - **GitHub**: add a webhook on `kiliman/nutwords` (issues + pull requests,
-     JSON) pointing at the `github` hook. Needs repo admin.
-   - **Sentry**: create an internal integration with webhooks for `issue`
-     (and alert rule action) pointing at the `sentry` hook, put its client
-     secret in the hook's signature, and set `enabled: true`. Then set the
-     tnh workspace's `sentryProjects` to the API and web project slugs.
+4. GitHub and Sentry handlers. ✅ Live since 2026-10-25:
+   - **GitHub**: repo webhook on `kiliman/nutwords` (issues + pull requests,
+     JSON), created with `gh api` as `kiliman` (needs the `admin:repo_hook`
+     scope). GitHub's own ping was delivered.
+   - **Sentry**: internal integration "Anima Support Desk" in the `kiliman`
+     org (Issue & Event: Read; webhooks for issue created, resolved and
+     unresolved; alert rule action enabled). Its client secret is the `sentry`
+     hook's signing secret. tnh's `sentryProjects` are `nutwords-api` and
+     `nutwords-web`. A Sentry issue from a project no workspace claims still
+     opens a ticket, with no project.
 5. Front-desk notices (Sentry wakes Support Lady), rename Mail → Support.
 6. Replies.
 
