@@ -239,15 +239,18 @@ export function createSupportExtension(
     },
     {
       name: "support.link",
-      description: "Link a GitHub issue or PR (by URL), or another URL, to a ticket",
-      inputSchema: z.object({
-        ticketId,
-        kind: z.enum(LINK_KINDS).default("other"),
-        url: z.url(),
-        ref: z.string().max(200).optional().describe("Defaults to owner/repo#N for GitHub URLs"),
-        title: z.string().max(200).optional(),
-        actor,
-      }),
+      description:
+        "Link a GitHub issue or PR (by URL), a session (kind session, ref = session id), or another URL to a ticket",
+      inputSchema: z
+        .object({
+          ticketId,
+          kind: z.enum(LINK_KINDS).default("other"),
+          url: z.url().optional(),
+          ref: z.string().max(200).optional().describe("Defaults to owner/repo#N for GitHub URLs"),
+          title: z.string().max(200).optional(),
+          actor,
+        })
+        .refine((p) => p.url || p.ref, "Pass url or ref"),
     },
     {
       name: "support.note",
@@ -618,14 +621,18 @@ export function createSupportExtension(
         const p = params as {
           ticketId: number;
           kind: (typeof LINK_KINDS)[number];
-          url: string;
+          url?: string;
           ref?: string;
           title?: string;
         };
-        const github = parseGithubUrl(p.url);
+        const github = p.url ? parseGithubUrl(p.url) : null;
         const kind = github && p.kind === "other" ? github.kind : p.kind;
-        const ref = p.ref ?? github?.ref ?? p.url;
-        return s.addLink(p.ticketId, { kind, ref, url: p.url, title: p.title ?? null }, who);
+        const ref = p.ref ?? github?.ref ?? (p.url as string);
+        return s.addLink(
+          p.ticketId,
+          { kind, ref, url: p.url ?? null, title: p.title ?? null },
+          who,
+        );
       }
 
       case "support.note": {
