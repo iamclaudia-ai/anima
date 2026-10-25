@@ -35,6 +35,7 @@ import { resolveRefsConfig } from "./session-reconciler";
 import {
   getStoredSession,
   listAttentionSessions,
+  setSessionPinned,
   resolveStaleCompleted,
   setSessionSnooze,
   setSessionTitle,
@@ -275,6 +276,18 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       if (renamed?.workspaceId) emitListChanged(renamed.workspaceId, "renamed");
       log.info("Session renamed", { sessionId: sessionId.slice(0, 8), cleared: !title?.trim() });
       return { sessionId, title: title?.trim() || null };
+    },
+    "session.set_pinned": async (params) => {
+      const sessionId = params.sessionId as string;
+      const pinned = params.pinned as boolean;
+      if (!setSessionPinned(sessionId, pinned)) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      // Pinning reorders the ACTIVE pane, which refetches on list changes.
+      const session = getStoredSession(sessionId);
+      if (session?.workspaceId) emitListChanged(session.workspaceId, "pinned");
+      log.info("Session pinned", { sessionId: shortId(sessionId), pinned });
+      return { sessionId, pinned };
     },
     "session.resolve_stale": async (params) => {
       const result = resolveStaleCompleted({

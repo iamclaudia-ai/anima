@@ -52,6 +52,7 @@ export type ListChangeReason =
   | "session_closed"
   | "disposition_changed"
   | "renamed"
+  | "pinned"
   | "reconciled";
 
 export interface SessionStatusChangedPayload {

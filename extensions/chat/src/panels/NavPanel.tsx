@@ -44,7 +44,7 @@ export function NavPanel() {
 
   // The ACTIVE pane's data. Shares one poller with the app-wide banner — two
   // views of "what needs you" that disagreed would undercut the entire point.
-  const { sessions: attention, now, acknowledge } = useAttentionSessions();
+  const { sessions: attention, now, acknowledge, setPinned } = useAttentionSessions();
   const activeSessions: ActiveSessionRow[] = attention.map((s) => ({
     sessionId: s.sessionId,
     workspaceId: s.workspaceId,
@@ -54,7 +54,7 @@ export function NavPanel() {
     runtimeStatus: s.runtimeStatus,
     disposition: s.disposition,
     waitingSince: s.waitingSince,
-    refs: s.refs,
+    pinned: s.pinned,
   }));
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
@@ -96,6 +96,7 @@ export function NavPanel() {
         activeSessions={activeSessions}
         activeNow={now}
         onAcknowledgeSession={(sessionId) => void acknowledge(sessionId)}
+        onPinSession={(sessionId, pinned) => void setPinned(sessionId, pinned)}
         onNewSession={onNewSession}
         onNewWorkspace={onNewWorkspace}
         onLoadMoreSessions={onLoadMoreSessions}

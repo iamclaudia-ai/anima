@@ -11,6 +11,7 @@ import {
   getStoredSession,
   listSubagentSessions,
   listAttentionSessions,
+  setSessionPinned,
   listWorkspaceSessions,
   setSessionDisposition,
   setSessionSnooze,
@@ -411,6 +412,31 @@ describe("session store", () => {
           .map((s) => s.sessionId)
           .filter((id) => seeded.has(id));
         expect(ids).toEqual(["ses_newest", "ses_middle", "ses_oldest"]);
+      });
+
+      it("puts pinned sessions first, each group newest first", () => {
+        seed("ses_a");
+        seed("ses_b");
+        seed("ses_c");
+        seed("ses_d");
+        createdAt("ses_a", "2026-08-01T00:00:00.000Z");
+        createdAt("ses_b", "2026-08-02T00:00:00.000Z");
+        createdAt("ses_c", "2026-08-03T00:00:00.000Z");
+        createdAt("ses_d", "2026-08-04T00:00:00.000Z");
+        expect(setSessionPinned("ses_a", true)).toBe(true);
+        expect(setSessionPinned("ses_c", true)).toBe(true);
+        expect(setSessionPinned("ses_missing", true)).toBe(false);
+
+        const seeded = new Set(["ses_a", "ses_b", "ses_c", "ses_d"]);
+        const rows = listAttentionSessions({ now: NOW }).filter((s) => seeded.has(s.sessionId));
+        expect(rows.map((s) => s.sessionId)).toEqual(["ses_c", "ses_a", "ses_d", "ses_b"]);
+        expect(rows.map((s) => s.pinned)).toEqual([true, true, false, false]);
+
+        setSessionPinned("ses_c", false);
+        const after = listAttentionSessions({ now: NOW })
+          .map((s) => s.sessionId)
+          .filter((id) => seeded.has(id));
+        expect(after).toEqual(["ses_a", "ses_d", "ses_c", "ses_b"]);
       });
 
       // The queue is "everything unresolved", not "everything busy". An idle

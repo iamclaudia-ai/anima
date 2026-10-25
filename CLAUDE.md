@@ -71,7 +71,7 @@ live gateway reports; run `anima gateway list_methods` for the current truth.
 
 | Extension    | Server methods                                                           | Web pages                                                         |
 | ------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `session`    | 38 — `create_session`, `send_prompt`, `spawn_agent`, `find_workspace`, … | —                                                                 |
+| `session`    | 39 — `create_session`, `send_prompt`, `spawn_agent`, `find_workspace`, … | —                                                                 |
 | `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …                   | —                                                                 |
 | `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …                 | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
 | `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …               | `/scheduler`                                                      |

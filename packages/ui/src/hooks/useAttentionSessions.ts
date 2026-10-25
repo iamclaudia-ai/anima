@@ -46,6 +46,8 @@ export interface AttentionSession {
   /** What "waiting 20 minutes" is measured from — the turn's end, not a restart. */
   waitingSince: string;
   snoozedUntil: string | null;
+  /** Pinned rows sort ahead of the rest; the server orders them. */
+  pinned: boolean;
   refs?: SessionRefInfo[];
 }
 
@@ -107,7 +109,8 @@ function sameSessions(a: AttentionSession[], b: AttentionSession[]): boolean {
       row.runtimeStatus === other.runtimeStatus &&
       row.disposition === other.disposition &&
       row.waitingSince === other.waitingSince &&
-      row.title === other.title
+      row.title === other.title &&
+      row.pinned === other.pinned
     );
   });
 }
@@ -287,6 +290,7 @@ export interface UseAttentionSessionsReturn {
   refresh: () => void;
   acknowledge: (sessionId: string) => Promise<void>;
   snooze: (sessionId: string, minutes: number) => Promise<void>;
+  setPinned: (sessionId: string, pinned: boolean) => Promise<void>;
 }
 
 /** Is this session blocked on a prompt only a human can answer (#69)? */
@@ -341,11 +345,16 @@ export function useAttentionSessions(): UseAttentionSessionsReturn {
     fetchNow();
   }, []);
 
+  const setPinned = useCallback(async (sessionId: string, pinned: boolean) => {
+    await client?.call("session.set_pinned", { sessionId, pinned });
+    fetchNow();
+  }, []);
+
   const overdue = sessions.filter((s) => {
     if (!isAwaitingAcknowledgement(s)) return false;
     const waited = waitedMs(s, now);
     return waited >= escalateAfterMs(s) && waited <= ESCALATE_UNTIL_MS;
   });
 
-  return { sessions, overdue, now, refresh, acknowledge, snooze };
+  return { sessions, overdue, now, refresh, acknowledge, snooze, setPinned };
 }

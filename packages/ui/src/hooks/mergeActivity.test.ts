@@ -26,6 +26,7 @@ const row = (over: Partial<AttentionSession> = {}): AttentionSession => ({
   lastActivity: "2026-08-20T00:00:00.000Z",
   waitingSince: "2026-08-20T00:00:00.000Z",
   snoozedUntil: null,
+  pinned: false,
   ...over,
 });
 

@@ -2,9 +2,11 @@
  * NavigationDrawer — Codex-style sidebar.
  *
  * Layout (top to bottom):
- *   FIXED TOP    — New workspace, Search, Plugins, Automations
- *   SCROLL MID   — "Workspaces" header + collapsible workspace items, each
- *                  showing up to 5 sessions with a "Show more" toggle.
+ *   FIXED TOP    — New workspace, Search
+ *   TABS         — Active | Workspaces (Active by default)
+ *   SCROLL MID   — the selected tab: the ACTIVE queue, or the collapsible
+ *                  workspace tree, each workspace showing a page of sessions
+ *                  with a "Show more" toggle.
  *   FIXED BOTTOM — Settings (popup menu)
  *
  * Per-workspace state (expanded, show-more) lives in this component because
@@ -121,6 +123,8 @@ interface NavigationDrawerProps {
   activeNow?: number;
   /** Mark a pane row done — it drops out of the pane and back into its tree. */
   onAcknowledgeSession?: (sessionId: string) => void;
+  /** Pin or unpin a pane row. Without it the menu has no pin item. */
+  onPinSession?: (sessionId: string, pinned: boolean) => void;
 }
 
 /**
@@ -142,8 +146,8 @@ export interface ActiveSessionRow {
   disposition: SessionDisposition;
   /** What the elapsed label counts from. */
   waitingSince: string;
-  /** PR / ticket chips — a queue row should read like a tree row. */
-  refs?: SessionRefInfo[];
+  /** Pinned rows sort ahead of the rest. The server orders them. */
+  pinned: boolean;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -257,14 +261,6 @@ function runtimePresentation(
 
 // ── ACTIVE pane ─────────────────────────────────────────────────
 
-/**
- * How many rows the pane shows before collapsing the rest behind a count.
- *
- * A busy morning must not push the workspace tree off-screen — the pane is
- * meant to answer "what's happening", not to become the whole sidebar.
- */
-const MAX_ACTIVE_ROWS = 6;
-
 function activeRowName(row: ActiveSessionRow): string {
   return row.title?.trim() || row.firstPrompt?.trim() || row.sessionId.slice(0, 8);
 }
@@ -283,13 +279,17 @@ function elapsedLabel(since: string, now: number): string {
 /**
  * The flat "what's happening right now" list, above the workspace tree.
  *
- * Ordered by the server, newest-created first, and rendered in exactly that
- * order — nothing is pinned or re-sorted here. Two earlier rules both had to
- * go for the same reason: ordering by recent activity moved a row you were
- * reading because some *other* session finished, and pinning the tab's own
- * session to the top made every row jump each time you clicked through the
- * list. Creation order never changes, so a session is always where you last
- * saw it, which is the property that makes a list scannable at all.
+ * Ordered by the server, pinned first, then newest-created first, and
+ * rendered in exactly that order — nothing is re-sorted here. Two earlier
+ * rules both had to go for the same reason: ordering by recent activity moved
+ * a row you were reading because some *other* session finished, and hoisting
+ * the tab's own session to the top made every row jump each time you clicked
+ * through the list. Creation order never changes, so a session is always where
+ * you last saw it, which is the property that makes a list scannable at all.
+ * Pinning moves a row once, when Michael asks, and never again.
+ *
+ * It has the sidebar's whole middle to itself now that it is a tab, so it
+ * shows every row and scrolls, rather than collapsing behind a count.
  */
 function ActivePane({
   rows,
@@ -299,6 +299,7 @@ function ActivePane({
   onAcknowledge,
   onRenameSession,
   onSetDisposition,
+  onPin,
 }: {
   rows: ActiveSessionRow[];
   activeSessionId: string | null;
@@ -307,22 +308,24 @@ function ActivePane({
   onAcknowledge?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, title: string | null) => void;
   onSetDisposition?: (sessionId: string, disposition: SessionDisposition) => void;
+  onPin?: (sessionId: string, pinned: boolean) => void;
 }) {
-  const [showAll, setShowAll] = useState(false);
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return <div className="px-2 py-6 text-center text-xs text-gray-400">Nothing active</div>;
+  }
 
-  const visible = showAll ? rows : rows.slice(0, MAX_ACTIVE_ROWS);
-  const hidden = rows.length - visible.length;
+  // Where the pinned group ends. The server sorts pinned rows first, so a
+  // divider before the first unpinned row is all it takes to show the split.
+  const firstUnpinned = rows.findIndex((row) => !row.pinned);
 
   return (
-    <div className="border-b border-gray-200 px-2 pb-2 pt-2">
-      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
-        Active
-      </div>
-      <div className="space-y-0.5">
-        {visible.map((row) => (
+    <div className="space-y-0.5">
+      {rows.map((row, index) => (
+        <div key={row.sessionId}>
+          {index > 0 && index === firstUnpinned && (
+            <div className="mx-2 my-1 border-t border-gray-100" />
+          )}
           <ActiveRow
-            key={row.sessionId}
             row={row}
             isActive={row.sessionId === activeSessionId}
             now={now}
@@ -330,27 +333,10 @@ function ActivePane({
             onAcknowledge={onAcknowledge}
             onRenameSession={onRenameSession}
             onSetDisposition={onSetDisposition}
+            onPin={onPin}
           />
-        ))}
-        {hidden > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowAll(true)}
-            className="w-full px-2 py-1 text-left text-xs text-gray-500 hover:text-gray-700"
-          >
-            {hidden} more
-          </button>
-        )}
-        {showAll && rows.length > MAX_ACTIVE_ROWS && (
-          <button
-            type="button"
-            onClick={() => setShowAll(false)}
-            className="w-full px-2 py-1 text-left text-xs text-gray-500 hover:text-gray-700"
-          >
-            Show less
-          </button>
-        )}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -358,7 +344,7 @@ function ActivePane({
 /**
  * One queue row.
  *
- * Carries everything the tree row does — refs, rename, tmux, status — because
+ * Carries everything the tree row does — rename, tmux, status — because
  * once the queue is where the work lives, having to go find the session in its
  * folder to rename it is exactly the friction the pane was meant to remove.
  */
@@ -370,6 +356,7 @@ function ActiveRow({
   onAcknowledge,
   onRenameSession,
   onSetDisposition,
+  onPin,
 }: {
   row: ActiveSessionRow;
   isActive: boolean;
@@ -378,6 +365,7 @@ function ActiveRow({
   onAcknowledge?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, title: string | null) => void;
   onSetDisposition?: (sessionId: string, disposition: SessionDisposition) => void;
+  onPin?: (sessionId: string, pinned: boolean) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
 
@@ -424,16 +412,13 @@ function ActiveRow({
               <DispositionChip disposition={row.disposition} />
             )}
           </span>
-          <span className="mt-0.5 block truncate text-xs text-gray-400">
-            {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
-          </span>
-          {/* Their own line. Sharing the context line meant the workspace name
-              truncated to make room for chips, and a row with three refs
-              pushed the clock off entirely — two things competing for one line
-              is worse than an extra line that only appears when there's
-              something to put on it. */}
-          <span className="mt-0.5 flex flex-wrap items-center gap-1 empty:mt-0">
-            <SessionRefChips refs={row.refs} />
+          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-gray-400">
+            {row.pinned && (
+              <Pin className="size-3 flex-shrink-0 text-blue-500" aria-label="Pinned" />
+            )}
+            <span className="truncate">
+              {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+            </span>
           </span>
         </span>
       </button>
@@ -441,6 +426,8 @@ function ActiveRow({
         <SessionActions
           sessionId={row.sessionId}
           disposition={row.disposition}
+          pinned={row.pinned}
+          onTogglePin={onPin ? () => onPin(row.sessionId, !row.pinned) : undefined}
           onRename={onRenameSession ? () => setRenaming(true) : undefined}
           onSetDisposition={
             onSetDisposition
@@ -725,9 +712,6 @@ function SessionRow({
                 <DispositionChip disposition={session.disposition} />
               )}
             </span>
-            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 empty:mt-0">
-              <SessionRefChips refs={session.refs} />
-            </span>
           </span>
         </span>
         {/* Hidden on hover so the actions can take its place — the row is
@@ -761,18 +745,23 @@ function SessionRow({
  * one place but not the other is the kind of inconsistency you only notice
  * while hunting for the button that was there a second ago.
  *
- * Everything but the tmux copy lives behind the ⋯ menu, because the queue row
- * carries a workspace label and refs and has no width to spare.
+ * Everything lives behind the ⋯ menu, because the queue row carries a
+ * workspace label and has no width to spare.
  */
 function SessionActions({
   sessionId,
   disposition,
+  pinned,
+  onTogglePin,
   onRename,
   onSetDisposition,
   onAcknowledge,
 }: {
   sessionId: string;
   disposition?: SessionDisposition;
+  /** Present on queue rows only: pinning orders the ACTIVE pane. */
+  pinned?: boolean;
+  onTogglePin?: () => void;
   onRename?: () => void;
   onSetDisposition?: (disposition: SessionDisposition) => void;
   /** Present on queue rows: the one-click version of "status → resolved". */
@@ -811,6 +800,19 @@ function SessionActions({
             >
               <Check className="size-3" />
               Mark done
+            </button>
+          )}
+          {onTogglePin && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onTogglePin();
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+            >
+              {pinned ? <PinOff className="size-3" /> : <Pin className="size-3" />}
+              {pinned ? "Unpin" : "Pin"}
             </button>
           )}
           <button
@@ -1088,7 +1090,7 @@ function WorkspaceItem({
   isActive: boolean;
   activeSessionId: string | null;
   defaultExpanded: boolean;
-  /** The open session lives here and no other list is showing it — reveal it. */
+  /** The open session lives here and should be visible in the tree — reveal it. */
   revealSession: boolean;
   onWorkspaceSelect: (workspace: WorkspaceInfo) => void;
   onSessionSelect: (session: SessionInfo, workspace: WorkspaceInfo) => void;
@@ -1665,6 +1667,39 @@ function SearchResults({
   );
 }
 
+// ── Tabs ────────────────────────────────────────────────────────
+
+type NavTab = "active" | "workspaces";
+
+/** One half of the Active | Workspaces toggle. */
+function NavTabButton({
+  label,
+  count,
+  selected,
+  onClick,
+}: {
+  label: string;
+  /** Shown beside the label when present and non-zero. */
+  count?: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+        selected ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+      }`}
+    >
+      {label}
+      {count ? <span className="text-gray-400">{count}</span> : null}
+    </button>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────
 
 export function NavigationDrawer({
@@ -1686,9 +1721,11 @@ export function NavigationDrawer({
   activeSessions,
   activeNow,
   onAcknowledgeSession,
+  onPinSession,
 }: NavigationDrawerProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tab, setTab] = useState<NavTab>("active");
 
   // Rendered in the server's order, untouched.
   //
@@ -1703,13 +1740,17 @@ export function NavigationDrawer({
   /**
    * The workspace whose folder should open to show the current session.
    *
-   * Only when no other list is showing it. A session in the ACTIVE queue is
-   * already visible and already highlighted there, so expanding its folder as
-   * well would unfold the tree to say something the pane just said.
+   * Always while the Workspaces tab is showing, so switching to it lands on
+   * where you are. On the Active tab, only for a session the queue isn't
+   * showing (a resolved one opened from search, say): otherwise clicking down
+   * the queue would quietly unfold a folder per click in the hidden tree, and
+   * the Workspaces tab would open on a mess of expanded folders.
    */
   const currentIsQueued = activeRows.some((row) => row.sessionId === activeSessionId);
   const revealInWorkspaceId =
-    activeSessionId && activeWorkspace && !currentIsQueued ? activeWorkspace.id : null;
+    activeSessionId && activeWorkspace && (tab === "workspaces" || !currentIsQueued)
+      ? activeWorkspace.id
+      : null;
 
   return (
     <>
@@ -1720,34 +1761,57 @@ export function NavigationDrawer({
           <TopAction icon={Search} label="Search" onClick={() => setSearchOpen(true)} />
         </div>
 
-        <ActivePane
-          rows={activeRows}
-          activeSessionId={activeSessionId}
-          now={activeNow ?? Date.now()}
-          onSelect={(row) => {
-            const workspace = workspaces.find((w) => w.id === row.workspaceId);
-            if (workspace) {
-              onSessionSelect({ sessionId: row.sessionId }, workspace);
-            }
-          }}
-          onAcknowledge={onAcknowledgeSession}
-          onRenameSession={
-            onRenameSession
-              ? (sessionId, title) => void onRenameSession({ sessionId }, title)
-              : undefined
-          }
-          onSetDisposition={
-            onSetSessionDisposition
-              ? (sessionId, disposition) => void onSetSessionDisposition({ sessionId }, disposition)
-              : undefined
-          }
-        />
+        <div className="flex gap-0.5 rounded-md bg-gray-100 p-0.5 mx-2 mt-2" role="tablist">
+          <NavTabButton
+            label="Active"
+            count={activeRows.length}
+            selected={tab === "active"}
+            onClick={() => setTab("active")}
+          />
+          <NavTabButton
+            label="Workspaces"
+            selected={tab === "workspaces"}
+            onClick={() => setTab("workspaces")}
+          />
+        </div>
 
-        {/* Scrollable workspaces */}
-        <div className="flex-1 overflow-y-auto p-2">
-          <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
-            Workspaces
-          </div>
+        {/* Both panes stay mounted and the hidden one is only hidden, so each
+            keeps its scroll position and the tree keeps its open folders
+            across tab switches. */}
+        <div
+          className={`flex-1 overflow-y-auto p-2 ${tab === "active" ? "" : "hidden"}`}
+          role="tabpanel"
+        >
+          <ActivePane
+            rows={activeRows}
+            activeSessionId={activeSessionId}
+            now={activeNow ?? Date.now()}
+            onSelect={(row) => {
+              const workspace = workspaces.find((w) => w.id === row.workspaceId);
+              if (workspace) {
+                onSessionSelect({ sessionId: row.sessionId }, workspace);
+              }
+            }}
+            onAcknowledge={onAcknowledgeSession}
+            onRenameSession={
+              onRenameSession
+                ? (sessionId, title) => void onRenameSession({ sessionId }, title)
+                : undefined
+            }
+            onSetDisposition={
+              onSetSessionDisposition
+                ? (sessionId, disposition) =>
+                    void onSetSessionDisposition({ sessionId }, disposition)
+                : undefined
+            }
+            onPin={onPinSession}
+          />
+        </div>
+
+        <div
+          className={`flex-1 overflow-y-auto p-2 ${tab === "workspaces" ? "" : "hidden"}`}
+          role="tabpanel"
+        >
           <div className="space-y-0.5">
             {workspaces.map((workspace) => (
               <WorkspaceItem

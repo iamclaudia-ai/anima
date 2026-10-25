@@ -298,9 +298,19 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
+    name: "session.set_pinned",
+    description:
+      "Pin or unpin a session in the ACTIVE pane. Pinned sessions sort ahead of the rest, each group newest created first.",
+    inputSchema: z.object({
+      sessionId: z.string().describe("Session UUID"),
+      pinned: z.boolean().describe("True to pin, false to unpin"),
+    }),
+    execution: { lane: "write", concurrency: "keyed", keyParam: "sessionId" },
+  },
+  {
     name: "session.list_attention",
     description:
-      "The work queue: every unresolved session across every workspace, newest created first. Not paginated per workspace — membership is the disposition, so nothing can be lost to a page boundary. Snoozed sessions are omitted until their timer passes. A resolved or archived session is not here at all, including the one a tab has open — it lives in its workspace tree, highlighted when current.",
+      "The work queue: every unresolved session across every workspace, pinned first, then newest created first. Not paginated per workspace — membership is the disposition, so nothing can be lost to a page boundary. Snoozed sessions are omitted until their timer passes. A resolved or archived session is not here at all, including the one a tab has open — it lives in its workspace tree, highlighted when current.",
     inputSchema: z.object({
       limit: z.number().int().positive().max(500).optional().default(200),
     }),

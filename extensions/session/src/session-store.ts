@@ -260,6 +260,7 @@ function ensureSessionTable(currentDb: Database): void {
       metadata_json       TEXT,
       previous_session_id TEXT,
       profile             TEXT,
+      pinned              INTEGER NOT NULL DEFAULT 0,
       last_activity       TEXT NOT NULL DEFAULT (datetime('now')),
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
@@ -294,6 +295,8 @@ function ensureSessionTable(currentDb: Database): void {
   addColumn("metadata_json", "metadata_json TEXT");
   // Migration 027: the permission profile, write-once (see setSessionProfile).
   addColumn("profile", "profile TEXT");
+  // Migration 030: pinned in the ACTIVE pane (see setSessionPinned).
+  addColumn("pinned", "pinned INTEGER NOT NULL DEFAULT 0");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
 
   // A CHECK constraint can't be widened by ALTER TABLE, so a table left behind
@@ -691,6 +694,20 @@ export function getWorkspaceActiveSession(workspaceId: string): string | null {
  * Returns false when no such session exists, so the method can 404 rather than
  * silently succeed.
  */
+/**
+ * Pin or unpin a session in the ACTIVE pane. Pinned rows sort ahead of the
+ * rest; within each group the order stays newest-created first.
+ */
+export function setSessionPinned(sessionId: string, pinned: boolean): boolean {
+  const result = getDb()
+    .query(
+      `UPDATE sessions SET pinned = ?, updated_at = datetime('now')
+       WHERE provider_session_id = ?`,
+    )
+    .run(pinned ? 1 : 0, sessionId);
+  return result.changes > 0;
+}
+
 export function setSessionTitle(sessionId: string, title: string | null): boolean {
   const trimmed = title?.trim();
   const result = getDb()
@@ -1007,6 +1024,8 @@ export interface AttentionSession {
   waitingSince: string;
   /** Set while snoozed; the session reappears once this passes. */
   snoozedUntil: string | null;
+  /** Pinned rows sort ahead of the rest of the queue. */
+  pinned: boolean;
   /** PR / ticket chips — the queue row should read like the tree row. */
   refs: StoredSessionRef[];
 }
@@ -1032,8 +1051,8 @@ export interface AttentionSession {
  * status can't have that problem — membership is the status itself. The set is
  * naturally small, because it's a description of right now.
  *
- * Ordered by when the session was **created**, newest first — not by when it
- * last did something. Recency-of-activity meant the list rearranged itself
+ * Pinned sessions come first. Within each group, ordered by when the session
+ * was **created**, newest first — not by when it last did something. Recency-of-activity meant the list rearranged itself
  * under the cursor: a row you were reading moved because some other session
  * finished a turn. Creation order never changes, so the pane becomes a stable
  * place where a given session is always found in the same spot, and "what did
@@ -1085,7 +1104,7 @@ export function listAttentionSessions(options?: {
   const rows = getDb()
     .query(
       `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
-              s.runtime_status, s.disposition, s.last_activity,
+              s.runtime_status, s.disposition, s.last_activity, s.pinned,
               w.id AS workspace_id, w.name AS workspace_name, w.cwd AS cwd
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
@@ -1093,7 +1112,7 @@ export function listAttentionSessions(options?: {
           AND s.status = 'active'
           AND s.disposition IN ('open','needs_review','blocked','snoozed')
           ${excludeClause}
-        ORDER BY s.created_at DESC
+        ORDER BY s.pinned DESC, s.created_at DESC
         LIMIT ?`,
     )
     .all(...excluded, ...excluded, limit) as Array<{
@@ -1103,6 +1122,7 @@ export function listAttentionSessions(options?: {
     runtime_status: string | null;
     disposition: string | null;
     last_activity: string;
+    pinned: number;
     workspace_id: string;
     workspace_name: string;
     cwd: string;
@@ -1150,6 +1170,7 @@ export function listAttentionSessions(options?: {
       lastActivity: row.last_activity,
       waitingSince,
       snoozedUntil,
+      pinned: row.pinned === 1,
       refs: refsBySession.get(row.session_id) ?? [],
     });
   }
