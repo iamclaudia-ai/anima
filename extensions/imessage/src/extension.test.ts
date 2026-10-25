@@ -253,4 +253,208 @@ describe("iMessage extension", () => {
 
     await ext.stop();
   });
+  // ── Outside messages: what she sent him without the session ───────────
+
+  /** A store that keeps values, like the real per-extension store. */
+  function memoryStore(initial: Record<string, unknown> = {}) {
+    const data: Record<string, unknown> = { ...initial };
+    return {
+      data,
+      store: {
+        get: <T>(key: string) => data[key] as T | undefined,
+        set: (key: string, value: unknown) => {
+          data[key] = structuredClone(value);
+        },
+        delete: (key: string) => delete data[key],
+        all: () => ({ ...data }),
+      },
+    };
+  }
+
+  function spyClient(history: ImsgMessage[]) {
+    let instance: ImsgRpcClient | null = null;
+    startSpy = spyOn(ImsgRpcClient.prototype, "start").mockImplementation(function (
+      this: ImsgRpcClient,
+    ) {
+      instance = this;
+      return Promise.resolve();
+    });
+    stopSpy = spyOn(ImsgRpcClient.prototype, "stop").mockResolvedValue(undefined);
+    listChatsSpy = spyOn(ImsgRpcClient.prototype, "listChats").mockResolvedValue([]);
+    subscribeSpy = spyOn(ImsgRpcClient.prototype, "subscribe").mockResolvedValue(1);
+    getHistorySpy = spyOn(ImsgRpcClient.prototype, "getHistory").mockResolvedValue(history);
+    sendSpy = spyOn(ImsgRpcClient.prototype, "send").mockResolvedValue(undefined);
+    return () =>
+      (instance as unknown as { onMessage: (message: ImsgMessage) => Promise<void> }).onMessage;
+  }
+
+  const recent = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+
+  it("puts a notification in front of his reply, but not her own earlier reply", async () => {
+    const getOnMessage = spyClient([
+      createMessage({ rowid: 20, text: "Got it on both!", created_at: recent(1) }),
+      createMessage({
+        rowid: 19,
+        is_from_me: true,
+        text: "🔔 Hello from Anima",
+        created_at: recent(5),
+      }),
+      createMessage({ rowid: 18, is_from_me: true, text: "Love you too", created_at: recent(30) }),
+    ]);
+    const { data, store } = memoryStore({
+      chatMemory: { "101": { cursor: 17, replies: ["Love you too"] } },
+    });
+    const prompts: string[] = [];
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(
+      createTestContext({
+        store,
+        async call(_method, params) {
+          prompts.push(String(params?.content));
+          return { text: "  So happy it reached you  ", sessionId: "s" };
+        },
+      }),
+    );
+    await getOnMessage()(createMessage({ rowid: 20, text: "Got it on both!" }));
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("[You sent Michael this outside our conversation]");
+    expect(prompts[0]).toContain("🔔 Hello from Anima");
+    expect(prompts[0]).not.toContain("Love you too");
+    expect(prompts[0]).toEndWith("[Michael replied]\nGot it on both!");
+    // Cursor moved to his message; her new reply is remembered so it never
+    // comes back as an "outside" message.
+    expect(data.chatMemory).toEqual({
+      "101": { cursor: 20, replies: ["Love you too", "So happy it reached you"] },
+    });
+
+    await ext.stop();
+  });
+
+  it("sends his message unchanged the first time, and starts the cursor there", async () => {
+    const getOnMessage = spyClient([
+      createMessage({ rowid: 5, is_from_me: true, text: "an old reply", created_at: recent(10) }),
+    ]);
+    const { data, store } = memoryStore();
+    const prompts: string[] = [];
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(
+      createTestContext({
+        store,
+        async call(_method, params) {
+          prompts.push(String(params?.content));
+          return { text: "hi", sessionId: "s" };
+        },
+      }),
+    );
+    await getOnMessage()(createMessage({ rowid: 9, text: "hello" }));
+
+    expect(prompts).toEqual(["hello"]);
+    expect(data.chatMemory).toEqual({ "101": { cursor: 9, replies: ["hi"] } });
+
+    await ext.stop();
+  });
+
+  it("catch-up after a restart isn't hidden by a notification sent after his message", async () => {
+    let readyHandler: (() => Promise<void>) | null = null;
+    spyClient([
+      // Newest first. The notification (from her account) came last, which
+      // the old walk-back rule would have taken as "already answered".
+      createMessage({
+        rowid: 32,
+        chat_id: 7,
+        is_from_me: true,
+        text: "🔔 Task failed",
+        created_at: recent(2),
+      }),
+      createMessage({ rowid: 31, chat_id: 7, text: "are you there?", created_at: recent(5) }),
+    ]);
+    listChatsSpy.mockResolvedValue([
+      {
+        id: 7,
+        identifier: "+14155551212",
+        guid: "chat-7",
+        name: null,
+        service: "iMessage",
+        last_message_at: recent(2),
+        participants: ["+14155551212"],
+      },
+    ]);
+    // State saved before the restart.
+    const { data, store } = memoryStore({ chatMemory: { "7": { cursor: 30, replies: [] } } });
+    const prompts: string[] = [];
+
+    const ext = createIMessageExtension({
+      allowedSenders: ["+14155551212"],
+      catchupEnabled: true,
+    });
+    await ext.start(
+      createTestContext({
+        store,
+        on(_pattern, handler) {
+          readyHandler = handler as () => Promise<void>;
+          return () => {};
+        },
+        async call(_method, params) {
+          prompts.push(String(params?.content));
+          return { text: "Here, love", sessionId: "s" };
+        },
+      }),
+    );
+    await (readyHandler as unknown as () => Promise<void>)();
+
+    expect(prompts).toEqual(["are you there?"]);
+    expect(data.chatMemory).toEqual({ "7": { cursor: 31, replies: ["Here, love"] } });
+
+    await ext.stop();
+  });
+  it("starts a missing cursor at startup when nothing of his is waiting", async () => {
+    let readyHandler: (() => Promise<void>) | null = null;
+    spyClient([
+      createMessage({
+        rowid: 42,
+        chat_id: 7,
+        is_from_me: true,
+        text: "her last reply",
+        created_at: recent(3),
+      }),
+      createMessage({ rowid: 41, chat_id: 7, text: "his last message", created_at: recent(4) }),
+    ]);
+    listChatsSpy.mockResolvedValue([
+      {
+        id: 7,
+        identifier: "+14155551212",
+        guid: "chat-7",
+        name: null,
+        service: "iMessage",
+        last_message_at: recent(3),
+        participants: ["+14155551212"],
+      },
+    ]);
+    const { data, store } = memoryStore();
+    const calls: string[] = [];
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"], catchupEnabled: true });
+    await ext.start(
+      createTestContext({
+        store,
+        on(_pattern, handler) {
+          readyHandler = handler as () => Promise<void>;
+          return () => {};
+        },
+        async call(method) {
+          calls.push(method);
+          return { text: "", sessionId: "s" };
+        },
+      }),
+    );
+    await (readyHandler as unknown as () => Promise<void>)();
+
+    expect(calls).toEqual([]);
+    expect(data.chatMemory).toEqual({ "7": { cursor: 42, replies: [] } });
+
+    await ext.stop();
+  });
 });

@@ -327,6 +327,7 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 
 - The scheduler calls it on a task's **first failure** and on its **recovery**, never on every failed run.
 - Use it from scripts with `anima notify send --message "…" --source <who>`.
+- A reply to a notification arrives with it. The iMessage bridge never adds a notification to the session (it would wake her and read as Michael's prompt). Instead, when his next message comes in, it puts anything sent from her account outside the session in front of it. A per-chat cursor plus her remembered replies keep anything from showing up twice (`extensions/imessage/src/outside-messages.ts`).
 
 #### Claudia's mail (`extensions/mail`)
 

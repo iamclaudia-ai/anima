@@ -14,6 +14,18 @@
 import type { AnimaExtension, ExtensionContext, HealthCheckResponse } from "@anima/shared";
 import { PERSISTENT_SESSION_ID } from "@anima/shared";
 import { ImsgRpcClient, type ImsgMessage, type ImsgAttachment } from "./imsg-client";
+import {
+  type ChatMemories,
+  type ChatMemory,
+  OUTSIDE_WINDOW_MS,
+  STORE_KEY,
+  advanceCursor,
+  collectOutside,
+  formatOutside,
+  memoryFor,
+  rememberReply,
+  withOutsideContext,
+} from "./outside-messages";
 import { z } from "zod";
 
 // ============================================================================
@@ -304,6 +316,40 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     return true;
   }
 
+  // ── Outside messages (see outside-messages.ts) ─────────────
+
+  function loadMemory(chatId: number): ChatMemory {
+    return memoryFor(ctx?.store.get<ChatMemories>(STORE_KEY), chatId);
+  }
+
+  function saveMemory(chatId: number, update: (memory: ChatMemory) => ChatMemory): void {
+    if (!ctx) return;
+    // Re-read before writing: another chat may have saved in the meantime.
+    const all = ctx.store.get<ChatMemories>(STORE_KEY) ?? {};
+    all[String(chatId)] = update(memoryFor(all, chatId));
+    ctx.store.set(STORE_KEY, all);
+  }
+
+  /** Her messages sent outside the session since the cursor, before `beforeRowId`. */
+  async function findOutside(
+    chatId: number,
+    memory: ChatMemory,
+    beforeRowId: number,
+  ): Promise<ImsgMessage[]> {
+    if (memory.cursor === undefined || !client) return [];
+    try {
+      const history = await client.getHistory(chatId, {
+        start: new Date(Date.now() - OUTSIDE_WINDOW_MS).toISOString(),
+        limit: 60,
+      });
+      return collectOutside(history, memory, beforeRowId);
+    } catch (err) {
+      // Context is a nicety; never let it stop a reply.
+      ctx?.log.warn(`Couldn't read history for outside messages: ${err}`);
+      return [];
+    }
+  }
+
   /**
    * Handle an incoming message
    */
@@ -342,8 +388,19 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     // Build source for routing
     const source = buildSource(message.chat_id);
 
+    // Anything she sent him outside the session (a notification, another
+    // session) goes in front of his message, so his reply has its context.
+    const memory = loadMemory(message.chat_id);
+    const outside = await findOutside(message.chat_id, memory, message.rowid);
+    if (outside.length > 0) {
+      ctx?.log.info(`Including ${outside.length} message(s) sent outside the session`);
+    }
+
     // Build content blocks (handles text + attachments)
-    const contentBlocks = await buildContentBlocks(message);
+    const contentBlocks = await buildContentBlocks({
+      ...message,
+      text: withOutsideContext(outside, message.text),
+    });
 
     if (contentBlocks.length === 0) {
       ctx?.log.warn("No valid content blocks to send");
@@ -361,6 +418,7 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       participants: message.participants,
     });
 
+    let replyText = "";
     try {
       const result = await requestSessionReply(source, contentBlocks);
 
@@ -372,11 +430,16 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
           `Sending reply to chat ${message.chat_id}:`,
         ))
       ) {
+        replyText = result.text || "";
         ctx?.emit("imessage.sent", { chatId: message.chat_id, text: result.text });
       }
     } catch (err) {
       ctx?.log.error(`Failed to process message: ${err}`);
       ctx?.emit("imessage.error", { error: String(err), chatId: message.chat_id });
+    } finally {
+      // His message has been handled either way; her reply (if any) is now in
+      // her session, so remember it to keep it out of the next outside batch.
+      saveMemory(message.chat_id, (m) => advanceCursor(rememberReply(m, replyText), message.rowid));
     }
   }
 
@@ -402,18 +465,37 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
 
         if (!messages.length) continue;
 
-        // Messages come in reverse chronological order.
-        // Walk backward until we find our last reply (is_from_me: true).
-        const unanswered: typeof messages = [];
-        for (const msg of messages) {
-          if (msg.is_from_me) break;
-          // Skip empty messages and reactions
-          if (!msg.text?.trim() && !msg.attachments?.length) continue;
-          unanswered.push(msg);
+        const memory = loadMemory(chat.id);
+        const hasContent = (msg: ImsgMessage) =>
+          Boolean(msg.text?.trim()) || Boolean(msg.attachments?.length);
+
+        // Messages come in reverse chronological order. With a cursor, his
+        // unanswered messages are simply the ones after it. Without one,
+        // walk back to the last message from her account (the old rule; a
+        // notification sent after his message would wrongly end the walk,
+        // which is why the cursor exists).
+        const unanswered: typeof messages =
+          memory.cursor !== undefined
+            ? messages.filter((m) => !m.is_from_me && m.rowid > memory.cursor! && hasContent(m))
+            : [];
+        if (memory.cursor === undefined) {
+          for (const msg of messages) {
+            if (msg.is_from_me) break;
+            // Skip empty messages and reactions
+            if (!hasContent(msg)) continue;
+            unanswered.push(msg);
+          }
         }
 
         if (!unanswered.length) {
           ctx?.log.info(`Catchup: ${chat.identifier} — all caught up`);
+          // Nothing of his is waiting, so everything here is already
+          // accounted for: a safe place to start a missing cursor. Anything
+          // sent from now on counts, including the next notification.
+          const newest = messages[0]?.rowid;
+          if (memory.cursor === undefined && newest !== undefined) {
+            saveMemory(chat.id, (m) => advanceCursor(m, newest));
+          }
           continue;
         }
 
@@ -436,10 +518,17 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
           return `[${time}] ${msg.text || "(attachment)"}`;
         });
 
-        const catchupPrompt =
+        const latestRowId = unanswered[unanswered.length - 1]?.rowid ?? 0;
+        const outside = collectOutside(messages, memory, latestRowId);
+        const context = formatOutside(outside);
+
+        const catchupBody =
           unanswered.length === 1
             ? unanswered[0].text || "(attachment)"
             : `[Catching up on ${unanswered.length} messages received while I was offline]\n\n${lines.join("\n")}`;
+        const catchupPrompt = context
+          ? `${context}\n\n[Michael replied]\n${catchupBody}`
+          : catchupBody;
 
         // Build content blocks (include attachments from the most recent message)
         const lastMsg = unanswered[unanswered.length - 1];
@@ -451,9 +540,12 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
         const source = buildSource(chat.id);
         const result = await requestSessionReply(source, contentBlocks);
 
-        if (result) {
-          await sendReply(chat.id, result.text || "", `Catchup reply to chat ${chat.id}:`);
-        }
+        const sent =
+          result &&
+          (await sendReply(chat.id, result.text || "", `Catchup reply to chat ${chat.id}:`));
+        saveMemory(chat.id, (m) =>
+          advanceCursor(rememberReply(m, sent ? result.text || "" : ""), latestRowId),
+        );
       } catch (err) {
         ctx?.log.error(`Catchup failed for ${chat.identifier}: ${err}`);
       }
