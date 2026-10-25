@@ -248,6 +248,17 @@
         "zod": "catalog:",
       },
     },
+    "extensions/support": {
+      "name": "@anima/ext-support",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anima/extension-host": "workspace:*",
+        "@anima/shared": "workspace:*",
+        "@anima/ui": "workspace:*",
+        "lucide-react": "catalog:",
+        "zod": "catalog:",
+      },
+    },
     "extensions/voice": {
       "name": "@anima/voice",
       "version": "0.1.0",
@@ -431,6 +442,8 @@
     "@anima/ext-scheduler": ["@anima/ext-scheduler@workspace:extensions/scheduler"],
 
     "@anima/ext-skills": ["@anima/ext-skills@workspace:extensions/skills"],
+
+    "@anima/ext-support": ["@anima/ext-support@workspace:extensions/support"],
 
     "@anima/ext-webhooks": ["@anima/ext-webhooks@workspace:extensions/webhooks"],
 

@@ -1,0 +1,22 @@
+{
+  "name": "@anima/ext-support",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./routes": "./src/routes.ts"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts src/routes.ts --outdir dist --target bun",
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@anima/extension-host": "workspace:*",
+    "@anima/shared": "workspace:*",
+    "@anima/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "zod": "catalog:"
+  }
+}
