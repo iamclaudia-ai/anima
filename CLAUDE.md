@@ -69,25 +69,26 @@ Server extension loading is config-driven from `~/.anima/anima.json` and always 
 Enabled extensions (from `~/.anima/anima.json`) — method counts are what the
 live gateway reports; run `anima gateway list_methods` for the current truth.
 
-| Extension    | Server methods                                                            | Web pages                                                         |
-| ------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `session`    | 36 — `create_session`, `send_prompt`, `spawn_agent`, `search`, …          | —                                                                 |
-| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …                    | —                                                                 |
-| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …                  | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
-| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …                | `/scheduler`                                                      |
-| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …                 | —                                                                 |
-| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …                    | code-server (`webConfig.url`)                                     |
-| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`                   | —                                                                 |
-| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                                 | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
-| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                               | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
-| `control`    | 3 — `health_check`, `log_list`, `log_tail`                                | `/control`, `/logs`                                               |
-| `hooks`      | 2 — `health_check`, `list`                                                | —                                                                 |
-| `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, …       | —                                                                 |
-| `mail`       | 10 — `list_messages`, `search`, `read`, `mark_read`, `archive`, `move`, … | —                                                                 |
-| `chat`       | —                                                                         | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
-| `bogart`     | —                                                                         | `/bogart`                                                         |
+| Extension    | Server methods                                                           | Web pages                                                         |
+| ------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `session`    | 38 — `create_session`, `send_prompt`, `spawn_agent`, `find_workspace`, … | —                                                                 |
+| `dominatrix` | 41 — `snapshot`, `click`, `fill`, `eval`, `use_tab`, …                   | —                                                                 |
+| `memory`     | 14 — `ingest`, `process`, `search`, `calendar`, `day`, …                 | `/memory`, `/memory/day/:date`, `/memory/episode/:id`             |
+| `scheduler`  | 8 — `add_task`, `list_tasks`, `fire_now`, `get_history`, …               | `/scheduler`                                                      |
+| `disco`      | 7 — `send_message`, `list_channels`, `update_presence`, …                | —                                                                 |
+| `editor`     | 7 — `open_file`, `get_selection`, `get_active_file`, …                   | code-server (`webConfig.url`)                                     |
+| `voice`      | 5 — `speak`, `stop`, `status`, `replay`, `health_check`                  | —                                                                 |
+| `presenter`  | 4 — `list`, `get`, `sync`, `health_check`                                | `/present`, `/present/:id`, `/present/:id/presenter`, `…/display` |
+| `audiobooks` | 3 — `list_books`, `get_book`, `get_chapter`                              | `/audiobooks`, `/audiobooks/:bookId`, `…/chapter/:chapterNum`     |
+| `control`    | 3 — `health_check`, `log_list`, `log_tail`                               | `/control`, `/logs`                                               |
+| `hooks`      | 2 — `health_check`, `list`                                               | —                                                                 |
+| `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, …      | —                                                                 |
+| `mail`       | 13 — `list_messages`, `search`, `read`, `verify_sender`, `archive`, …    | —                                                                 |
+| `support`    | 15 — `list_tickets`, `create_ticket`, `delegate`, `create_issue`, …      | `/support`, `/support/:ticketId`                                  |
+| `chat`       | —                                                                        | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
+| `bogart`     | —                                                                        | `/bogart`                                                         |
 
-That is all 15 extensions the gateway actually loads. Two other names appear
+That is all 16 extensions the gateway actually loads. Two other names appear
 but are not loaded extensions: `imessage` is present on disk and disabled in
 config, and `testroute` is a dev-only fixture absent from config. The
 `extensions.codex` block is **not** an extension either — see Agent Providers
@@ -131,7 +132,7 @@ Every session runs under a **profile**, chosen at creation and fixed for its lif
 | ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `yolo`  | `bypassPermissions`                                                 | `create_session` default: sessions Michael creates (web, iOS, menubar, CLI), Libby, and unattended runbooks that ask for it explicitly (the deps sweep, the NutWords deploy gate) |
 | `auto`  | Claude Code auto mode                                               | `spawn_agent` default (`extensions.session.config.spawnProfile`)                                                                                                                  |
-| `mail`  | `dontAsk`, no built-in tools, only Anima's MCP server, `restricted` | mail sessions: mail tools + read-only memory, nothing else                                                                                                                        |
+| `mail`  | `dontAsk`, no built-in tools, only Anima's MCP server, `restricted` | mail sessions: mail + support-desk tools, read-only memory                                                                                                                        |
 
 - Profiles beyond the built-ins live in `agentHost.sessionProfiles` (`permissionMode`, `tools`, `allowedTools`, `disallowedTools`, `mcp: "anima-only"`, `restricted`). Code: `packages/agent-host/src/profiles.ts`.
 - The profile is stored write-once in `sessions.profile` and sent with **every** create and prompt (the session bridge looks it up), so a resumed session keeps its powers. agent-host rejects a missing or unknown profile, and closes and relaunches a session running under the wrong one. Legacy rows (NULL) read as `yolo`.
@@ -203,6 +204,7 @@ anima/
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   ├── webhooks/         # Inbound webhooks (:30089, public via Cloudflare tunnel) → inbox + target method
 │   ├── mail/             # Claudia's mailbox (Zoho API): read/search/archive, webhook target, reconcile
+│   ├── support/          # Support desk: tickets across projects, delegation, GitHub + Sentry webhook targets
 │   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
 ├── scripts/              # Smoke tests, E2E tests
@@ -314,6 +316,15 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 #### Claudia's mail (`extensions/mail`)
 
 `claudia@iamclaudia.ai` through the Zoho REST API (Self Client, no delete scope; credentials in `extensions.mail.config`). The `zoho-mail` webhook targets `mail.handle_webhook`, which only reads the message id from the payload, re-fetches the message from the API (a forged POST names nothing real), and emits `mail.received` once per message. A reconcile pass (startup + every 30 min) announces Inbox mail the webhook missed. `mail.read` returns plain text inside an `<untrusted_email … authenticated="yes|no">` envelope; `authenticated` means DMARC passed at Zoho's MX for the From domain. Plan and next steps: `docs/plans/CLAUDIA-MAIL.md`.
+
+#### Support desk (`extensions/support`)
+
+A Linear-lite across projects. A **ticket** is one problem; **reports** are the emails, forum posts and Sentry alerts about it; **links** point at GitHub issues, PRs, delegated sessions and Sentry issues (GitHub stays the source of truth for code). A ticket that is `fixed` with an unanswered reporter shows as **reply owed**. Page: `/support`.
+
+- Projects are workspaces with project fields (`session.update_workspace`: aliases, email domains, GitHub repo, Sentry projects); `session.find_workspace` resolves any of them.
+- `support.delegate` starts an `auto` session in the ticket's workspace with a prompt built from the ticket. Only trusted tickets (verified mail from Michael, Sentry, GitHub, or created by Claudia/Michael) or approved ones delegate. `support.create_issue` files a GitHub issue with `gh`.
+- Webhook targets: `support.handle_github` (PRs/issues naming "Support ticket #N" get linked; a merged PR or all linked issues closed → `fixed`) and `support.handle_sentry` (one ticket per Sentry issue; resolved → `fixed`, regressed → reopened).
+- The front desk (the `mail` profile session) has `support_*` MCP tools without approve or reply bookkeeping. Delegated sessions report back with `anima support note` and `anima support link`. Plan: `docs/plans/SUPPORT-DESK.md`.
 
 **Known platform gap (#86):** the extension host does not validate params, so schema defaults never apply. New extensions should parse params against their own method schemas in `handleMethod` until #86 is fixed.
 

@@ -160,12 +160,26 @@ the computer." So:
 
 ## Build order
 
-1. Workspace project fields. ✅
-2. Support extension: tables, methods, MCP tools, web page. ✅
-3. Delegation and `create_issue`. ✅
-4. GitHub and Sentry handlers, then the hooks configured on each service.
+1. Workspace project fields. ✅ (e473be3, 0721209)
+2. Support extension: tables, methods, MCP tools, web page. ✅ (3d664a2)
+3. Delegation and `create_issue`. ✅ The Mail session's wake prompt and
+   profile include the support tools (5dafc9e).
+4. GitHub and Sentry handlers. ✅ Both hooks are configured in
+   `extensions.webhooks.config.hooks`; `github` is tested end to end through
+   the tunnel (signed deliveries reach `support.handle_github`, a forged one
+   gets 401). Still to do on the services:
+   - **GitHub**: add a webhook on `kiliman/nutwords` (issues + pull requests,
+     JSON) pointing at the `github` hook. Needs repo admin.
+   - **Sentry**: create an internal integration with webhooks for `issue`
+     (and alert rule action) pointing at the `sentry` hook, put its client
+     secret in the hook's signature, and set `enabled: true`. Then set the
+     tnh workspace's `sentryProjects` to the API and web project slugs.
 5. Front-desk notices (Sentry wakes Support Lady), rename Mail → Support.
 6. Replies.
+
+Seeded on Oct 24: tickets #1–#6 from the forwarded NutWords emails, linked
+to the issues (#127–#129, #132, #133), draft PRs (#130, #131, #134) and the two
+OC sessions that investigated them.
 
 Later: tnh's skills and scripts as MCP tools; a generic method → MCP bridge for
 trusted sessions; per-session MCP tokens so the gateway enforces a profile's

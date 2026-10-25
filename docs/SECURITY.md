@@ -106,7 +106,29 @@ in `x-hook-secret` on the first request and is stored in
 handshake. Deliveries are stored before the 200 response and handed to their
 target as data. Treat bodies as untrusted input.
 
+Configured hooks:
+
+| Hook        | Signature                                                           | Target                  |
+| ----------- | ------------------------------------------------------------------- | ----------------------- |
+| `zoho-mail` | Zoho (`x-hook-signature`, learned secret)                           | `mail.handle_webhook`   |
+| `github`    | `x-hub-signature-256`, hex, `sha256=` prefix                        | `support.handle_github` |
+| `sentry`    | `sentry-hook-signature`, hex (internal integration's client secret) | `support.handle_sentry` |
+
 `anima doctor` checks the tunnel's ingress rules and the 30089 loopback bind.
+
+### Support Desk
+
+The front-desk session (`mail` profile) reads strangers' words, so it gets
+narrow MCP tools and no shell. The support extension computes trust itself:
+an email report is trusted only when `mail.verify_sender` says it is
+DMARC-verified from a trusted sender, and Sentry and GitHub are trusted
+through their signatures. Only a trusted ticket, or one Michael approved,
+can be delegated, and delegated sessions always run under
+`extensions.support.config.delegation.profile` (never `yolo`) in the
+ticket's workspace, with a prompt built by the extension that marks report
+text as data. A GitHub event links a PR or issue to a ticket only from that
+ticket's own repo. The front desk can't file issues in a public repo
+without Michael's approval.
 
 ### Authentication
 
@@ -197,8 +219,9 @@ or watchdog/gateway startup behavior.
 - [ ] All Anima control services bind to `127.0.0.1`.
 - [ ] Remote access goes through Tailscale plus Caddy, not raw exposed ports.
 - [ ] `watchdog.kiliman.dev` remains token-protected.
-- [ ] `webhooks.kiliman.dev` proxies to the scheduler webhook server only if
-      that server remains token-protected.
+- [ ] `webhooks.kiliman.dev` reaches only `/hook/*` on the webhooks extension,
+      and every hook has a long path secret (plus a signature where the
+      sender supports one).
 - [ ] `code-server` binds to loopback and is reachable only through the intended
       Caddy/Tailscale path.
 - [ ] Public DNS exposure is reviewed any time a new `*.kiliman.dev` route is
