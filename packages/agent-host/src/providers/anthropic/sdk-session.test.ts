@@ -365,6 +365,77 @@ describe("SDKSession", () => {
     }
   });
 
+  it("puts the configured persona file first in the systemPrompt", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-persona`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+    const previousClaudiaHome = process.env.ANIMA_HOME;
+    const isolatedHome = join(tmpdir(), `claudia-sdk-home-${Date.now()}-persona`);
+    const isolatedCwd = join(isolatedHome, "repo", "app");
+    const personaPath = join(isolatedHome, "persona.md");
+
+    try {
+      process.env.ANIMA_HOME = isolatedHome;
+      mkdirSync(isolatedCwd, { recursive: true });
+      writeFileSync(personaPath, "PERSONA_INSTRUCTIONS\n");
+      writeFileSync(join(isolatedCwd, "CLAUDE.md"), "PROJECT_INSTRUCTIONS\n");
+
+      const session = new SDKSession(sessionId, { cwd: isolatedCwd, model: "claude-test" }, false, {
+        config: { systemPromptFile: personaPath },
+        queryFactory: ((args: { options: Record<string, unknown> }) => {
+          capturedOptions = args.options;
+          return fakeQuery as unknown;
+        }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      });
+
+      await session.start();
+      await session.prompt("hello");
+
+      const systemPrompt = (capturedOptions?.systemPrompt as string | undefined) || "";
+      expect(systemPrompt.startsWith("PERSONA_INSTRUCTIONS")).toBe(true);
+      expect(systemPrompt.indexOf("PROJECT_INSTRUCTIONS")).toBeGreaterThan(0);
+
+      await session.close();
+    } finally {
+      if (previousClaudiaHome === undefined) {
+        delete process.env.ANIMA_HOME;
+      } else {
+        process.env.ANIMA_HOME = previousClaudiaHome;
+      }
+      rmSync(isolatedHome, { recursive: true, force: true });
+    }
+  });
+
+  it("starts without a persona when the configured file is missing", async () => {
+    const fakeQuery = new FakeQuery();
+    const sessionId = `sdk-test-${Date.now()}-persona-missing`;
+    createdSessionIds.push(sessionId);
+    let capturedOptions: Record<string, unknown> | undefined;
+    const isolatedCwd = join(tmpdir(), `claudia-sdk-cwd-${Date.now()}-persona-missing`);
+
+    try {
+      mkdirSync(isolatedCwd, { recursive: true });
+      const session = new SDKSession(sessionId, { cwd: isolatedCwd, model: "claude-test" }, false, {
+        config: { systemPromptFile: join(isolatedCwd, "does-not-exist.md") },
+        queryFactory: ((args: { options: Record<string, unknown> }) => {
+          capturedOptions = args.options;
+          return fakeQuery as unknown;
+        }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query,
+      });
+
+      await session.start();
+      await session.prompt("hello");
+
+      expect(capturedOptions).toBeDefined();
+      expect(String(capturedOptions?.systemPrompt ?? "")).not.toContain("does-not-exist");
+
+      await session.close();
+    } finally {
+      rmSync(isolatedCwd, { recursive: true, force: true });
+    }
+  });
+
   it("still omits skills block from systemPrompt when no discovered skills exist", async () => {
     const fakeQuery = new FakeQuery();
     const sessionId = `sdk-test-${Date.now()}-preset-only`;

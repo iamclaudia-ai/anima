@@ -106,6 +106,11 @@ Agent-host owns every runtime. Providers are a plain name-keyed registry
 | `claude` | `createClaudeCliProvider` or `createAnthropicProvider` | Chosen by `agentHost.claudeRuntime` (`"cli"` \| `"sdk"`) |
 | `codex`  | `createCodexProvider`                                  | OpenAI Codex CLI                                         |
 
+**The persona** (`~/memory/personas/claudia.md`) is set per runtime:
+`agentHost.claudeCli.systemPromptFile` (vesuvius, with `systemPromptMode: "replace"`) or
+`agentHost.sdk.systemPromptFile` (Anima Sedes). The SDK runtime's system prompt is a plain string,
+which replaces Claude Code's default prompt, so its persona comes first, then the CLAUDE.md chain.
+
 **Every agent is a first-class session.** `session.create_session({ cwd, agent })`
 accepts any registered agent name (default `claude`), so a Codex session is
 created by the same call, through the same provider registry, as a Claude one.

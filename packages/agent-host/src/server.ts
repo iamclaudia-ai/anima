@@ -139,6 +139,7 @@ export async function createAgentHostServer(
             },
           })
         : createAnthropicProvider({
+            systemPromptFile: config.agentHost?.sdk?.systemPromptFile,
             imageProcessing:
               configuredImageProcessing &&
               typeof configuredImageProcessing === "object" &&

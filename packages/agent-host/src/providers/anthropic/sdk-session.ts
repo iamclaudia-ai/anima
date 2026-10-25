@@ -73,6 +73,8 @@ import {
 // ── Types ────────────────────────────────────────────────────
 
 export interface AnthropicProviderConfig {
+  /** Persona file (`~` expanded), placed first in the system prompt. */
+  systemPromptFile?: string;
   imageProcessing?: ImageProcessingConfig;
   skillsPaths?: string[];
   extensionMcp?: {
@@ -261,6 +263,7 @@ export class SDKSession extends EventEmitter {
   private isFirstPrompt: boolean;
   private imageProcessingConfig: ImageProcessingConfig;
   private skillsPaths: string[];
+  private systemPromptFile?: string;
   private extensionMcp?: AnthropicProviderConfig["extensionMcp"];
 
   // Timestamps for health reporting
@@ -301,6 +304,7 @@ export class SDKSession extends EventEmitter {
     this.isFirstPrompt = !isResume;
     this.imageProcessingConfig = deps?.config?.imageProcessing || DEFAULT_IMAGE_PROCESSING_CONFIG;
     this.skillsPaths = deps?.config?.skillsPaths || [];
+    this.systemPromptFile = deps?.config?.systemPromptFile?.trim() || undefined;
     this.extensionMcp = deps?.config?.extensionMcp;
     if (this.profile.mcp === "anima-only" && !this.extensionMcp) {
       throw new Error(
@@ -639,6 +643,13 @@ export class SDKSession extends EventEmitter {
   private buildCombinedSystemPrompt(): string | undefined {
     const parts: string[] = [];
 
+    // Persona first, as the CLI runtime's replace mode puts it. Read on every
+    // query rather than once, so an edit to the persona reaches live sessions
+    // on their next prompt, and it applies to resumed sessions as well, which
+    // the per-session custom prompt below does not.
+    const persona = this.readPersona();
+    if (persona) parts.push(persona);
+
     const customPrompt = this.systemPrompt?.trim();
     if (customPrompt) {
       parts.push(
@@ -661,6 +672,27 @@ export class SDKSession extends EventEmitter {
     // }
 
     return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
+
+  /**
+   * The configured persona file's contents, or undefined.
+   *
+   * A missing or unreadable file is a warning, not an error: a bad path in the
+   * config must not stop every session from starting.
+   */
+  private readPersona(): string | undefined {
+    const raw = this.systemPromptFile;
+    if (!raw) return undefined;
+    const path = raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
+    try {
+      return readFileSync(path, "utf-8").trim() || undefined;
+    } catch (error) {
+      this.logger.warn("systemPromptFile unreadable, starting without it", {
+        path,
+        error: String(error),
+      });
+      return undefined;
+    }
   }
 
   private buildSkillsPrompt(): string {

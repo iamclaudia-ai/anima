@@ -153,6 +153,16 @@ export interface AgentHostConfig {
      */
     systemPromptMode?: "append" | "replace";
   };
+  /** Agent SDK runtime configuration (used when claudeRuntime === "sdk"). */
+  sdk?: {
+    /**
+     * Persona file (`~` expanded), placed first in the session's system
+     * prompt. The SDK runtime's prompt is a plain string, which replaces
+     * Claude Code's default prompt entirely, so this behaves like the CLI's
+     * `systemPromptMode: "replace"`.
+     */
+    systemPromptFile?: string;
+  };
   /** Idle-reaper: close sessions whose last activity is older than this (ms). */
   idleStaleMs?: number;
   /** How often the idle reaper runs (ms). */
