@@ -137,6 +137,12 @@ export function createMailExtension(
       inputSchema: z.object({ messageId, folderId: messageId.optional() }),
     },
     {
+      name: "mail.verify_sender",
+      description:
+        "Who sent a message and whether to trust it: authenticated (DMARC passed for the From domain) and trusted (authenticated and a trusted sender). No body.",
+      inputSchema: z.object({ messageId, folderId: messageId.optional() }),
+    },
+    {
       name: "mail.mark_read",
       description: "Mark messages read (or unread with read: false)",
       inputSchema: z.object({ messageIds, read: z.boolean().default(true) }),
@@ -393,6 +399,26 @@ export function createMailExtension(
         const result = await box.read(p.messageId, folderFor(p.messageId, p.folderId));
         knownFolders.set(result.messageId, result.folderId);
         return result;
+      }
+
+      case "mail.verify_sender": {
+        const p = params as { messageId: string; folderId?: string };
+        const folderId = folderFor(p.messageId, p.folderId);
+        const [details, headers] = await Promise.all([
+          client.getDetails(folderId, p.messageId),
+          client.getHeaders(folderId, p.messageId),
+        ]);
+        const summary = await box.summarize(details);
+        const authenticated = isAuthenticatedSender(summary.from, parseAuthentication(headers));
+        return {
+          messageId: summary.messageId,
+          from: summary.from,
+          sender: summary.sender,
+          subject: summary.subject,
+          receivedAt: summary.receivedAt,
+          authenticated,
+          trusted: authenticated && config.trustedSenders.includes(summary.from.toLowerCase()),
+        };
       }
 
       case "mail.mark_read": {
