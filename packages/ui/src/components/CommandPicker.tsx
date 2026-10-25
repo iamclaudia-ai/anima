@@ -35,7 +35,8 @@ export function filterCommands(items: CommandItem[], query: string): FilteredIte
     return items.map((item) => ({ item, matchIndices: [] }));
   }
   const targets = items.map((item) => fuzzysort.prepare(item.name));
-  const results = fuzzysort.go(query, targets, { all: false });
+  // fuzzysort v4 defaults to threshold .5 and limit 10; keep every match.
+  const results = fuzzysort.go(query, targets, { threshold: 0, limit: 0 });
   return results.map((result) => {
     const name = result.target;
     return {

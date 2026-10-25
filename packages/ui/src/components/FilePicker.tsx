@@ -52,7 +52,8 @@ export function filterFiles(files: string[], query: string): FilteredFile[] {
   const targets = files.map((p) => fuzzysort.prepare(p));
 
   if (tokens.length === 1) {
-    const results = fuzzysort.go(tokens[0], targets, { all: false, limit: MAX_RESULTS });
+    // threshold 0 keeps weak matches (fuzzysort v4 defaults to .5).
+    const results = fuzzysort.go(tokens[0], targets, { threshold: 0, limit: MAX_RESULTS });
     return results.map((result) => ({
       path: result.target,
       matchIndices: result.indexes,
@@ -63,7 +64,7 @@ export function filterFiles(files: string[], query: string): FilteredFile[] {
   // the intersection isn't truncated by per-token cuts). Then keep paths that
   // matched every token, sum scores, union match indices, sort, slice.
   const tokenMaps = tokens.map((tok) => {
-    const results = fuzzysort.go(tok, targets, { all: false });
+    const results = fuzzysort.go(tok, targets, { threshold: 0, limit: 0 });
     const map = new Map<string, { score: number; indexes: ReadonlyArray<number> }>();
     for (const r of results) {
       map.set(r.target, { score: r.score, indexes: r.indexes });
