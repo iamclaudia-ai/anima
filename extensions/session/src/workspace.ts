@@ -35,8 +35,8 @@ export interface Workspace {
   emailDomains: string[];
   /** "owner/repo" on GitHub. */
   githubRepo: string | null;
-  /** Sentry project slug. */
-  sentryProject: string | null;
+  /** Sentry project slugs (a project can have several, e.g. API and web). Lowercase. */
+  sentryProjects: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -48,7 +48,7 @@ export interface WorkspaceProjectFields {
   aliases?: string[];
   emailDomains?: string[];
   githubRepo?: string | null;
-  sentryProject?: string | null;
+  sentryProjects?: string[];
 }
 
 /** Raw row from SQLite (snake_case) */
@@ -63,7 +63,7 @@ interface WorkspaceRow {
   aliases: string;
   email_domains: string;
   github_repo: string | null;
-  sentry_project: string | null;
+  sentry_projects: string;
   created_at: string;
   updated_at: string;
 }
@@ -102,7 +102,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     aliases: parseList(row.aliases),
     emailDomains: parseList(row.email_domains),
     githubRepo: row.github_repo ?? null,
-    sentryProject: row.sentry_project ?? null,
+    sentryProjects: parseList(row.sentry_projects),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -156,7 +156,7 @@ function getDb(): Database {
     ["aliases", "TEXT NOT NULL DEFAULT '[]'"],
     ["email_domains", "TEXT NOT NULL DEFAULT '[]'"],
     ["github_repo", "TEXT"],
-    ["sentry_project", "TEXT"],
+    ["sentry_projects", "TEXT NOT NULL DEFAULT '[]'"],
   ];
   for (const [name, type] of projectColumns) {
     if (!columns.some((column) => column.name === name)) {
@@ -353,8 +353,8 @@ export function updateWorkspaceProject(
     set("email_domains", JSON.stringify(normalizeList(fields.emailDomains)));
   }
   if (fields.githubRepo !== undefined) set("github_repo", fields.githubRepo?.trim() || null);
-  if (fields.sentryProject !== undefined) {
-    set("sentry_project", fields.sentryProject?.trim().toLowerCase() || null);
+  if (fields.sentryProjects !== undefined) {
+    set("sentry_projects", JSON.stringify(normalizeList(fields.sentryProjects)));
   }
   if (sets.length === 0) return getWorkspace(id);
   sets.push("updated_at = datetime('now')");
@@ -408,7 +408,7 @@ export function findWorkspace(query: WorkspaceQuery): Workspace | null {
     matches = all.filter((w) => w.githubRepo?.toLowerCase() === wanted);
   } else if (query.sentryProject) {
     const wanted = query.sentryProject.trim().toLowerCase();
-    matches = all.filter((w) => w.sentryProject === wanted);
+    matches = all.filter((w) => w.sentryProjects.includes(wanted));
   }
   return matches.length === 1 ? matches[0] : null;
 }

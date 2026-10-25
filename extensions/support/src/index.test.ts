@@ -21,7 +21,7 @@ const TNH = {
   aliases: ["nutwords"],
   emailDomains: ["nutwords.com"],
   githubRepo: "kiliman/tnh",
-  sentryProject: "nutwords",
+  sentryProjects: ["nutwords"],
 };
 
 /** Zoho message ids → what mail.verify_sender reports for them. */
@@ -78,7 +78,7 @@ describe("support extension", () => {
                   aliases: [],
                   emailDomains: [],
                   githubRepo: null,
-                  sentryProject: null,
+                  sentryProjects: [],
                   description: null,
                 },
               ],

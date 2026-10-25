@@ -121,14 +121,14 @@ describe("workspace db", () => {
       aliases: ["NutWords", "the nuthouse", "nutwords", " "],
       emailDomains: ["NutWords.com"],
       githubRepo: "kiliman/tnh",
-      sentryProject: "NutWords",
+      sentryProjects: ["NutWords-API", "nutwords-web"],
     });
     expect(updated).toMatchObject({
       description: "NutWords",
       aliases: ["nutwords", "the nuthouse"],
       emailDomains: ["nutwords.com"],
       githubRepo: "kiliman/tnh",
-      sentryProject: "nutwords",
+      sentryProjects: ["nutwords-api", "nutwords-web"],
     });
 
     expect(findWorkspace({ name: "TNH" })?.id).toBe(tnh.id);
@@ -137,7 +137,8 @@ describe("workspace db", () => {
     expect(findWorkspace({ email: "login@mail.nutwords.com" })?.id).toBe(tnh.id);
     expect(findWorkspace({ email: "x@notnutwords.com" })).toBeNull();
     expect(findWorkspace({ githubRepo: "Kiliman/TNH" })?.id).toBe(tnh.id);
-    expect(findWorkspace({ sentryProject: "nutwords" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ sentryProject: "nutwords-web" })?.id).toBe(tnh.id);
+    expect(findWorkspace({ sentryProject: "NutWords-API" })?.id).toBe(tnh.id);
     expect(findWorkspace({ name: "anima" })?.id).toBe(other.id);
     expect(findWorkspace({ name: "nope" })).toBeNull();
 

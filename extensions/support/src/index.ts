@@ -64,7 +64,7 @@ export const TICKET_UPDATED = "support.ticket_updated";
 interface Workspace extends WorkspaceRef {
   aliases: string[];
   emailDomains: string[];
-  sentryProject: string | null;
+  sentryProjects: string[];
 }
 
 const HOUR_MS = 3_600_000;
@@ -530,7 +530,7 @@ export function createSupportExtension(
                 w.aliases?.length ||
                 w.emailDomains?.length ||
                 w.githubRepo ||
-                w.sentryProject,
+                w.sentryProjects?.length,
             )
             .map((w) => ({
               name: w.name,
@@ -538,7 +538,7 @@ export function createSupportExtension(
               aliases: w.aliases,
               emailDomains: w.emailDomains,
               githubRepo: w.githubRepo,
-              sentryProject: w.sentryProject,
+              sentryProjects: w.sentryProjects,
             })),
         };
       }

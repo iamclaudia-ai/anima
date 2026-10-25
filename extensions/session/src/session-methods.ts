@@ -48,10 +48,9 @@ export const workspaceUpdateSchema = z
       .regex(/^[\w.-]+\/[\w.-]+$/, "owner/repo")
       .nullable()
       .optional(),
-    sentryProject: z
-      .string()
-      .regex(/^[a-z0-9_-]+$/i, "a Sentry project slug")
-      .nullable()
+    sentryProjects: z
+      .array(z.string().regex(/^[a-z0-9_-]+$/i, "a Sentry project slug"))
+      .max(20)
       .optional(),
     detect: z.boolean().default(false).describe("Fill githubRepo from the git origin remote"),
   })
@@ -429,7 +428,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   {
     name: "session.update_workspace",
     description:
-      "Set a workspace's project fields (description, aliases, email domains, GitHub repo, Sentry project). Omitted fields are unchanged; null clears. detect: true fills githubRepo from the git origin remote when it isn't given.",
+      "Set a workspace's project fields (description, aliases, email domains, GitHub repo, Sentry projects). Omitted fields are unchanged; null clears. detect: true fills githubRepo from the git origin remote when it isn't given.",
     inputSchema: workspaceUpdateSchema,
     execution: { lane: "write", concurrency: "serial" },
   },

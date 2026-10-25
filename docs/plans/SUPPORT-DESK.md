@@ -27,13 +27,13 @@ The goal is a small support desk that runs without Michael prompting it:
 
 Workspaces already map a name to a folder. They gain:
 
-| Field           | Example                                                     | Source                     |
-| --------------- | ----------------------------------------------------------- | -------------------------- |
-| `description`   | "NutWords: word game, revival of The Nuthouse"              | set by hand                |
-| `aliases`       | `["nutwords", "the nuthouse", "tnh"]`                       | set by hand                |
-| `emailDomains`  | `["nutwords.com", "mail.nutwords.com", "the-nuthouse.com"]` | set by hand                |
-| `githubRepo`    | `kiliman/tnh`                                               | detected from git `origin` |
-| `sentryProject` | `nutwords`                                                  | set by hand                |
+| Field            | Example                                                     | Source                     |
+| ---------------- | ----------------------------------------------------------- | -------------------------- |
+| `description`    | "NutWords: word game, revival of The Nuthouse"              | set by hand                |
+| `aliases`        | `["nutwords", "the nuthouse", "tnh"]`                       | set by hand                |
+| `emailDomains`   | `["nutwords.com", "mail.nutwords.com", "the-nuthouse.com"]` | set by hand                |
+| `githubRepo`     | `kiliman/tnh`                                               | detected from git `origin` |
+| `sentryProjects` | `["nutwords-api", "nutwords-web"]`                          | set by hand                |
 
 - `session.update_workspace` sets them (`detect: true` fills `githubRepo` from git).
 - `session.find_workspace` resolves a name, alias, email domain, GitHub repo or
@@ -120,7 +120,7 @@ which verifies the HMAC and retries the target on failure.
 HMAC-SHA256 with the client secret over the raw body; `sentry-hook-resource`
 names the resource):
 
-- `issue.created` → a ticket for the workspace whose `sentryProject` matches
+- `issue.created` → a ticket for the workspace whose `sentryProjects` include
   `data.issue.project.slug` (a report with `source: sentry`, `external_id` =
   issue id, linked to the Sentry issue).
 - `issue.resolved` → the Sentry link becomes `resolved`; the ticket `fixed`.

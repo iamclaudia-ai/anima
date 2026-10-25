@@ -4,7 +4,7 @@
  * The webhooks extension has already checked `sentry-hook-signature` (an
  * internal integration's client secret). `sentry-hook-resource` names what
  * happened:
- * - `issue` `created` → a ticket for the workspace whose `sentryProject` is
+ * - `issue` `created` → a ticket for the workspace whose `sentryProjects` include
  *   the issue's project slug. `resolved` → fixed; `unresolved` → reopened.
  * - `event_alert` `triggered` → the same as `issue.created` for its issue, so
  *   alert rules decide what is worth a ticket.
