@@ -83,12 +83,13 @@ live gateway reports; run `anima gateway list_methods` for the current truth.
 | `control`    | 3 — `health_check`, `log_list`, `log_tail`                               | `/control`, `/logs`                                               |
 | `hooks`      | 2 — `health_check`, `list`                                               | —                                                                 |
 | `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, …      | —                                                                 |
+| `notify`     | 2 — `send`, `health_check`                                               | —                                                                 |
 | `mail`       | 13 — `list_messages`, `search`, `read`, `verify_sender`, `archive`, …    | —                                                                 |
 | `support`    | 15 — `list_tickets`, `create_ticket`, `delegate`, `create_issue`, …      | `/support`, `/support/:ticketId`                                  |
 | `chat`       | —                                                                        | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
 | `bogart`     | —                                                                        | `/bogart`                                                         |
 
-That is all 16 extensions the gateway actually loads. Two other names appear
+That is all 17 extensions the gateway actually loads. Two other names appear
 but are not loaded extensions: `imessage` is present on disk and disabled in
 config, and `testroute` is a dev-only fixture absent from config. The
 `extensions.codex` block is **not** an extension either — see Agent Providers
@@ -209,6 +210,7 @@ anima/
 │   ├── bogart/           # Web pages
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   ├── webhooks/         # Inbound webhooks (:30089, public via Cloudflare tunnel) → inbox + target method
+│   ├── notify/           # notify.send → Michael's phone + Mac (iMessage on Anima Sedes; other hosts relay)
 │   ├── mail/             # Claudia's mailbox (Zoho API): read/search/archive, webhook target, reconcile
 │   ├── support/          # Support desk: tickets across projects, delegation, GitHub + Sentry webhook targets
 │   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
@@ -318,6 +320,13 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 - Every accepted delivery is stored in `webhook_deliveries` before the 200, then `webhooks.received` is emitted (metadata only).
 - With a `target`, the extension calls it with `{ id, hook, receivedAt, contentType, headers, body }`. `body` is the raw text: parse it yourself (Zoho's ids overflow JS numbers). Throwing schedules a retry (30s, 2m, 10m, 1h, 6h, then `failed`), so a target must be idempotent on `id`.
 - `anima webhooks list_deliveries`, `get_delivery`, `redeliver`, `reset_signing_secret` manage the inbox.
+
+#### Notify (`extensions/notify`)
+
+`notify.send({ message, title?, source? })` is how anything reaches Michael when he isn't looking. Each host either **delivers** (`delivery: { type: "imessage", to }`: Anima Sedes, whose iMessage lands on his phone and Mac at once) or **relays** (`delivery: { type: "relay", url, token }`: vesuvius forwards to Sedes' `notify.send` over Tailscale at `wss://gateway.anima-sedes.com/ws`, one hop at most). Identical text within 10 minutes is sent once.
+
+- The scheduler calls it on a task's **first failure** and on its **recovery**, never on every failed run.
+- Use it from scripts with `anima notify send --message "…" --source <who>`.
 
 #### Claudia's mail (`extensions/mail`)
 

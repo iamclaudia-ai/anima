@@ -203,6 +203,15 @@
         "xstate": "5.30.0",
       },
     },
+    "extensions/notify": {
+      "name": "@anima/ext-notify",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anima/extension-host": "workspace:*",
+        "@anima/shared": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
     "extensions/presenter": {
       "name": "@anima/ext-presenter",
       "version": "0.1.0",
@@ -436,6 +445,8 @@
     "@anima/ext-imessage": ["@anima/ext-imessage@workspace:extensions/imessage"],
 
     "@anima/ext-mail": ["@anima/ext-mail@workspace:extensions/mail"],
+
+    "@anima/ext-notify": ["@anima/ext-notify@workspace:extensions/notify"],
 
     "@anima/ext-presenter": ["@anima/ext-presenter@workspace:extensions/presenter"],
 

@@ -49,6 +49,7 @@ import {
 } from "./db.js";
 import { cronParser } from "./cronParser.js";
 import { interpolate, interpolateAll } from "./template.js";
+import { notifyTransition, previousOutcome, transitionFor } from "./failure-notify.js";
 
 // ── JSON migration ──────────────────────────────────────────
 
@@ -160,6 +161,22 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
   // Track running tasks for concurrency control
   const runningTasks = new Set<string>();
+
+  /**
+   * Notify Michael if this run changed the task's state (first failure, or
+   * recovery). Fire-and-forget: a slow relay must never delay the scheduler.
+   */
+  function reportTransition(
+    task: ScheduledTask,
+    execId: string,
+    outcome: "success" | "error",
+    error?: string,
+  ): void {
+    if (!ctx) return;
+    const previous = previousOutcome(getExecutionsForTask(task.id, 10), execId);
+    const transition = transitionFor(previous, outcome);
+    if (transition) void notifyTransition(ctx, task, transition, error);
+  }
 
   // ── Fire a single task ─────────────────────────────────────
 
@@ -291,6 +308,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "success", durationMs, undefined, execOutput);
+      reportTransition(task, execId, "success");
       ctx.log.info(`Scheduled task completed: ${task.name}`, {
         id: task.id,
         durationMs,
@@ -312,6 +330,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     } catch (error) {
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "error", durationMs, String(error));
+      reportTransition(task, execId, "error", String(error));
       ctx.log.error(`Failed to fire task: ${task.name}`, { id: task.id, error: String(error) });
       taskLog.error("Task failed", { durationMs, error: String(error) });
     } finally {
