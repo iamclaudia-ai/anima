@@ -38,7 +38,9 @@ export interface ImsgChat {
 }
 
 export interface ImsgMessage {
+  /** chat.db message rowid. imsg 0.5.x sends only this. */
   id: number;
+  /** Same value as `id`; filled in by the client (see withRowId). */
   rowid: number;
   chat_id: number;
   guid: string;
@@ -53,6 +55,16 @@ export interface ImsgMessage {
   attachments?: ImsgAttachment[];
   reactions?: ImsgReaction[];
   is_group: boolean;
+}
+
+/**
+ * imsg 0.5.x names the chat.db rowid `id` and sends no `rowid` field, so
+ * everything that orders messages by `rowid` (the watch cursor, the outside-
+ * messages cursor) saw `undefined`. Fill it in once, here, for every message
+ * the client hands out.
+ */
+export function withRowId(message: ImsgMessage): ImsgMessage {
+  return typeof message.rowid === "number" ? message : { ...message, rowid: message.id };
 }
 
 export interface ImsgAttachment {
@@ -320,7 +332,7 @@ export class ImsgRpcClient extends EventEmitter {
     };
     if (opts.start) params.start = opts.start;
     const result = await this.request<{ messages: ImsgMessage[] }>("messages.history", params);
-    return result.messages;
+    return result.messages.map(withRowId);
   }
 
   /**
@@ -414,8 +426,9 @@ export class ImsgRpcClient extends EventEmitter {
   private handleNotification(method: string, params: unknown): void {
     if (method === "message") {
       const data = params as { subscription: number; message: ImsgMessage };
-      this.emit("message", data.message);
-      this.onMessage?.(data.message);
+      const message = withRowId(data.message);
+      this.emit("message", message);
+      this.onMessage?.(message);
     } else if (method === "error") {
       const data = params as { subscription: number; error: { message: string } };
       const err = new Error(data.error?.message || "Unknown error");
