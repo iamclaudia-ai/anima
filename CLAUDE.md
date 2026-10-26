@@ -335,6 +335,7 @@ Runs `imsg rpc` (imsg ≥ 0.19). When Michael's message arrives, it marks the ch
 
 - Read, typing and tapbacks go through imsg's **IMCore bridge**: SIP disabled plus Messages.app launched by `imsg launch`. The LaunchAgent `org.openclaw.imsg.bridge` re-injects every 5 minutes. It must run `/opt/homebrew/bin/imsg`, not a `Cellar/<version>` path that `brew upgrade` deletes. `imsg status --json` reports the bridge state.
 - Without the bridge, she still replies. The three actions just log a warning.
+- His tapbacks never wake her: the watch skips reaction rows. Like outside messages, his tapbacks on her messages since the cursor go in front of his next message (`[Michael reacted to your messages]`).
 - imsg sends the chat.db rowid only as `id`, so the client fills in `rowid` (`withRowId`).
 
 #### Claudia's mail (`extensions/mail`)

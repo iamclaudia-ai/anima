@@ -20,8 +20,11 @@ import {
   OUTSIDE_WINDOW_MS,
   STORE_KEY,
   advanceCursor,
+  NO_OUTSIDE,
+  type OutsideContext,
   collectOutside,
   formatOutside,
+  isEmptyOutside,
   memoryFor,
   rememberReply,
   withOutsideContext,
@@ -392,13 +395,13 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     ctx.store.set(STORE_KEY, all);
   }
 
-  /** Her messages sent outside the session since the cursor, before `beforeRowId`. */
+  /** Her outside messages and his tapbacks since the cursor, before `beforeRowId`. */
   async function findOutside(
     chatId: number,
     memory: ChatMemory,
     beforeRowId: number,
-  ): Promise<ImsgMessage[]> {
-    if (memory.cursor === undefined || !client) return [];
+  ): Promise<OutsideContext> {
+    if (memory.cursor === undefined || !client) return NO_OUTSIDE;
     try {
       const history = await client.getHistory(chatId, {
         start: new Date(Date.now() - OUTSIDE_WINDOW_MS).toISOString(),
@@ -408,7 +411,7 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     } catch (err) {
       // Context is a nicety; never let it stop a reply.
       ctx?.log.warn(`Couldn't read history for outside messages: ${err}`);
-      return [];
+      return NO_OUTSIDE;
     }
   }
 
@@ -454,11 +457,14 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     const source = buildSource(message.chat_id);
 
     // Anything she sent him outside the session (a notification, another
-    // session) goes in front of his message, so his reply has its context.
+    // session) goes in front of his message, so his reply has its context,
+    // along with any tapbacks he left on her messages since his last one.
     const memory = loadMemory(message.chat_id);
     const outside = await findOutside(message.chat_id, memory, message.rowid);
-    if (outside.length > 0) {
-      ctx?.log.info(`Including ${outside.length} message(s) sent outside the session`);
+    if (!isEmptyOutside(outside)) {
+      ctx?.log.info(
+        `Including ${outside.messages.length} outside message(s) and ${outside.tapbacks.length} tapback(s)`,
+      );
     }
 
     // Build content blocks (handles text + attachments)

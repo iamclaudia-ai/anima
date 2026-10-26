@@ -79,9 +79,14 @@ export interface ImsgAttachment {
 }
 
 export interface ImsgReaction {
+  /** chat.db rowid of the reaction itself, ordered with messages. */
+  id: number;
   sender: string;
+  /** love | like | dislike | laugh | emphasize | question | emoji */
   type: string;
+  emoji: string;
   is_from_me: boolean;
+  created_at: string;
 }
 
 export interface ImsgClientOptions {

@@ -21,14 +21,21 @@
  *
  * Nothing is added to her session when a notification goes out, so it never
  * wakes her or reads as Michael's prompt. She only sees it when he answers.
+ *
+ * His tapbacks on her messages work the same way. A tapback is a quiet
+ * acknowledgment, not a message, so it never wakes her. Reactions are rows in
+ * chat.db too, so the same cursor decides which ones are new, and they ride
+ * in front of his next message.
  */
 
 import type { ImsgMessage } from "./imsg-client";
 
 /** How far back outside messages are worth showing. */
 export const OUTSIDE_WINDOW_MS = 24 * 60 * 60 * 1000;
-/** At most this many outside messages in front of one reply. */
+/** At most this many outside messages (and, separately, tapbacks) in front of one reply. */
 export const MAX_OUTSIDE = 10;
+/** Her message is quoted up to this many characters after his tapback. */
+const QUOTE_CHARS = 80;
 /** Session replies remembered per chat, for recognising them in history. */
 export const MAX_REMEMBERED_REPLIES = 20;
 
@@ -60,9 +67,33 @@ export function advanceCursor(memory: ChatMemory, rowid: number): ChatMemory {
   return { ...memory, cursor: Math.max(memory.cursor ?? 0, rowid) };
 }
 
+/** One of his tapbacks on a message of hers. */
+export interface Tapback {
+  /** rowid of the reaction row. */
+  rowid: number;
+  emoji: string;
+  createdAt: string;
+  /** The text of her message he reacted to. */
+  text: string;
+}
+
+/** What happened in the chat since his last message, outside her session. */
+export interface OutsideContext {
+  /** Her messages sent outside the session, oldest first. */
+  messages: ImsgMessage[];
+  /** His tapbacks on her messages, oldest first. */
+  tapbacks: Tapback[];
+}
+
+export const NO_OUTSIDE: OutsideContext = { messages: [], tapbacks: [] };
+
+export function isEmptyOutside(outside: OutsideContext): boolean {
+  return outside.messages.length === 0 && outside.tapbacks.length === 0;
+}
+
 /**
- * Her messages sent outside the session, after the cursor and before
- * `beforeRowId`, oldest first.
+ * Everything after the cursor and before `beforeRowId`: her messages sent
+ * outside the session, and his tapbacks on any of her messages.
  *
  * Without a cursor (the first message after this feature shipped) there is no
  * reliable starting point: her old session replies would come back as
@@ -73,38 +104,71 @@ export function collectOutside(
   memory: ChatMemory,
   beforeRowId: number,
   now = Date.now(),
-): ImsgMessage[] {
-  if (memory.cursor === undefined) return [];
+): OutsideContext {
+  if (memory.cursor === undefined) return NO_OUTSIDE;
   const cursor = memory.cursor;
   const since = now - OUTSIDE_WINDOW_MS;
+  const isNew = (rowid: number, createdAt: string) =>
+    rowid > cursor && rowid < beforeRowId && Date.parse(createdAt) >= since;
   const ownReplies = new Set(memory.replies);
-  return history
+
+  const messages = history
     .filter(
       (m) =>
         m.is_from_me &&
-        m.rowid > cursor &&
-        m.rowid < beforeRowId &&
+        isNew(m.rowid, m.created_at) &&
         Boolean(m.text?.trim()) &&
-        !ownReplies.has(m.text?.trim() ?? "") &&
-        Date.parse(m.created_at) >= since,
+        !ownReplies.has(m.text?.trim() ?? ""),
     )
     .sort((a, b) => a.rowid - b.rowid)
     .slice(-MAX_OUTSIDE);
+
+  // Her session replies count here: those are usually what he's acknowledging.
+  const tapbacks = history
+    .filter((m) => m.is_from_me && Boolean(m.text?.trim()))
+    .flatMap((m) =>
+      (m.reactions ?? [])
+        .filter((r) => !r.is_from_me && isNew(r.id, r.created_at))
+        .map((r) => ({
+          rowid: r.id,
+          emoji: r.emoji || r.type,
+          createdAt: r.created_at,
+          text: m.text?.trim() ?? "",
+        })),
+    )
+    .sort((a, b) => a.rowid - b.rowid)
+    .slice(-MAX_OUTSIDE);
+
+  return { messages, tapbacks };
 }
 
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-/** The context block placed in front of his message. Empty when there's nothing. */
-export function formatOutside(messages: ImsgMessage[]): string {
-  if (messages.length === 0) return "";
-  const lines = messages.map((m) => `[${clock(m.created_at)}] ${m.text?.trim()}`);
-  return `[You sent Michael this outside our conversation]\n${lines.join("\n")}`;
+function quote(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ");
+  return oneLine.length > QUOTE_CHARS ? `${oneLine.slice(0, QUOTE_CHARS - 1)}…` : oneLine;
+}
+
+/** The context blocks placed in front of his message. Empty when there's nothing. */
+export function formatOutside(outside: OutsideContext): string {
+  const blocks: string[] = [];
+  if (outside.messages.length > 0) {
+    const lines = outside.messages.map((m) => `[${clock(m.created_at)}] ${m.text?.trim()}`);
+    blocks.push(`[You sent Michael this outside our conversation]\n${lines.join("\n")}`);
+  }
+  if (outside.tapbacks.length > 0) {
+    const lines = outside.tapbacks.map(
+      (t) => `[${clock(t.createdAt)}] ${t.emoji} on "${quote(t.text)}"`,
+    );
+    blocks.push(`[Michael reacted to your messages]\n${lines.join("\n")}`);
+  }
+  return blocks.join("\n\n");
 }
 
 /** His message with the outside context in front, or the message unchanged. */
-export function withOutsideContext(outside: ImsgMessage[], text: string | null): string | null {
+export function withOutsideContext(outside: OutsideContext, text: string | null): string | null {
   const context = formatOutside(outside);
   if (!context) return text;
   return `${context}\n\n[Michael replied]\n${text?.trim() || "(attachment)"}`;

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { ImsgMessage } from "./imsg-client";
+import type { ImsgMessage, ImsgReaction } from "./imsg-client";
 import {
   MAX_OUTSIDE,
   MAX_REMEMBERED_REPLIES,
+  NO_OUTSIDE,
   advanceCursor,
   collectOutside,
   formatOutside,
@@ -42,22 +43,22 @@ describe("collectOutside", () => {
 
   it("returns what she sent after the cursor, minus her own session replies", () => {
     const memory = { cursor: 17, replies: ["Love you too 💙"] };
-    expect(collectOutside(history, memory, 20, NOW).map((m) => m.rowid)).toEqual([19]);
+    expect(collectOutside(history, memory, 20, NOW).messages.map((m) => m.rowid)).toEqual([19]);
   });
 
   it("returns nothing without a cursor, rather than guessing", () => {
-    expect(collectOutside(history, { replies: [] }, 20, NOW)).toEqual([]);
+    expect(collectOutside(history, { replies: [] }, 20, NOW)).toEqual(NO_OUTSIDE);
   });
 
   it("ignores messages older than the window and messages at or after his", () => {
     const memory = { cursor: 0, replies: [] };
     const old = [msg(5, "two days ago", true, 48 * 60), msg(21, "after his message", true, 0)];
-    expect(collectOutside(old, memory, 20, NOW)).toEqual([]);
+    expect(collectOutside(old, memory, 20, NOW).messages).toEqual([]);
   });
 
   it("keeps only the most recent few, oldest first", () => {
     const many = Array.from({ length: MAX_OUTSIDE + 5 }, (_, i) => msg(100 + i, `n${i}`, true, 5));
-    const got = collectOutside(many.reverse(), { cursor: 1, replies: [] }, 1000, NOW);
+    const got = collectOutside(many.reverse(), { cursor: 1, replies: [] }, 1000, NOW).messages;
     expect(got).toHaveLength(MAX_OUTSIDE);
     expect(got[0]?.text).toBe("n5");
     expect(got.at(-1)?.text).toBe(`n${MAX_OUTSIDE + 4}`);
@@ -82,13 +83,84 @@ describe("memory", () => {
 
 describe("formatting", () => {
   it("labels the outside messages and his reply", () => {
-    const text = withOutsideContext([msg(19, "🔔 Hello from Anima 💙", true)], "Got it!");
+    const text = withOutsideContext(
+      { messages: [msg(19, "🔔 Hello from Anima 💙", true)], tapbacks: [] },
+      "Got it!",
+    );
     expect(text).toStartWith("[You sent Michael this outside our conversation]\n[");
     expect(text).toContain("] 🔔 Hello from Anima 💙\n\n[Michael replied]\nGot it!");
   });
 
   it("leaves his message alone when there is nothing outside", () => {
-    expect(formatOutside([])).toBe("");
-    expect(withOutsideContext([], "just me")).toBe("just me");
+    expect(formatOutside(NO_OUTSIDE)).toBe("");
+    expect(withOutsideContext(NO_OUTSIDE, "just me")).toBe("just me");
+  });
+});
+
+describe("tapbacks", () => {
+  function love(rowid: number, minutesAgo: number, fromMe = false): ImsgReaction {
+    return {
+      id: rowid,
+      sender: fromMe ? "" : "+14155551212",
+      type: "love",
+      emoji: "❤️",
+      is_from_me: fromMe,
+      created_at: new Date(NOW - minutesAgo * 60_000).toISOString(),
+    };
+  }
+
+  // History newest first. Her session reply (#18) got his heart at #19, after
+  // his message #17 (the cursor). #21 lands after his new message #20.
+  // #12 came before the cursor, and #13 is her own heart on his message.
+  const reply = msg(18, "Babe, Milk and Mocha!! The two little bears", true, 20);
+  const history: ImsgMessage[] = [
+    msg(20, "We need to fix voice mode", false, 1),
+    { ...reply, reactions: [love(19, 10), love(21, 0)] },
+    msg(17, "look at this", false, 25),
+    { ...msg(11, "an older reply", true, 120), reactions: [love(12, 119)] },
+    { ...msg(10, "his message", false, 121), reactions: [love(13, 118, true)] },
+  ];
+
+  it("returns his new tapbacks on her messages, including session replies", () => {
+    const memory = { cursor: 17, replies: [reply.text ?? ""] };
+    const { messages, tapbacks } = collectOutside(history, memory, 20, NOW);
+    expect(messages).toEqual([]);
+    expect(tapbacks).toEqual([
+      {
+        rowid: 19,
+        emoji: "❤️",
+        createdAt: new Date(NOW - 10 * 60_000).toISOString(),
+        text: "Babe, Milk and Mocha!! The two little bears",
+      },
+    ]);
+  });
+
+  it("ignores her own reactions and reactions on his messages", () => {
+    const { tapbacks } = collectOutside(history, { cursor: 0, replies: [] }, 20, NOW);
+    expect(tapbacks.map((t) => t.rowid)).toEqual([12, 19]);
+  });
+
+  it("puts them in front of his message, quoting her message", () => {
+    const outside = collectOutside(history, { cursor: 17, replies: [] }, 20, NOW);
+    const text = withOutsideContext({ messages: [], tapbacks: outside.tapbacks }, "hi");
+    expect(text).toMatch(
+      /^\[Michael reacted to your messages\]\n\[[^\]]+\] ❤️ on "Babe, Milk and Mocha!! The two little bears"\n\n\[Michael replied\]\nhi$/,
+    );
+  });
+
+  it("shortens a long quote to one line", () => {
+    const text = formatOutside({
+      messages: [],
+      tapbacks: [
+        {
+          rowid: 1,
+          emoji: "👍",
+          createdAt: new Date(NOW).toISOString(),
+          text: "word\n".repeat(40),
+        },
+      ],
+    });
+    expect(text.split("\n")).toHaveLength(2);
+    expect(text).toEndWith('…"');
   });
 });

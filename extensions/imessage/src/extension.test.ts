@@ -341,6 +341,51 @@ describe("iMessage extension", () => {
     await ext.stop();
   });
 
+  it("tells her about his tapback on her reply with his next message", async () => {
+    const getOnMessage = spyClient([
+      createMessage({ rowid: 22, text: "Fix voice mode next?", created_at: recent(1) }),
+      createMessage({
+        rowid: 20,
+        is_from_me: true,
+        text: "Milk and Mocha!!",
+        created_at: recent(10),
+        reactions: [
+          {
+            id: 21,
+            sender: "+14155551212",
+            type: "love",
+            emoji: "❤️",
+            is_from_me: false,
+            created_at: recent(5),
+          },
+        ],
+      }),
+    ]);
+    const { store } = memoryStore({
+      chatMemory: { "101": { cursor: 19, replies: ["Milk and Mocha!!"] } },
+    });
+    const prompts: string[] = [];
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(
+      createTestContext({
+        store,
+        async call(_method, params) {
+          prompts.push(String(params?.content));
+          return { text: "On it", sessionId: "s" };
+        },
+      }),
+    );
+    await getOnMessage()(createMessage({ rowid: 22, text: "Fix voice mode next?" }));
+
+    expect(prompts[0]).toStartWith("[Michael reacted to your messages]\n");
+    expect(prompts[0]).toContain('❤️ on "Milk and Mocha!!"');
+    expect(prompts[0]).not.toContain("[You sent Michael this outside our conversation]");
+    expect(prompts[0]).toEndWith("[Michael replied]\nFix voice mode next?");
+
+    await ext.stop();
+  });
+
   it("sends his message unchanged the first time, and starts the cursor there", async () => {
     const getOnMessage = spyClient([
       createMessage({ rowid: 5, is_from_me: true, text: "an old reply", created_at: recent(10) }),
