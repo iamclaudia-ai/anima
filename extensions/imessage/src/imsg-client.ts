@@ -382,6 +382,38 @@ export class ImsgRpcClient extends EventEmitter {
     });
   }
 
+  // ── IMCore bridge actions ──────────────────────────────────
+  // These go through imsg's private-API bridge, which needs SIP disabled and
+  // Messages.app launched with `imsg launch`. Without it they throw.
+
+  /** Mark a chat read on this Mac, which sends the sender a read receipt. */
+  async markRead(chatId: number): Promise<void> {
+    await this.request("read", { chat_id: chatId });
+  }
+
+  /** Show (or clear) the typing bubble in a chat. */
+  async setTyping(chatId: number, typing: boolean): Promise<void> {
+    await this.request("typing", { chat_id: chatId, typing });
+  }
+
+  /**
+   * React to a message. `kind` is love|like|dislike|laugh|emphasize|question,
+   * or any single emoji (sent as a custom emoji tapback).
+   */
+  async tapback(opts: {
+    chatId: number;
+    messageGuid: string;
+    kind: string;
+    remove?: boolean;
+  }): Promise<void> {
+    await this.request("tapback", {
+      chat_id: opts.chatId,
+      message_guid: opts.messageGuid,
+      kind: opts.kind,
+      remove: opts.remove ?? false,
+    });
+  }
+
   /**
    * Handle a line of JSON-RPC output
    */

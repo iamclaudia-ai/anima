@@ -329,6 +329,14 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 - Use it from scripts with `anima notify send --message "…" --source <who>`.
 - A reply to a notification arrives with it. The iMessage bridge never adds a notification to the session (it would wake her and read as Michael's prompt). Instead, when his next message comes in, it puts anything sent from her account outside the session in front of it. A per-chat cursor plus her remembered replies keep anything from showing up twice (`extensions/imessage/src/outside-messages.ts`).
 
+#### iMessage bridge (`extensions/imessage`, enabled on Anima Sedes only)
+
+Runs `imsg rpc` (imsg ≥ 0.19). When Michael's message arrives, it marks the chat read (he gets a read receipt) and shows her typing bubble until the reply is sent. `imessage.react({ kind })` sends a tapback (love, like, dislike, laugh, emphasize, question, or any emoji), defaulting to his latest message.
+
+- Read, typing and tapbacks go through imsg's **IMCore bridge**: SIP disabled plus Messages.app launched by `imsg launch`. The LaunchAgent `org.openclaw.imsg.bridge` re-injects every 5 minutes. It must run `/opt/homebrew/bin/imsg`, not a `Cellar/<version>` path that `brew upgrade` deletes. `imsg status --json` reports the bridge state.
+- Without the bridge, she still replies. The three actions just log a warning.
+- imsg sends the chat.db rowid only as `id`, so the client fills in `rowid` (`withRowId`).
+
 #### Claudia's mail (`extensions/mail`)
 
 `claudia@iamclaudia.ai` through the Zoho REST API (Self Client, no delete scope; credentials in `extensions.mail.config`). The `zoho-mail` webhook targets `mail.handle_webhook`, which only reads the message id from the payload, re-fetches the message from the API (a forged POST names nothing real), and emits `mail.received` once per message. A reconcile pass (startup + every 30 min) announces Inbox mail the webhook missed. `mail.read` returns plain text inside an `<untrusted_email … authenticated="yes|no">` envelope; `authenticated` means DMARC passed at Zoho's MX for the From domain. Plan and next steps: `docs/plans/CLAUDIA-MAIL.md`.

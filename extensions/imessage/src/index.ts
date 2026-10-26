@@ -95,6 +95,27 @@ const DEFAULT_CONFIG: IMessageConfig = {
   historyLimit: 0,
 };
 
+const reactSchema = z.object({
+  kind: z
+    .string()
+    .min(1)
+    .describe("love | like | dislike | laugh | emphasize | question, or a single emoji"),
+  chatId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Defaults to the chat of Michael's most recent message"),
+  messageGuid: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Defaults to Michael's most recent message in the chat"),
+  remove: z.boolean().optional().describe("Take the reaction back instead of adding it"),
+});
+
+type ReactParams = z.infer<typeof reactSchema>;
+
 // ============================================================================
 // iMessage Extension
 // ============================================================================
@@ -136,6 +157,10 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
   let client: ImsgRpcClient | null = null;
   let ctx: ExtensionContext | null = null;
   let lastRowId: number | null = null;
+  /** Chat of his most recent message, the default target for imessage.react. */
+  let lastChatId: number | null = null;
+  /** chatId → guid of his most recent message there. */
+  const lastIncoming = new Map<number, string>();
 
   /**
    * Convert an attachment to a content block
@@ -316,6 +341,43 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
     return true;
   }
 
+  // ── Read receipts, typing, tapbacks (imsg's IMCore bridge) ──
+  // Best-effort niceties: without the bridge she still replies, just silently.
+  // imsg runs mutations in one FIFO lane, so read → typing → send stay ordered
+  // even though these calls aren't awaited.
+
+  /** He sees "Read" and the typing bubble while she thinks. */
+  function acknowledge(chatId: number): void {
+    void client
+      ?.markRead(chatId)
+      .catch((err) => ctx?.log.warn(`Couldn't mark chat ${chatId} read: ${err}`));
+    void client
+      ?.setTyping(chatId, true)
+      .catch((err) => ctx?.log.warn(`Couldn't show typing in chat ${chatId}: ${err}`));
+  }
+
+  function stopTyping(chatId: number): void {
+    void client?.setTyping(chatId, false).catch(() => {});
+  }
+
+  /** His newest message in a chat, for a tapback with no explicit target. */
+  async function latestFromHim(chatId: number): Promise<string | undefined> {
+    const remembered = lastIncoming.get(chatId);
+    if (remembered) return remembered;
+    const history = (await client?.getHistory(chatId, { limit: 20 })) ?? [];
+    return history.find((m) => !m.is_from_me && isAllowedSenderForConfig(m.sender))?.guid;
+  }
+
+  async function react(params: ReactParams): Promise<{ ok: true; messageGuid: string }> {
+    if (!client) throw new Error("iMessage client not running");
+    const chatId = params.chatId ?? lastChatId;
+    if (chatId === null) throw new Error("No recent chat: pass chatId");
+    const messageGuid = params.messageGuid ?? (await latestFromHim(chatId));
+    if (!messageGuid) throw new Error(`No message from an allowed sender in chat ${chatId}`);
+    await client.tapback({ chatId, messageGuid, kind: params.kind, remove: params.remove });
+    return { ok: true, messageGuid };
+  }
+
   // ── Outside messages (see outside-messages.ts) ─────────────
 
   function loadMemory(chatId: number): ChatMemory {
@@ -384,6 +446,9 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
 
     // Track last rowid for resuming
     lastRowId = message.rowid;
+    lastChatId = message.chat_id;
+    lastIncoming.set(message.chat_id, message.guid);
+    acknowledge(message.chat_id);
 
     // Build source for routing
     const source = buildSource(message.chat_id);
@@ -437,6 +502,7 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
       ctx?.log.error(`Failed to process message: ${err}`);
       ctx?.emit("imessage.error", { error: String(err), chatId: message.chat_id });
     } finally {
+      stopTyping(message.chat_id);
       // His message has been handled either way; her reply (if any) is now in
       // her session, so remember it to keep it out of the next outside batch.
       saveMemory(message.chat_id, (m) => advanceCursor(rememberReply(m, replyText), message.rowid));
@@ -538,7 +604,12 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
         });
 
         const source = buildSource(chat.id);
-        const result = await requestSessionReply(source, contentBlocks);
+        lastChatId = chat.id;
+        lastIncoming.set(chat.id, lastMsg.guid);
+        acknowledge(chat.id);
+        const result = await requestSessionReply(source, contentBlocks).finally(() =>
+          stopTyping(chat.id),
+        );
 
         const sent =
           result &&
@@ -568,6 +639,12 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
           .refine((v) => v.chatId !== undefined || v.to !== undefined, {
             message: "Either chatId or to is required",
           }),
+      },
+      {
+        name: "imessage.react",
+        description:
+          "React to a message with a tapback (❤️ 👍 👎 😂 ‼️ ❓, or any emoji). With no target, reacts to Michael's latest message",
+        inputSchema: reactSchema,
       },
       {
         name: "imessage.status",
@@ -674,6 +751,10 @@ export function createIMessageExtension(config: IMessageConfig = {}): AnimaExten
           ctx?.emit("imessage.sent", { text, chatId, to });
           return { ok: true };
         }
+
+        case "imessage.react":
+          // Parse here too: the extension host doesn't validate params (#86).
+          return await react(reactSchema.parse(params));
 
         case "imessage.status": {
           return {

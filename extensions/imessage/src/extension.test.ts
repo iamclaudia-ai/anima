@@ -73,8 +73,14 @@ describe("iMessage extension", () => {
   let subscribeSpy: ReturnType<typeof spyOn>;
   let getHistorySpy: ReturnType<typeof spyOn>;
   let sendSpy: ReturnType<typeof spyOn>;
+  let markReadSpy: ReturnType<typeof spyOn>;
+  let setTypingSpy: ReturnType<typeof spyOn>;
+  let tapbackSpy: ReturnType<typeof spyOn>;
 
   afterEach(() => {
+    markReadSpy?.mockRestore();
+    setTypingSpy?.mockRestore();
+    tapbackSpy?.mockRestore();
     startSpy?.mockRestore();
     stopSpy?.mockRestore();
     listChatsSpy?.mockRestore();
@@ -284,6 +290,9 @@ describe("iMessage extension", () => {
     subscribeSpy = spyOn(ImsgRpcClient.prototype, "subscribe").mockResolvedValue(1);
     getHistorySpy = spyOn(ImsgRpcClient.prototype, "getHistory").mockResolvedValue(history);
     sendSpy = spyOn(ImsgRpcClient.prototype, "send").mockResolvedValue(undefined);
+    markReadSpy = spyOn(ImsgRpcClient.prototype, "markRead").mockResolvedValue(undefined);
+    setTypingSpy = spyOn(ImsgRpcClient.prototype, "setTyping").mockResolvedValue(undefined);
+    tapbackSpy = spyOn(ImsgRpcClient.prototype, "tapback").mockResolvedValue(undefined);
     return () =>
       (instance as unknown as { onMessage: (message: ImsgMessage) => Promise<void> }).onMessage;
   }
@@ -455,6 +464,82 @@ describe("iMessage extension", () => {
     expect(calls).toEqual([]);
     expect(data.chatMemory).toEqual({ "7": { cursor: 42, replies: [] } });
 
+    await ext.stop();
+  });
+
+  it("marks his message read and shows typing until the reply is sent", async () => {
+    const getOnMessage = spyClient([]);
+    const order: string[] = [];
+    markReadSpy.mockImplementation(async (chatId: number) => {
+      order.push(`read ${chatId}`);
+    });
+    setTypingSpy.mockImplementation(async (chatId: number, typing: boolean) => {
+      order.push(`typing ${chatId} ${typing}`);
+    });
+    sendSpy.mockImplementation(async () => {
+      order.push("send");
+    });
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(createTestContext({ store: memoryStore().store }));
+    await getOnMessage()(createMessage({ rowid: 9 }));
+
+    expect(order).toEqual(["read 101", "typing 101 true", "send", "typing 101 false"]);
+    await ext.stop();
+  });
+
+  it("still replies when the bridge isn't there", async () => {
+    const getOnMessage = spyClient([]);
+    markReadSpy.mockRejectedValue(new Error("bridge not started"));
+    setTypingSpy.mockRejectedValue(new Error("bridge not started"));
+    const warnings: string[] = [];
+
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    const base = createTestContext({ store: memoryStore().store });
+    await ext.start({
+      ...base,
+      log: { ...base.log, warn: (msg: string) => warnings.push(msg) },
+    });
+    await getOnMessage()(createMessage({ rowid: 9 }));
+
+    expect(sendSpy).toHaveBeenCalledWith({ chatId: 101, text: "default reply" });
+    expect(warnings.some((w) => w.includes("Couldn't mark chat 101 read"))).toBe(true);
+    await ext.stop();
+  });
+
+  it("react defaults to his latest message, in the chat he last wrote from", async () => {
+    const getOnMessage = spyClient([]);
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(createTestContext({ store: memoryStore().store }));
+    await getOnMessage()(createMessage({ rowid: 9, guid: "his-guid" }));
+
+    const result = await ext.handleMethod("imessage.react", { kind: "love" });
+
+    expect(result).toEqual({ ok: true, messageGuid: "his-guid" });
+    expect(tapbackSpy).toHaveBeenCalledWith({
+      chatId: 101,
+      messageGuid: "his-guid",
+      kind: "love",
+      remove: undefined,
+    });
+    await ext.stop();
+  });
+
+  it("react finds his latest message in history after a restart", async () => {
+    spyClient([
+      createMessage({ rowid: 12, is_from_me: true, guid: "her-reply" }),
+      createMessage({ rowid: 11, sender: "+19995550000", guid: "a-stranger" }),
+      createMessage({ rowid: 10, guid: "his-older" }),
+    ]);
+    const ext = createIMessageExtension({ allowedSenders: ["+14155551212"] });
+    await ext.start(createTestContext({ store: memoryStore().store }));
+
+    await expect(ext.handleMethod("imessage.react", { kind: "👍" })).rejects.toThrow(
+      "No recent chat: pass chatId",
+    );
+    const result = await ext.handleMethod("imessage.react", { kind: "👍", chatId: 101 });
+
+    expect(result).toEqual({ ok: true, messageGuid: "his-older" });
     await ext.stop();
   });
 });
