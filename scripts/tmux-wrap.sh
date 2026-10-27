@@ -489,7 +489,12 @@ allocate_pane() {
         tmux send-keys -t "$pane_id" -X cancel >/dev/null 2>&1 || true
       fi
       tmux send-keys -t "$pane_id" C-u
-      tmux send-keys -t "$pane_id" -l "$child_cmd"
+      # `exec`, so the child replaces the idle shell instead of running under
+      # it. run_child ends by exec-ing a fresh login shell; typed into the idle
+      # shell without `exec`, every reuse nested one more `zsh -l` (plus its
+      # gitstatusd) that never exits. Busy sessions leaked thousands of them,
+      # and agent-host's `pgrep -f` scans slowed until the watchdog killed it.
+      tmux send-keys -t "$pane_id" -l "exec $child_cmd"
       tmux send-keys -t "$pane_id" Enter
       release_lock
       printf "%s" "$pane_id"
