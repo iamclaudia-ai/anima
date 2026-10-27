@@ -223,7 +223,7 @@ export async function createAgentHostServer(
   await restorePersistedSessions(sessionHost, persistedState, log);
 
   // Then repair anything the registry missed. A `claude` still running in an
-  // `anima-cli-*` pane needs its proxy rebound on the exact port it was
+  // `anima-claude-*` pane needs its proxy rebound on the exact port it was
   // launched against, whether or not `sessions.json` remembers it.
   const tracked = sessionHost.trackedIds?.() ?? new Set<string>();
   // Under `bun test` the default is "don't", not "the real tmux" — a suite that

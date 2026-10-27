@@ -168,7 +168,7 @@ export interface AgentHostConfig {
   /** How often the idle reaper runs (ms). */
   reapIntervalMs?: number;
   /**
-   * Also reap orphan `anima-session-*` tmux panes created by the tmux-wrap
+   * Also reap orphan `anima-wrapper-*` tmux panes created by the tmux-wrap
    * PreToolUse hook. Kept only when attached or idle below `idleStaleMs`.
    */
   reapTmuxOrphans?: boolean;

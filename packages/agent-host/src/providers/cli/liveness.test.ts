@@ -94,7 +94,7 @@ describe("LivenessMonitor", () => {
   test("reports nothing alive until primed, then reads the snapshot", async () => {
     const { probes } = fakeProbes({
       ps: "  7 claude --resume s1",
-      tmux: "anima-cli-s1\nother",
+      tmux: "anima-claude-s1\nother",
     });
     const monitor = new LivenessMonitor(probes);
     expect(monitor.primed).toBe(false);
@@ -104,7 +104,7 @@ describe("LivenessMonitor", () => {
     expect(monitor.primed).toBe(true);
     expect(monitor.claudeAlive("s1")).toBe(true);
     expect(monitor.claudePid("s1")).toBe(7);
-    expect(monitor.tmuxAlive("anima-cli-s1")).toBe(true);
+    expect(monitor.tmuxAlive("anima-claude-s1")).toBe(true);
     expect(monitor.claudeAlive("s2")).toBe(false);
   });
 
@@ -140,7 +140,7 @@ describe("LivenessMonitor", () => {
   });
 
   test("a failed ps keeps the previous answer instead of reporting every session dead", async () => {
-    const { state, probes } = fakeProbes({ ps: "  7 claude --resume s1", tmux: "anima-cli-s1" });
+    const { state, probes } = fakeProbes({ ps: "  7 claude --resume s1", tmux: "anima-claude-s1" });
     const monitor = new LivenessMonitor(probes);
     await monitor.refresh();
 
@@ -148,11 +148,11 @@ describe("LivenessMonitor", () => {
     state.tmuxResult = { exitCode: 1, stdout: "", stderr: "server exited unexpectedly" };
     await monitor.refresh();
     expect(monitor.claudeAlive("s1")).toBe(true);
-    expect(monitor.tmuxAlive("anima-cli-s1")).toBe(true);
+    expect(monitor.tmuxAlive("anima-claude-s1")).toBe(true);
   });
 
   test("no tmux server means no tmux sessions", async () => {
-    const { state, probes } = fakeProbes({ tmux: "anima-cli-s1" });
+    const { state, probes } = fakeProbes({ tmux: "anima-claude-s1" });
     const monitor = new LivenessMonitor(probes);
     await monitor.refresh();
 
@@ -162,16 +162,16 @@ describe("LivenessMonitor", () => {
       stderr: "no server running on /tmp/tmux-501/default",
     };
     await monitor.refresh();
-    expect(monitor.tmuxAlive("anima-cli-s1")).toBe(false);
+    expect(monitor.tmuxAlive("anima-claude-s1")).toBe(false);
   });
 
   test("forget() drops a closed session at once", async () => {
-    const { probes } = fakeProbes({ ps: "  7 claude --resume s1", tmux: "anima-cli-s1" });
+    const { probes } = fakeProbes({ ps: "  7 claude --resume s1", tmux: "anima-claude-s1" });
     const monitor = new LivenessMonitor(probes);
     await monitor.refresh();
-    monitor.forget("s1", "anima-cli-s1");
+    monitor.forget("s1", "anima-claude-s1");
     expect(monitor.claudeAlive("s1")).toBe(false);
-    expect(monitor.tmuxAlive("anima-cli-s1")).toBe(false);
+    expect(monitor.tmuxAlive("anima-claude-s1")).toBe(false);
   });
 
   test("proxyPort() reads the live process's environment", async () => {

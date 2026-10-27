@@ -196,10 +196,10 @@ describe("adoptLiveCliSessions", () => {
   function deps(overrides: Partial<Record<string, unknown>> = {}) {
     return {
       listTmuxSessions: () => [
-        { name: "anima-cli-live-one" },
-        { name: "anima-cli-dead-one" },
-        { name: "anima-cli-tracked-one" },
-        { name: "anima-session-hookpane" },
+        { name: "anima-claude-live-one" },
+        { name: "anima-claude-dead-one" },
+        { name: "anima-claude-tracked-one" },
+        { name: "anima-wrapper-hookpane" },
         { name: "unrelated" },
       ],
       claudeProcessAlive: (id: string) => id !== "dead-one",

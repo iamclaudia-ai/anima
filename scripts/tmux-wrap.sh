@@ -2,7 +2,7 @@
 
 set -u
 
-SESSION_NAME="${TMUX_WRAP_SESSION:-anima-session}"
+SESSION_NAME="${TMUX_WRAP_SESSION:-anima-wrapper}"
 MAX_PANES="${TMUX_WRAP_MAX_PANES:-8}"
 BASE_DIR="${TMPDIR:-/tmp}"
 SCRIPT_PATH="${BASH_SOURCE[0]}"
@@ -25,12 +25,12 @@ Usage:
   tmux-wrap.sh --hook-filter-only
 
 Environment:
-  TMUX_WRAP_SESSION   tmux session/group to use (default: anima-session)
+  TMUX_WRAP_SESSION   tmux session/group to use (default: anima-wrapper)
   TMUX_WRAP_MAX_PANES max panes in the target tmux window (default: 8)
   TMUX_WRAP_NO_TOKF   run the command raw instead of through tokf rewrite
 
 Attach:
-  tmux attach -t anima-session
+  tmux attach -t anima-wrapper
 EOF
 }
 

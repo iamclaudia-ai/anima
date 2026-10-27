@@ -186,7 +186,7 @@ function formatSessionName(s: SessionInfo): string {
 
 /** The command that attaches a terminal to a session's CLI pane. */
 function tmuxAttachCommand(sessionId: string): string {
-  return `tmux attach -t anima-cli-${sessionId}`;
+  return `tmux attach -t anima-claude-${sessionId}`;
 }
 
 // ── Status presentation ─────────────────────────────────────────

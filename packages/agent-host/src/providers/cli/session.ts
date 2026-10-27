@@ -334,7 +334,7 @@ export class ClaudeCliSession extends EventEmitter {
   ) {
     super();
     this.id = id;
-    this.tmuxName = `anima-cli-${id}`;
+    this.tmuxName = `anima-claude-${id}`;
     this.cwd = options.cwd;
     const rawModel = options.model || config.model || "claude-opus-4-6";
     this.wants1m = /\[1m\]/i.test(rawModel);

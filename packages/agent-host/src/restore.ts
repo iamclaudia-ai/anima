@@ -88,7 +88,7 @@ export async function restorePersistedSessions(
  * pointed somewhere new. Worse, the orphan reaper then read "untracked" as
  * "abandoned" and killed the pane.
  *
- * A running `claude` in an `anima-cli-<id>` pane is ground truth, so this
+ * A running `claude` in an `anima-claude-<id>` pane is ground truth, so this
  * treats the filesystem and process table as the source and the registry as
  * the derived thing. Resuming re-binds the proxy on the port the CLI is
  * already targeting (`ensureProxy` prefers the live process's own port), which
@@ -109,7 +109,7 @@ export async function adoptLiveCliSessions(
   },
   log: RestoreLogger,
 ): Promise<number> {
-  const PREFIX = "anima-cli-";
+  const PREFIX = "anima-claude-";
   let adopted = 0;
 
   for (const session of deps.listTmuxSessions()) {
