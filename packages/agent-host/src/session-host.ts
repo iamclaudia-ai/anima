@@ -375,10 +375,9 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * List all active sessions. Calls `getInfo()` on every session, which for
-   * CLI provider sessions shells out to `tmux has-session` + `ps` — O(N
-   * subprocess spawns). Don't call this from hot paths like `/health`; use
-   * `count()` instead.
+   * List all active sessions. `getInfo()` reads CLI liveness from the shared
+   * snapshot (#95), so this spawns nothing, but `/health` still only needs
+   * `count()`.
    */
   list(): AgentRuntimeSessionInfo[] {
     return Array.from(this.sessions.values()).map((s) => s.getInfo());
@@ -477,7 +476,7 @@ export class SessionHost extends EventEmitter {
    * the tmux pane and the `claude` process, so a `Monitor` running inside
    * survives — but it removes the ONLY path that ever terminates a CLI session:
    * a released session is untracked, and `reapOrphanTmuxPanes()` skips every
-   * untracked pane whose process is still alive (`claudeProcessAlive` is its
+   * untracked pane whose process is still alive (the liveness snapshot is its
    * ground truth). Nothing else kills one. Shipping that traded a recoverable
    * inconvenience for an unbounded leak — 52 panes and 12 GB resident in six
    * days (#75, #76).

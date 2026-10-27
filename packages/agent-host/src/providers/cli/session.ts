@@ -29,9 +29,6 @@ import type {
 import { AnthropicTeeProxy, type StreamContext } from "./proxy";
 import {
   capturePane,
-  readClaudeProxyPort,
-  claudeProcessAlive,
-  hasSession,
   killSession,
   newSession,
   pasteText,
@@ -39,6 +36,7 @@ import {
   sendKey,
   submit,
 } from "./tmux";
+import { liveness } from "./liveness";
 import { detectModalPrompt, type ModalPrompt } from "./modal-prompt";
 import { copyImageToClipboard } from "./image-clipboard";
 import { ensureMitmCerts } from "./mitm-certs";
@@ -82,6 +80,8 @@ const DEFAULT_BASE_PORT = 31000;
 const TERMINAL_STOP = new Set(["end_turn", "stop_sequence", "max_tokens"]);
 const INIT_TIMEOUT_MS = 12_000;
 const STALE_MS = 5 * 60 * 1000;
+/** Oldest liveness snapshot a launch decision may trust. */
+const LIVENESS_FRESH_MS = 1_000;
 /** Settle time after each Ctrl-V so the TUI reads the clipboard + renders `[Image #N]`. */
 const IMAGE_INGEST_MS = 700;
 /** Settle delay after a paste before we send Enter to submit. */
@@ -390,7 +390,8 @@ export class ClaudeCliSession extends EventEmitter {
     //   2. What we last bound for this session — covers a CLI that's alive but
     //      unmatchable, and a pane whose CLI is dead and about to be relaunched.
     //   3. Derivation — a first-ever launch.
-    const pinnedByCli = readClaudeProxyPort(this.id);
+    await liveness.fresh(LIVENESS_FRESH_MS);
+    const pinnedByCli = await liveness.proxyPort(this.id);
     const remembered = recallPort(this.id);
     const derived = derivePort(this.config.basePort ?? DEFAULT_BASE_PORT, this.id);
     const preferred = pinnedByCli ?? remembered ?? derived;
@@ -441,9 +442,13 @@ export class ClaudeCliSession extends EventEmitter {
   private async ensureRunning(): Promise<boolean> {
     await this.ensureProxy();
 
-    if (hasSession(this.tmuxName) && claudeProcessAlive(this.id)) return true;
+    await liveness.fresh(LIVENESS_FRESH_MS);
+    // Never relaunch on a cached "dead": confirm it with a snapshot taken now,
+    // because the branch below kills the pane.
+    if (!this.runtimeAlive()) await liveness.refresh();
+    if (this.runtimeAlive()) return true;
 
-    if (hasSession(this.tmuxName)) {
+    if (liveness.tmuxAlive(this.tmuxName)) {
       // Pane survived but claude exited (crash, or a manually re-created shell).
       this.launchInPane();
     } else {
@@ -452,7 +457,8 @@ export class ClaudeCliSession extends EventEmitter {
     }
     await this.waitForReady();
 
-    if (!claudeProcessAlive(this.id)) {
+    await liveness.refresh();
+    if (!liveness.claudeAlive(this.id)) {
       throw new Error(`Claude CLI failed to start in tmux session ${this.tmuxName}`);
     }
     this._isClosed = false;
@@ -721,8 +727,8 @@ export class ClaudeCliSession extends EventEmitter {
     return {
       id: this.id.slice(0, 8),
       tmux: this.tmuxName,
-      tmuxAlive: hasSession(this.tmuxName),
-      claudeAlive: claudeProcessAlive(this.id),
+      tmuxAlive: liveness.tmuxAlive(this.tmuxName),
+      claudeAlive: liveness.claudeAlive(this.id),
       started: this._isStarted,
       closed: this._isClosed,
       turnActive: reportedTurnActive(this._turnStateKnown, this._turnActive),
@@ -861,7 +867,7 @@ export class ClaudeCliSession extends EventEmitter {
    * pane doesn't re-announce the same prompt.
    */
   private pollModal(): void {
-    if (!hasSession(this.tmuxName)) return;
+    if (!liveness.tmuxAlive(this.tmuxName)) return;
     const found = detectModalPrompt(capturePane(this.tmuxName));
     if (found && found.fingerprint === this._modal?.fingerprint) return;
     if (found) {
@@ -1118,6 +1124,7 @@ export class ClaudeCliSession extends EventEmitter {
     this.tail.stop();
     this.stopModalWatch();
     killSession(this.tmuxName);
+    liveness.forget(this.id, this.tmuxName);
     this.proxy?.stop();
     this.proxy = null;
     this._isStarted = false;
@@ -1160,8 +1167,14 @@ export class ClaudeCliSession extends EventEmitter {
     return this._isStarted && !this._isClosed;
   }
 
+  /** Read from the shared liveness snapshot: no subprocess, safe on hot paths (#95). */
   get isProcessRunning(): boolean {
-    return this.proxy !== null && hasSession(this.tmuxName) && claudeProcessAlive(this.id);
+    return this.proxy !== null && this.runtimeAlive();
+  }
+
+  /** Pane and `claude` both alive, per the latest liveness snapshot. */
+  private runtimeAlive(): boolean {
+    return liveness.tmuxAlive(this.tmuxName) && liveness.claudeAlive(this.id);
   }
 
   getInfo(): AgentRuntimeSessionInfo {

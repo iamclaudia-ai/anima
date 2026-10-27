@@ -16,7 +16,8 @@ import {
 } from "./session-host";
 import { loadState, saveState, type PersistedState } from "./state";
 import { adoptLiveCliSessions, restorePersistedSessions } from "./restore";
-import { claudeProcessAlive, listTmuxSessions, paneCurrentPath } from "./providers/cli/tmux";
+import { listTmuxSessions, paneCurrentPath } from "./providers/cli/tmux";
+import { liveness as hostLiveness, type LivenessMonitor } from "./providers/cli/liveness";
 import type { BufferedEvent } from "./event-buffer";
 import type { ThinkingEffort } from "@anima/shared";
 import { createAnthropicProvider } from "./providers/anthropic/sdk-session";
@@ -76,6 +77,13 @@ export interface AgentHostServerOptions {
    * entirely.
    */
   adoptDeps?: AdoptDeps | null;
+  /**
+   * The shared CLI liveness snapshot (#95). Defaults to the host-wide monitor
+   * when the Claude runtime is the CLI. Under `bun test` the default is none,
+   * so a suite can't probe the developer's real processes by accident.
+   */
+  liveness?: LivenessMonitor | null;
+  livenessIntervalMs?: number;
 }
 
 type AdoptDeps = Parameters<typeof adoptLiveCliSessions>[1];
@@ -193,6 +201,20 @@ export async function createAgentHostServer(
     effort: sessionEffort,
   });
 
+  // Prime the liveness snapshot before anything reads it: restore, adoption and
+  // state persistence all ask which sessions are alive, and an unprimed
+  // snapshot answers "none".
+  const liveness =
+    options.liveness !== undefined
+      ? options.liveness
+      : process.env.NODE_ENV !== "test" && claudeRuntime === "cli"
+        ? hostLiveness
+        : null;
+  if (liveness) {
+    await liveness.refresh();
+    liveness.start(options.livenessIntervalMs ?? 5_000);
+  }
+
   // Load persisted session registry (for crash recovery)
   const persistedState = loadStateFn();
   log.info("Persisted state loaded", { sessions: persistedState.sessions.length });
@@ -213,7 +235,7 @@ export async function createAgentHostServer(
       : options.adoptDeps === undefined
         ? {
             listTmuxSessions,
-            claudeProcessAlive,
+            claudeProcessAlive: (id: string) => liveness?.claudeAlive(id) ?? false,
             paneCurrentPath,
             isTracked: (id: string) => tracked.has(id),
           }
@@ -622,6 +644,7 @@ export async function createAgentHostServer(
     if (stateSaveTimer) {
       clearInterval(stateSaveTimer);
     }
+    liveness?.stop();
 
     saveStateFn(sessionHost.getSessionRecords());
     await sessionHost.closeAll();

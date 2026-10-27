@@ -13,7 +13,8 @@ import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { createAgentHostServer } from "./server";
-import { claudeProcessAlive, killSession, listTmuxSessions } from "./providers/cli/tmux";
+import { killSession, listTmuxSessions } from "./providers/cli/tmux";
+import { liveness } from "./providers/cli/liveness";
 
 const log = createLogger("AgentHost", join(homedir(), ".anima", "logs", "agent-host.log"));
 
@@ -39,6 +40,11 @@ const IDLE_REAP_INTERVAL_MS = parseMs(
   agentHostConfig.reapIntervalMs ?? 60_000,
 );
 const REAP_TMUX_ORPHANS = agentHostConfig.reapTmuxOrphans !== false;
+/**
+ * A subagent's tmux-wrap session idle this long is treated as finished. If the
+ * subagent is resumed and runs a command, the wrapper simply creates it again.
+ */
+const SUBAGENT_PANE_STALE_MS = 15 * 60 * 1000;
 
 function forceClearGatewayLocks(): void {
   if (!FORCE_STARTUP) return;
@@ -81,7 +87,10 @@ const ctx = await createAgentHostServer({ port: PORT });
 
 /**
  * Reap orphan tmux panes:
- *  - `anima-session-*` panes from the tmux-wrap PreToolUse hook.
+ *  - `anima-session-*` panes from the tmux-wrap PreToolUse hook. A subagent's
+ *    own session (`anima-session-<id>-sub-<agentId>`) is done when the
+ *    subagent is, so it goes after SUBAGENT_PANE_STALE_MS instead of the full
+ *    idle threshold.
  *  - `anima-cli-*` panes whose session ID is NOT currently tracked by sessionHost
  *    *and* whose `claude` process is gone — genuinely abandoned shells.
  * Keeps any pane with an attached client and any pane whose tmux activity
@@ -95,8 +104,11 @@ const ctx = await createAgentHostServer({ port: PORT });
  * UI rather than tmux. A running `claude` process is ground truth and outranks
  * anything the registry does or doesn't remember.
  */
-function reapOrphanTmuxPanes(staleMs: number): number {
-  const cutoffSec = (Date.now() - staleMs) / 1000;
+async function reapOrphanTmuxPanes(staleMs: number): Promise<number> {
+  // A fresh snapshot, never a cached one: a live `claude` is the one thing
+  // that keeps an untracked CLI pane alive, and this is about to kill panes.
+  await liveness.refresh();
+  const nowSec = Date.now() / 1000;
   const tracked = ctx.sessionHost.trackedIds ? ctx.sessionHost.trackedIds() : new Set<string>();
   let killed = 0;
   for (const s of listTmuxSessions()) {
@@ -106,14 +118,16 @@ function reapOrphanTmuxPanes(staleMs: number): number {
     if (isCli) {
       const sessionId = s.name.slice("anima-cli-".length);
       if (tracked.has(sessionId)) continue;
-      if (claudeProcessAlive(sessionId)) continue;
+      if (liveness.claudeAlive(sessionId)) continue;
     }
     if (s.attached) continue;
-    if (s.activitySec >= cutoffSec) continue;
+    const isSubagent = isSession && s.name.includes("-sub-");
+    const idleLimitSec = Math.min(staleMs, isSubagent ? SUBAGENT_PANE_STALE_MS : staleMs) / 1000;
+    if (nowSec - s.activitySec < idleLimitSec) continue;
     killSession(s.name);
     log.info("Reaped orphan tmux pane", {
       name: s.name,
-      kind: isCli ? "cli-untracked" : "session-hook",
+      kind: isCli ? "cli-untracked" : isSubagent ? "subagent-hook" : "session-hook",
       idleSec: Math.floor(Date.now() / 1000 - s.activitySec),
     });
     killed++;
@@ -151,7 +165,7 @@ const idleReapTimer = setInterval(async () => {
       }
     }
     if (REAP_TMUX_ORPHANS) {
-      reapOrphanTmuxPanes(IDLE_STALE_MS);
+      await reapOrphanTmuxPanes(IDLE_STALE_MS);
     }
   } catch (error) {
     log.warn("Idle session reaper failed", { error: String(error) });
