@@ -59,6 +59,31 @@ describe("session store", () => {
     expect(setSessionProfile("ses_missing", "mail")).toBe(false);
   });
 
+  it("takes createdAt on insert and never rewrites it", () => {
+    // A session discovered on disk keeps its real start, not when it was noticed.
+    upsertSession({
+      id: "ses_found",
+      workspaceId: "ws_created",
+      model: "m",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(getStoredSession("ses_found")?.createdAt).toBe("2026-01-01T00:00:00.000Z");
+
+    // A later sweep (or any other writer) can't move it.
+    upsertSession({
+      id: "ses_found",
+      workspaceId: "ws_created",
+      model: "m",
+      createdAt: "2026-09-09T00:00:00.000Z",
+    });
+    expect(getStoredSession("ses_found")?.createdAt).toBe("2026-01-01T00:00:00.000Z");
+
+    // Without one, an insert is stamped now, as before.
+    const before = new Date().toISOString();
+    upsertSession({ id: "ses_new", workspaceId: "ws_created", model: "m" });
+    expect((getStoredSession("ses_new")?.createdAt ?? "") >= before).toBe(true);
+  });
+
   it("keeps a user rename separate from the derived title", () => {
     upsertSession({
       id: "ses_rename",

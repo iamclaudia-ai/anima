@@ -418,6 +418,14 @@ export function upsertSession(params: {
   metadata?: Record<string, unknown> | null;
   previousSessionId?: string | null;
   lastActivity?: string;
+  /**
+   * When the session really began, for a row being inserted. Only an insert
+   * uses it (ON CONFLICT never rewrites `created_at`), so a session Anima
+   * created keeps its own timestamp. Without it, a session discovered on disk
+   * got the time it was first *noticed*, and sessions found in one sweep
+   * sorted in arbitrary order.
+   */
+  createdAt?: string;
 }): void {
   const now = new Date().toISOString();
   const providerSessionId = params.providerSessionId || params.id;
@@ -487,7 +495,7 @@ export function upsertSession(params: {
       metadataJson,
       params.previousSessionId ?? null,
       params.lastActivity || now,
-      now,
+      params.createdAt || now,
       now,
       // Second binding of the same value — the ON CONFLICT clause above.
       params.runtimeStatus ?? null,

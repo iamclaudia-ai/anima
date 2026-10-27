@@ -138,6 +138,9 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
         gitBranch: entry.gitBranch ?? existing?.gitBranch,
       },
       lastActivity,
+      // The transcript's own start, so the nav's creation order is real.
+      // Ignored for a row that already exists.
+      createdAt: entry.created,
     });
 
     written++;
