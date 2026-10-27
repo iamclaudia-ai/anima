@@ -79,6 +79,61 @@ function createTestContext(overrides: Partial<ExtensionContext> = {}): Extension
   };
 }
 
+// Captured before any case replaces the global, so the fail-fast guard below
+// still has a working clock while setTimeout is being recorded.
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+
+/**
+ * Replace setTimeout with a recorder, so a case can fire one timer on demand.
+ *
+ * Timers are found by their delay, never by position. `start()` registers its
+ * own background timers (the ref validator's 60s startup delay), so "the first
+ * timer" is not the one under test. Firing it by position once left the
+ * awaited promise pending forever, and with setTimeout replaced, Bun's
+ * per-test timeout could not fire either: the whole file hung.
+ */
+function recordTimers() {
+  const timers: Array<{ delay: number; fire: () => void }> = [];
+  const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
+    cb: (...args: unknown[]) => void,
+    delay?: number,
+  ) => {
+    timers.push({ delay: Number(delay ?? 0), fire: () => cb() });
+    return timers.length as unknown as ReturnType<typeof setTimeout>;
+  }) as unknown as typeof setTimeout);
+  const clearSpy = spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
+
+  return {
+    /** Wait (a few microtask turns) for a timer with this delay, then fire it. */
+    async fire(delay: number): Promise<void> {
+      for (let i = 0; i < 50; i++) {
+        const timer = timers.find((t) => t.delay === delay);
+        if (timer) {
+          timer.fire();
+          return;
+        }
+        await Promise.resolve();
+      }
+      const seen = timers.map((t) => t.delay).join(", ") || "none";
+      throw new Error(`No ${delay}ms timer was registered (saw: ${seen})`);
+    },
+    restore(): void {
+      timeoutSpy.mockRestore();
+      clearSpy.mockRestore();
+    },
+  };
+}
+
+/** Fail with a message, instead of hanging the file, if a promise never settles. */
+function settleWithin<T>(promise: Promise<T>, ms = 2_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timer = realSetTimeout(() => reject(new Error(`Did not settle within ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => realClearTimeout(timer));
+}
+
 describe("session extension", () => {
   let promptSpy: ReturnType<typeof spyOn>;
   let emitEventSpy: ReturnType<typeof spyOn>;
@@ -613,58 +668,52 @@ describe("session extension", () => {
   });
 
   it("fails open when memory transition hangs during first-prompt bootstrap", async () => {
-    const timeoutCallbacks: Array<() => void> = [];
-    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
-      cb: (...args: unknown[]) => void,
-    ) => {
-      timeoutCallbacks.push(() => cb());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    }) as unknown as typeof setTimeout);
-    const clearSpy = spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
-
+    const timers = recordTimers();
     const ext = createSessionExtension();
-    await ext.start(
-      createTestContext({
-        async call(method) {
-          if (method === "memory.transition_conversation") {
-            return new Promise(() => undefined);
-          }
-          if (method === "memory.get_session_context") {
-            return { recentMessages: [], recentSummaries: [] };
-          }
-          return null;
-        },
-      }),
-    );
+    try {
+      await ext.start(
+        createTestContext({
+          async call(method) {
+            if (method === "memory.transition_conversation") {
+              return new Promise(() => undefined);
+            }
+            if (method === "memory.get_session_context") {
+              return { recentMessages: [], recentSummaries: [] };
+            }
+            return null;
+          },
+        }),
+      );
 
-    const created = (await ext.handleMethod("session.create_session", {
-      cwd: "/repo/project",
-    })) as { sessionId: string };
-    const pending = ext.handleMethod("session.send_prompt", {
-      sessionId: created.sessionId,
-      cwd: "/repo/project",
-      content: "hello",
-    });
-    for (let i = 0; i < 20 && timeoutCallbacks.length === 0; i++) {
-      await Promise.resolve();
+      const created = (await ext.handleMethod("session.create_session", {
+        cwd: "/repo/project",
+      })) as { sessionId: string };
+      const pending = ext.handleMethod("session.send_prompt", {
+        sessionId: created.sessionId,
+        cwd: "/repo/project",
+        content: "hello",
+      });
+      // MEMORY_TRANSITION_TIMEOUT_MS in lifecycle/prompt-lifecycle.ts.
+      await timers.fire(1_500);
+
+      await expect(settleWithin(pending)).resolves.toEqual({
+        status: "streaming",
+        sessionId: created.sessionId,
+      });
+      expect(createSpy).toHaveBeenCalledWith({
+        sessionId: created.sessionId,
+        agent: "claude",
+        cwd: "/repo/project",
+        model: "claude-opus-4-6",
+        profile: "yolo",
+        systemPrompt: expect.stringContaining("Current local date and time:"),
+        thinking: false,
+        effort: "medium",
+      });
+    } finally {
+      timers.restore();
+      await ext.stop();
     }
-    expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
-    timeoutCallbacks[0]?.();
-
-    await expect(pending).resolves.toEqual({ status: "streaming", sessionId: created.sessionId });
-    expect(createSpy).toHaveBeenCalledWith({
-      sessionId: created.sessionId,
-      agent: "claude",
-      cwd: "/repo/project",
-      model: "claude-opus-4-6",
-      systemPrompt: expect.stringContaining("Current local date and time:"),
-      thinking: false,
-      effort: "medium",
-    });
-
-    await ext.stop();
-    timeoutSpy.mockRestore();
-    clearSpy.mockRestore();
   });
 
   it("bootstraps memory on the first prompt for draft sessions", async () => {
@@ -708,6 +757,7 @@ describe("session extension", () => {
       agent: "claude",
       cwd: "/repo/project",
       model: "claude-opus-4-6",
+      profile: "yolo",
       systemPrompt: expect.stringContaining("You are strict"),
       thinking: true,
       effort: "high",
@@ -1126,35 +1176,12 @@ describe("session extension", () => {
 
     const listed = await ext.handleMethod("session.list_workspaces", {});
     expect(listWorkspacesSpy).toHaveBeenCalledTimes(1);
-    expect(listed).toEqual({
-      workspaces: [
-        {
-          id: "ws-1",
-          name: "project",
-          cwd: "/repo/project",
-          general: false,
-          pinned: false,
-          cwdDisplay: "/repo/project",
-          createdAt: "2026-02-22T00:00:00.000Z",
-          updatedAt: "2026-02-22T00:00:00.000Z",
-        },
-      ],
-    });
+    // Pass-through: whatever the workspace module returns, unchanged.
+    expect(listed).toEqual({ workspaces: listWorkspacesSpy.mock.results[0]?.value });
 
     const fetched = await ext.handleMethod("session.get_workspace", { id: "ws-1" });
     expect(getWorkspaceSpy).toHaveBeenCalledWith("ws-1");
-    expect(fetched).toEqual({
-      workspace: {
-        id: "ws-1",
-        name: "project",
-        cwd: "/repo/project",
-        general: false,
-        pinned: false,
-        cwdDisplay: "/repo/project",
-        createdAt: "2026-02-22T00:00:00.000Z",
-        updatedAt: "2026-02-22T00:00:00.000Z",
-      },
-    });
+    expect(fetched).toEqual({ workspace: getWorkspaceSpy.mock.results[0]?.value });
 
     const created = await ext.handleMethod("session.get_or_create_workspace", {
       cwd: "/repo/new-project",
@@ -1165,19 +1192,7 @@ describe("session extension", () => {
       "new-project",
       undefined,
     );
-    expect(created).toEqual({
-      workspace: {
-        id: "ws-2",
-        name: "new-project",
-        cwd: "/repo/new-project",
-        general: false,
-        pinned: false,
-        cwdDisplay: "/repo/new-project",
-        createdAt: "2026-02-22T00:00:00.000Z",
-        updatedAt: "2026-02-22T00:00:00.000Z",
-      },
-      created: true,
-    });
+    expect(created).toEqual(getOrCreateWorkspaceSpy.mock.results[0]?.value);
 
     await ext.stop();
   });
@@ -1482,14 +1497,7 @@ describe("session extension", () => {
   });
 
   it("times out non-streaming prompts when turn_stop never arrives", async () => {
-    const timeoutCallbacks: Array<() => void> = [];
-    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
-      cb: (...args: unknown[]) => void,
-    ) => {
-      timeoutCallbacks.push(() => cb());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    }) as unknown as typeof setTimeout);
-    const clearSpy = spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
+    const timers = recordTimers();
 
     promptSpy.mockImplementation(() => Promise.resolve());
 
@@ -1498,9 +1506,8 @@ describe("session extension", () => {
     writeFileSync(join(projectDir, `${sessionId}.jsonl`), "", "utf-8");
 
     const ext = createSessionExtension();
-    await ext.start(createTestContext());
-
     try {
+      await ext.start(createTestContext());
       const pending = ext.handleMethod("session.send_prompt", {
         sessionId,
         cwd: "/repo/project",
@@ -1508,17 +1515,13 @@ describe("session extension", () => {
         content: "ping",
         streaming: false,
       });
-      for (let i = 0; i < 20 && timeoutCallbacks.length === 0; i++) {
-        await Promise.resolve();
-      }
-      expect(timeoutCallbacks.length).toBeGreaterThanOrEqual(1);
-      timeoutCallbacks[0]?.();
-      await expect(pending).rejects.toThrow("Prompt timed out after 5 minutes");
+      // The turn timeout passed to beginTurn in lifecycle/prompt-lifecycle.ts.
+      await timers.fire(300_000);
+      await expect(settleWithin(pending)).rejects.toThrow("Prompt timed out after 5 minutes");
     } finally {
+      timers.restore();
       rmSync(projectDir, { recursive: true, force: true });
       await ext.stop();
-      timeoutSpy.mockRestore();
-      clearSpy.mockRestore();
     }
   });
 
