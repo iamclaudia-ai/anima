@@ -256,6 +256,17 @@ emit_hook_output() {
     session_name="${SESSION_NAME}-${safe_sid}"
   fi
 
+  # A subagent shares its parent's session_id; Claude Code adds agent_id to the
+  # payload for its tool calls. Its own tmux session keeps parallel subagents
+  # from queueing for the parent's panes, and lets agent-host reap it soon
+  # after the subagent finishes (the `-sub-` marker), not with the parent.
+  local agent_id safe_aid
+  agent_id="$(jq -r '.agent_id // empty' <<<"$input")"
+  if [ -n "$agent_id" ]; then
+    safe_aid="$(printf '%s' "$agent_id" | tr -c '[:alnum:]_-' '_')"
+    session_name="${session_name}-sub-${safe_aid}"
+  fi
+
   quoted_script="$(q "$SCRIPT_PATH")"
   quoted_command="$(q "$command")"
   quoted_session="$(q "$session_name")"
@@ -383,6 +394,17 @@ emit_codex_hook_output() {
   if [ -n "$session_id" ]; then
     safe_sid="$(printf '%s' "$session_id" | tr -c '[:alnum:]_-' '_')"
     session_name="${SESSION_NAME}-${safe_sid}"
+  fi
+
+  # A subagent shares its parent's session_id; Claude Code adds agent_id to the
+  # payload for its tool calls. Its own tmux session keeps parallel subagents
+  # from queueing for the parent's panes, and lets agent-host reap it soon
+  # after the subagent finishes (the `-sub-` marker), not with the parent.
+  local agent_id safe_aid
+  agent_id="$(jq -r '.agent_id // empty' <<<"$input")"
+  if [ -n "$agent_id" ]; then
+    safe_aid="$(printf '%s' "$agent_id" | tr -c '[:alnum:]_-' '_')"
+    session_name="${session_name}-sub-${safe_aid}"
   fi
 
   quoted_script="$(q "$SCRIPT_PATH")"
