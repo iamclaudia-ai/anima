@@ -102,6 +102,27 @@ async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/**
+ * Wait until `check` passes. The extension handles each event fire-and-forget,
+ * and a workspace event first `import()`s that workspace's hook files, which
+ * one timer tick does not always cover when the whole suite is running. Use
+ * flushAsync only to assert that something did NOT happen.
+ */
+async function waitFor(
+  what: string,
+  check: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+const emittedCount = (mock: { emitted: Array<{ type: string }> }, type: string) =>
+  mock.emitted.filter((e) => e.type === type).length;
+
 async function writeHookFile(dir: string, filename: string, source: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, filename), source, "utf8");
@@ -147,6 +168,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
+    await waitFor("hook.overlap.count", () => emittedCount(mock, "hook.overlap.count") >= 1);
     await flushAsync();
 
     const overlapEvents = mock.emitted.filter((e) => e.type === "hook.overlap.count");
@@ -219,6 +241,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
+    await waitFor("hook.local.loaded", () => emittedCount(mock, "hook.local.loaded") >= 1);
     await flushAsync();
 
     const localEvents = mock.emitted.filter((e) => e.type === "hook.local.loaded");
@@ -261,6 +284,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
+    await waitFor("hook.linked.ok", () => emittedCount(mock, "hook.linked.ok") >= 1);
     await flushAsync();
 
     const events = mock.emitted.filter((e) => e.type === "hook.linked.ok");
@@ -298,6 +322,7 @@ export default {
       origin: "test",
       sessionId: "ses_123",
     });
+    await waitFor("hook.context.snapshot", () => emittedCount(mock, "hook.context.snapshot") >= 1);
     await flushAsync();
 
     const events = mock.emitted.filter((e) => e.type === "hook.context.snapshot");
@@ -331,7 +356,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
-    await flushAsync();
+    await waitFor("hook.ephemeral.hit", () => emittedCount(mock, "hook.ephemeral.hit") >= 1);
 
     await mock.dispatch({
       type: "custom.ephemeral",
@@ -421,7 +446,12 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
-    await flushAsync();
+    await waitFor("the workspace shadow hook", async () => {
+      const { hooks } = (await extension.handleMethod("hooks.list", {})) as {
+        hooks: Array<{ id: string; description?: string }>;
+      };
+      return hooks.some((h) => h.id === "shadow" && h.description === "workspace");
+    });
 
     const listed = (await extension.handleMethod("hooks.list", {})) as {
       hooks: Array<{ id: string; description?: string }>;
@@ -461,6 +491,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
+    await waitFor("hook.wild.seen", () => emittedCount(mock, "hook.wild.seen") >= 1);
     await flushAsync();
 
     expect(mock.emitted.some((e) => e.type === "hook.wild.seen")).toBe(true);
@@ -546,6 +577,7 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
+    await waitFor("hook.dupe.who", () => emittedCount(mock, "hook.dupe.who") >= 1);
     await flushAsync();
     const dupeEvent = mock.emitted.find((e) => e.type === "hook.dupe.who");
     expect(dupeEvent?.payload).toEqual({ source: "b" });
@@ -557,7 +589,12 @@ export default {
       timestamp: Date.now(),
       origin: "test",
     });
-    await flushAsync();
+    await waitFor("the workspace throws hook", async () => {
+      const { hooks } = (await extension.handleMethod("hooks.list", {})) as {
+        hooks: Array<{ id: string }>;
+      };
+      return hooks.some((h) => h.id === "throws");
+    });
 
     // rescan throttling path: new file should not load immediately for same workspace
     await writeHookFile(
