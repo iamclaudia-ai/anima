@@ -31,10 +31,16 @@ first draft) where they differ. Runs on **Anima Sedes**.
   Mail session, which reported the injection instead of obeying it, then marked the email read and archived it.
   **3votech.com has no DMARC record**, so mail from michael@3votech.com never verifies (dmarc=none).
 
+- Step 4a (send, 2026-10-30): `mail.send` with attachments and `replyTo`, for sessions with a
+  shell acting on Michael's request (`anima mail send`). Gateway method only: there is no MCP tool,
+  so the `mail` profile still cannot send. The mail profile gained `memory_note` (append-only
+  notebooks under `~/memory/notebooks/`), and every memory tool now refuses paths outside
+  `~/memory` (before this, `memory_read` in the mail profile could read `~/.anima/anima.json`).
+
 ### Next
 
 - Michael sends a real email from kiliman@gmail.com to test the trusted wake end to end.
-- Step 4: reply/send behind the approved-recipient list + iMessage confirmation.
+- Step 4b: send/reply **from the mail session**, behind the approved-recipient list + iMessage confirmation.
 - Step 5: move tunnel + webhooks + mail to Anima Sedes (pre-trust `~/.anima/mail-session` there,
   turn wake off on vesuvius), and route iMessage with memory context.
 - Libby gets a restricted profile; #86 strict validation; DMARC for 3votech.com (Michael's call).

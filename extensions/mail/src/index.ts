@@ -25,6 +25,7 @@ import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import { type MailConfig, parseMailConfig } from "./config";
 import { MAIL_RECEIVED, Mailbox, type MessageSummary, type ReadResult } from "./mailbox";
+import { sendMail, sendSchema, type SendParams } from "./send";
 import { MailStore, openAnimaDb } from "./store";
 import { isAuthenticatedSender, parseAuthentication } from "./parse";
 import { WakeQueue } from "./wake";
@@ -161,6 +162,14 @@ export function createMailExtension(
       }),
     },
     {
+      name: "mail.send",
+      description:
+        "Send mail from Claudia's address, with optional attachments (absolute paths on the " +
+        "gateway host) and replyTo (a message id, to answer in its thread). Only on Michael's " +
+        "request. There is no MCP tool for this: mail-profile sessions cannot send.",
+      inputSchema: sendSchema,
+    },
+    {
       name: "mail.wake_status",
       description: "Show the wake queue: mail waiting to be delivered and today's Mail session",
       inputSchema: z.object({}),
@@ -186,7 +195,8 @@ export function createMailExtension(
   /**
    * MCP tools for sessions without a shell (the `mail` profile). Each mirrors
    * a method and is validated by the same schema. There is deliberately no
-   * tool for reconcile or the webhook target, and none that sends mail.
+   * tool for reconcile or the webhook target, and none that sends mail
+   * (`mail.send` is reachable only through the gateway, e.g. `anima mail send`).
    */
   const MCP_TOOL_METHODS = [
     "mail.list_folders",
@@ -451,6 +461,21 @@ export function createMailExtension(
           store?.updateFolder(id, folder.folderId);
         }
         return { moved: p.messageIds.length, folder: folder.folderName };
+      }
+
+      case "mail.send": {
+        const p = params as SendParams;
+        const result = await sendMail(client, p);
+        ctx?.log.info("Mail sent", {
+          to: result.to,
+          cc: result.cc,
+          bcc: result.bcc,
+          subject: result.subject,
+          replyTo: result.replyTo,
+          attachments: result.attachments.map((a) => a.name),
+          messageId: result.messageId,
+        });
+        return result;
       }
 
       case "mail.wake_status":

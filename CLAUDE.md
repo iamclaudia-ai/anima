@@ -84,7 +84,7 @@ live gateway reports; run `anima gateway list_methods` for the current truth.
 | `hooks`      | 2 — `health_check`, `list`                                               | —                                                                 |
 | `webhooks`   | 6 — `list_hooks`, `list_deliveries`, `get_delivery`, `redeliver`, …      | —                                                                 |
 | `notify`     | 2 — `send`, `health_check`                                               | —                                                                 |
-| `mail`       | 13 — `list_messages`, `search`, `read`, `verify_sender`, `archive`, …    | —                                                                 |
+| `mail`       | 14 — `list_messages`, `search`, `read`, `send`, `verify_sender`, …       | —                                                                 |
 | `support`    | 15 — `list_tickets`, `create_ticket`, `delegate`, `create_issue`, …      | `/support`, `/support/:ticketId`                                  |
 | `chat`       | —                                                                        | `/chat`, `/chat/:workspaceId`, `/chat/:workspaceId/:sessionId`    |
 | `bogart`     | —                                                                        | `/bogart`                                                         |
@@ -138,7 +138,7 @@ Every session runs under a **profile**, chosen at creation and fixed for its lif
 | ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `yolo`  | `bypassPermissions`                                                 | `create_session` default: sessions Michael creates (web, iOS, menubar, CLI), Libby, and unattended runbooks that ask for it explicitly (the deps sweep, the NutWords deploy gate) |
 | `auto`  | Claude Code auto mode                                               | `spawn_agent` default (`extensions.session.config.spawnProfile`)                                                                                                                  |
-| `mail`  | `dontAsk`, no built-in tools, only Anima's MCP server, `restricted` | mail sessions: mail + support-desk tools, read-only memory                                                                                                                        |
+| `mail`  | `dontAsk`, no built-in tools, only Anima's MCP server, `restricted` | mail sessions: mail + support-desk tools, memory read, notes via `memory_note` only                                                                                               |
 
 - Profiles beyond the built-ins live in `agentHost.sessionProfiles` (`permissionMode`, `tools`, `allowedTools`, `disallowedTools`, `mcp: "anima-only"`, `restricted`). Code: `packages/agent-host/src/profiles.ts`.
 - The profile is stored write-once in `sessions.profile` and sent with **every** create and prompt (the session bridge looks it up), so a resumed session keeps its powers. agent-host rejects a missing or unknown profile, and closes and relaunches a session running under the wrong one. Legacy rows (NULL) read as `yolo`.
@@ -211,7 +211,7 @@ anima/
 │   ├── hooks/            # Lifecycle hooks (post-response processing)
 │   ├── webhooks/         # Inbound webhooks (:30089, public via Cloudflare tunnel) → inbox + target method
 │   ├── notify/           # notify.send → Michael's phone + Mac (iMessage on Anima Sedes; other hosts relay)
-│   ├── mail/             # Claudia's mailbox (Zoho API): read/search/archive, webhook target, reconcile
+│   ├── mail/             # Claudia's mailbox (Zoho API): read/search/archive/send, webhook target, reconcile
 │   ├── support/          # Support desk: tickets across projects, delegation, GitHub + Sentry webhook targets
 │   ├── skills/           # Skill runner CLI (`anima skills run|task`); management planned (#82)
 │   └── imessage/         # iMessage bridge + auto-reply (disabled)
@@ -341,6 +341,9 @@ Runs `imsg rpc` (imsg ≥ 0.19). When Michael's message arrives, it marks the ch
 #### Claudia's mail (`extensions/mail`)
 
 `claudia@iamclaudia.ai` through the Zoho REST API (Self Client, no delete scope; credentials in `extensions.mail.config`). The `zoho-mail` webhook targets `mail.handle_webhook`, which only reads the message id from the payload, re-fetches the message from the API (a forged POST names nothing real), and emits `mail.received` once per message. A reconcile pass (startup + every 30 min) announces Inbox mail the webhook missed. `mail.read` returns plain text inside an `<untrusted_email … authenticated="yes|no">` envelope; `authenticated` means DMARC passed at Zoho's MX for the From domain. Plan and next steps: `docs/plans/CLAUDIA-MAIL.md`.
+
+- **Sending:** `mail.send({ to, cc?, bcc?, subject, body, format?, attachments?, replyTo? })`, e.g. `anima mail send --to jane@acme.com --subject "…" --body "…" --attachments '["/abs/path/report.pdf"]'`. Attachments are absolute paths on the gateway host (20 MB each, 25 MB total, up to 10), all checked before anything uploads. `replyTo` (a message id) answers in that thread. Send only on Michael's request. It is a gateway method only, with **no MCP tool**, so the `mail` profile can never send.
+- **Memory in the mail profile:** read-only memory plus `memory_note`, which appends to `~/memory/notebooks/<name>.md` (path built from a slug, git-committed). It must never get `memory_remember`, which can write any memory file, personas included. All memory tools refuse paths outside `~/memory`.
 
 #### Support desk (`extensions/support`)
 

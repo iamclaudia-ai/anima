@@ -358,9 +358,12 @@ At startup, the memory extension registers its MCP tool metadata with the gatewa
 
 - `mcp__anima__memory_recall`
 - `mcp__anima__memory_remember`
+- `mcp__anima__memory_note` — append-only notebooks (`notebooks/<name>.md`); the only memory write the restricted `mail` profile gets
 - `mcp__anima__memory_read`
 - `mcp__anima__memory_list`
 - `mcp__anima__memory_transcript`
+
+Every path these tools touch must resolve inside `~/memory` (`resolveMemoryPath`); anything else throws. Writes are git-committed and pushed in `~/memory`. Tests point `ANIMA_MEMORY_DIR` at a temp dir.
 
 Tool call path:
 

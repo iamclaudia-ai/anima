@@ -48,6 +48,23 @@ export interface ZohoMessage {
   status?: string;
 }
 
+/** A file in Zoho's store, as the upload endpoint returns it. */
+export interface ZohoAttachment {
+  storeName: string;
+  attachmentPath: string;
+  attachmentName: string;
+}
+
+export interface OutgoingMessage {
+  toAddress: string;
+  ccAddress?: string;
+  bccAddress?: string;
+  subject: string;
+  content: string;
+  mailFormat: "html" | "plaintext";
+  attachments?: ZohoAttachment[];
+}
+
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 interface ZohoEnvelope<T> {
@@ -108,6 +125,8 @@ export class ZohoMailClient {
     options: {
       query?: Record<string, string | number | boolean | undefined>;
       rawJson?: string;
+      /** A raw file body (attachment upload). */
+      binary?: Blob;
     } = {},
   ): Promise<T> {
     const url = new URL(`${this.apiBase}${path}`);
@@ -118,9 +137,16 @@ export class ZohoMailClient {
       Authorization: `Zoho-oauthtoken ${await this.token()}`,
       Accept: "application/json",
     };
-    if (options.rawJson !== undefined) headers["Content-Type"] = "application/json";
+    let body: string | Blob | undefined;
+    if (options.rawJson !== undefined) {
+      headers["Content-Type"] = "application/json";
+      body = options.rawJson;
+    } else if (options.binary !== undefined) {
+      headers["Content-Type"] = "application/octet-stream";
+      body = options.binary;
+    }
 
-    const res = await this.fetchImpl(url.toString(), { method, headers, body: options.rawJson });
+    const res = await this.fetchImpl(url.toString(), { method, headers, body });
     const text = await res.text();
     let envelope: ZohoEnvelope<T>;
     try {
@@ -231,5 +257,43 @@ export class ZohoMailClient {
       messageIds,
       `,"destfolderId":${assertId(destFolderId, "folderId")}`,
     );
+  }
+
+  /** Upload one file (raw body) to Zoho's store, ready to attach to a send. */
+  async uploadAttachment(fileName: string, file: Blob): Promise<ZohoAttachment> {
+    const data = await this.request<ZohoAttachment | ZohoAttachment[]>(
+      "POST",
+      "/messages/attachments",
+      { query: { fileName }, binary: file },
+    );
+    const uploaded = Array.isArray(data) ? data[0] : data;
+    if (!uploaded?.storeName || !uploaded.attachmentPath) {
+      throw new ZohoError(`Zoho attachment upload for ${fileName} returned no file`, 200);
+    }
+    return {
+      storeName: uploaded.storeName,
+      attachmentPath: uploaded.attachmentPath,
+      attachmentName: uploaded.attachmentName ?? fileName,
+    };
+  }
+
+  /**
+   * Send from Claudia's address. With `replyTo`, Zoho sends it as a reply to
+   * that message, in its thread.
+   */
+  async sendMessage(
+    message: OutgoingMessage,
+    replyTo?: string,
+  ): Promise<{ messageId: string | null }> {
+    const path = replyTo ? `/messages/${assertId(replyTo, "messageId")}` : "/messages";
+    const payload = {
+      fromAddress: this.config.address,
+      ...message,
+      ...(replyTo ? { action: "reply" } : {}),
+    };
+    const data = await this.request<{ messageId?: string } | undefined>("POST", path, {
+      rawJson: JSON.stringify(payload),
+    });
+    return { messageId: data?.messageId ?? null };
   }
 }
