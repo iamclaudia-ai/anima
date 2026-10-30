@@ -3,44 +3,52 @@
  */
 
 import { readdir, readFile, writeFile, mkdir, stat } from "node:fs/promises";
-import { join, dirname, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "bun";
 import matter from "gray-matter";
 import type { ParsedMemory, MemoryFrontmatter, MemorySection, MemoryCategory } from "./types.js";
 
-const MEMORY_ROOT = join(homedir(), "memory");
-
 /**
- * Get the memory root path.
+ * The memory root, resolved per call so tests can point `ANIMA_MEMORY_DIR` at a
+ * temp dir instead of the live ~/memory.
  *
  * Note: react-doctor flags this as unused because it doesn't follow `.js`
  * extension imports from sibling .ts files — but `mcp/sync.ts` imports this
  * from "./storage.js" at startup.
  */
 export function getMemoryRoot(): string {
-  return MEMORY_ROOT;
+  return process.env.ANIMA_MEMORY_DIR || join(homedir(), "memory");
 }
 
 /**
- * Resolve a memory path (handles relative paths)
+ * Resolve a memory path to an absolute path inside the memory root.
+ *
+ * Accepts "relationships/michael.md", "~/memory/…" or an absolute path under the
+ * root. Anything that lands outside it ("../.anima/anima.json", "/etc/hosts")
+ * throws: these tools are reachable from restricted sessions that read
+ * untrusted mail, so they must never become a general file reader or writer.
  */
+export function resolveMemoryPath(filepath: string, root: string = getMemoryRoot()): string {
+  const base = resolve(root);
+  const trimmed = filepath.startsWith("~/memory/") ? filepath.slice("~/memory/".length) : filepath;
+  const resolved = resolve(base, trimmed);
+  const rel = relative(base, resolved);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Path is outside ~/memory: ${filepath}`);
+  }
+  return resolved;
+}
+
 function resolvePath(filepath: string): string {
-  if (filepath.startsWith("~/memory/")) {
-    return filepath.replace("~/memory/", MEMORY_ROOT + "/");
-  }
-  if (filepath.startsWith("/")) {
-    return filepath;
-  }
-  return join(MEMORY_ROOT, filepath);
+  return resolveMemoryPath(filepath);
 }
 
 /**
  * Get relative path from memory root
  */
 function getRelativePath(filepath: string): string {
-  const resolved = resolvePath(filepath);
-  return relative(MEMORY_ROOT, resolved);
+  return relative(getMemoryRoot(), resolvePath(filepath));
 }
 
 /**
@@ -53,11 +61,11 @@ function gitCommitAndPush(filepath: string, message: string): void {
   // Run git operations in background (don't await)
   (async () => {
     try {
-      const add = spawn(["git", "add", resolved], { cwd: MEMORY_ROOT });
+      const add = spawn(["git", "add", resolved], { cwd: getMemoryRoot() });
       await add.exited;
-      const commit = spawn(["git", "commit", "-m", message], { cwd: MEMORY_ROOT });
+      const commit = spawn(["git", "commit", "-m", message], { cwd: getMemoryRoot() });
       await commit.exited;
-      const push = spawn(["git", "push"], { cwd: MEMORY_ROOT });
+      const push = spawn(["git", "push"], { cwd: getMemoryRoot() });
       await push.exited;
       console.error(`[memory] Git pushed: ${relativePath}`);
     } catch (err) {
@@ -179,9 +187,9 @@ export async function listMemoryFiles(category?: MemoryCategory): Promise<string
   }
 
   if (category) {
-    await scan(join(MEMORY_ROOT, category));
+    await scan(resolvePath(category));
   } else {
-    await scan(MEMORY_ROOT);
+    await scan(getMemoryRoot());
   }
 
   return files;
