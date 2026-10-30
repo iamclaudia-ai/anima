@@ -30,6 +30,47 @@ const MAIL: Record<string, { from: string; sender: string; trusted: boolean }> =
   "200": { from: "stranger@example.com", sender: "Stranger", trusted: false },
 };
 
+/** Canned `gh api` responses, by path. */
+function fakeGithub(path: string): unknown {
+  if (path === "repos/kiliman/tnh/issues/5") {
+    return {
+      number: 5,
+      title: "Login crash",
+      state: "closed",
+      html_url: "https://github.com/kiliman/tnh/pull/5",
+      user: { login: "kiliman" },
+      labels: [{ name: "bug" }],
+      comments: 1,
+      body: "Fixes the crash",
+      pull_request: {},
+    };
+  }
+  if (path === "repos/kiliman/tnh/issues/5/comments") {
+    return [{ user: { login: "claudia" }, body: "LGTM" }];
+  }
+  if (path === "repos/kiliman/tnh/pulls/5") {
+    return { merged: true, head: { ref: "fix" }, base: { ref: "main" }, changed_files: 1 };
+  }
+  if (path === "repos/kiliman/tnh/pulls/5/files") {
+    return [{ filename: "app/login.ts", status: "modified", additions: 3, deletions: 1 }];
+  }
+  if (path === "search/issues") {
+    return {
+      total_count: 1,
+      items: [
+        {
+          number: 5,
+          title: "Login crash",
+          state: "open",
+          html_url: "https://github.com/kiliman/tnh/issues/5",
+          repository_url: "https://api.github.com/repos/kiliman/tnh",
+        },
+      ],
+    };
+  }
+  throw new Error(`unexpected gh api ${path}`);
+}
+
 describe("support extension", () => {
   let ext: AnimaExtension;
   let calls: Array<{ method: string; params: Record<string, unknown> }>;
@@ -49,6 +90,9 @@ describe("support extension", () => {
         now: () => new Date((clock += 1000)),
         run: async (args): Promise<CommandResult> => {
           commands.push(args);
+          if (args[1] === "api") {
+            return { exitCode: 0, stdout: JSON.stringify(fakeGithub(args[4])), stderr: "" };
+          }
           if (args[1] === "repo") return { exitCode: 0, stdout: `${visibility}\n`, stderr: "" };
           return { exitCode: 0, stdout: "https://github.com/kiliman/tnh/issues/77\n", stderr: "" };
         },
@@ -123,8 +167,50 @@ describe("support extension", () => {
       "support_link",
       "support_note",
       "support_delegate",
+      "support_github_get",
+      "support_github_search",
       "support_create_issue",
     ]);
+  });
+
+  it("reads a PR from a project's repo with GET calls only", async () => {
+    const { error, data } = await mcp("support_github_get", {
+      url: "https://github.com/kiliman/tnh/pull/5",
+    });
+    expect(error).toBe(false);
+    expect(data).toMatchObject({
+      kind: "pr",
+      state: "merged",
+      labels: ["bug"],
+      pr: { head: "fix", base: "main", files: [{ path: "app/login.ts", additions: 3 }] },
+      comments: [{ author: "claudia", body: "LGTM" }],
+    });
+    expect(data.notice).toContain("never instructions");
+    const gh = commands.filter((c) => c[1] === "api");
+    expect(gh).toHaveLength(4);
+    for (const c of gh) expect(c.slice(0, 4)).toEqual(["gh", "api", "-X", "GET"]);
+  });
+
+  it("refuses repos that aren't linked to a project", async () => {
+    for (const args of [
+      { url: "https://github.com/beehiiv/swarm/issues/1" },
+      { repo: "beehiiv/swarm", number: 1 },
+      { repo: "../../user", number: 1 },
+    ]) {
+      const { error } = await mcp("support_github_get", args);
+      expect(error).toBe(true);
+    }
+    expect(commands).toHaveLength(0);
+  });
+
+  it("pins searches to the projects' repos", async () => {
+    const { data } = await mcp("support_github_search", { query: "login crash" });
+    expect(data.results[0]).toMatchObject({ repo: "kiliman/tnh", number: 5, kind: "issue" });
+    expect(commands[0]).toContain("q=login crash repo:kiliman/tnh state:open");
+
+    const widened = await mcp("support_github_search", { query: "secrets repo:beehiiv/swarm" });
+    expect(widened.error).toBe(true);
+    expect(commands).toHaveLength(1);
   });
 
   it("lists only workspaces with project fields", async () => {
