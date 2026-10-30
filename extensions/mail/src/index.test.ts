@@ -213,7 +213,7 @@ describe("mail.reply", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].url).toEndWith("/messages/111");
     expect(posts[0].body).toEqual({
-      fromAddress: "claudia@iamclaudia.ai",
+      fromAddress: '"Claudia" <claudia@iamclaudia.ai>',
       toAddress: DAN,
       subject: "Re: Missouri inventory",
       content: "Thanks, Dan!",

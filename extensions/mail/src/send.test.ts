@@ -113,7 +113,7 @@ describe("sendMail", () => {
     expect(up2.url).toContain("fileName=notes.txt");
     expect(send.url).toBe("https://mail.zoho.com/api/accounts/902705288/messages");
     expect(JSON.parse(send.body)).toEqual({
-      fromAddress: "claudia@iamclaudia.ai",
+      fromAddress: '"Claudia" <claudia@iamclaudia.ai>',
       toAddress: "jane@acme.com,bob@acme.com",
       ccAddress: "michael@kiliman.dev",
       subject: "Q3 report",

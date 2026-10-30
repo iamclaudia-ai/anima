@@ -17,6 +17,13 @@ export const mailConfigSchema = z.object({
     .regex(/^[a-z.]+$/)
     .default("com"),
   address: z.email(),
+  /** Name shown beside the address on mail she sends (Zoho's API ignores the account's). */
+  displayName: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[^"<>\r\n]+$/, "no quotes, angle brackets or newlines")
+    .default("Claudia"),
   clientId: z.string().min(1),
   clientSecret: z.string().min(1),
   refreshToken: z.string().min(1),

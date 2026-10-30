@@ -287,7 +287,7 @@ export class ZohoMailClient {
   ): Promise<{ messageId: string | null }> {
     const path = replyTo ? `/messages/${assertId(replyTo, "messageId")}` : "/messages";
     const payload = {
-      fromAddress: this.config.address,
+      fromAddress: `"${this.config.displayName}" <${this.config.address}>`,
       ...message,
       ...(replyTo ? { action: "reply" } : {}),
     };
