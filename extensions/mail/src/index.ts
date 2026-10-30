@@ -25,7 +25,9 @@ import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import { type MailConfig, parseMailConfig } from "./config";
 import { MAIL_RECEIVED, Mailbox, type MessageSummary, type ReadResult } from "./mailbox";
+import { ReplyLimiter, replySchema, replySubject, type ReplyParams } from "./reply";
 import { sendMail, sendSchema, type SendParams } from "./send";
+import { type SenderRole, senderRole } from "./senders";
 import { MailStore, openAnimaDb } from "./store";
 import { isAuthenticatedSender, parseAuthentication } from "./parse";
 import { WakeQueue } from "./wake";
@@ -53,6 +55,7 @@ export function createMailExtension(
   let timer: ReturnType<typeof setInterval> | null = null;
   let digestTimer: ReturnType<typeof setInterval> | null = null;
   let wake: WakeQueue | null = null;
+  let replies: ReplyLimiter | null = null;
   let lastReconcile: { at: string; announced: number } | null = null;
   let lastError: { at: string; message: string } | null = null;
   /** messageId → folderId, learned from every listing, so read needs no folder. */
@@ -84,6 +87,20 @@ export function createMailExtension(
       );
     }
     return folderId;
+  }
+
+  /** Fetch a message's sender and decide who they are (DMARC verdict + lists). */
+  async function checkSender(
+    messageId: string,
+    folderId: string,
+  ): Promise<{ summary: MessageSummary; authenticated: boolean; role: SenderRole }> {
+    const [details, headers] = await Promise.all([
+      client.getDetails(folderId, messageId),
+      client.getHeaders(folderId, messageId),
+    ]);
+    const summary = await requireMailbox().summarize(details);
+    const authenticated = isAuthenticatedSender(summary.from, parseAuthentication(headers));
+    return { summary, authenticated, role: senderRole(summary.from, authenticated, config) };
   }
 
   async function runReconcile(): Promise<void> {
@@ -140,7 +157,7 @@ export function createMailExtension(
     {
       name: "mail.verify_sender",
       description:
-        "Who sent a message and whether to trust it: authenticated (DMARC passed for the From domain) and trusted (authenticated and a trusted sender). No body.",
+        "Who sent a message and who they are to Claudia: authenticated (DMARC passed for the From domain), role (principal = Michael, contact = someone she corresponds with, unknown), and trusted (an authenticated principal). No body.",
       inputSchema: z.object({ messageId, folderId: messageId.optional() }),
     },
     {
@@ -160,6 +177,12 @@ export function createMailExtension(
         messageIds,
         folder: z.string().min(1).describe("Folder name, type or id"),
       }),
+    },
+    {
+      name: "mail.reply",
+      description:
+        "Reply in the thread to a VERIFIED message from Michael or a contact. Goes to the original sender only; Michael is notified of every reply. Refused for anyone else.",
+      inputSchema: replySchema,
     },
     {
       name: "mail.send",
@@ -195,8 +218,9 @@ export function createMailExtension(
   /**
    * MCP tools for sessions without a shell (the `mail` profile). Each mirrors
    * a method and is validated by the same schema. There is deliberately no
-   * tool for reconcile or the webhook target, and none that sends mail
-   * (`mail.send` is reachable only through the gateway, e.g. `anima mail send`).
+   * tool for reconcile or the webhook target. The only way to send is
+   * mail_reply (verified principals and contacts, original sender only);
+   * `mail.send` is reachable only through the gateway (`anima mail send`).
    */
   const MCP_TOOL_METHODS = [
     "mail.list_folders",
@@ -206,6 +230,7 @@ export function createMailExtension(
     "mail.mark_read",
     "mail.archive",
     "mail.move",
+    "mail.reply",
   ];
   const mcpTools: ExtensionMcpToolDefinition[] = MCP_TOOL_METHODS.map((name) => {
     const method = methods.find((m) => m.name === name);
@@ -278,7 +303,7 @@ export function createMailExtension(
       };
       wake = new WakeQueue({
         config: config.wake,
-        trustedSenders: config.trustedSenders,
+        senders: config,
         state,
         log: context.log,
         isVerified: async (message) =>
@@ -288,6 +313,7 @@ export function createMailExtension(
           ),
         call: (method, params) => context.call(method, params),
       });
+      replies = new ReplyLimiter({ state, limits: config.replyLimits });
       const activeWake = wake;
       mailbox = new Mailbox({
         client,
@@ -319,6 +345,7 @@ export function createMailExtension(
       digestTimer = null;
       wake?.stop();
       wake = null;
+      replies = null;
       mailbox = null;
       store = null;
       if (db && !options.db) db.close();
@@ -413,13 +440,10 @@ export function createMailExtension(
 
       case "mail.verify_sender": {
         const p = params as { messageId: string; folderId?: string };
-        const folderId = folderFor(p.messageId, p.folderId);
-        const [details, headers] = await Promise.all([
-          client.getDetails(folderId, p.messageId),
-          client.getHeaders(folderId, p.messageId),
-        ]);
-        const summary = await box.summarize(details);
-        const authenticated = isAuthenticatedSender(summary.from, parseAuthentication(headers));
+        const { summary, authenticated, role } = await checkSender(
+          p.messageId,
+          folderFor(p.messageId, p.folderId),
+        );
         return {
           messageId: summary.messageId,
           from: summary.from,
@@ -427,8 +451,42 @@ export function createMailExtension(
           subject: summary.subject,
           receivedAt: summary.receivedAt,
           authenticated,
-          trusted: authenticated && config.trustedSenders.includes(summary.from.toLowerCase()),
+          role,
+          trusted: role === "principal",
         };
+      }
+
+      case "mail.reply": {
+        const p = params as ReplyParams;
+        if (!replies) throw new Error("Mail extension is not started");
+        const { summary, role } = await checkSender(
+          p.messageId,
+          folderFor(p.messageId, p.folderId),
+        );
+        if (role === "unknown") {
+          throw new Error(
+            `Can't reply to ${summary.from}: replies go only to verified mail from Michael or a contact. Draft it for Michael instead.`,
+          );
+        }
+        replies.check(summary.from);
+        const subject = replySubject(summary.subject);
+        const { messageId: sentId } = await client.sendMessage(
+          { toAddress: summary.from, subject, content: p.body, mailFormat: p.format },
+          summary.messageId,
+        );
+        replies.record(summary.from);
+        ctx?.log.info("Mail reply sent", { to: summary.from, role, subject, messageId: sentId });
+        const preview = p.body.replace(/\s+/g, " ").trim().slice(0, 200);
+        await ctx
+          ?.call("notify.send", {
+            title: "Claudia replied to an email",
+            message: `To ${summary.sender ? `${summary.sender} <${summary.from}>` : summary.from}: "${subject}"\n\n${preview}${p.body.length > 200 ? "…" : ""}`,
+            source: "mail",
+          })
+          .catch((error: unknown) =>
+            ctx?.log.warn("Reply notification failed", { error: String(error) }),
+          );
+        return { sent: true, to: summary.from, role, subject, messageId: sentId };
       }
 
       case "mail.mark_read": {

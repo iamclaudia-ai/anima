@@ -25,11 +25,30 @@ export const mailConfigSchema = z.object({
   reconcileMinutes: z.number().int().min(1).default(30),
   /** Bodies longer than this are cut, with a note saying so. */
   maxBodyChars: z.number().int().positive().default(100_000),
-  /** Addresses whose DMARC-verified mail wakes Claudia right away. */
-  trustedSenders: z
+  /**
+   * Michael's addresses. Their DMARC-verified mail is *trusted*: it wakes
+   * Claudia, can be replied to, and its tickets can be delegated.
+   */
+  principals: z
     .array(z.email())
     .default([])
     .transform((list) => list.map((a) => a.toLowerCase())),
+  /**
+   * People Claudia corresponds with on Michael's behalf (clients). Their
+   * DMARC-verified mail wakes her and can be replied to, but their requests are
+   * not commands, and their tickets are never trusted.
+   */
+  contacts: z
+    .array(z.email())
+    .default([])
+    .transform((list) => list.map((a) => a.toLowerCase())),
+  /** Rate limits on mail.reply, so an auto-reply loop can't run away. */
+  replyLimits: z
+    .object({
+      perRecipientPerHour: z.number().int().min(1).default(3),
+      perDay: z.number().int().min(1).default(20),
+    })
+    .default({ perRecipientPerHour: 3, perDay: 20 }),
   wake: z
     .object({
       enabled: z.boolean().default(false),
