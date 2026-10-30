@@ -44,14 +44,22 @@ export function profileCliArgs(profile: ResolvedProfile, mcpConfigPath?: string)
   return args;
 }
 
-/** Write the per-session MCP config (owner-only) and return its path. */
-export function writeSessionMcpConfig(sessionId: string, target: ExtensionMcpTarget): string {
+/**
+ * Write the per-session MCP config (owner-only) and return its path: Anima's
+ * server, plus any extra servers the profile declares.
+ */
+export function writeSessionMcpConfig(
+  sessionId: string,
+  target: ExtensionMcpTarget,
+  extraServers: Record<string, Record<string, unknown>> = {},
+): string {
   const base = process.env.ANIMA_DATA_DIR || join(homedir(), ".anima");
   const dir = join(base, "agent-host", "mcp");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, `${sessionId}.json`);
   const config = {
     mcpServers: {
+      ...extraServers,
       [target.serverName]: {
         type: "http",
         url: target.url,

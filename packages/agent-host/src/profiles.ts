@@ -41,6 +41,13 @@ export interface SessionProfile {
   /** `anima-only`: load only Anima's extension MCP server, nothing from user config. */
   mcp?: "default" | "anima-only";
   /**
+   * Extra MCP servers for an `anima-only` profile, loaded beside Anima's
+   * (e.g. `{ "slack": { "type": "http", "url": "https://mcp.slack.com/mcp", … } }`).
+   * Same shape as an `.mcp.json` entry. Their tools still need `allowedTools`
+   * rules (`mcp__<name>` allows a whole server).
+   */
+  mcpServers?: Record<string, Record<string, unknown>>;
+  /**
    * Ignore user/project/local settings files (and, on the CLI, `--restricted`:
    * no code-running tools, file tools confined to the working directory,
    * bypass mode refused).
@@ -61,6 +68,7 @@ export const BUILTIN_PROFILES: Record<string, SessionProfile> = {
 };
 
 const PROFILE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const MCP_SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 
 export function resolveProfile(
   name: string,
@@ -80,6 +88,17 @@ export function resolveProfile(
   }
   if (profile.restricted && profile.permissionMode === "bypassPermissions") {
     throw new Error(`Session profile ${name} cannot be restricted and bypass permissions`);
+  }
+  for (const [server, definition] of Object.entries(profile.mcpServers ?? {})) {
+    if (profile.mcp !== "anima-only") {
+      throw new Error(`Session profile ${name}: mcpServers needs mcp: "anima-only"`);
+    }
+    if (!MCP_SERVER_NAME.test(server) || server === "anima") {
+      throw new Error(`Session profile ${name} has an invalid MCP server name: ${server}`);
+    }
+    if (typeof definition?.type !== "string") {
+      throw new Error(`Session profile ${name}: MCP server ${server} needs a type`);
+    }
   }
   return { name, ...profile };
 }

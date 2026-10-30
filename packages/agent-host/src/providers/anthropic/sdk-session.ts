@@ -311,6 +311,11 @@ export class SDKSession extends EventEmitter {
         `Session profile ${this.profile.name} needs Anima's MCP server, but none is configured`,
       );
     }
+    if (Object.keys(this.profile.mcpServers ?? {}).length > 0) {
+      throw new Error(
+        `Session profile ${this.profile.name} declares mcpServers, which only the CLI runtime supports`,
+      );
+    }
 
     const resumeActivity =
       "lastActivity" in options && typeof options.lastActivity === "string"

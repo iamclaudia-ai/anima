@@ -76,6 +76,22 @@ describe("profileCliArgs", () => {
     expect(args.slice(0, 4)).toEqual(["--permission-mode", "dontAsk", "--tools", ""]);
   });
 
+  it("validates extra MCP servers", () => {
+    const slack = { type: "http", url: "https://mcp.slack.com/mcp" };
+    expect(resolveProfile("mail", { mail: { ...MAIL, mcpServers: { slack } } }).mcpServers).toEqual(
+      { slack },
+    );
+    expect(() =>
+      resolveProfile("x", { x: { permissionMode: "auto", mcpServers: { slack } } }),
+    ).toThrow('needs mcp: "anima-only"');
+    expect(() =>
+      resolveProfile("mail", { mail: { ...MAIL, mcpServers: { anima: slack } } }),
+    ).toThrow("invalid MCP server name");
+    expect(() =>
+      resolveProfile("mail", { mail: { ...MAIL, mcpServers: { slack: { url: "x" } } } }),
+    ).toThrow("needs a type");
+  });
+
   it("refuses an anima-only profile without an MCP config", () => {
     expect(() => profileCliArgs(resolveProfile("mail", { mail: MAIL }))).toThrow(
       "needs Anima's MCP",
@@ -112,6 +128,18 @@ describe("writeSessionMcpConfig", () => {
           headers: { Authorization: "Bearer t" },
         },
       },
+    });
+  });
+
+  it("adds the profile's extra servers beside Anima's, which always wins its name", () => {
+    const path = writeSessionMcpConfig(
+      "sess-2",
+      { serverName: "anima", url: "http://localhost:30086/mcp" },
+      { slack: { type: "http", url: "https://mcp.slack.com/mcp", oauth: { callbackPort: 3118 } } },
+    );
+    expect(JSON.parse(readFileSync(path, "utf8")).mcpServers).toEqual({
+      slack: { type: "http", url: "https://mcp.slack.com/mcp", oauth: { callbackPort: 3118 } },
+      anima: { type: "http", url: "http://localhost:30086/mcp" },
     });
   });
 });

@@ -492,7 +492,7 @@ export class ClaudeCliSession extends EventEmitter {
     const args = resume ? ["--resume", this.id] : ["--session-id", this.id];
     const mcpConfigPath =
       this.profile.mcp === "anima-only" && this.config.extensionMcp
-        ? writeSessionMcpConfig(this.id, this.config.extensionMcp)
+        ? writeSessionMcpConfig(this.id, this.config.extensionMcp, this.profile.mcpServers)
         : undefined;
     args.push("--model", this.cliModel, ...profileCliArgs(this.profile, mcpConfigPath));
     // Persona file first: in "replace" mode it swaps out Claude Code's own
